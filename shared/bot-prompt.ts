@@ -9,21 +9,73 @@
  * only their role: asked to file an issue on a site it was not signed in to, one browsed to the page
  * and then said it could not, never calling `computer_request_help` to have a person sign in.
  */
+import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
+import { RESEARCH_APP_NAMES } from "./research";
+
+const OPENING_A_PAGE_LINES = [
+  "You are a Bot with your own computer, a real web browser the person can watch you use.",
+  "When you are asked to open, visit or read a particular web page, call computer_navigate: that is",
+  "something you can actually do.",
+  "Opening a page returns its title and its readable text. Answer from that text.",
+  "Never tell the person to go and look at the page themselves: you have already read it.",
+];
+
+/**
+ * Where finding something out goes, which depends on whether this run holds a search tool.
+ *
+ * Asked to "search for" something in a demo, a Bot drove its browser to a search engine instead of
+ * calling the search tool it held. The prompt invited it: it said to navigate whenever asked to
+ * "look at, check or read" anything and to "never claim you cannot browse", and the one sentence
+ * saying a page is not a search sat beside them as a hedge. A model reading both picks the emphatic
+ * one. So the Bot is told one thing, chosen by what it holds, instead of two things to reconcile.
+ *
+ * WITH A SEARCH TOOL, finding information is the search tool's job, and the computer is kept for what
+ * only a browser can do. The research guidance generated from the grants says how to use the tool;
+ * this says only that the browser is not it.
+ *
+ * WITHOUT ONE, the browser is still not a search tool. A Bot typing a query into a search engine
+ * meets cookie walls and CAPTCHAs, reads results pages built for people, and makes the person watch
+ * it. It answers from what it knows, marked as unchecked as `PROVENANCE_GUIDANCE` asks, and offers a
+ * search app with the card tool, because "I cannot search" with no way to fix it is the same dead end
+ * a missing app used to be. The names are the catalogue's search apps, since the card resolves an
+ * app by name and there is no app called "search"; see `RESEARCH_APP_NAMES`.
+ *
+ * Worded as "if none of your tools searches the web" rather than "you do not hold a search tool",
+ * because the variant is chosen by recognising the catalogue's research roles, and a search tool can
+ * arrive unrecognised: a Composio toolkit, a server an administrator added by URL, or Exa's advanced
+ * search granted without its basic one. Told flatly that it holds none, a Bot holding one of those
+ * would have two instructions to reconcile again.
+ */
+const WITH_SEARCH_LINES = [
+  "Finding information is not a job for your computer. When you are asked to search for something,",
+  "look something up, find the latest on a subject or find a few examples of something, use your",
+  "search tool and answer from what it returns. Do not open a search engine in your browser.",
+  "Use the computer for what a search tool cannot do: signing in, clicking through a site, filling in",
+  "a form, or opening a page the person asked to see.",
+];
+
+const WITHOUT_SEARCH_LINES = [
+  "Opening a page is not a web search. NEVER drive your browser to a search engine (Google, Bing,",
+  "DuckDuckGo or any other) to look something up, and do not guess at addresses hoping one of them",
+  "has the answer.",
+  "When you are asked to search for something, look something up, find the latest on a subject or",
+  "find a few examples of something, and none of your tools searches the web, answer from what you",
+  "already know and say plainly that you have not checked it against a source.",
+  `If you hold ${SHOW_APP_ACCESS_TOOL}, call it once in the conversation with the name of one search`,
+  `app (${RESEARCH_APP_NAMES.join(", ")}), preferring one this deployment already connects: the card`,
+  "lets the person ask an administrator to add it. Otherwise say an administrator can add a search",
+  "app.",
+  "In that case, asked whether you can search the web, say you can open and read pages the person",
+  "names but cannot search.",
+];
+
 /**
  * The order of operations that makes the computer tools usable.
  *
  * The prompt requires snapshot-first computer use. Element refs are opaque and valid only with the
  * snapshotId that produced them, so the Bot must read refs from the page before acting.
  */
-const COMPUTER_GUIDANCE_LINES = [
-  "You are a Bot with your own computer, a real web browser the person can watch you use.",
-  "When you are asked to look at, open, visit, check or read a web page, call computer_navigate.",
-  "Never claim you cannot browse: opening a page is something you can actually do.",
-  "Opening a page is not a web search. To find sources rather than read a page you can name, use a",
-  "search tool if you hold one; if you do not, say you can open and read pages but cannot search.",
-  "Opening a page returns its title and its readable text. Answer from that text.",
-  "Never tell the person to go and look at the page themselves: you have already read it.",
-  "",
+const ACTING_LINES = [
   "You can also ACT on a page: fill in forms, click buttons, tick boxes and follow links.",
   "The order matters. First call computer_snapshot, which lists every field and button on the page",
   "with a ref such as e1, its label, and its current value. Then call computer_type and",
@@ -65,26 +117,60 @@ const COMPUTER_GUIDANCE_LINES = [
   "Some actions are refused by this deployment's policy. A refusal is not a malfunction and not",
   "something to retry: say plainly what was blocked and why, and stop. Do not try another route to",
   "the same thing.",
+  "Before your first computer action in a turn, say in one sentence what you are about to do and where.",
   "Say what you found or did in plain language, briefly.",
 ];
 
 /**
- * `COMPUTER_GUIDANCE_LINES` uses `""` as a paragraph break. Joining the whole array with `" "` would
- * collapse those breaks into a double space instead of a real paragraph gap, turning the prompt into
- * one run-on block. Join each paragraph's lines with a space, then join paragraphs with a blank line.
+ * These line arrays use `""` as a paragraph break. Joining a whole array with `" "` would collapse
+ * those breaks into a double space instead of a real paragraph gap, turning the prompt into one
+ * run-on block. Join each paragraph's lines with a space, then join paragraphs with a blank line.
  */
-export const COMPUTER_GUIDANCE = COMPUTER_GUIDANCE_LINES.reduce<string[]>(
-  (paragraphs, line) => {
-    if (line === "") {
-      paragraphs.push("");
-      return paragraphs;
-    }
-    const last = paragraphs.length - 1;
-    paragraphs[last] = paragraphs[last] ? `${paragraphs[last]} ${line}` : line;
-    return paragraphs;
-  },
-  [""],
-).join("\n\n");
+function asParagraphs(lines: readonly string[]): string {
+  return lines
+    .reduce<string[]>(
+      (paragraphs, line) => {
+        if (line === "") {
+          paragraphs.push("");
+          return paragraphs;
+        }
+        const last = paragraphs.length - 1;
+        paragraphs[last] = paragraphs[last]
+          ? `${paragraphs[last]} ${line}`
+          : line;
+        return paragraphs;
+      },
+      [""],
+    )
+    .join("\n\n");
+}
+
+/** What a run holds that changes what it is told about its computer. */
+export type ComputerHolding = {
+  /** Whether this run was offered a tool that finds sources, from any research provider. */
+  search: boolean;
+};
+
+/**
+ * The computer guidance for one run, chosen by what it holds.
+ *
+ * A function rather than one constant because the right advice about the browser depends on whether
+ * a search tool sits beside it; see `WITH_SEARCH_LINES`. Built-in Bots get it from `copilot.ts`, which
+ * knows the tools it is building with; `agent-bot` and `agent-langgraph` work it out from the tools
+ * each run offers them.
+ */
+export function computerGuidance(holding: ComputerHolding): string {
+  return asParagraphs([
+    ...OPENING_A_PAGE_LINES,
+    "",
+    ...(holding.search ? WITH_SEARCH_LINES : WITHOUT_SEARCH_LINES),
+    "",
+    ...ACTING_LINES,
+  ]);
+}
+
+/** How a deployment with a computer words it for a run. See {@link computerGuidance}. */
+export type ComputerGuidance = typeof computerGuidance;
 
 /**
  * Where an answer came from, said out loud.
@@ -131,20 +217,14 @@ const PROVENANCE_GUIDANCE_LINES = [
   "person names. Do not go hunting the open web in your browser for something to cite, and do not",
   "keep retrying a page that is not giving you one: an unsourced answer that says it is unsourced is",
   "honest, and a search that never ends is a Bot that never answers.",
+  "",
+  "A chart is the most confident-looking answer you can give, so it carries its origin on its face.",
+  "Before charting figures that change over time (prices, statistics, rankings, results), look them up",
+  "with a search tool if you hold one, and list what you read as the chart's sources. If you charted",
+  "them from your own knowledge, say so in the chart's basis: the person then sees they are unchecked.",
 ];
 
-export const PROVENANCE_GUIDANCE = PROVENANCE_GUIDANCE_LINES.reduce<string[]>(
-  (paragraphs, line) => {
-    if (line === "") {
-      paragraphs.push("");
-      return paragraphs;
-    }
-    const last = paragraphs.length - 1;
-    paragraphs[last] = paragraphs[last] ? `${paragraphs[last]} ${line}` : line;
-    return paragraphs;
-  },
-  [""],
-).join("\n\n");
+export const PROVENANCE_GUIDANCE = asParagraphs(PROVENANCE_GUIDANCE_LINES);
 
 /**
  * What a tool call is given when its answer never came.

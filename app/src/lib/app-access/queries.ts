@@ -12,7 +12,7 @@ import { client } from "@/lib/client";
  */
 
 /**
- * The seven things a person can be told about one app on one Bot.
+ * The eight things a person can be told about one app on one Bot.
  *
  * `ready` — usable now. `not_connected` / `reconnect` — waiting on an account: this person's own,
  * which they connect or reconnect themselves, or on somebody else's Team Bot the owner's, which only
@@ -21,7 +21,9 @@ import { client } from "@/lib/client";
  * connected, but an administrator has not approved this Bot's audience for it, so every call is
  * refused; the refused call files the administrator's request itself, so there is none to press.
  * `disabled` — switched off at the deployment, for the reason `unavailable` gives. `not_granted` —
- * enabled, and this Bot holds none of it.
+ * enabled, and this Bot holds none of it; only an admin can give it. `owner_grantable` — the same,
+ * except the person looking owns the Bot and the app is open to owners, so they can give it
+ * themselves (see `needsConnect`).
  */
 export type AppAccessState =
   | "ready"
@@ -30,7 +32,8 @@ export type AppAccessState =
   | "shared_not_connected"
   | "shared_not_approved"
   | "disabled"
-  | "not_granted";
+  | "not_granted"
+  | "owner_grantable";
 
 /**
  * Why an app is switched off. `absent` — nobody switched it on here. `composio_unconfigured` — a
@@ -77,6 +80,15 @@ export type AppAccess = {
   asksFirst: boolean;
   /** Whether this Bot holds any of the app's tools. */
   granted: boolean;
+  /** Who may give the app to a Bot: any Bot's owner, or only an admin. */
+  ownerGrants: "any" | "admin";
+  /** Whether everything this Bot holds of the app was given by its owner, who may take it back. */
+  givenByOwner: boolean;
+  /**
+   * In `owner_grantable`, whether giving it has to start with connecting the person's own account.
+   * False in every other state.
+   */
+  needsConnect: boolean;
   /**
    * When the account this app runs in for this person was connected, or null. Read by the chat card
    * to tell an account lost at the vendor from one connected again since. See `AppAccessCard`.
@@ -123,7 +135,29 @@ export const appAccessKeys = {
     ["plugins", "app-access", "bot", agentId, "app", app] as const,
   inbox: (app?: string) =>
     ["plugins", "app-access", "inbox", { app: app ?? null }] as const,
+  giveable: ["plugins", "app-access", "giveable"] as const,
 };
+
+/** An app this person could give their own Bots. */
+export type GiveableApp = Pick<
+  AppAccess,
+  "key" | "displayName" | "logo" | "account"
+>;
+
+/**
+ * The apps this person could give their own Bots: switched on and open to owners, and connected
+ * where the app runs on their own account. What the New Bot sheet offers ticked, and the switches
+ * on a Bot's page. Empty where an admin turned the feature off for them.
+ */
+export function giveableAppsQueryOptions() {
+  return queryOptions({
+    queryKey: appAccessKeys.giveable,
+    queryFn: (): Promise<GiveableApp[]> =>
+      client("/api/plugins/giveable", "apps", {
+        fallback: "Couldn't load your apps.",
+      }),
+  });
+}
 
 /** Every work app this Bot holds, with what each is for the person asking. */
 export function botAppsQueryOptions(agentId: string) {

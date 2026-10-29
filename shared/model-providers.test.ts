@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  MODEL_PROVIDERS,
-  PROVIDER_IDS,
   apiKeyOrPlaceholder,
   baseUrlVariableFor,
   botSettings,
@@ -9,6 +7,8 @@ import {
   defaultModelFor,
   keyIsRequired,
   keyVariableFor,
+  MODEL_PROVIDERS,
+  PROVIDER_IDS,
   providerSpec,
   requiresResponsesApi,
 } from "./model-providers";
@@ -192,6 +192,35 @@ describe("whether a model has to be driven through the Responses API", () => {
   test("other providers' models are not OpenAI's problem", () => {
     expect(requiresResponsesApi("claude-sonnet-4-5")).toBe(false);
     expect(requiresResponsesApi("gemini-2.5-flash")).toBe(false);
+  });
+
+  /*
+   * OpenAI's own catalogue on 2026-10-28, each model asked for a tool on both APIs. The `-pro` models
+   * and `gpt-5.3-codex` answer 404 on chat completions; the 5.6 and 6 families answer 400 with
+   * function tools; the rest take tools on either.
+   */
+  test("the models OpenAI serves tools for only on the Responses API are flagged", () => {
+    for (const model of [
+      "gpt-5.6-luna",
+      "gpt-6-astra",
+      "gpt-6.1-sol",
+      "gpt-5-pro",
+      "gpt-5-pro-2025-10-06",
+      "gpt-5.5-pro",
+      "o3-pro",
+      "gpt-5.3-codex",
+    ])
+      expect(requiresResponsesApi(model)).toBe(true);
+    for (const model of ["gpt-5", "gpt-5.4-mini", "gpt-5.5-2026-04-23", "o3"])
+      expect(requiresResponsesApi(model)).toBe(false);
+  });
+
+  test("a gateway's namespaced name is the model it names", () => {
+    expect(requiresResponsesApi("openai/gpt-5.6-terra")).toBe(true);
+    expect(requiresResponsesApi("openai/gpt-5.5")).toBe(false);
+    // An open-weights model a gateway files under `openai/` is not one of OpenAI's own.
+    expect(requiresResponsesApi("openai/gpt-oss-20b")).toBe(false);
+    expect(requiresResponsesApi("qwen/qwen3-8b")).toBe(false);
   });
 });
 

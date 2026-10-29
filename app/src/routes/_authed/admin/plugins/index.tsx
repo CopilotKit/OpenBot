@@ -140,7 +140,7 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What this deployment can reach, and which Bots can use it. A plugin you add is for everybody. Choose which Bots get its tools on its page."
+      description="Connect services for your company, then choose which Bots can use each service’s tools."
       title="Plugins"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}

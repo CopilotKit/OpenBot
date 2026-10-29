@@ -80,7 +80,7 @@ export function vendorAnswer(result: { text: string; isError: boolean }) {
  * A tool array tells a model a tool exists. It does not tell it that the tool is the right way to
  * reach that system, and it competes with a page of prose about the browser that every Bot is given
  * whether or not it has any connectors at all. The browser prose wins: it is emphatic, it is about
- * capability, and it says "never claim you cannot browse".
+ * capability, and it used to say "never claim you cannot browse".
  *
  * So a Bot holding four Google Drive tools browsed to drive.google.com, met a sign-in page its
  * container could never satisfy, and asked its person to sign in to a vendor that person had already
@@ -203,6 +203,17 @@ type ResearchProvider = {
   search: GrantedTool;
   fetch: GrantedTool;
 };
+
+/**
+ * Whether these tools include one that finds sources, from any research provider.
+ *
+ * The search role alone, not the full pair `researchProviders` wants: a Bot holding a search tool and
+ * no reader can still search, and telling it to drive its browser to a search engine instead would
+ * be the very routing mistake this decides against. See `computerGuidance`.
+ */
+export function holdsWebSearch(tools: readonly GrantedTool[]): boolean {
+  return tools.some((tool) => researchRoleFor(tool.ref) === "search");
+}
 
 /**
  * The research providers this Bot can actually use: a search tool and a fetch tool from one server.

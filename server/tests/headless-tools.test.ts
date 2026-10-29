@@ -9,7 +9,10 @@ import {
 import { Observable } from "rxjs";
 import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput } from "../src/audit";
-import { createComputerGateway } from "../src/computer/gateway";
+import {
+  ComputerStillStartingError,
+  createComputerGateway,
+} from "../src/computer/gateway";
 import * as headless from "../src/computer/headless-tools";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
@@ -383,6 +386,75 @@ test("scheduled computer actions carry the owner and routine into both policy an
       initiator: actor.initiator,
       eventType: "computer.action_refused",
     }),
+  );
+});
+
+/**
+ * A cold start that outlasts the wait reaches the model as an answer it can act on.
+ *
+ * Thrown, it was one more error string; the model apologised and gave up on a computer that was
+ * seconds from ready. And a click used to wait for the start twice, once to learn the run and again
+ * to send, so it is also pinned that the wait happens once.
+ */
+test("a computer still starting answers 'not performed, try again' rather than throwing, after one wait", async () => {
+  let locates = 0;
+  const audit: AuditEventInput[] = [];
+  const gateway = createComputerGateway({
+    provider: {
+      name: "test",
+      isolation: "per-bot",
+      locate: async () => {
+        locates++;
+        throw new ComputerStillStartingError();
+      },
+      status: async (botId) => ({ botId, state: "starting" }),
+      list: async () => [],
+      stop: async () => ({ wasRunning: false }),
+      reset: async () => ({ cleared: false }),
+    },
+    auditStore: {
+      insert: async (event) => {
+        audit.push(event);
+      },
+    },
+    policy: () => ({ mode: "enforce", allow: ["true"], deny: [] }),
+    fetchImpl: (async () => {
+      throw new Error("nothing should reach the computer");
+    }) as unknown as typeof fetch,
+  });
+  const tools = headless.createHeadlessComputerTools({
+    gateway,
+    botId: "bot",
+    actor: { id: "owner", userId: "owner" },
+  });
+  const invoke = (name: string, args: unknown) => {
+    const tool = tools.find((candidate) => candidate.definition.name === name);
+    if (!tool) throw new Error(`Missing ${name}`);
+    return tool.execute(args, {
+      toolCallId: name,
+      signal: new AbortController().signal,
+    });
+  };
+
+  const navigated = await invoke("computer_navigate", {
+    url: "https://example.com",
+  });
+  expect(navigated).toMatchObject({
+    ok: false,
+    starting: true,
+    notPerformed: true,
+  });
+  expect(String((navigated as { reason?: string }).reason)).toContain(
+    "not performed",
+  );
+
+  locates = 0;
+  const clicked = await invoke("computer_click", { ref: "e1", snapshotId: 7 });
+  expect(clicked).toMatchObject({ ok: false, starting: true });
+  expect(locates).toBe(1);
+  // Still on the trail: allowed, then the failure that says it did not happen.
+  expect(audit.map((event) => event.eventType)).toContain(
+    "computer.action_failed",
   );
 });
 

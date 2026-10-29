@@ -2,12 +2,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import {
+  RESEARCH_APP_NAMES,
   RESEARCH_TOOLS as SHARED_RESEARCH_TOOLS,
   researchRoleOf,
+  researchRoleOfToolName,
 } from "@openbot/shared/research";
 import { parse } from "yaml";
 import { z } from "zod";
 import {
+  CATALOGUE,
   catalogueEntry,
   classifyTool,
   researchRoleFor,
@@ -17,7 +20,7 @@ import {
 } from "../src/plugins/catalogue";
 import { listTools } from "../src/plugins/mcp";
 import { selectTools } from "../src/plugins/selection";
-import { grantedToolGuidance } from "../src/plugins/tools";
+import { grantedToolGuidance, holdsWebSearch } from "../src/plugins/tools";
 
 const tool = (server: string, name: string): GrantedTool => ({
   name: `mcp__${server}__${name}`,
@@ -36,6 +39,43 @@ const RESEARCH_TOOLS: Record<string, [string, string]> = {
 };
 const pair = (server = "parallel") =>
   (RESEARCH_TOOLS[server] ?? []).map((name) => tool(server, name));
+
+describe("whether a Bot holds a search tool", () => {
+  test("any provider's search tool counts, from its ref or the name a model sees", () => {
+    for (const [server, [search, fetch]] of Object.entries(RESEARCH_TOOLS)) {
+      expect(holdsWebSearch([tool(server, search)])).toBe(true);
+      expect(holdsWebSearch([tool(server, fetch)])).toBe(false);
+      expect(researchRoleOfToolName(`mcp__${server}__${search}`)).toBe(
+        "search",
+      );
+      expect(researchRoleOfToolName(`mcp__${server}__${fetch}`)).toBe("fetch");
+    }
+    expect(holdsWebSearch([])).toBe(false);
+    expect(holdsWebSearch([tool("google-drive", "search_files")])).toBe(false);
+    expect(researchRoleOfToolName("web_search")).toBeNull();
+    expect(
+      researchRoleOfToolName("mcp__google-drive__search_files"),
+    ).toBeNull();
+  });
+
+  test("the search apps a Bot without one offers are the catalogue's, by a name the card resolves", () => {
+    // The card resolves an app by key or title. A renamed title would leave a Bot offering a card
+    // for an app this deployment has no name for.
+    const research = CATALOGUE.filter((entry) =>
+      Object.hasOwn(SHARED_RESEARCH_TOOLS, entry.key),
+    );
+    const named = research.filter((entry) =>
+      RESEARCH_APP_NAMES.includes(entry.title),
+    );
+    expect(named.map((entry) => entry.title).sort()).toEqual(
+      [...RESEARCH_APP_NAMES].sort(),
+    );
+    // Every research vendor is offered, so the choice stays the administrator's.
+    expect(new Set(named.map((entry) => entry.vendor))).toEqual(
+      new Set(research.map((entry) => entry.vendor)),
+    );
+  });
+});
 
 describe("research providers in the catalogue", () => {
   test("each is pinned to its vendor's official endpoint", () => {

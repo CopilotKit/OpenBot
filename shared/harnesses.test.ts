@@ -75,7 +75,7 @@ test("every named mark is vendored where both apps look for it", async () => {
   }
 });
 
-test("every row an image publishes names the directory it is built from", () => {
+test("CrewAI uses its expected image, health endpoint and port", () => {
   const crewai = HARNESSES.find((h) => h.id === "crewai");
   expect(crewai?.image).toBe("agent-crewai");
   expect(crewai?.healthPath).toBe("/health");

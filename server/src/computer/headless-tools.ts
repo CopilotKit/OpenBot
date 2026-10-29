@@ -8,6 +8,7 @@ import {
 import {
   type ActionActor,
   type ComputerGateway,
+  ComputerStillStartingError,
   HumanHasControlError,
 } from "./gateway";
 import type { ControlState } from "./schema";
@@ -63,6 +64,22 @@ export function createHeadlessComputerTools(options: {
         try {
           return await execute(input, context);
         } catch (error) {
+          /*
+           * A cold start that outlasted the wait is answered, not thrown.
+           *
+           * Thrown, it reached the model as a bare error string beside every real failure, and a
+           * model reading "error" tends to apologise and give up on a computer that was seconds from
+           * ready. As a result it says the three things that decide the next step: the computer is
+           * starting, this call did nothing, and trying again shortly is the right move.
+           */
+          if (error instanceof ComputerStillStartingError) {
+            return {
+              ok: false,
+              starting: true,
+              notPerformed: true,
+              reason: error.message,
+            };
+          }
           if (error instanceof HumanHasControlError) {
             throw new HeadlessToolSuspension(error.message, {
               kind: "computer_handoff",

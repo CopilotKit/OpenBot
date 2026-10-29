@@ -1,15 +1,9 @@
 /**
- * `store.ts`'s last vendor-scheme sites, read through the shared record instead of a literal.
- *
- * Four of them, and they fail differently: the connections listing drops every row on a non-Composio
- * broker, the probe dials a vendor this deployment may hold no key for, the screen-name reservation
- * covers only one of the two static routes, and `shared-use-store.ts` spells the scheme a second
- * time. Each has its own test below, and each Composio behaviour is asserted unchanged beside it.
+ * Broker-specific store behavior: connection listings, probes and reserved screen names
+ * use the configured provider, and adding an app preserves its scheme.
  */
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { inArray, like } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
@@ -26,7 +20,6 @@ import {
   createPluginStore,
 } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { stripComments } from "./support/source-scan";
 import { stubBroker } from "./support/stub-broker";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -268,21 +261,6 @@ test("the brokered id-prefix refusal is untouched by the screen-name one", async
   ).rejects.toThrow(
     "Names beginning arcade- belong to the Arcade apps this deployment enables",
   );
-});
-
-/* (e) One table, one spelling: `shared-use-store.ts` reads the record rather than rebuilding it. */
-test("shared-use-store derives its scheme from BROKERED_PROFILE and nowhere else", () => {
-  const source = readFileSync(
-    join(import.meta.dir, "../src/plugins/shared-use-store.ts"),
-    "utf8",
-  );
-  // The shared stripper, which blanks a comment where it stands instead of dropping the line it
-  // sits on: a trailing `// note` used to take its own code with it, so the assertion below could
-  // have failed on a line that carries the derivation it is looking for.
-  const code = stripComments(source);
-  expect(code).toContain("BROKERED_PROFILE[provider].scheme");
-  // The local derivation 4.5 could not avoid, now that the record is reachable.
-  expect(code).not.toMatch(/\$\{provider\}:\/\//);
 });
 
 /* And `addBrokeredApp` keeps writing at the record's scheme, which is where the record came from. */

@@ -1,6 +1,43 @@
 import { describe, expect, test } from "bun:test";
 import type { RunAgentInput } from "@ag-ui/core";
+import { computerGuidance } from "../../shared/bot-prompt";
 import { NO_ANSWER_CAME, toProviderMessages } from "../src/history";
+
+/**
+ * Whether the browser is told to leave searching to a search tool is decided by the tools this run
+ * offers, since the names are all this Bot sees of its grants. "search for X" made a Bot holding
+ * a search tool drive its browser to a search engine instead.
+ */
+describe("the computer guidance this Bot is given", () => {
+  const offered = (...names: string[]) =>
+    ({
+      messages: [{ id: "u1", role: "user", content: "Search for X." }],
+      tools: names.map((name) => ({ name, description: "", parameters: {} })),
+    }) as unknown as RunAgentInput;
+
+  test("leaves searching to a search tool the run offers", () => {
+    const [system] = toProviderMessages(
+      offered("show_app_access", "mcp__exa__web_search_exa"),
+    );
+    expect(system).toEqual({
+      role: "system",
+      content: computerGuidance({ search: true }),
+    });
+  });
+
+  test("never searches in the browser when no search tool is offered", () => {
+    for (const run of [
+      offered("show_app_access", "mcp__google-drive__search_files"),
+      // A reader alone does not find sources.
+      offered("mcp__exa__web_fetch_exa"),
+      { messages: [] } as unknown as RunAgentInput,
+    ])
+      expect(toProviderMessages(run)[0]).toEqual({
+        role: "system",
+        content: computerGuidance({ search: false }),
+      });
+  });
+});
 
 /**
  * The Bot that ships in the box, and the conversation a declined handover used to end.

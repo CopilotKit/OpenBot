@@ -6,6 +6,10 @@
 //! `migrate`, and three host processes for the rest. `scripts/start.sh` does exactly this for a
 //! developer. This does it for somebody who double-clicked.
 //!
+//! A fourth host process runs where this machine can run it: the person's own browser, the local
+//! Chrome computer `scripts/start-local-chrome-computer.ts` starts for a developer. See
+//! `local_browser` for when, and why it is not a container.
+//!
 //! The shell also becomes the restart policy those three do not have. `worker/src/index.ts` names
 //! the gap itself: "this process has no restart policy watching it; it is somebody's laptop, left
 //! running".
@@ -95,12 +99,15 @@ pub fn selected_services(harness: bool, bots: BundledBots) -> Vec<&'static str> 
     services
 }
 
-/// The three that are not containers, in the order they are started.
+/// The processes that are not containers, in the order they are started.
 ///
 /// The server first, because the app serves a page that talks to it and the worker claims routines
 /// it owns. Nothing here waits on the others: each is supervised on its own and reports its own
 /// state, so a worker that dies does not take the window with it.
-pub const HOST_PROCESSES: [HostProcess; 3] = [
+///
+/// The person's browser last, and only where [`host_processes`] includes it. The server reaches it
+/// only when the person opens their browser, so it is not on the way to the window answering.
+pub const HOST_PROCESSES: [HostProcess; 4] = [
     HostProcess {
         name: "server",
         cwd: "server",
@@ -123,10 +130,27 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
         script: "src/index.ts",
         package_script: "",
     },
+    HostProcess {
+        name: LOCAL_BROWSER,
+        cwd: "agent-computer",
+        script: "src/index.ts",
+        package_script: "",
+    },
 ];
 
+/// The host process that runs the person's own browser.
+pub const LOCAL_BROWSER: &str = "browser";
+
+/// The host processes one start runs, in order: the server, the app and the worker always, and the
+/// person's browser where this machine runs one.
+pub fn host_processes(local_browser: bool) -> impl Iterator<Item = &'static HostProcess> {
+    HOST_PROCESSES
+        .iter()
+        .filter(move |process| local_browser || process.name != LOCAL_BROWSER)
+}
+
 #[derive(Clone, Copy, Debug)]
-/// One of the three processes Compose does not run.
+/// One of the processes Compose does not run.
 ///
 /// The app is started through the package's own `dev` script, which runs Vite through bun rather
 /// than through its shebang. `node_modules/.bin/vite` begins `#!/usr/bin/env node`, so a machine
@@ -213,6 +237,12 @@ fn postgres_configuration(
 }
 
 fn named_volume_exists(engine: &Address, root: &Path, volume: &str) -> Result<bool, Problem> {
+    Ok(volume_inventory(engine, root)?
+        .iter()
+        .any(|name| name == volume))
+}
+
+fn volume_inventory(engine: &Address, root: &Path) -> Result<Vec<String>, Problem> {
     let inventory = engine
         .command()
         .current_dir(root)
@@ -227,7 +257,12 @@ fn named_volume_exists(engine: &Address, root: &Path, volume: &str) -> Result<bo
     }
     let names = std::str::from_utf8(&inventory.stdout)
         .map_err(|_| postgres_volume_problem("Volume inventory was not valid UTF-8."))?;
-    Ok(names.lines().any(|name| name.trim() == volume))
+    Ok(names
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect())
 }
 
 fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
@@ -243,65 +278,120 @@ pub fn leftover_database_volume(
     root: &Path,
     secrets: &Secrets,
 ) -> Result<Option<String>, Problem> {
+    let config = leftover_configuration(engine, root, secrets)?;
+    let inventory = volume_inventory(engine, root)?;
+    owned_database_volume(engine, root, &config, &inventory)
+}
+
+fn leftover_configuration(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<serde_json::Value, Problem> {
     let configuration = postgres_configuration(engine, root, secrets)?;
-    let config: serde_json::Value = serde_json::from_slice(&configuration)
-        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
-    let Some((source, definition)) = postgres_data_volume(&config) else {
+    serde_json::from_slice(&configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))
+}
+
+fn owned_database_volume(
+    engine: &Address,
+    root: &Path,
+    config: &serde_json::Value,
+    inventory: &[String],
+) -> Result<Option<String>, Problem> {
+    let Some((source, definition)) = postgres_data_volume(config) else {
         return Ok(None);
     };
     let Some(project) = config["name"].as_str().filter(|name| !name.is_empty()) else {
         return Ok(None);
     };
-    let Some(name) = definition["name"].as_str() else {
+    let Some(name) = ordinary_project_volume(project, source, definition) else {
         return Ok(None);
     };
-    // Compose's explicit names and external volumes can refer to somebody else's database.
-    // Permit only ordinary project-scoped, local storage, even if a custom volume has labels.
-    if name != format!("{project}_{source}")
-        || !name.bytes().enumerate().all(|(index, byte)| {
+    // Another service mounting the database volume, under any alias, makes it shared storage.
+    if config["services"].as_object().is_some_and(|services| {
+        services.iter().any(|(service, configuration)| {
+            service != "postgres"
+                && configuration["volumes"].as_array().is_some_and(|mounts| {
+                    mounts.iter().any(|mount| {
+                        mount["source"].as_str().is_some_and(|other_source| {
+                            other_source == source
+                                || config["volumes"][other_source]["name"].as_str() == Some(name)
+                        })
+                    })
+                })
+        })
+    }) {
+        return Ok(None);
+    }
+    owned_compose_volume(engine, root, project, source, name, inventory)
+}
+
+/// Compose's explicit names and external volumes can refer to somebody else's data.
+/// Permit only ordinary project-scoped, local storage, even if a custom volume has labels.
+fn ordinary_project_volume<'a>(
+    project: &str,
+    source: &str,
+    definition: &'a serde_json::Value,
+) -> Option<&'a str> {
+    let name = definition["name"].as_str()?;
+    (name == format!("{project}_{source}")
+        && name.bytes().enumerate().all(|(index, byte)| {
             byte.is_ascii_alphanumeric() || (index > 0 && b"_.-".contains(&byte))
         })
-        || !matches!(
+        && matches!(
             definition.get("external"),
             None | Some(serde_json::Value::Bool(false))
         )
-        || definition["driver"]
+        && !definition["driver"]
             .as_str()
             .is_some_and(|driver| driver != "local")
-        || !empty_volume_options(&definition["driver_opts"])
-        || config["services"].as_object().is_some_and(|services| {
-            services.iter().any(|(service, configuration)| {
-                service != "postgres"
-                    && configuration["volumes"].as_array().is_some_and(|mounts| {
-                        mounts.iter().any(|mount| {
-                            mount["source"].as_str().is_some_and(|other_source| {
-                                other_source == source
-                                    || config["volumes"][other_source]["name"].as_str()
-                                        == Some(name)
-                            })
-                        })
-                    })
-            })
-        })
-    {
+        && empty_volume_options(&definition["driver_opts"]))
+    .then_some(name)
+}
+
+fn owned_compose_volume(
+    engine: &Address,
+    root: &Path,
+    project: &str,
+    source: &str,
+    name: &str,
+    inventory: &[String],
+) -> Result<Option<String>, Problem> {
+    if !inventory.iter().any(|listed| listed == name) {
         return Ok(None);
     }
-    if !named_volume_exists(engine, root, name)? {
+    let Some(labels) = inspect_local_volume(engine, root, name)? else {
         return Ok(None);
-    }
+    };
+    Ok(
+        (labels["com.docker.compose.project"].as_str() == Some(project)
+            && labels["com.docker.compose.volume"].as_str() == Some(source))
+        .then(|| name.to_owned()),
+    )
+}
+
+/// The labels of exactly this local volume, or `None` when the engine describes anything else.
+fn inspect_local_volume(
+    engine: &Address,
+    root: &Path,
+    name: &str,
+) -> Result<Option<serde_json::Value>, Problem> {
     let inspect = engine
         .command()
         .current_dir(root)
         .args(["volume", "inspect", name])
         .output()
         .map_err(|error| {
-            postgres_volume_problem(format!("Could not inspect the database volume: {error}"))
+            postgres_volume_problem(format!("Could not inspect volume {name}: {error}"))
         })?;
     if !inspect.status.success() {
-        return Err(postgres_volume_problem(format!("Database volume inspection exited with {}. Output omitted because it can contain credentials.", inspect.status)));
+        return Err(postgres_volume_problem(format!("Inspection of volume {name} exited with {}. Output omitted because it can contain credentials.", inspect.status)));
     }
     let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
-        postgres_volume_problem("Database volume inspection did not return valid JSON.")
+        postgres_volume_problem(format!(
+            "Inspection of volume {name} did not return valid JSON."
+        ))
     })?;
     let Some(volumes) = inspected.as_array().filter(|volumes| volumes.len() == 1) else {
         return Ok(None);
@@ -311,36 +401,402 @@ pub fn leftover_database_volume(
     // tied to the full name the person confirmed, never a similarly named backup.
     Ok((volume["Name"].as_str() == Some(name)
         && volume["Driver"].as_str() == Some("local")
-        && empty_volume_options(&volume["Options"])
-        && volume["Labels"]["com.docker.compose.project"].as_str() == Some(project)
-        && volume["Labels"]["com.docker.compose.volume"].as_str() == Some(source))
+        && empty_volume_options(&volume["Options"]))
+    .then(|| volume["Labels"].clone()))
+}
+
+/// A Bot's profile or workspace volume, created by the supervisor in this namespace.
+/// Matches `supervisor/src/names.ts` names and `labelsFor` in `supervisor/src/docker.ts`;
+/// all three labels are required, so an older or foreign volume is never claimed.
+fn owned_supervisor_volume(
+    engine: &Address,
+    root: &Path,
+    namespace: &str,
+    name: &str,
+) -> Result<Option<String>, Problem> {
+    let Some(bot) = ["profile", "workspace"]
+        .iter()
+        .find_map(|kind| name.strip_prefix(&format!("{namespace}-{kind}-")))
+        .filter(|bot| supervisor_identifier(bot))
+    else {
+        return Ok(None);
+    };
+    let Some(labels) = inspect_local_volume(engine, root, name)? else {
+        return Ok(None);
+    };
+    Ok((labels["openbot.supervisor"].as_str() == Some("true")
+        && labels["openbot.bot-id"].as_str() == Some(bot)
+        && labels["openbot.namespace"].as_str() == Some(namespace))
     .then(|| name.to_owned()))
 }
 
-pub fn reset_leftover_database(
+/// The namespace the selected supervisor will run with, as `supervisor/src/names.ts` reads it.
+/// No supervisor, or a namespace it would refuse, owns no volumes.
+fn supervisor_namespace(config: &serde_json::Value) -> Option<String> {
+    let supervisor = config["services"]["supervisor"].as_object()?;
+    let configured = match supervisor
+        .get("environment")
+        .and_then(|environment| environment.get("COMPUTER_NAMESPACE"))
+    {
+        None | Some(serde_json::Value::Null) => "",
+        Some(value) => value.as_str()?,
+    };
+    resolve_namespace(configured).map(str::to_owned)
+}
+
+/// Match supervisor/src/names.ts: trim, default only an empty value, then the same 64-character
+/// ASCII identifier grammar.
+fn resolve_namespace(configured: &str) -> Option<&str> {
+    let namespace = match configured.trim() {
+        "" => "openbot",
+        value => value,
+    };
+    supervisor_identifier(namespace).then_some(namespace)
+}
+
+fn supervisor_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+/// What a previous installation of this deployment left on the selected engine.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeftoverVolumes {
+    /// The Postgres volume, when Compose and the engine agree this project owns it.
+    pub database: Option<String>,
+    /// Whether the volume Compose selects for Postgres exists at all, owned or not.
+    pub database_exists: bool,
+    /// Every verified, owned volume, sorted. This is exactly what a reset removes.
+    pub volumes: Vec<String>,
+    /// Stopped containers this deployment provably owns, sorted by name. They still hold the
+    /// volumes, so a reset removes them first.
+    pub containers: Vec<LeftoverContainer>,
+    /// Owned containers that are not stopped, by name. Any one of them blocks a reset.
+    pub running: Vec<String>,
+}
+
+/// A stopped container a reset may remove, named for the person and removed by its exact id.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeftoverContainer {
+    pub name: String,
+    pub id: String,
+}
+
+impl LeftoverVolumes {
+    /// A reset must not leave a database it cannot verify for the new installation to reuse,
+    /// and never touches a container that is still running.
+    pub fn resettable(&self) -> bool {
+        !self.volumes.is_empty()
+            && (self.database.is_some() || !self.database_exists)
+            && self.running.is_empty()
+    }
+
+    pub fn container_names(&self) -> Vec<String> {
+        self.containers
+            .iter()
+            .map(|container| container.name.clone())
+            .collect()
+    }
+
+    /// The sentence for a reset that a running container blocks, or `None` when none is running.
+    pub fn running_said(&self) -> Option<String> {
+        (!self.running.is_empty()).then(|| {
+            format!(
+                "A container from the previous installation is still running: {}. Stop it in Docker or Podman, then try Start again.",
+                self.running.join(", ")
+            )
+        })
+    }
+}
+
+fn leftover_container_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify which containers a previous installation left. Nothing was changed. Check the selected container engine, then try again.",
+        detail,
+    )
+}
+
+/// The ids carrying every one of these labels. Only a hint: each one is inspected before use.
+fn labelled_containers(
+    engine: &Address,
+    root: &Path,
+    labels: &[(&str, &str)],
+) -> Result<Vec<String>, Problem> {
+    let mut command = engine.command();
+    command
+        .current_dir(root)
+        .args(["ps", "--all", "--quiet", "--no-trunc"]);
+    for (key, value) in labels {
+        command.args(["--filter", &format!("label={key}={value}")]);
+    }
+    let listed = command.output().map_err(|error| {
+        leftover_container_problem(format!("Could not list containers: {error}"))
+    })?;
+    if !listed.status.success() {
+        return Err(leftover_container_problem(format!(
+            "Container listing exited with {}. Output omitted because it can contain credentials.",
+            listed.status
+        )));
+    }
+    let listed = std::str::from_utf8(&listed.stdout)
+        .map_err(|_| leftover_container_problem("Container listing was not valid UTF-8."))?;
+    Ok(listed.split_whitespace().map(str::to_owned).collect())
+}
+
+enum ContainerState {
+    Stopped,
+    Running,
+}
+
+/// The name and state of a container whose labels prove this deployment owns it, or `None`.
+fn owned_container(
+    engine: &Address,
+    root: &Path,
+    id: &str,
+    project: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<Option<(String, ContainerState)>, Problem> {
+    let inspect = engine
+        .command()
+        .current_dir(root)
+        .args(["container", "inspect", id])
+        .output()
+        .map_err(|error| {
+            leftover_container_problem(format!("Could not inspect container {id}: {error}"))
+        })?;
+    if !inspect.status.success() {
+        return Err(leftover_container_problem(format!(
+            "Inspection of container {id} exited with {}. Output omitted because it can contain credentials.",
+            inspect.status
+        )));
+    }
+    let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
+        leftover_container_problem(format!(
+            "Inspection of container {id} did not return valid JSON."
+        ))
+    })?;
+    let Some(containers) = inspected
+        .as_array()
+        .filter(|containers| containers.len() == 1)
+    else {
+        return Ok(None);
+    };
+    let container = &containers[0];
+    // Exact ids only: an engine resolving a prefix to something else is not this container.
+    if container["Id"].as_str() != Some(id) {
+        return Ok(None);
+    }
+    // Docker reports `/name`; Podman reports `name`.
+    let Some(name) = container["Name"]
+        .as_str()
+        .map(|name| name.strip_prefix('/').unwrap_or(name))
+        .filter(|name| !name.is_empty())
+    else {
+        return Ok(None);
+    };
+    let labels = &container["Config"]["Labels"];
+    let compose_owned = project
+        .is_some_and(|project| labels["com.docker.compose.project"].as_str() == Some(project));
+    // Matches `namesFor` in supervisor/src/names.ts and `labelsFor` in supervisor/src/docker.ts.
+    let supervisor_owned = namespace.is_some_and(|namespace| {
+        labels["openbot.supervisor"].as_str() == Some("true")
+            && labels["openbot.namespace"].as_str() == Some(namespace)
+            && labels["openbot.bot-id"].as_str().is_some_and(|bot| {
+                supervisor_identifier(bot) && name == format!("{namespace}-computer-{bot}")
+            })
+    });
+    if !compose_owned && !supervisor_owned {
+        return Ok(None);
+    }
+    let state = &container["State"];
+    // Only states a plain removal accepts count as stopped. Anything else, or anything unknown,
+    // is treated as running so it is never touched.
+    let stopped = state["Running"].as_bool() == Some(false)
+        && state["Status"].as_str().is_some_and(|status| {
+            matches!(status, "created" | "exited" | "stopped" | "configured")
+        });
+    Ok(Some((
+        name.to_owned(),
+        if stopped {
+            ContainerState::Stopped
+        } else {
+            ContainerState::Running
+        },
+    )))
+}
+
+fn leftover_containers(
+    engine: &Address,
+    root: &Path,
+    project: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<(Vec<LeftoverContainer>, Vec<String>), Problem> {
+    let mut ids = Vec::new();
+    if let Some(project) = project {
+        ids.extend(labelled_containers(
+            engine,
+            root,
+            &[("com.docker.compose.project", project)],
+        )?);
+    }
+    if let Some(namespace) = namespace {
+        ids.extend(labelled_containers(
+            engine,
+            root,
+            &[
+                ("openbot.supervisor", "true"),
+                ("openbot.namespace", namespace),
+            ],
+        )?);
+    }
+    ids.sort();
+    ids.dedup();
+    let mut stopped = Vec::new();
+    let mut running = Vec::new();
+    for id in ids {
+        match owned_container(engine, root, &id, project, namespace)? {
+            Some((name, ContainerState::Stopped)) => stopped.push(LeftoverContainer { name, id }),
+            Some((name, ContainerState::Running)) => running.push(name),
+            None => {}
+        }
+    }
+    stopped.sort_by(|a, b| a.name.cmp(&b.name));
+    running.sort();
+    Ok((stopped, running))
+}
+
+/**
+Every volume a previous installation of this deployment left behind, and that it provably owns.
+
+A deleted installation folder removes `.env` and the vault, but not the engine's volumes. Compose
+and the supervisor reattach them by name, so a new installation silently inherits the old one's
+Bots' workspace files and browser sign-ins. Only three kinds are claimed: the verified Postgres
+volume, the other ordinary project-scoped Compose volumes labelled for this project, and the
+per-Bot volumes the supervisor labelled for this namespace. Never include config output in
+diagnostics: interpolation may have put credentials in it.
+*/
+pub fn leftover_volumes(
     engine: &Address,
     root: &Path,
     secrets: &Secrets,
-    confirmed_volume: &str,
-) -> Result<(), Problem> {
-    if leftover_database_volume(engine, root, secrets)?.as_deref() != Some(confirmed_volume) {
-        return Err(Problem::plain("The leftover database no longer matches the volume you confirmed, or OpenBot could not verify that it owns the volume. Nothing was removed. Try Start again."));
+) -> Result<LeftoverVolumes, Problem> {
+    let config = leftover_configuration(engine, root, secrets)?;
+    let inventory = volume_inventory(engine, root)?;
+    let postgres = postgres_data_volume(&config);
+    let database_exists = postgres
+        .and_then(|(_, definition)| definition["name"].as_str())
+        .is_some_and(|name| inventory.iter().any(|listed| listed == name));
+    let database = owned_database_volume(engine, root, &config, &inventory)?;
+    let mut volumes: Vec<String> = database.iter().cloned().collect();
+    let project = config["name"].as_str().filter(|name| !name.is_empty());
+    let namespace = supervisor_namespace(&config);
+    if let (Some(project), Some(definitions)) = (project, config["volumes"].as_object()) {
+        for (source, definition) in definitions {
+            // The database has its own, stricter test above.
+            if postgres.is_some_and(|(postgres_source, _)| postgres_source == source) {
+                continue;
+            }
+            let Some(name) = ordinary_project_volume(project, source, definition) else {
+                continue;
+            };
+            volumes.extend(owned_compose_volume(
+                engine, root, project, source, name, &inventory,
+            )?);
+        }
     }
-    // Never force this operation: the engine must refuse any container attachment, including a
-    // stopped container or one created after inspection. Do not stop containers to make it pass.
-    let removed = engine
-        .command()
-        .current_dir(root)
-        .args(["volume", "rm", confirmed_volume])
-        .output()
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not reset the leftover database. Nothing else was removed.",
-                format!("Could not run volume removal: {error}"),
-            )
-        })?;
-    if !removed.status.success() {
-        return Err(Problem::with("OpenBot could not reset the leftover database. It may still be attached to a container. Nothing else was removed; stop the installation using it before trying again.", format!("Volume removal exited with {}. Output omitted because it can contain credentials.", removed.status)));
+    if let Some(namespace) = &namespace {
+        for name in &inventory {
+            volumes.extend(owned_supervisor_volume(engine, root, namespace, name)?);
+        }
+    }
+    volumes.sort();
+    volumes.dedup();
+    // Stopped containers keep their volumes attached, so the engine refuses to remove them. Only
+    // worth listing when there is data to reset.
+    let (containers, running) = if volumes.is_empty() {
+        Default::default()
+    } else {
+        leftover_containers(engine, root, project, namespace.as_deref())?
+    };
+    Ok(LeftoverVolumes {
+        database,
+        database_exists,
+        volumes,
+        containers,
+        running,
+    })
+}
+
+/// Remove exactly the leftover containers and volumes the person confirmed, containers first,
+/// or nothing when either set changed or an owned container is running.
+pub fn reset_leftover_volumes(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    confirmed: &[String],
+    confirmed_containers: &[String],
+) -> Result<(), Problem> {
+    let leftovers = leftover_volumes(engine, root, secrets)?;
+    if let Some(said) = leftovers.running_said() {
+        return Err(Problem::plain(format!("{said} Nothing was removed.")));
+    }
+    let sorted = |names: &[String]| {
+        let mut names = names.to_vec();
+        names.sort();
+        names
+    };
+    if !leftovers.resettable()
+        || leftovers.volumes != sorted(confirmed)
+        || leftovers.container_names() != sorted(confirmed_containers)
+    {
+        return Err(Problem::plain("The leftover data no longer matches the containers and volumes you confirmed, or OpenBot could not verify that it owns them. Nothing was removed. Try Start again."));
+    }
+    let mut removed: Vec<&str> = Vec::new();
+    let removals = leftovers
+        .containers
+        .iter()
+        .map(|container| ("container", container.id.as_str(), container.name.as_str()))
+        .chain(
+            leftovers
+                .volumes
+                .iter()
+                .map(|volume| ("volume", volume.as_str(), volume.as_str())),
+        );
+    for (kind, target, name) in removals {
+        let so_far = || match removed.as_slice() {
+            [] => "Nothing was removed.".to_owned(),
+            removed => format!("Already removed: {}.", removed.join(", ")),
+        };
+        // Never force this operation: the engine must refuse a running container and any
+        // container attachment, including one created after inspection. Do not stop containers
+        // to make it pass.
+        let output = engine
+            .command()
+            .current_dir(root)
+            .args([kind, "rm", target])
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    format!("OpenBot could not remove {name}. {}", so_far()),
+                    format!("Could not run {kind} removal: {error}"),
+                )
+            })?;
+        if !output.status.success() {
+            let why = if kind == "container" {
+                "It may have started again."
+            } else {
+                "It may still be attached to a container."
+            };
+            return Err(Problem::with(
+                format!("OpenBot could not remove {name}. {why} {} Stop the installation using it, then try Start again.", so_far()),
+                format!("{kind} removal exited with {}. Output omitted because it can contain credentials.", output.status),
+            ));
+        }
+        removed.push(name);
     }
     Ok(())
 }
@@ -732,20 +1188,9 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
         .pointer("/services/supervisor/environment/COMPUTER_NAMESPACE")
         .and_then(serde_json::Value::as_str)
         .ok_or("could not resolve computer namespace: supervisor configuration has no namespace")?;
-    // Match supervisor/src/names.ts: trim, default only an empty value, then the same 64-character
-    // ASCII identifier grammar. A malformed/missing response never becomes an unscoped filter.
-    let namespace = match configured.trim() {
-        "" => "openbot",
-        value => value,
-    };
-    if namespace.len() > 64
-        || !namespace.as_bytes()[0].is_ascii_alphanumeric()
-        || !namespace
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-    {
-        return Err("could not resolve computer namespace: supervisor namespace is invalid".into());
-    }
+    // A malformed/missing response never becomes an unscoped filter.
+    let namespace = resolve_namespace(configured)
+        .ok_or("could not resolve computer namespace: supervisor namespace is invalid")?;
     Ok(Some(namespace.to_string()))
 }
 
@@ -855,19 +1300,34 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
     // that has bun need not have, so the install fails at "node: command not found" after the
     // containers are already up. Found on a Linux machine with bun and no node.
-    let output = command(bun)
-        .current_dir(root)
-        .args(["install", "--frozen-lockfile", "--ignore-scripts"])
-        .output()
-        .map_err(|error| format!("could not run bun install: {error}"))?;
-
-    if output.status.success() {
-        return Ok(());
+    for directory in dependency_directories(root) {
+        let output = command(bun)
+            .current_dir(root.join(directory))
+            .args(["install", "--frozen-lockfile", "--ignore-scripts"])
+            .output()
+            .map_err(|error| format!("could not run bun install: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "installing the deployment's dependencies failed: {}",
+                command_said(&output.stderr)
+            ));
+        }
     }
-    Err(format!(
-        "installing the deployment's dependencies failed: {}",
-        command_said(&output.stderr)
-    ))
+    Ok(())
+}
+
+/// Where the deployment's packages are installed: the root workspace, and `agent-computer` where the
+/// release runs the person's browser from it.
+///
+/// `agent-computer` is not a workspace. It has its own lockfile, as its image installs it, so the
+/// root install leaves it without Playwright and the browser process stops at its first import.
+/// Older releases have no browser to run, so they are not made to download one's dependencies.
+pub fn dependency_directories(root: &Path) -> Vec<&'static str> {
+    let mut directories = vec![""];
+    if crate::local_browser::in_release(root) {
+        directories.push("agent-computer");
+    }
+    directories
 }
 
 /// Start one host process, with its output on disk rather than nowhere.
@@ -1135,6 +1595,9 @@ pub fn spawn_host_process(
     logs: &Path,
     bun: &Path,
     secrets: &Secrets,
+    // What this start decided about the person's browser. Required to start that process, and
+    // ignored by the others.
+    local_browser: Option<&crate::local_browser::LocalBrowser>,
 ) -> std::io::Result<std::process::Child> {
     std::fs::create_dir_all(logs)?;
     let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
@@ -1142,6 +1605,15 @@ pub fn spawn_host_process(
 
     let mut command = command(bun);
     command.current_dir(root.join(process.cwd));
+    let ports = crate::env::Ports::read(root)?;
+    if process.name == LOCAL_BROWSER {
+        configure_local_browser(&mut command, process, root, &ports, secrets, local_browser)?;
+        command
+            .stdout(Stdio::from(out))
+            .stderr(Stdio::from(err))
+            .stdin(Stdio::null());
+        return command.spawn();
+    }
     /*
      * The credentials, alongside the `--env-file` that carries the settings.
      *
@@ -1150,7 +1622,6 @@ pub fn spawn_host_process(
      * fought with.
      */
     configure_host_process_env(&mut command, process.name, secrets);
-    let ports = crate::env::Ports::read(root)?;
     command.envs(ports.settings());
     if process.name == "server" {
         command.env("PORT", ports.server.to_string());
@@ -1165,6 +1636,55 @@ pub fn spawn_host_process(
         .stderr(Stdio::from(err))
         .stdin(Stdio::null());
     command.spawn()
+}
+
+/// The person's browser is started the way `scripts/start-local-chrome-computer.ts` starts it, and
+/// is handed only what it needs (see `local_browser::environment`).
+///
+/// `--no-env-file` because nothing in a settings file is the computer's: Bun would otherwise read
+/// a `.env` beside it, and the deployment's own `.env` is the server's.
+fn configure_local_browser(
+    command: &mut Command,
+    process: &HostProcess,
+    root: &Path,
+    ports: &crate::env::Ports,
+    secrets: &Secrets,
+    local_browser: Option<&crate::local_browser::LocalBrowser>,
+) -> std::io::Result<()> {
+    let missing = |what: &str| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("the person's browser cannot start without {what}"),
+        )
+    };
+    let browser = local_browser.ok_or_else(|| missing("a browser to open"))?;
+    let port = ports.browser.ok_or_else(|| missing("BROWSER_PORT"))?;
+    let token = secrets
+        .get("COMPUTER_TOKEN")
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| missing("COMPUTER_TOKEN"))?;
+    // The contract says absolute. A deployment folder typed as a relative path is relative to
+    // wherever this window runs from, which the computer does not share.
+    let root = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(root)
+    };
+    crate::local_browser::prepare_data(browser)?;
+    // Taken out as well as not given: a Desktop started from a developer's shell inherits whatever
+    // that shell exported, and none of the deployment's other credentials are this process's.
+    for key in secrets
+        .keys()
+        .filter(|key| key.as_str() != "COMPUTER_TOKEN")
+    {
+        command.env_remove(key);
+    }
+    command
+        .envs(crate::local_browser::environment(
+            &root, browser, port, token,
+        ))
+        .args(["--no-env-file", process.script]);
+    Ok(())
 }
 
 /// Keep a replacement handle even if refreshing durable ownership fails. The caller must
@@ -1468,6 +1988,7 @@ pub fn stop_host_children(
     root: &Path,
     children: &mut [(&str, std::process::Child)],
 ) -> Result<usize, Problem> {
+    close_local_browser_first(children, BROWSER_CLOSE_PATIENCE);
     let mut live = Vec::new();
     for (name, child) in children {
         if child
@@ -1486,6 +2007,46 @@ pub fn stop_host_children(
     stop_unix_records(root, &unix_host_records(root, &live)?)
 }
 
+/// How long the person's browser is given to close before the rest of the stack is taken down.
+/// Playwright closes it over its own pipe in about a second; the rest is for a busy machine, kept
+/// short because the person is waiting on Stop or Quit.
+#[cfg(unix)]
+const BROWSER_CLOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Ask the person's browser to close before anything is killed.
+///
+/// Every other host process is stopped by freezing its process tree and killing it, which is right
+/// for a server and wrong for a browser holding somebody's logins: Chrome killed mid-write says it
+/// did not shut down correctly the next time it opens, and offers back pages the person had closed.
+/// The computer closes its browsers and exits on SIGTERM (`agent-computer/src/index.ts`, the path
+/// `docker stop` takes), so it is sent that first. Whatever still runs after `patience` is stopped
+/// the ordinary way, so this never weakens the guarantee below it.
+///
+/// Only a held child is signalled. Its pid cannot belong to anybody else while this process has
+/// not reaped it, which is not true of a pid read back from the pidfile.
+#[cfg(unix)]
+fn close_local_browser_first(
+    children: &mut [(&str, std::process::Child)],
+    patience: std::time::Duration,
+) {
+    let deadline = std::time::Instant::now() + patience;
+    for (name, child) in children.iter_mut() {
+        if *name != LOCAL_BROWSER || !matches!(child.try_wait(), Ok(None)) {
+            continue;
+        }
+        let Ok(pid) = i32::try_from(child.id()) else {
+            continue;
+        };
+        // SAFETY: kill(2) on a child this process spawned and still holds unreaped.
+        if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+            continue;
+        }
+        while matches!(child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
 /// Windows replacements may not be in the initial pidfile. A live Child plus its current direct
 /// parent and complete instance identity authorizes adding it to the existing verified inventory.
 #[cfg(not(unix))]
@@ -1498,7 +2059,88 @@ pub fn stop_host_children(
         children,
         Path::new("powershell"),
         Path::new("taskkill"),
+        WINDOWS_BROWSER_CLOSE_PATIENCE,
     )
+}
+
+/// How long the person's browser is given to close on Windows before its tree is ended, as on Unix
+/// ([`BROWSER_CLOSE_PATIENCE`]): Chrome closes its windows in about a second, and the person is
+/// waiting on Stop or Quit.
+#[cfg(any(not(unix), test))]
+const WINDOWS_BROWSER_CLOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The browsers the person's browser computer started, by the name Windows runs each from.
+#[cfg(any(not(unix), test))]
+const WINDOWS_BROWSERS: [&str; 2] = ["chrome.exe", "msedge.exe"];
+
+/// Ask the person's browser to close on Windows before anything is ended, as Unix does with
+/// SIGTERM ([`close_local_browser_first`]).
+///
+/// Every host process on Windows is ended with `taskkill /T /F`, which is `TerminateProcess` on the
+/// whole tree: right for a server and wrong for a browser holding somebody's logins, which killed
+/// mid-write says it did not shut down correctly the next time it opens and offers back pages the
+/// person had closed. Windows has no SIGTERM to send the computer instead, so the browser itself is
+/// asked, the way Windows asks any program to close: `taskkill` without `/F` posts `WM_CLOSE` to
+/// its windows, as their close button does, and Chrome and Edge then shut down cleanly. Chromium's
+/// own tooling quits Chrome on Windows exactly so, posting `WM_CLOSE` to each window and ending it
+/// by force only if it is still there after a wait.
+/// <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill>
+/// <https://chromium.googlesource.com/chromium/src.git/+/74.0.3702.1/chrome/test/mini_installer/quit_chrome.py>
+///
+/// Only a browser the held computer started (its direct child, found in a fresh inventory) is
+/// asked, never one found by name: the person's everyday Chrome is nobody's child here and stays
+/// open. Never the computer itself or its console, which have no window to close. Whatever still
+/// runs after `patience` is ended the ordinary way, so this never weakens the guarantee below it,
+/// and an inventory or a `taskkill` that fails only means it goes straight to that.
+#[cfg(any(not(unix), test))]
+fn close_local_browser_windows_first(
+    children: &mut [(&str, std::process::Child)],
+    powershell: &Path,
+    taskkill: &Path,
+    patience: std::time::Duration,
+) {
+    let deadline = std::time::Instant::now() + patience;
+    let Some(computer) = children.iter_mut().find_map(|(name, child)| {
+        (*name == LOCAL_BROWSER && matches!(child.try_wait(), Ok(None))).then(|| child.id())
+    }) else {
+        return;
+    };
+    let browsers_of = |processes: &[WindowsProcess]| -> Vec<u32> {
+        processes
+            .iter()
+            .filter(|process| {
+                process.parent_process_id == computer
+                    && process.executable_path.as_deref().is_some_and(|path| {
+                        let file = path.rsplit(['\\', '/']).next().unwrap_or(path);
+                        WINDOWS_BROWSERS
+                            .iter()
+                            .any(|browser| file.eq_ignore_ascii_case(browser))
+                    })
+            })
+            .map(|process| process.process_id)
+            .collect()
+    };
+    let Ok(snapshot) = windows_processes_with(powershell) else {
+        return;
+    };
+    let browsers = browsers_of(&snapshot);
+    if browsers.is_empty() {
+        return;
+    }
+    for pid in &browsers {
+        // Not `/F` and not `/T`: the windows are asked to close, and the browser ends its own children.
+        let _ = command(taskkill).args(["/PID", &pid.to_string()]).output();
+    }
+    while std::time::Instant::now() < deadline {
+        let Ok(now) = windows_processes_with(powershell) else {
+            return;
+        };
+        let left = browsers_of(&now);
+        if !browsers.iter().any(|pid| left.contains(pid)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 #[cfg(any(not(unix), test))]
@@ -1507,7 +2149,9 @@ fn stop_windows_host_children_with(
     children: &mut [(&str, std::process::Child)],
     powershell: &Path,
     taskkill: &Path,
+    browser_patience: std::time::Duration,
 ) -> Result<usize, Problem> {
+    close_local_browser_windows_first(children, powershell, taskkill, browser_patience);
     let mut held = Vec::new();
     for (name, child) in children.iter_mut() {
         if child
@@ -2766,8 +3410,13 @@ const LOOPBACKS: [&str; 2] = ["127.0.0.1", "[::1]"];
 /// Returns the address that worked rather than a boolean, so a caller that has to send somebody
 /// there can use the one that answered instead of guessing again.
 pub fn answering_at(port: u16, path: &str) -> Option<String> {
+    answering_within(port, path, std::time::Duration::from_secs(3))
+}
+
+/// [`answering_at`], giving each loopback at most `patience`.
+pub fn answering_within(port: u16, path: &str, patience: std::time::Duration) -> Option<String> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
+        .timeout(patience)
         .build()
         .ok()?;
     LOOPBACKS.iter().find_map(|host| {
@@ -3209,14 +3858,25 @@ mod tests {
                 leftover_database_volume(&address, &root, &Secrets::new()).unwrap(),
                 Some("openbot_postgres-data".into())
             );
-            assert!(
-                reset_leftover_database(&address, &root, &Secrets::new(), "unrelated").is_err()
-            );
+            assert!(reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &["unrelated".into()],
+                &[]
+            )
+            .is_err());
             assert!(!std::fs::read_to_string(&record)
                 .unwrap()
                 .contains("volume rm"));
-            reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
-                .unwrap();
+            reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &["openbot_postgres-data".into()],
+                &[],
+            )
+            .unwrap();
             assert_eq!(
                 std::fs::read_to_string(root.join(".fixture-volumes")).unwrap(),
                 "unrelated\n"
@@ -3329,9 +3989,14 @@ mod tests {
             if let Some(marker) = marker {
                 std::fs::write(root.join(marker), "").unwrap();
             }
-            let error =
-                reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
-                    .expect_err(scenario);
+            let error = reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &["openbot_postgres-data".into()],
+                &[],
+            )
+            .expect_err(scenario);
             assert!(
                 !format!("{error:?}").contains("synthetic-secret"),
                 "{scenario}"
@@ -3355,6 +4020,462 @@ mod tests {
                 std::fs::remove_file(root.join(marker)).unwrap();
             }
         }
+    }
+
+    /// A reinstall's Compose project and supervisor volumes, beside look-alikes it does not own.
+    fn leftover_volumes_fixture(root: &Path, namespace: &str) {
+        let config = serde_json::json!({
+            "name": "openbot",
+            "services": {
+                "postgres": {"volumes": [{
+                    "type": "volume", "source": "postgres-data", "target": "/var/lib/postgresql/data"
+                }]},
+                "supervisor": {"environment": {"COMPUTER_NAMESPACE": namespace}},
+                "agent-computer": {"volumes": [
+                    {"type": "volume", "source": "agent-profiles", "target": "/profiles"},
+                    {"type": "volume", "source": "agent-workspace", "target": "/workspace"}
+                ]}
+            },
+            "volumes": {
+                "postgres-data": {"name": "openbot_postgres-data"},
+                "agent-profiles": {"name": "openbot_agent-profiles"},
+                "agent-workspace": {"name": "openbot_agent-workspace"},
+                "spire-server-data": {"name": "openbot_spire-server-data"},
+                "unlabeled": {"name": "openbot_unlabeled"},
+                "foreign": {"name": "openbot_foreign"},
+                "shared-cache": {"name": "shared-cache", "external": true},
+                "explicit": {"name": "explicitly-named"},
+                "remote": {"name": "openbot_remote", "driver_opts": {"device": "/shared"}}
+            }
+        });
+        std::fs::write(root.join(".fixture-config"), config.to_string()).unwrap();
+        std::fs::write(
+            root.join(".fixture-volumes"),
+            [
+                "unrelated",
+                "openbot_agent-profiles",
+                "openbot_agent-workspace",
+                "openbot_unlabeled",
+                "openbot_foreign",
+                "shared-cache",
+                "explicitly-named",
+                "openbot_remote",
+                "openbot-profile-general-assistant",
+                "openbot-workspace-general-assistant",
+                "openbot-profile-unlabeled",
+                "openbot-workspace-elsewhere",
+                "openbot-profile-legacy",
+                "other-profile-knowledge",
+            ]
+            .map(|name| format!("{name}\n"))
+            .concat(),
+        )
+        .unwrap();
+        let inspect = |name: &str, labels: serde_json::Value| {
+            std::fs::write(
+                root.join(format!(".fixture-inspect-{name}")),
+                serde_json::json!([{
+                    "Name": name, "Driver": "local", "Options": {}, "Labels": labels
+                }])
+                .to_string(),
+            )
+            .unwrap();
+        };
+        let compose = |project: &str, source: &str| {
+            serde_json::json!({
+                "com.docker.compose.project": project, "com.docker.compose.volume": source
+            })
+        };
+        let supervisor = |bot: &str, namespace: &str| {
+            serde_json::json!({
+                "openbot.supervisor": "true", "openbot.bot-id": bot, "openbot.namespace": namespace
+            })
+        };
+        inspect(
+            "openbot_agent-profiles",
+            compose("openbot", "agent-profiles"),
+        );
+        inspect(
+            "openbot_agent-workspace",
+            compose("openbot", "agent-workspace"),
+        );
+        inspect("openbot_unlabeled", serde_json::json!({}));
+        inspect("openbot_foreign", compose("another-project", "foreign"));
+        inspect(
+            "openbot-profile-general-assistant",
+            supervisor("general-assistant", "openbot"),
+        );
+        inspect(
+            "openbot-workspace-general-assistant",
+            supervisor("general-assistant", "openbot"),
+        );
+        inspect("openbot-profile-unlabeled", serde_json::json!({}));
+        inspect(
+            "openbot-workspace-elsewhere",
+            supervisor("elsewhere", "other"),
+        );
+        inspect(
+            "openbot-profile-legacy",
+            serde_json::json!({"openbot.supervisor": "true", "openbot.bot-id": "legacy"}),
+        );
+        inspect("other-profile-knowledge", supervisor("knowledge", "other"));
+    }
+
+    const OWNED_LEFTOVERS: [&str; 4] = [
+        "openbot-profile-general-assistant",
+        "openbot-workspace-general-assistant",
+        "openbot_agent-profiles",
+        "openbot_agent-workspace",
+    ];
+
+    #[test]
+    fn leftover_volumes_are_only_volumes_this_project_or_namespace_provably_owns() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_volumes_are_only_volumes_this_project_or_namespace_provably_owns",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let address = computer_stop_addresses(&path)[0].clone();
+        let root = path.bin.join("leftover-volumes");
+        std::fs::create_dir(&root).unwrap();
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+
+        leftover_volumes_fixture(&root, "openbot");
+        let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+        assert_eq!(found.volumes, OWNED_LEFTOVERS.map(String::from));
+        assert_eq!(found.database, None);
+        assert!(!found.database_exists);
+        assert!(found.resettable());
+        let log = std::fs::read_to_string(&record).unwrap();
+        for never_inspected in ["shared-cache", "explicitly-named", "openbot_remote"] {
+            assert!(
+                !log.contains(&format!("volume inspect {never_inspected}")),
+                "{never_inspected}: {log}"
+            );
+        }
+        assert!(!log.contains("volume rm"));
+
+        // Another deployment's namespace selects only that namespace's Bots.
+        leftover_volumes_fixture(&root, "other");
+        assert_eq!(
+            leftover_volumes(&address, &root, &Secrets::new())
+                .unwrap()
+                .volumes,
+            [
+                "openbot_agent-profiles",
+                "openbot_agent-workspace",
+                "other-profile-knowledge"
+            ]
+        );
+
+        // The database joins the set when it is verified, and blocks the offer when it is not.
+        leftover_volumes_fixture(&root, "openbot");
+        let mut inventory = std::fs::read_to_string(root.join(".fixture-volumes")).unwrap();
+        inventory.push_str("openbot_postgres-data\n");
+        std::fs::write(root.join(".fixture-volumes"), inventory).unwrap();
+        let database = serde_json::json!([{
+            "Name": "openbot_postgres-data", "Driver": "local", "Options": {},
+            "Labels": {"com.docker.compose.project":"openbot", "com.docker.compose.volume":"postgres-data"}
+        }]);
+        std::fs::write(root.join(".fixture-inspect"), database.to_string()).unwrap();
+        let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+        assert_eq!(found.database.as_deref(), Some("openbot_postgres-data"));
+        assert!(found.database_exists && found.resettable());
+        let mut expected = OWNED_LEFTOVERS.map(String::from).to_vec();
+        expected.push("openbot_postgres-data".into());
+        expected.sort();
+        assert_eq!(found.volumes, expected);
+
+        let mut foreign = database.clone();
+        foreign[0]["Labels"]["com.docker.compose.project"] = "another-project".into();
+        std::fs::write(root.join(".fixture-inspect"), foreign.to_string()).unwrap();
+        let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+        assert_eq!(found.database, None);
+        assert!(found.database_exists);
+        assert_eq!(found.volumes, OWNED_LEFTOVERS.map(String::from));
+        assert!(
+            !found.resettable(),
+            "an unverified database must not be left behind by a reset"
+        );
+        std::fs::write(record, "").unwrap();
+        assert!(reset_leftover_volumes(
+            &address,
+            &root,
+            &Secrets::new(),
+            &OWNED_LEFTOVERS.map(String::from),
+            &[]
+        )
+        .is_err());
+        assert!(!std::fs::read_to_string(root.join("commands.log"))
+            .unwrap()
+            .contains("volume rm"));
+    }
+
+    #[test]
+    fn leftover_volume_reset_removes_exactly_the_confirmed_owned_set() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_volume_reset_removes_exactly_the_confirmed_owned_set",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-leftover-reset", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            leftover_volumes_fixture(&root, "openbot");
+            let owned = OWNED_LEFTOVERS.map(String::from).to_vec();
+            let mut duplicated = owned.clone();
+            duplicated.push(owned[0].clone());
+            let mut superset = owned.clone();
+            superset.push("other-profile-knowledge".into());
+            for stale in [
+                owned[..3].to_vec(),
+                superset,
+                duplicated,
+                vec!["unrelated".into()],
+                Vec::new(),
+            ] {
+                let error = reset_leftover_volumes(&address, &root, &Secrets::new(), &stale, &[])
+                    .expect_err("a changed set must not be removed");
+                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(!std::fs::read_to_string(&record)
+                    .unwrap_or_default()
+                    .contains("volume rm"));
+            }
+
+            // The engine refuses a volume a container still uses; nothing is forced.
+            std::fs::write(
+                root.join(".fixture-attached-openbot-profile-general-assistant"),
+                "",
+            )
+            .unwrap();
+            let error = reset_leftover_volumes(&address, &root, &Secrets::new(), &owned, &[])
+                .expect_err("an attached volume is refused");
+            assert!(
+                error.said.contains("openbot-profile-general-assistant"),
+                "{}",
+                error.said
+            );
+            assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+            assert!(!format!("{error:?}").contains("synthetic-secret"));
+            std::fs::remove_file(root.join(".fixture-attached-openbot-profile-general-assistant"))
+                .unwrap();
+
+            let mut reordered = owned.clone();
+            reordered.reverse();
+            reset_leftover_volumes(&address, &root, &Secrets::new(), &reordered, &[]).unwrap();
+            let remaining = std::fs::read_to_string(root.join(".fixture-volumes")).unwrap();
+            for name in &owned {
+                assert!(!remaining.lines().any(|line| line == name), "{name}");
+            }
+            for kept in [
+                "unrelated",
+                "openbot_unlabeled",
+                "openbot_foreign",
+                "shared-cache",
+                "explicitly-named",
+                "openbot_remote",
+                "openbot-profile-unlabeled",
+                "openbot-workspace-elsewhere",
+                "openbot-profile-legacy",
+                "other-profile-knowledge",
+            ] {
+                assert!(remaining.lines().any(|line| line == kept), "{kept}");
+            }
+            let log = std::fs::read_to_string(&record).unwrap();
+            let removals: Vec<_> = log
+                .lines()
+                .filter_map(|line| line.split_once("volume rm "))
+                .map(|(_, name)| name)
+                .collect();
+            // One refused attempt, then each confirmed volume once.
+            assert_eq!(removals[0], "openbot-profile-general-assistant");
+            assert_eq!(removals[1..], OWNED_LEFTOVERS);
+            assert!(!log.contains("--force") && !log.contains("prune") && !log.contains("down"));
+            if address.engine == crate::engine::Engine::Podman {
+                assert!(log.lines().all(|line| line
+                    .split_once('\t')
+                    .unwrap()
+                    .1
+                    .starts_with("--connection fixture-machine ")));
+            }
+        }
+    }
+
+    /// The previous installation's stopped computers and Compose containers, beside ones it
+    /// does not own. Each still mounts the volumes it used, as a real engine reports it.
+    fn leftover_containers_fixture(root: &Path, computer_status: &str) {
+        let supervisor = |bot: &str, namespace: &str| {
+            format!("openbot.supervisor=true,openbot.bot-id={bot},openbot.namespace={namespace}")
+        };
+        let lines = [
+            format!(
+                "c-computer\topenbot-computer-general-assistant\t{computer_status}\t{}\topenbot-profile-general-assistant,openbot-workspace-general-assistant",
+                supervisor("general-assistant", "openbot")
+            ),
+            "c-compose\topenbot-agent-computer-1\texited\tcom.docker.compose.project=openbot,com.docker.compose.service=agent-computer\topenbot_agent-profiles,openbot_agent-workspace".into(),
+            format!("c-other-namespace\tother-computer-knowledge\texited\t{}\tother-profile-knowledge", supervisor("knowledge", "other")),
+            "c-unlabeled\topenbot-computer-unlabeled\texited\t\topenbot-profile-unlabeled".into(),
+            "c-other-project\tanother-project-postgres-1\texited\tcom.docker.compose.project=another-project\t".into(),
+            format!("c-renamed\topenbot-computer-not-this-bot\texited\t{}\t", supervisor("general-assistant", "openbot")),
+            "c-legacy\topenbot-computer-legacy\texited\topenbot.supervisor=true,openbot.bot-id=legacy\topenbot-profile-legacy".into(),
+        ];
+        std::fs::write(
+            root.join(".fixture-containers"),
+            lines.map(|line| format!("{line}\n")).concat(),
+        )
+        .unwrap();
+    }
+
+    const OWNED_CONTAINERS: [&str; 2] = [
+        "openbot-agent-computer-1",
+        "openbot-computer-general-assistant",
+    ];
+
+    #[test]
+    fn leftover_reset_removes_stopped_owned_containers_before_their_volumes() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_reset_removes_stopped_owned_containers_before_their_volumes",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-leftover-containers", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            leftover_volumes_fixture(&root, "openbot");
+            leftover_containers_fixture(&root, "exited");
+
+            let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+            assert_eq!(found.volumes, OWNED_LEFTOVERS.map(String::from));
+            assert_eq!(
+                found
+                    .containers
+                    .iter()
+                    .map(|container| container.name.as_str())
+                    .collect::<Vec<_>>(),
+                OWNED_CONTAINERS
+            );
+            assert!(found.running.is_empty() && found.resettable());
+
+            let volumes = OWNED_LEFTOVERS.map(String::from).to_vec();
+            let containers = OWNED_CONTAINERS.map(String::from).to_vec();
+            for (stale_volumes, stale_containers) in [
+                (volumes.clone(), Vec::new()),
+                (volumes.clone(), containers[..1].to_vec()),
+                (
+                    volumes.clone(),
+                    [containers.clone(), vec!["other-computer-knowledge".into()]].concat(),
+                ),
+                (Vec::new(), containers.clone()),
+            ] {
+                let error = reset_leftover_volumes(
+                    &address,
+                    &root,
+                    &Secrets::new(),
+                    &stale_volumes,
+                    &stale_containers,
+                )
+                .expect_err("a changed set must not be removed");
+                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(!std::fs::read_to_string(&record).unwrap().contains(" rm "));
+            }
+
+            reset_leftover_volumes(&address, &root, &Secrets::new(), &volumes, &containers)
+                .unwrap();
+            let log = std::fs::read_to_string(&record).unwrap();
+            let removals: Vec<_> = log
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .map(|(_, command)| {
+                    command
+                        .strip_prefix("--connection fixture-machine ")
+                        .unwrap_or(command)
+                })
+                .filter(|command| command.contains(" rm "))
+                .collect();
+            assert_eq!(
+                removals,
+                [
+                    "container rm c-compose",
+                    "container rm c-computer",
+                    "volume rm openbot-profile-general-assistant",
+                    "volume rm openbot-workspace-general-assistant",
+                    "volume rm openbot_agent-profiles",
+                    "volume rm openbot_agent-workspace",
+                ]
+            );
+            assert!(!log.contains("--force") && !log.contains("prune") && !log.contains("down"));
+            let kept = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
+            let kept: Vec<_> = kept
+                .lines()
+                .map(|line| line.split('\t').next().unwrap())
+                .collect();
+            assert_eq!(
+                kept,
+                [
+                    "c-other-namespace",
+                    "c-unlabeled",
+                    "c-other-project",
+                    "c-renamed",
+                    "c-legacy"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn a_running_owned_container_blocks_the_reset_and_removes_nothing() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_running_owned_container_blocks_the_reset_and_removes_nothing",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let address = computer_stop_addresses(&path)[0].clone();
+        let root = path.bin.join("leftover-running");
+        std::fs::create_dir(&root).unwrap();
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        leftover_volumes_fixture(&root, "openbot");
+        for status in ["running", "paused", "restarting"] {
+            leftover_containers_fixture(&root, status);
+            let found = leftover_volumes(&address, &root, &Secrets::new()).unwrap();
+            assert_eq!(found.running, ["openbot-computer-general-assistant"]);
+            assert!(!found.resettable(), "{status}");
+            let error = reset_leftover_volumes(
+                &address,
+                &root,
+                &Secrets::new(),
+                &OWNED_LEFTOVERS.map(String::from),
+                &OWNED_CONTAINERS.map(String::from),
+            )
+            .expect_err("a running container blocks the reset");
+            assert!(
+                error.said.contains("openbot-computer-general-assistant")
+                    && error.said.contains("still running")
+                    && error.said.contains("Nothing was removed"),
+                "{}",
+                error.said
+            );
+            assert!(!format!("{error:?}").contains("synthetic-secret"));
+            assert!(!std::fs::read_to_string(&record).unwrap().contains(" rm "));
+        }
+        // A container listing that fails is not proof that nothing is running.
+        leftover_containers_fixture(&root, "exited");
+        std::fs::write(root.join(".fixture-ps-failure"), "").unwrap();
+        let error = leftover_volumes(&address, &root, &Secrets::new()).unwrap_err();
+        assert!(!format!("{error:?}").contains("synthetic-secret"));
     }
 
     #[test]
@@ -3415,12 +4536,13 @@ fn main() {
             ("PORT".into(), "3001".into()),
         ]);
         for _ in 0..2 {
-            for process in HOST_PROCESSES {
+            for process in host_processes(false) {
                 std::fs::create_dir_all(root.join(process.cwd)).unwrap();
-                let status = spawn_host_process(&process, &root, &root.join(".logs"), &bun, &stale)
-                    .unwrap()
-                    .wait()
-                    .unwrap();
+                let status =
+                    spawn_host_process(process, &root, &root.join(".logs"), &bun, &stale, None)
+                        .unwrap()
+                        .wait()
+                        .unwrap();
                 assert!(
                     status.success(),
                     "{} did not receive selected ports",
@@ -4473,6 +5595,7 @@ fn main() {
             &mut children,
             &fixture.command("powershell"),
             &fixture.command("taskkill"),
+            WINDOWS_BROWSER_CLOSE_PATIENCE,
         );
         let alive = children[0].1.try_wait().unwrap().is_none();
         children[0].1.kill().unwrap();
@@ -4518,6 +5641,7 @@ fn main() {
                 &mut children,
                 &fixture.command("powershell"),
                 &fixture.command("taskkill"),
+                WINDOWS_BROWSER_CLOSE_PATIENCE,
             );
             let alive = children[0].1.try_wait().unwrap().is_none();
             children[0].1.kill().unwrap();
@@ -4528,6 +5652,151 @@ fn main() {
             assert!(!fixture.log().contains("taskkill\t"));
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    /// The inventory a Windows machine gives while the person's browser runs: the held computer,
+    /// its console, and the browser it started, as Win32_Process lists them.
+    fn windows_browser_inventory(computer: u32, with_browser: bool) -> String {
+        let mut rows = vec![
+            serde_json::json!({
+                "ProcessId": computer, "ParentProcessId": std::process::id(),
+                "ExecutablePath": r"C:\Users\person\.bun\bin\bun.exe",
+                "CommandLine": "bun --no-env-file src/index.ts", "CreationDate": "/Date(2000)/"
+            }),
+            serde_json::json!({
+                "ProcessId": 9200, "ParentProcessId": computer,
+                "ExecutablePath": r"C:\Windows\System32\conhost.exe",
+                "CommandLine": "conhost.exe 0xffffffff -ForceV1", "CreationDate": "/Date(2001)/"
+            }),
+            // The person's everyday Chrome, which is nobody's child here.
+            serde_json::json!({
+                "ProcessId": 9300, "ParentProcessId": 4,
+                "ExecutablePath": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "CommandLine": "chrome.exe", "CreationDate": "/Date(1500)/"
+            }),
+        ];
+        if with_browser {
+            rows.push(serde_json::json!({
+                "ProcessId": 9100, "ParentProcessId": computer,
+                "ExecutablePath": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "CommandLine": "chrome.exe --remote-debugging-pipe", "CreationDate": "/Date(2002)/"
+            }));
+        }
+        serde_json::to_string(&rows).unwrap()
+    }
+
+    /// Windows used to end the person's browser with `taskkill /T /F` while Unix asks it to close
+    /// and waits, which risks the profile damage a graceful close avoids. Now its windows are asked to close first (no `/F`), and the tree
+    /// is ended only once it has gone. Never the person's everyday Chrome, nor the console.
+    #[cfg(unix)]
+    #[test]
+    fn windows_asks_the_persons_browser_to_close_before_its_tree_is_ended() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_asks_the_persons_browser_to_close_before_its_tree_is_ended",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-browser-close");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        // Each stand-in run once first: macOS checks a freshly built executable on its first run.
+        fixture.scenario("warm-up");
+        for name in ["powershell", "taskkill"] {
+            let _ = Command::new(fixture.command(name)).output();
+        }
+        fixture.scenario("browser-close");
+        let computer = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = computer.id();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            windows_browser_inventory(pid, true),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory-closed.json"),
+            windows_browser_inventory(pid, false),
+        )
+        .unwrap();
+        let mut children = vec![(LOCAL_BROWSER, computer)];
+        let started = std::time::Instant::now();
+        let result = stop_windows_host_children_with(
+            &root,
+            &mut children,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+            WINDOWS_BROWSER_CLOSE_PATIENCE,
+        );
+        let waited = started.elapsed();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        assert_eq!(result.unwrap(), 1);
+        assert!(waited < WINDOWS_BROWSER_CLOSE_PATIENCE, "{waited:?}");
+        let taskkills: Vec<String> = fixture
+            .log()
+            .lines()
+            .filter(|line| line.starts_with("taskkill\t"))
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            taskkills,
+            [
+                "taskkill\t/PID 9100".to_string(),
+                format!("taskkill\t/PID {pid} /T /F")
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A browser that does not close in time is ended with its tree, so Stop waits on it for no
+    /// longer than its patience and never leaves it running.
+    #[cfg(unix)]
+    #[test]
+    fn windows_waits_for_a_browser_that_will_not_close_only_so_long() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_waits_for_a_browser_that_will_not_close_only_so_long",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-browser-stubborn");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        // Run each stand-in once first: macOS checks a freshly built executable on its first run,
+        // which takes seconds, and the wait measured below is the browser's alone.
+        fixture.scenario("warm-up");
+        for name in ["powershell", "taskkill"] {
+            let _ = Command::new(fixture.command(name)).output();
+        }
+        fixture.scenario("browser-stubborn");
+        let computer = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = computer.id();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            windows_browser_inventory(pid, true),
+        )
+        .unwrap();
+        let mut children = vec![(LOCAL_BROWSER, computer)];
+        let patience = std::time::Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        let result = stop_windows_host_children_with(
+            &root,
+            &mut children,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+            patience,
+        );
+        let waited = started.elapsed();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        assert_eq!(result.unwrap(), 1);
+        assert!(waited >= patience, "{waited:?}");
+        assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
+        let log = fixture.log();
+        assert!(log.contains("taskkill\t/PID 9100\n"), "{log}");
+        assert!(
+            log.contains(&format!("taskkill\t/PID {pid} /T /F")),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
@@ -4726,6 +5995,24 @@ fn main() {
     const FAKE_ENGINE_SOURCE: &str = r#"
 use std::io::Write;
 
+/// `.fixture-containers`: one container per line, `id<TAB>name<TAB>status<TAB>k=v,k=v<TAB>volume,volume`.
+struct FixtureContainer { id: String, name: String, status: String, labels: Vec<(String, String)>, mounts: Vec<String> }
+
+fn fixture_containers() -> Vec<FixtureContainer> {
+    let Ok(listing) = std::fs::read_to_string(".fixture-containers") else { return Vec::new() };
+    listing.lines().filter(|line| !line.is_empty()).map(|line| {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let list = |field: &str| field.split(',').filter(|item| !item.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+        FixtureContainer {
+            id: fields[0].into(),
+            name: fields[1].into(),
+            status: fields[2].into(),
+            labels: list(fields[3]).into_iter().map(|pair| { let (k, v) = pair.split_once('=').unwrap(); (k.to_owned(), v.to_owned()) }).collect(),
+            mounts: list(fields.get(4).copied().unwrap_or("")),
+        }
+    }).collect()
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let joined = args.join(" ");
@@ -4747,14 +6034,70 @@ fn main() {
             (".fixture-volumes", ".fixture-volume-failure")
         } else if actual == ["volume", "inspect", "openbot_postgres-data"] {
             (".fixture-inspect", ".fixture-inspect-failure")
-        } else if actual == ["volume", "rm", "openbot_postgres-data"] {
-            if std::path::Path::new(".fixture-attached").exists() {
+        } else if actual.len() == 3 && actual[0] == "volume" && actual[1] == "inspect" {
+            let file = format!(".fixture-inspect-{}", actual[2]);
+            if !std::path::Path::new(&file).exists() {
+                eprintln!("no such volume: {}", actual[2]);
+                std::process::exit(1);
+            }
+            print!("{}", std::fs::read_to_string(file).unwrap());
+            return;
+        } else if actual.len() == 3 && actual[0] == "volume" && actual[1] == "rm" {
+            let volume = actual[2].as_str();
+            if (volume == "openbot_postgres-data" && std::path::Path::new(".fixture-attached").exists())
+                || std::path::Path::new(&format!(".fixture-attached-{volume}")).exists()
+                || fixture_containers().iter().any(|container| container.mounts.iter().any(|mount| mount == volume))
+            {
                 eprintln!("synthetic-secret attached container");
                 std::process::exit(2);
             }
             let inventory = std::fs::read_to_string(".fixture-volumes").unwrap();
-            let remaining: String = inventory.lines().filter(|name| *name != "openbot_postgres-data").map(|name| format!("{name}\n")).collect();
+            let remaining: String = inventory.lines().filter(|name| *name != volume).map(|name| format!("{name}\n")).collect();
             std::fs::write(".fixture-volumes", remaining).unwrap();
+            return;
+        } else if actual.first().map(String::as_str) == Some("ps") {
+            assert_eq!(actual[1..4], ["--all", "--quiet", "--no-trunc"], "{actual:?}");
+            let wanted: Vec<(&str, &str)> = actual[4..].chunks(2).map(|pair| {
+                assert_eq!(pair[0], "--filter");
+                pair[1].strip_prefix("label=").unwrap().split_once('=').unwrap()
+            }).collect();
+            if std::path::Path::new(".fixture-ps-failure").exists() {
+                eprintln!("synthetic-secret-must-not-appear-in-diagnostics");
+                std::process::exit(17);
+            }
+            for container in fixture_containers() {
+                if wanted.iter().all(|(key, value)| container.labels.iter().any(|(k, v)| k == key && v == value)) {
+                    println!("{}", container.id);
+                }
+            }
+            return;
+        } else if actual.len() == 3 && actual[0] == "container" && actual[1] == "inspect" {
+            let Some(container) = fixture_containers().into_iter().find(|container| container.id == actual[2]) else {
+                eprintln!("no such container: {}", actual[2]);
+                std::process::exit(1);
+            };
+            // Docker reports names with a leading slash; Podman does not.
+            let slash = if args.first().map(String::as_str) == Some("--connection") { "" } else { "/" };
+            let labels: Vec<String> = container.labels.iter().map(|(k, v)| format!("\"{k}\":\"{v}\"")).collect();
+            let mounts: Vec<String> = container.mounts.iter().map(|m| format!("{{\"Type\":\"volume\",\"Name\":\"{m}\"}}")).collect();
+            print!(
+                "[{{\"Id\":\"{}\",\"Name\":\"{slash}{}\",\"State\":{{\"Status\":\"{}\",\"Running\":{}}},\"Config\":{{\"Labels\":{{{}}}}},\"Mounts\":[{}]}}]",
+                container.id, container.name, container.status, container.status == "running", labels.join(","), mounts.join(",")
+            );
+            return;
+        } else if actual.len() == 3 && actual[0] == "container" && actual[1] == "rm" {
+            let containers = fixture_containers();
+            let Some(container) = containers.iter().find(|container| container.id == actual[2]) else {
+                eprintln!("no such container: {}", actual[2]);
+                std::process::exit(1);
+            };
+            if container.status == "running" {
+                eprintln!("synthetic-secret cannot remove a running container");
+                std::process::exit(2);
+            }
+            let inventory = std::fs::read_to_string(".fixture-containers").unwrap();
+            let remaining: String = inventory.lines().filter(|line| line.split('\t').next() != Some(actual[2].as_str())).map(|line| format!("{line}\n")).collect();
+            std::fs::write(".fixture-containers", remaining).unwrap();
             return;
         } else { panic!("unexpected volume probe command: {actual:?}"); };
         if std::path::Path::new(failure).exists() {
@@ -5050,6 +6393,19 @@ fn main() {
             println!("  TCP    127.0.0.1:45124        0.0.0.0:0              LISTENING       9002");
         },
         ("taskkill", "held-refusal") => { eprintln!("synthetic held cleanup refused"); std::process::exit(5); },
+        // The person's browser: its windows asked to close (`taskkill` without `/F`), after which an inventory no
+        // longer lists it. A stubborn one ignores the request and is still listed.
+        ("powershell", "browser-close" | "browser-stubborn") => {
+            let closed = std::path::Path::new(&root).join("browser-closed").exists();
+            let file = if closed { "synthetic-inventory-closed.json" } else { "synthetic-inventory.json" };
+            print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join(file)).unwrap());
+        }
+        ("taskkill", "browser-close") => {
+            if !args.iter().any(|arg| arg == "/F") {
+                std::fs::write(std::path::Path::new(&root).join("browser-closed"), "").unwrap();
+            }
+        }
+        ("taskkill", "browser-stubborn") => {},
         ("powershell", "inventory-fail") => {
             print!("synthetic partial inventory that must not be trusted");
             std::process::exit(17);
@@ -6721,17 +8077,6 @@ fn main() {
         assert!(picked.contains(&"agent-harness"));
     }
 
-    /// Stop has to name the profile, or the one Bot the person picked keeps running.
-    #[test]
-    fn stopping_names_the_harness_profile() {
-        let source = include_str!("stack.rs");
-        assert!(
-            source
-                .contains(r#".args(["-f", "docker-compose.yml", "--profile", "harness", "down"])"#),
-            "compose down without the profile leaves agent-harness running"
-        );
-    }
-
     #[test]
     fn the_published_ports_are_read_off_a_real_listing() {
         // Verbatim from `compose ps --format '{{.Ports}}'` against a running deployment.
@@ -7668,9 +9013,343 @@ fn main() {
     }
 
     #[test]
-    fn the_three_host_processes_are_the_three_that_are_not_containers() {
+    fn the_host_processes_are_the_ones_that_are_not_containers() {
         let names: Vec<_> = HOST_PROCESSES.iter().map(|p| p.name).collect();
-        assert_eq!(names, vec!["server", "app", "worker"]);
+        assert_eq!(names, vec!["server", "app", "worker", "browser"]);
+    }
+
+    /// The person's browser starts last, after everything the window waits on, and not at all on a
+    /// machine that cannot run one.
+    #[test]
+    fn the_persons_browser_starts_last_and_only_where_it_runs() {
+        let without: Vec<_> = host_processes(false).map(|p| p.name).collect();
+        assert_eq!(without, ["server", "app", "worker"]);
+        let with: Vec<_> = host_processes(true).map(|p| p.name).collect();
+        assert_eq!(with, ["server", "app", "worker", "browser"]);
+        let browser = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == LOCAL_BROWSER)
+            .unwrap();
+        assert_eq!(
+            (browser.cwd, browser.script),
+            ("agent-computer", "src/index.ts")
+        );
+    }
+
+    /// The browser process through the real spawn path, with a stand-in for Bun that writes down
+    /// what it was given: the arguments and environment `scripts/start-local-chrome-computer.ts`
+    /// gives the computer, this start's port, the computer token, and the built Recorder, and none
+    /// of the credentials the server and the worker hold.
+    #[test]
+    fn the_persons_browser_is_started_with_its_own_environment_and_no_other_credentials() {
+        let root = temp_root("local-browser-spawn");
+        std::fs::create_dir_all(root.join("agent-computer")).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+        let source = root.join("said.rs");
+        let bun = root.join(format!("said{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    let mut said: Vec<String> = std::env::args().skip(1).collect();
+    for name in ["COMPUTER_TOKEN", "COMPUTER_BROWSER_BACKEND", "COMPUTER_BROWSER_MODE", "PORT",
+        "PROFILES_DIR", "WORKSPACE_DIR", "OPENBOT_RECORDER_DIR", "COMPUTER_BROWSER_IDLE_MS",
+        "COMPUTER_PEOPLE_ONLY", "INTELLIGENCE_API_KEY", "OPENBOT_DESKTOP_HOST_TOKEN",
+        "KEY_ENCRYPTION_KEY"] {
+        said.push(format!("{name}={}", std::env::var(name).unwrap_or_else(|_| "<unset>".into())));
+    }
+    std::fs::write("said.txt", said.join("\n")).unwrap();
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &bun);
+        crate::env::write(
+            &root.join(".env"),
+            &crate::env::Ports {
+                browser: Some(52131),
+                ..Default::default()
+            }
+            .settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let secrets = Secrets::from([
+            ("COMPUTER_TOKEN".into(), "synthetic-computer-token".into()),
+            (
+                "INTELLIGENCE_API_KEY".into(),
+                "synthetic-intelligence".into(),
+            ),
+            ("KEY_ENCRYPTION_KEY".into(), "synthetic-key".into()),
+            ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "synthetic-host".into()),
+        ]);
+        let browser = crate::local_browser::LocalBrowser {
+            product: crate::local_browser::Product::Chrome,
+            executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into(),
+            data: root.join("data").join("local-computer"),
+        };
+        let process = host_processes(true)
+            .find(|process| process.name == LOCAL_BROWSER)
+            .unwrap();
+
+        let refused = spawn_host_process(process, &root, &root.join(".logs"), &bun, &secrets, None)
+            .expect_err("the browser cannot start without this start's decision about it");
+        assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
+
+        let status = spawn_host_process(
+            process,
+            &root,
+            &root.join(".logs"),
+            &bun,
+            &secrets,
+            Some(&browser),
+        )
+        .unwrap()
+        .wait()
+        .unwrap();
+        assert!(status.success());
+        let said = std::fs::read_to_string(root.join("agent-computer/said.txt")).unwrap();
+        let data = root.join("data").join("local-computer");
+        assert_eq!(
+            said.lines().collect::<Vec<_>>(),
+            [
+                "--no-env-file".to_string(),
+                "src/index.ts".into(),
+                "COMPUTER_TOKEN=synthetic-computer-token".into(),
+                "COMPUTER_BROWSER_BACKEND=local-chrome".into(),
+                "COMPUTER_BROWSER_MODE=headed".into(),
+                "PORT=52131".into(),
+                format!("PROFILES_DIR={}", data.join("profiles").display()),
+                format!("WORKSPACE_DIR={}", data.join("workspace").display()),
+                format!(
+                    "OPENBOT_RECORDER_DIR={}",
+                    root.join("extension").join("dist").display()
+                ),
+                "COMPUTER_BROWSER_IDLE_MS=0".into(),
+                // Desktop's computer runs people's browsers and no Bot, and says so, or the computer
+                // refuses to run a person's browser at all.
+                "COMPUTER_PEOPLE_ONLY=on".into(),
+                "INTELLIGENCE_API_KEY=<unset>".into(),
+                "OPENBOT_DESKTOP_HOST_TOKEN=<unset>".into(),
+                "KEY_ENCRYPTION_KEY=<unset>".into(),
+            ]
+        );
+        assert!(data.join("profiles").is_dir() && data.join("workspace").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Stop asks the person's browser to close and waits for it, and only then freezes and kills
+    /// the rest. The stand-in does what `agent-computer` does on SIGTERM: closes, and exits 0.
+    #[cfg(unix)]
+    #[test]
+    fn stop_lets_the_persons_browser_close_before_the_rest_is_killed() {
+        use std::os::unix::process::ExitStatusExt;
+        let root = temp_root("local-browser-stop");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut children = vec![
+            ("server", stand_in(&root, ":")),
+            (LOCAL_BROWSER, stand_in(&root, "trap 'exit 0' TERM")),
+        ];
+        let started = std::time::Instant::now();
+        stop_host_children(&root, &mut children).unwrap();
+        assert!(started.elapsed() < BROWSER_CLOSE_PATIENCE);
+        let browser = children[1].1.wait().unwrap();
+        assert_eq!(
+            browser.code(),
+            Some(0),
+            "the browser closed itself: {browser:?}"
+        );
+        let server = children[0].1.wait().unwrap();
+        assert_eq!(server.signal(), Some(libc::SIGKILL), "{server:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A browser that does not close in time is stopped the ordinary way, so Stop never waits on it
+    /// for longer than its patience and never leaves it running.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_will_not_close_is_waited_for_only_so_long() {
+        let root = temp_root("local-browser-stubborn");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut children = vec![(LOCAL_BROWSER, stand_in(&root, "trap '' TERM"))];
+        let started = std::time::Instant::now();
+        close_local_browser_first(&mut children, std::time::Duration::from_millis(300));
+        let waited = started.elapsed();
+        assert!(
+            waited >= std::time::Duration::from_millis(300),
+            "{waited:?}"
+        );
+        assert!(waited < std::time::Duration::from_secs(3), "{waited:?}");
+        assert!(children[0].1.try_wait().unwrap().is_none());
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The person's browser exactly as Desktop gets it there: this commit's tree as GitHub's tag
+    /// tarball carries it, laid out by `deployment::unpack`, installed by `install_dependencies`,
+    /// its Recorder built here (installation copies the release's prebuilt one out of its computer
+    /// image, `preparation::place_recorder`, and this commit has no published image), the browser decided by
+    /// `local_browser::find` against this machine's real Chrome and Edge, spawned by
+    /// `spawn_host_process`, asked for `/health` with the computer token, and stopped by
+    /// `stop_host_children`. No browser is opened. Only the home folder is a scratch one, so the
+    /// profile folders it makes are not the person's.
+    ///
+    /// ```sh
+    /// OPENBOT_LIVE_BROWSER_BUN=<bun> OPENBOT_LIVE_BROWSER_PORT=<port> \
+    /// cargo test --lib live_the_persons_browser -- --ignored --nocapture
+    /// ```
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "starts agent-computer from a prepared deployment on this machine"]
+    fn live_the_persons_browser_answers_health_with_the_computer_token() {
+        let setting = |name: &str| {
+            std::env::var(name).unwrap_or_else(|_| panic!("{name} names the live run's input"))
+        };
+        let bun = PathBuf::from(setting("OPENBOT_LIVE_BROWSER_BUN"));
+        let port: u16 = setting("OPENBOT_LIVE_BROWSER_PORT").parse().unwrap();
+        let scratch = temp_root("live-browser");
+        let root = scratch.join("deployment");
+        let home = scratch.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // From the repository root: run in a subdirectory, `git archive` packs only that directory.
+        let tarball = Command::new("git")
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .args([
+                "archive",
+                "--format=tar.gz",
+                "--prefix=OpenBot-live/",
+                "HEAD",
+            ])
+            .output()
+            .unwrap();
+        assert!(tarball.status.success());
+        crate::deployment::unpack(&root, &tarball.stdout).unwrap();
+        install_dependencies(&root, &bun).unwrap();
+        let built = Command::new(&bun)
+            .current_dir(root.join("extension"))
+            .args(["run", "build"])
+            .status()
+            .unwrap();
+        assert!(built.success());
+        crate::env::write(
+            &root.join(".env"),
+            &crate::env::Ports {
+                browser: Some(port),
+                ..Default::default()
+            }
+            .settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let var = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+        let browser = crate::local_browser::find(
+            &root,
+            crate::recorder_install::Os::current(),
+            Some(&home),
+            &var,
+            &|path: &Path| path.is_file(),
+        )
+        .expect("this machine runs the person's browser");
+        let token = format!("{:032x}", rand::random::<u128>());
+        let secrets = Secrets::from([
+            ("COMPUTER_TOKEN".into(), token.clone()),
+            (
+                "INTELLIGENCE_API_KEY".into(),
+                "synthetic-not-for-the-browser".into(),
+            ),
+        ]);
+        let process = host_processes(true)
+            .find(|process| process.name == LOCAL_BROWSER)
+            .unwrap();
+        let child = spawn_host_process(
+            process,
+            &root,
+            &root.join(".logs"),
+            &bun,
+            &secrets,
+            Some(&browser),
+        )
+        .unwrap();
+        let mut children = vec![(LOCAL_BROWSER, child)];
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let at = |path: &str| format!("http://127.0.0.1:{port}{path}");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let health: serde_json::Value = loop {
+            if let Ok(response) = client.get(at("/health")).bearer_auth(&token).send() {
+                if response.status().is_success() {
+                    break response.json().unwrap();
+                }
+            }
+            assert!(
+                children[0].1.try_wait().unwrap().is_none(),
+                "the browser process exited: {}",
+                tail_of(&root.join(".logs"), LOCAL_BROWSER)
+            );
+            assert!(std::time::Instant::now() < deadline, "no /health answer");
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        };
+        let without_token = client.get(at("/computers")).send().unwrap().status();
+        let with_token = client
+            .get(at("/computers"))
+            .bearer_auth(&token)
+            .send()
+            .unwrap()
+            .status();
+        let on_ipv6 = std::net::TcpStream::connect(("::1", port)).is_ok();
+
+        stop_host_children(&root, &mut children).unwrap();
+        let exit = children[0].1.wait().unwrap();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "browser": browser.product.name(),
+                "executable": browser.executable,
+                "health": health,
+                "computersWithoutToken": without_token.as_u16(),
+                "computersWithToken": with_token.as_u16(),
+                "listeningOnIpv6Loopback": on_ipv6,
+                "exitAfterStop": exit.code(),
+            })
+        );
+        std::fs::remove_dir_all(scratch).unwrap();
+
+        assert_eq!(health["status"], "ok");
+        assert_eq!(health["browserBackend"], "local-chrome");
+        assert_eq!(health["browserMode"], "headed");
+        assert_eq!(health["browser"], false, "nothing opened a browser");
+        assert_eq!(without_token, reqwest::StatusCode::UNAUTHORIZED);
+        assert_eq!(with_token, reqwest::StatusCode::OK);
+        assert!(!on_ipv6, "the computer listens on 127.0.0.1 alone");
+        assert_eq!(exit.code(), Some(0), "Stop let it close on its own");
+    }
+
+    /// A shell that runs `setup`, says it is ready, and idles. Waited on until ready, because a
+    /// signal that lands before its `trap` is set kills it the default way.
+    #[cfg(unix)]
+    fn stand_in(dir: &Path, setup: &str) -> std::process::Child {
+        let ready = dir.join(format!("ready-{}", rand::random::<u64>()));
+        let child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "{setup}; : > '{}'; while :; do sleep 0.05; done",
+                ready.display()
+            ))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stand-in never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        child
     }
 
     #[test]

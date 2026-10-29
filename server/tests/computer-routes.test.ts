@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
-import type { ComputerGateway } from "../src/computer/gateway";
+import {
+  type ComputerGateway,
+  ComputerStillStartingError,
+} from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
 
@@ -9,6 +12,7 @@ describe("computer routes", () => {
   test("gets a screenshot through the governed computer gateway", async () => {
     const requestedBotIds: string[] = [];
     const gateway = {
+      status: async (botId: string) => ({ botId, state: "ready" }),
       screenshot: async (botId: string) => {
         requestedBotIds.push(botId);
         return { image: "aGVsbG8=", mimeType: "image/png" as const };
@@ -38,6 +42,94 @@ describe("computer routes", () => {
       mimeType: "image/png",
     });
     expect(requestedBotIds).toEqual(["bot-17"]);
+  });
+});
+
+/**
+ * Watching a computer must not start it, and a slow start must not read as a failure.
+ *
+ * `screenshot` resumes a suspended computer on the way, so the panel polling it once a second used
+ * to be what woke every Bot it was opened on, and the first poll to give up drew "can't show the
+ * screen" over a computer that was simply still booting.
+ */
+describe("a computer that is not ready yet", () => {
+  function routesFor(gateway: Partial<ComputerGateway>) {
+    const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+      context,
+      next,
+    ) => {
+      context.set("actor", { id: "user-1", email: "u@openbot.test" } as never);
+      await next();
+    };
+    return createComputerRoutes(
+      gateway as ComputerGateway,
+      {} as PolicyStore,
+      requireUser,
+      async () => true,
+    );
+  }
+
+  test.each(["absent", "starting"] as const)(
+    "answers %s as a state, without taking a screenshot",
+    async (state) => {
+      let screenshots = 0;
+      const routes = routesFor({
+        status: async (botId: string) => ({ botId, state }),
+        screenshot: async () => {
+          screenshots++;
+          return { base64: "AAAA", width: 1, height: 1, capturedAt: "" };
+        },
+      });
+
+      const response = await routes.request("http://openbot.test/b/screenshot");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ready: false, state });
+      expect(screenshots).toBe(0);
+    },
+  );
+
+  test("passes an unreachable computer's reason through, still as an answer", async () => {
+    const routes = routesFor({
+      status: async (botId: string) => ({
+        botId,
+        state: "unreachable",
+        reason: "The supervisor could not be reached.",
+      }),
+      screenshot: async () => {
+        throw new Error("must not be called");
+      },
+    });
+
+    const response = await routes.request("http://openbot.test/b/screenshot");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ready: false,
+      state: "unreachable",
+      reason: "The supervisor could not be reached.",
+    });
+  });
+
+  test("an action whose cold start ran out says it was not performed, and is marked as starting", async () => {
+    const routes = routesFor({
+      navigate: async () => {
+        throw new ComputerStillStartingError();
+      },
+    });
+
+    const response = await routes.request("http://openbot.test/b/navigate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com" }),
+    });
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.starting).toBe(true);
+    expect(body.notPerformed).toBe(true);
+    expect(String(body.error)).toContain("still starting");
+    expect(String(body.error)).toContain("not performed");
   });
 });
 

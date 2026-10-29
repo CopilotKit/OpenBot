@@ -91,3 +91,35 @@ export function researchRoleOf(ref: string): ResearchRole | null {
   if (prefix !== RESEARCH_ROLE_PREFIX || extra !== undefined) return null;
   return role === "search" || role === "fetch" ? role : null;
 }
+
+/**
+ * The research role a tool plays, from the name a model is offered it under, or null.
+ *
+ * Granted tools reach a model as `mcp__<server>__<tool>`. A Bot running its own loop (`agent-bot`,
+ * `agent-langgraph`) sees only those names, not the refs the server holds, so this is how it learns
+ * whether it was offered a search tool on this run.
+ */
+export function researchRoleOfToolName(name: string): ResearchRole | null {
+  if (!name.startsWith("mcp__")) return null;
+  const rest = name.slice("mcp__".length);
+  const separator = rest.indexOf("__");
+  if (separator <= 0) return null;
+  return researchRoleOfTool(
+    rest.slice(0, separator),
+    rest.slice(separator + 2),
+  );
+}
+
+/**
+ * The search apps a Bot holding none may offer the person, by a name the app card resolves.
+ *
+ * Titles of the free catalogue entries, because `show_app_access` resolves an app's key or title and
+ * nothing more general: there is no app called "search". All of them rather than one, because which
+ * search app a deployment uses is the administrator's choice. A name here that is not a research
+ * entry's title is a test failure, so the list cannot drift from the catalogue.
+ */
+export const RESEARCH_APP_NAMES: readonly string[] = Object.freeze([
+  "Parallel Search",
+  "Exa Search",
+  "Firecrawl",
+]);

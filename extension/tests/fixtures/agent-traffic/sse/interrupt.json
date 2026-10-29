@@ -1,0 +1,308 @@
+{
+  "name": "interrupt",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 55,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"shopper\"},\"body\":{\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"398a0b9d-f0d5-4122-b4a6-87c866292d53\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"0695f26a-2add-4221-9ff1-e03a4a8636a3\",\"role\":\"user\",\"content\":\"Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 68,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"398a0b9d-f0d5-4122-b4a6-87c866292d53\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"398a0b9d-f0d5-4122-b4a6-87c866292d53\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"0695f26a-2add-4221-9ff1-e03a4a8636a3\",\"role\":\"user\",\"content\":\"Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 644,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"toolCallName\":\"approvePurchase\",\"parentMessageId\":\"27958ff2-ead5-40a5-a9d0-4efec6bfda1a\"}\n\n"
+        },
+        {
+          "at": 645,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"{\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"item\"}\n\n"
+        },
+        {
+          "at": 651,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 653,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"coffee\"}\n\n"
+        },
+        {
+          "at": 683,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"\\\",\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"amount\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"\\\":\"}\n\n"
+        },
+        {
+          "at": 684,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"4\"}\n\n"
+        },
+        {
+          "at": 721,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"delta\":\"}\"}\n\n"
+        },
+        {
+          "at": 753,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\"}\n\n"
+        },
+        {
+          "at": 914,
+          "text": "data: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"tool-calls\"},\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"398a0b9d-f0d5-4122-b4a6-87c866292d53\",\"outcome\":{\"type\":\"interrupt\",\"interrupts\":[{\"id\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"reason\":\"tool_call\",\"message\":\"Approve this purchase?\",\"toolCallId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\"}]},\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":230,\"outputTokens\":20,\"totalTokens\":250,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 915,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 917,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"shopper\"},\"body\":{\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"e77d6829-4490-4147-b78e-c27ea2ff5de0\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"0695f26a-2add-4221-9ff1-e03a4a8636a3\",\"role\":\"user\",\"content\":\"Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.\"},{\"id\":\"27958ff2-ead5-40a5-a9d0-4efec6bfda1a\",\"role\":\"assistant\",\"toolCalls\":[{\"id\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"type\":\"function\",\"function\":{\"name\":\"approvePurchase\",\"arguments\":\"{\\\"item\\\":\\\"coffee\\\",\\\"amount\\\":4}\"}}]}],\"resume\":[{\"interruptId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"status\":\"resolved\",\"payload\":{\"approved\":true}}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 920,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"e77d6829-4490-4147-b78e-c27ea2ff5de0\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"e77d6829-4490-4147-b78e-c27ea2ff5de0\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"27958ff2-ead5-40a5-a9d0-4efec6bfda1a\",\"role\":\"assistant\",\"toolCalls\":[{\"id\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"type\":\"function\",\"function\":{\"name\":\"approvePurchase\",\"arguments\":\"{\\\"item\\\":\\\"coffee\\\",\\\"amount\\\":4}\"}}]}],\"tools\":[],\"context\":[],\"forwardedProps\":{},\"resume\":[{\"interruptId\":\"call_PgBiPdnQS2p05EDKRLa6DKm2\",\"status\":\"resolved\",\"payload\":{\"approved\":true}}]}}\n\n"
+        },
+        {
+          "at": 1506,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\"Purchase\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" approved\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\".\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" Buying\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" one\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" coffee\"}\n\n"
+        },
+        {
+          "at": 1569,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" for\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" \"}\n\n"
+        },
+        {
+          "at": 1590,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\"4\"}\n\n"
+        },
+        {
+          "at": 1592,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" dollars\"}\n\n"
+        },
+        {
+          "at": 1607,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\" now\"}\n\n"
+        },
+        {
+          "at": 1612,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 2004,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\"}\n\ndata: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"toolCallName\":\"AGUISendStateDelta\",\"parentMessageId\":\"msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 2009,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"delta\"}\n\n"
+        },
+        {
+          "at": 2014,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\":[\"}\n\n"
+        },
+        {
+          "at": 2020,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 2023,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"op\"}\n\n"
+        },
+        {
+          "at": 2026,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 2030,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"add\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\",\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"path\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\":\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\"/\"}\n\n"
+        },
+        {
+          "at": 2032,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"p\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"urchases\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"/-\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\",\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"value\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\":{\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"item\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 2101,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"coffee\"}\n\n"
+        },
+        {
+          "at": 2104,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 2115,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"amount\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"\\\":\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"4\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"}}\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"delta\":\"]}\"}\n\n"
+        },
+        {
+          "at": 2214,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\"}\n\ndata: {\"type\":\"STATE_SNAPSHOT\",\"snapshot\":{}}\n\ndata: {\"type\":\"STATE_DELTA\",\"delta\":[{\"op\":\"add\",\"path\":\"/purchases\",\"value\":[]},{\"op\":\"add\",\"path\":\"/purchases/-\",\"value\":{\"item\":\"coffee\",\"amount\":4}}]}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"messageId\":\"c8033746-9152-4e47-bf7e-c4aa8b67648d\",\"toolCallId\":\"call_HOadrQiJTvXnyWjvwDlLwllc\",\"content\":\"{\\\"success\\\":true,\\\"delta\\\":[{\\\"op\\\":\\\"add\\\",\\\"path\\\":\\\"/purchases/-\\\",\\\"value\\\":{\\\"item\\\":\\\"coffee\\\",\\\"amount\\\":4}}]}\",\"role\":\"tool\"}\n\n"
+        },
+        {
+          "at": 2373,
+          "text": "data: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"tool-calls\"},\"threadId\":\"0bc2bf7f-bc91-4595-8bd8-9e7aee365732\",\"runId\":\"e77d6829-4490-4147-b78e-c27ea2ff5de0\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":263,\"outputTokens\":54,\"totalTokens\":317,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 2373,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "296d5ed2-6144-44ba-ba64-759faabff778",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538324248
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "0695f26a-2add-4221-9ff1-e03a4a8636a3",
+            "runId": null,
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "role": "user",
+            "textLength": 74,
+            "text": "Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.",
+            "seq": 2
+          },
+          "timestamp": 1792538324299
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "398a0b9d-f0d5-4122-b4a6-87c866292d53",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "seq": 3
+          },
+          "timestamp": 1792538324318
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_PgBiPdnQS2p05EDKRLa6DKm2",
+            "toolName": "approvePurchase",
+            "agentId": "shopper",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "messageId": "27958ff2-ead5-40a5-a9d0-4efec6bfda1a",
+            "runId": "398a0b9d-f0d5-4122-b4a6-87c866292d53",
+            "seq": 4
+          },
+          "timestamp": 1792538324891
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "398a0b9d-f0d5-4122-b4a6-87c866292d53",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "seq": 5
+          },
+          "timestamp": 1792538325162
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "e77d6829-4490-4147-b78e-c27ea2ff5de0",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "seq": 6
+          },
+          "timestamp": 1792538325167
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "296d5ed2-6144-44ba-ba64-759faabff778",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741",
+            "runId": "398a0b9d-f0d5-4122-b4a6-87c866292d53",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "role": "assistant",
+            "textLength": 55,
+            "text": "Purchase approved. Buying one coffee for 4 dollars now.",
+            "seq": 7
+          },
+          "timestamp": 1792538326251
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_HOadrQiJTvXnyWjvwDlLwllc",
+            "toolName": "AGUISendStateDelta",
+            "agentId": "shopper",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "messageId": "msg_077c312dc66312bd006ad7f6d5baa487d0870dd1616bca7741",
+            "runId": "e77d6829-4490-4147-b78e-c27ea2ff5de0",
+            "seq": 8
+          },
+          "timestamp": 1792538326251
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "c8033746-9152-4e47-bf7e-c4aa8b67648d",
+            "runId": "398a0b9d-f0d5-4122-b4a6-87c866292d53",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "role": "tool",
+            "textLength": 98,
+            "text": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/purchases/-\",\"value\":{\"item\":\"coffee\",\"amount\":4}}]}",
+            "seq": 9
+          },
+          "timestamp": 1792538326463
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "e77d6829-4490-4147-b78e-c27ea2ff5de0",
+            "threadId": "0bc2bf7f-bc91-4595-8bd8-9e7aee365732",
+            "agentId": "shopper",
+            "seq": 10
+          },
+          "timestamp": 1792538326620
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

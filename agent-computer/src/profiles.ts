@@ -36,14 +36,28 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
+import { isPersonBrowserId } from "../../shared/openbot-browser";
 import { profileDirectoryFor } from "./bot-id";
-import { chooseEvictions, chooseIdle } from "./browser-eviction";
-import { browserRuntimeFromEnv } from "./browser-runtime";
+import { chooseEvictions, chooseIdle, keptOpen } from "./browser-eviction";
+import { type BrowserRuntime, browserRuntimeFromEnv } from "./browser-runtime";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
 import { attachBrowserNetwork, attachPageNetwork } from "./page-network";
+import { BrowserNotOpenError } from "./person-access";
+import {
+  launchPersonBrowser,
+  type PersonBrowser,
+  personPages,
+  windowPages,
+} from "./person-browser";
+import {
+  type PersonDisplay,
+  PLAYWRIGHT_DISABLED_FEATURES,
+  personWindow,
+} from "./person-launch";
 import { botIdsIn } from "./profile-listing";
+import { isRecorderPage, type Recorder } from "./recorder";
 import {
   type SessionCookieKeeper,
   sessionCookieKeeper,
@@ -97,14 +111,44 @@ const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
  * whether the browser rendering the open internet is sandboxed.
  */
 const BROWSER_RUNTIME = browserRuntimeFromEnv(process.env);
-const LOCAL_CHROME = BROWSER_RUNTIME.backend === "local-chrome";
 // Native Chrome has no container boundary. Always retain its own process sandbox and OS keychain.
-const SANDBOX_ENABLED = LOCAL_CHROME || process.env.COMPUTER_SANDBOX === "on";
+const sandboxFor = (runtime: BrowserRuntime) =>
+  runtime.backend === "local-chrome" || process.env.COMPUTER_SANDBOX === "on";
+const SANDBOX_ENABLED = sandboxFor(BROWSER_RUNTIME);
 
-const LAUNCH_ARGS = [
-  ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
+/**
+ * Playwright's own disabled features, and AcceptCHFrame, for every browser that reaches the network
+ * through the egress filter: a Bot's, and a person's on the live screen.
+ *
+ * WHY. Such a browser is given the filter with the Bot in its proxy credentials, and a Playwright
+ * browser given proxy credentials answers the proxy's challenge itself, through DevTools request
+ * interception, so every request it makes is intercepted. Google (www.google.com and
+ * accounts.google.com) sends an HTTP/2 ACCEPT_CH frame while the connection is set up, asking for
+ * client hints; Chromium then aborts the page's request and restarts it with those hints, and under
+ * Playwright's interception the restarted request is never sent. Measured on this filter with
+ * Playwright 1.62.1's Chromium: the main-frame request for https://www.google.com/ ends ERR_ABORTED
+ * at "connected" and no second one follows, so the page waited until the navigation timed out,
+ * while Bing and Wikipedia (no ACCEPT_CH frame) loaded. The same browser loaded Google in about 330
+ * ms with this feature off, or with no proxy credentials.
+ *
+ * With it off, Chromium learns which hints a site wants from its Accept-CH response header, as it
+ * did before the frame existed, and sends them from the next request on. Playwright itself launched
+ * with it off from 2021 (microsoft/playwright#10380, for the same restart under interception) until
+ * 1.58 (#38472); #40194 is this hang reported against later versions.
+ *
+ * Playwright's own list is repeated because Chromium keeps only the last `--disable-features` on a
+ * command line (base/command_line.cc), and this one comes after Playwright's. Both lists are checked
+ * against the launched browser's own command line in `person-browser.test.ts`.
+ */
+const BEHIND_THE_FILTER_FEATURES = `--disable-features=${[
+  ...PLAYWRIGHT_DISABLED_FEATURES,
+  "AcceptCHFrame",
+].join(",")}`;
+
+const launchArgsFor = (local: boolean, sandbox: boolean): string[] => [
+  ...(sandbox ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
-  ...(LOCAL_CHROME ? [] : ["--password-store=basic"]),
+  ...(local ? [] : ["--password-store=basic"]),
   // Drop the automation signals Chromium sets for itself, so a real person who takes the wheel can
   // sign in to a site that refuses obvious automation (Google among them). This is the flag, not a
   // JS patch of `navigator.webdriver`: the flag turns the property off at the source, where spoofing
@@ -112,6 +156,7 @@ const LAUNCH_ARGS = [
   // may do; the governed path is unchanged. Full Chromium is selected explicitly in both modes;
   // headed mode also provides a window a person can use on the native desktop or virtual display.
   "--disable-blink-features=AutomationControlled",
+  BEHIND_THE_FILTER_FEATURES,
 ];
 
 /**
@@ -169,6 +214,14 @@ console.info(
  * 30s stop grace period, so a shutdown never becomes the reason a computer does not come back.
  */
 const CLOSE_SETTLE_MS = 2_000;
+
+/**
+ * How long a change of the page in front of a person's browser waits before it is logged. A person
+ * who closes their browser's window, or quits it, closes its tabs one after another, each making the
+ * next the page in front, and none of those is a change the browser stays open for. A quit of Google
+ * Chrome 156 (headless, three tabs) closed the tabs within 20 ms and the browser within 60 ms.
+ */
+const PAGE_CHANGE_SETTLE_MS = 500;
 
 /**
  * How long telling a viewer its browser went away may take before the close carries on without it.
@@ -271,7 +324,49 @@ const IDLE_SWEEP_MS = 60_000;
  */
 export type BrowserClosed = (botId: string) => void | Promise<void>;
 
-export function createProfiles(root: string, onClosed: BrowserClosed) {
+export type ProfilesOptions = {
+  /**
+   * How browsers start here. The computer's own, read from its environment, unless a test needs a
+   * combination the environment refuses: a person's native browser launched headless, which is how
+   * that launch is tested without opening a window on the machine running the tests.
+   */
+  runtime?: BrowserRuntime;
+  /**
+   * The display the person's desktop session had, captured before this process pointed `DISPLAY`
+   * at its own Xvfb. A person's native window opens there. Defaults to this process's environment
+   * as it is now.
+   */
+  personDisplay?: PersonDisplay;
+};
+
+/** Opening a person's browser, which is the one way it starts. See `person-browser.ts`. */
+export type PersonOpen = { recorder: Recorder };
+
+/** A person's open browser, for the browser routes. */
+export type OpenPersonBrowser = PersonBrowser & {
+  context: BrowserContext;
+  /** The tab the person is on, which the live screen shows. */
+  active(): Page;
+  /** Put a tab in front: the one the live screen follows and the routes act on. */
+  activate(page: Page): void;
+  /** The person's tabs, oldest first, never the Recorder's own pages. */
+  pages(): Page[];
+};
+
+export function createProfiles(
+  root: string,
+  onClosed: BrowserClosed,
+  options: ProfilesOptions = {},
+) {
+  const runtime = options.runtime ?? BROWSER_RUNTIME;
+  const local = runtime.backend === "local-chrome";
+  const sandbox = sandboxFor(runtime);
+  const launchArgs = launchArgsFor(local, sandbox);
+  const personDisplay: PersonDisplay = options.personDisplay ?? {
+    DISPLAY: process.env.DISPLAY,
+    WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+  };
+
   type LiveBrowser = {
     context: BrowserContext;
     page: Page;
@@ -282,6 +377,8 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     retarget: () => void;
     /** Keeps this browser's session cookies on the profile volume. Absent for a native Chrome. */
     sessionCookies?: SessionCookieKeeper;
+    /** Present for a person's browser, which has the Recorder in it and no Bot acting in it. */
+    person?: PersonBrowser;
   };
 
   /**
@@ -301,6 +398,8 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
 
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<string, LiveBrowser>();
+  /** A person's native window: the idle sweep leaves it and the cap takes it last. See `keptOpen`. */
+  const stays = keptOpen(personWindow(runtime));
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
   /** Closes and resets in flight, so a Bot's browser is never reopened from a profile being closed or deleted. */
@@ -362,7 +461,11 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
    * rather than before, so the Bot that just asked is never the one closed.
    */
   const enforceCap = async (): Promise<void> => {
-    for (const botId of chooseEvictions(live.entries(), MAX_LIVE_BROWSERS)) {
+    for (const botId of chooseEvictions(
+      live.entries(),
+      MAX_LIVE_BROWSERS,
+      stays,
+    )) {
       await evict(botId, "the cap on running browsers was reached");
     }
   };
@@ -378,6 +481,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
       live.entries(),
       IDLE_TIMEOUT_MS,
       Date.now(),
+      stays,
     )) {
       await evict(botId, "it had been idle");
     }
@@ -420,6 +524,173 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     );
   };
 
+  /*
+   * Session cookies back before anything navigates, so the first request a site sees from this
+   * launch is already signed in. Not for a native Chrome: its cookies are protected by the OS
+   * keychain, and a plain file beside them would undo that. The container profile uses the
+   * basic password store, so the file adds no exposure the volume did not already have.
+   */
+  const keepSessionCookiesFrom = async (
+    botId: string,
+    dir: string,
+    context: BrowserContext,
+  ): Promise<SessionCookieKeeper | undefined> => {
+    if (local) return undefined;
+    const sessionCookies = sessionCookieKeeper(botId, dir, context);
+    await sessionCookies.restore().catch((error: unknown) => {
+      console.info(
+        JSON.stringify({
+          type: "computer-session-cookies-not-restored",
+          botId,
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    });
+    sessionCookies.start();
+    return sessionCookies;
+  };
+
+  /**
+   * A person's browser: the Recorder in it, their tabs, and the one they are on.
+   *
+   * The tab in front is kept rather than recomputed. A Bot's browser follows the newest page,
+   * because a window a site opened is where the Bot's work went; a person moves between tabs, so
+   * the one they put in front stays in front until they choose another, a new tab opens (which a
+   * browser brings to the front), or it closes. The live screen follows whichever that is.
+   *
+   * It is closed when the person closes it. Quitting the browser ends the context, and closing the
+   * last window ends it too: on macOS Chrome keeps running with no window, and a browser nobody can
+   * see is one the person closed. A native window is not closed by the idle sweep, and goes last at
+   * the cap; a cloud browser, which the person reaches only through the Browser page, closes when
+   * nobody has touched it for as long as a Bot's would (`keptOpen`).
+   *
+   * A window is a window whatever it shows. One left on one of the Recorder's own pages (its
+   * options, say) is still the person's browser on the screen: it is open, it is not closed under
+   * them, and opening it again brings it forward rather than relaunching it. The Recorder's pages are
+   * never put in front over a tab of the person's, but when they are all there is, the one in front
+   * is one of them.
+   */
+  const launchPerson = async (
+    botId: string,
+    dir: string,
+    open: PersonOpen,
+  ): Promise<Page> => {
+    const window = personWindow(runtime);
+    const { context, person } = await launchPersonBrowser({
+      botId,
+      dir,
+      runtime,
+      recorder: open.recorder,
+      // A hosted browser runs on OpenBot's network, so it goes through the egress filter like any
+      // other browser here. A native window is the person's own browser on their own machine, and
+      // reaches the network the way their everyday browser does.
+      proxy: window === "screen" ? egressFor(botId, process.env) : null,
+      sandbox,
+      botArgs: launchArgs,
+      viewport: VIEWPORT,
+      display: personDisplay,
+    });
+    const sessionCookies = await keepSessionCookiesFrom(botId, dir, context);
+    const { recorderId } = person;
+    let page = personPages(context, recorderId).at(-1);
+    try {
+      page ??= await context.newPage();
+      /*
+       * What a hosted Bot's browser says about itself, said by the hosted person's browser too:
+       * both are this computer's Chromium on its network, and a person's search or sign-in is
+       * judged by the same signals. Without it a headless one sent `HeadlessChrome` in its user
+       * agent and its client hints, and Google answered searches with its "unusual traffic" check
+       * and refused sign-in as a browser that "may not be secure", from an address where Chrome was
+       * fine. Before the person's first page loads, and for every tab as it opens. Read from one of
+       * the person's own tabs first, because what the browser says is read once per browser from
+       * a page, and the Recorder's setup page may be the other one there, closing. A native window
+       * is the person's own browser, which says who it is already, as a local Bot's does. Never the
+       * Web Bot Auth signature: that says the deployment's automated agent sent the request, and a
+       * person browsing is not it.
+       */
+      if (window === "screen") {
+        const network = { headless: runtime.mode === "headless" };
+        await attachPageNetwork(context, page, network);
+        await attachBrowserNetwork(context, { ...network, signs: false });
+        for (const opened of context.pages())
+          void attachPageNetwork(context, opened, network);
+        context.on("page", (opened) => {
+          void attachPageNetwork(context, opened, network);
+        });
+      }
+    } catch (error) {
+      // Not left running unrecorded: a browser that never made it into the map is closed here.
+      await sessionCookies?.stop();
+      await context.close().catch(() => undefined);
+      throw error;
+    }
+    const record: LiveBrowser = {
+      context,
+      page,
+      startedAt: new Date().toISOString(),
+      usedAt: Date.now(),
+      retarget: () => {},
+      ...(sessionCookies ? { sessionCookies } : {}),
+      person,
+    };
+    const bringForward = (next: Page) => {
+      if (next === record.page) return;
+      record.page = next;
+      // In front at once; said once the browser has stayed open with it in front.
+      setTimeout(() => {
+        if (live.get(botId) !== record || record.page !== next) return;
+        if (next.isClosed() || !context.browser()?.isConnected()) return;
+        console.info(
+          JSON.stringify({
+            type: "computer-page-changed",
+            botId,
+            url: next.url(),
+          }),
+        );
+      }, PAGE_CHANGE_SETTLE_MS).unref();
+    };
+    record.retarget = () => {
+      if (
+        !record.page.isClosed() &&
+        !isRecorderPage(record.page.url(), recorderId)
+      )
+        return;
+      // The person's newest tab; failing that, while the one in front has closed, whatever window
+      // is left.
+      const next =
+        personPages(context, recorderId).at(-1) ??
+        (record.page.isClosed() ? windowPages(context).at(-1) : undefined);
+      if (next) bringForward(next);
+    };
+    const closed = () => {
+      // A browser being closed closes its tabs one by one, and none of them is a page change: a
+      // close takes the browser out of `live` before it closes it.
+      if (live.get(botId) !== record) return;
+      record.retarget();
+      if (windowPages(context).length === 0)
+        void evict(botId, "its last window was closed");
+    };
+    const follow = (opened: Page) => {
+      opened.on("close", closed);
+      // A tab that becomes one of the Recorder's own pages is never the one in front.
+      opened.on("framenavigated", (frame) => {
+        if (frame === opened.mainFrame() && opened === record.page)
+          record.retarget();
+      });
+    };
+    for (const existing of context.pages()) follow(existing);
+    context.on("page", (opened) => {
+      follow(opened);
+      if (!isRecorderPage(opened.url(), recorderId)) bringForward(opened);
+    });
+    context.on("close", () => {
+      if (live.get(botId) === record) void evict(botId, "it was closed");
+    });
+    live.set(botId, record);
+    await enforceCap();
+    return record.page;
+  };
+
   return {
     /**
      * The Bot's page, starting its browser if it is not running.
@@ -428,7 +699,10 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
      * otherwise leave this process alive and answering the same error for every request until the
      * container restarts. This turns that into one slow request instead of an outage.
      */
-    async page(botId: string): Promise<Page> {
+    async page(
+      botId: string,
+      request: { open?: PersonOpen } = {},
+    ): Promise<Page> {
       // Only when something is closing: an unconditional await would let a stop slip in ahead of the launch.
       const closingNow = closing.get(botId);
       if (closingNow) await closingNow;
@@ -443,6 +717,8 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
       // Asked before the page is judged, so a close that has not been delivered yet does not read as
       // a browser that has gone.
       existing?.retarget();
+      // A person's browser whose one window shows a Recorder page is open like any other (see
+      // `launchPerson`), so the page in front is judged only by whether it is still there.
       if (
         existing?.context.browser()?.isConnected() &&
         !existing.page.isClosed()
@@ -463,20 +739,29 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         await existing.context.close().catch(() => undefined);
         live.delete(botId);
       }
+      /*
+       * A person's browser starts only when they open it. Anything else asking for its page (the
+       * live screen's follow loop, a person's input arriving late) finds it closed and says so,
+       * rather than opening a window on somebody's desktop they have just closed.
+       */
+      const { open } = request;
+      if (isPersonBrowserId(botId) && !open) throw new BrowserNotOpenError();
 
       const launch = (async () => {
         const dir = directoryFor(botId);
         // A second native helper can target the same data root on another port. Do not remove an
         // active Chrome profile's lock; Chrome reports contention and handles its own stale locks.
-        if (!LOCAL_CHROME) {
+        if (!local) {
           await sweepLocks(dir);
           await keepWebRtcInsideProxy(dir);
         }
+        if (open && isPersonBrowserId(botId))
+          return launchPerson(botId, dir, open);
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
-          channel: BROWSER_RUNTIME.channel,
-          headless: BROWSER_RUNTIME.mode === "headless",
-          args: LAUNCH_ARGS,
+          channel: runtime.channel,
+          headless: runtime.mode === "headless",
+          args: launchArgs,
           // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
           // "controlled by automated software" banner. Dropped for the same reason as the flag above:
           // a person who takes the wheel should be able to sign in. Named explicitly so the sandbox
@@ -485,7 +770,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
           // means the flag above decides nothing and a deployment that asked for the sandbox does
           // not get one. Verified by reading the launched process arguments, not by trusting either.
-          chromiumSandbox: SANDBOX_ENABLED,
+          chromiumSandbox: sandbox,
           viewport: VIEWPORT,
           // This process owns shutdown. Playwright's signal handlers kill Chromium immediately on
           // SIGTERM, before pending cookie writes have time to flush.
@@ -494,27 +779,11 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           handleSIGHUP: false,
           ...(proxy ? { proxy } : {}),
         });
-        /*
-         * Session cookies back before anything navigates, so the first request a site sees from this
-         * launch is already signed in. Not for a native Chrome: its cookies are protected by the OS
-         * keychain, and a plain file beside them would undo that. The container profile uses the
-         * basic password store, so the file adds no exposure the volume did not already have.
-         */
-        const sessionCookies = LOCAL_CHROME
-          ? undefined
-          : sessionCookieKeeper(botId, dir, context);
-        if (sessionCookies) {
-          await sessionCookies.restore().catch((error: unknown) => {
-            console.info(
-              JSON.stringify({
-                type: "computer-session-cookies-not-restored",
-                botId,
-                reason: error instanceof Error ? error.message : String(error),
-              }),
-            );
-          });
-          sessionCookies.start();
-        }
+        const sessionCookies = await keepSessionCookiesFrom(
+          botId,
+          dir,
+          context,
+        );
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
         /*
@@ -522,8 +791,8 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
          * request a site sees already carries both. Not for a native Chrome: that is the person's own
          * browser, which says who it is already and should not announce a deployment on their behalf.
          */
-        const network = { headless: BROWSER_RUNTIME.mode === "headless" };
-        if (!LOCAL_CHROME) {
+        const network = { headless: runtime.mode === "headless" };
+        if (!local) {
           await attachBrowserNetwork(context, network);
           await attachPageNetwork(context, page, network);
         }
@@ -547,16 +816,24 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
             }),
           );
         };
+        /*
+         * A page that closes while the browser stays open moves the record on. One closing because the
+         * browser is being closed (out of `live` already) moves nothing: it is not a page change, and
+         * saying so for every tab as it went only filled the log.
+         */
+        const closed = () => {
+          if (live.get(botId) === record) record.retarget();
+        };
         // Without this the Bot stays pinned to the page it launched with, so a sign-in the site opens
         // in a new window is neither shown to the person taking the wheel nor reachable by input.
         context.on("page", (opened) => {
-          if (!LOCAL_CHROME) void attachPageNetwork(context, opened, network);
+          if (!local) void attachPageNetwork(context, opened, network);
           record.retarget();
           // A popup closes itself when it succeeds, and the record must move back to the opener
           // rather than leave a closed page to be read as a dead browser.
-          opened.on("close", () => record.retarget());
+          opened.on("close", closed);
         });
-        page.on("close", () => record.retarget());
+        page.on("close", closed);
         live.set(botId, record);
         // After the new one is in the map, so the cap counts what is really running and the Bot that
         // just asked is the most recently used and therefore never the one closed.
@@ -580,10 +857,11 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
      *
      * The same close the cap and the idle sweep make, so it goes through the same path rather than
      * repeating it: a request is one more reason a browser closes, not a different kind of closing,
-     * and anything watching has to come down either way.
+     * and anything watching has to come down either way. `reason` is what the close is logged with,
+     * when the caller knows better than "it was stopped".
      */
-    async stop(botId: string): Promise<boolean> {
-      return closeOnRequest(botId, "it was stopped");
+    async stop(botId: string, reason = "it was stopped"): Promise<boolean> {
+      return closeOnRequest(botId, reason);
     },
 
     /**
@@ -664,6 +942,36 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     /** Whether this Bot has a browser right now, so a caller can drop state that belongs to one. */
     isLive(botId: string): boolean {
       return live.has(botId);
+    },
+
+    /**
+     * A person's browser when it is open, touched like any page request so the cap sees it in use.
+     * Undefined when it is closed, still starting, or has no window left. A window showing only one
+     * of the Recorder's own pages is open: its tab list is then empty, and the page in front is that
+     * Recorder page.
+     */
+    person(botId: string): OpenPersonBrowser | undefined {
+      const running = live.get(botId);
+      const person = running?.person;
+      if (!running || !person) return undefined;
+      if (!running.context.browser()?.isConnected()) return undefined;
+      running.retarget();
+      const pages = () => personPages(running.context, person.recorderId);
+      if (!windowPages(running.context).includes(running.page))
+        return undefined;
+      running.usedAt = Date.now();
+      return {
+        ...person,
+        context: running.context,
+        active: () => {
+          running.retarget();
+          return running.page;
+        },
+        activate: (page: Page) => {
+          running.page = page;
+        },
+        pages,
+      };
     },
 
     /** Run the idle sweep now. Exposed so a test does not have to wait a minute for the interval. */

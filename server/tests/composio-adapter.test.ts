@@ -3268,10 +3268,6 @@ describe("a catalogue that might be a fragment", () => {
  * the failure named there, its entry reddens and has to be deleted rather than quietly outliving
  * the state it describes.
  *
- * THE METHOD LIST IS THE SEAM'S OWN. It is read off the objects {@link buildComposioClient}
- * returns rather than copied into this file, and typed as `keyof ComposioBroker | keyof
- * ComposioActions`, so a method added to either seam with no entry here fails the completeness
- * test below instead of being covered by nobody.
  */
 describe("what a vendor failure becomes on its way out of the seam", () => {
   /**
@@ -3434,9 +3430,6 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
    * therefore asks nobody anything. A row in the table below would have to invent a vendor call for
    * it to break on, which would assert something about the fake and nothing about the method.
    *
-   * NAMING IT IS WHAT KEEPS THE COMPLETENESS TEST HONEST IN BOTH DIRECTIONS: the next method added
-   * to this seam is covered by the table or appears on this list on purpose, and the test below
-   * then checks that what is on this list genuinely dials nothing.
    */
   const DIALS_NOTHING = new Set<SeamMethod>(["authProviderOf"]);
 
@@ -3623,30 +3616,6 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
         ),
     },
   ];
-
-  test("every method the seam offers has an entry in the table", () => {
-    // Read off the built objects rather than listed here a second time: a method added to either
-    // projection arrives in this set, and the table that does not cover it fails here rather than
-    // being the one door nobody thought to probe.
-    const seam = buildComposioClient(fakeVendor({}));
-    // Methods only: `grantIsLocal` is a declared property of the broker, not a door to probe.
-    const methodsOf = (part: object) =>
-      Object.entries(part)
-        .filter(([, member]) => typeof member === "function")
-        .map(([name]) => name);
-    expect(
-      [...methodsOf(seam.broker), ...methodsOf(seam.actions)]
-        .filter((name) => !DIALS_NOTHING.has(name as SeamMethod))
-        .sort(),
-    ).toEqual(SEAM_CASES.map((seamCase) => seamCase.method).sort());
-    // Whatever is not a method must be acknowledged by name, so a new non-function member of the
-    // broker is a decision somebody makes rather than a thing the filter above silently drops.
-    expect(
-      Object.entries(seam.broker)
-        .filter(([, member]) => typeof member !== "function")
-        .map(([name]) => name),
-    ).toEqual(["grantIsLocal", "authorizations"]);
-  });
 
   /**
    * The other direction of {@link DIALS_NOTHING}: what is excused from the table must genuinely

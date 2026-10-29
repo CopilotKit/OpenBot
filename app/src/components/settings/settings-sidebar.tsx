@@ -1,10 +1,12 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconBrowser,
   IconChecks,
   IconDeviceDesktop,
   IconKey,
   IconLayoutGrid,
+  IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
@@ -23,7 +25,7 @@ import { desktopShell } from "@/lib/desktop/intelligence-dashboard";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
-const ITEMS: {
+export const SETTINGS_SIDEBAR_ITEMS: {
   /**
    * Whether this entry lights only on its own route.
    *
@@ -55,6 +57,18 @@ const ITEMS: {
     title: "Approvals",
     icon: IconChecks,
     linkOptions: { to: "/settings/approvals" },
+  },
+  {
+    /* The browsers signed in to the Recorder extension as you; each can be disconnected here. */
+    title: "Browsers",
+    icon: IconBrowser,
+    linkOptions: { to: "/settings/browsers" },
+  },
+  {
+    /* Who else's Bots use the Skills learned from your recordings: none, all, or the ones you open. */
+    title: "Learning",
+    icon: IconSchool,
+    linkOptions: { to: "/settings/learning" },
   },
   {
     /* Logins saved from a Bot's private sign-in form. */
@@ -104,7 +118,7 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {ITEMS.filter(
+            {SETTINGS_SIDEBAR_ITEMS.filter(
               (option) => !option.desktopOnly || desktopShell() !== null,
             ).map((option) => (
               <SidebarMenuItem key={option.title}>

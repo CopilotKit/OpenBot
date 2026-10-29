@@ -4,7 +4,7 @@ import { expo } from "@better-auth/expo";
 import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
 import { eq, sql } from "drizzle-orm";
 import { createEnterpriseStore } from "../admin/settings-store";
@@ -28,6 +28,7 @@ import {
 } from "../db/schema";
 import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
 import { encryptSsoConfig } from "./encrypt-sso-config";
+import { SIGN_OUT_UNFINISHED } from "./organization";
 import { applyConfiguredAdmin, isConfiguredAdmin, seedRole } from "./roles";
 import { recordProvisioned, scimOptions } from "./scim";
 
@@ -183,6 +184,14 @@ export function createAuth(
    * write below is guarded and its failure is logged rather than raised.
    */
   auditStore?: AuditStore,
+  options: {
+    /**
+     * Ends what else a person is signed in with here (their Recorder connections, index.ts) whenever their sign-in ends:
+     * before a sign-out, and before any live session of theirs is deleted. Throws when it could not, and then the
+     * session is not ended either: see `endRecordersOrRefuse`.
+     */
+    signOutRecorders?: (userId: string, ending: string) => Promise<void>;
+  } = {},
 ) {
   const authConfig = config.auth;
   if (!authConfig) {
@@ -259,7 +268,46 @@ export function createAuth(
     }),
   ];
 
+  /*
+   * A person's sessions and their Recorder connections end together or not at all. They are one sign-in, and ending
+   * access here is never reported done while half of it stands: a removal ends sessions and deny-lists in one
+   * transaction (people/store.ts), a removed person's linked accounts are retired in one transaction with their rows
+   * (identity/retire.ts), and a connection ends exactly when its row is written (recorder/connections.ts). So when the
+   * Recorders cannot be ended (signOutRecorders has retried and written `recorder.sign_out_failed`), the session is
+   * left as it is and whoever was ending it is told: the person stays signed in and can sign out again. Answering
+   * success would have left a Recorder recording as somebody who believes they signed out, for as long as it is used.
+   */
+  const endRecordersOrRefuse = async (userId: string, ending: string) => {
+    if (!options.signOutRecorders) return;
+    try {
+      await options.signOutRecorders(userId, ending);
+    } catch {
+      throw new APIError("SERVICE_UNAVAILABLE", {
+        message: SIGN_OUT_UNFINISHED,
+      });
+    }
+  };
+
   return betterAuth({
+    /*
+     * A sign-out ends the Recorders before Better Auth ends the session, here rather than in the session's delete hook
+     * below: the sign-out route goes on when deleting the session throws (it logs, clears the cookie and answers
+     * success), so only a refusal made before it starts reaches the person. The session is the one the route itself
+     * would end, found the way it finds it (the signed cookie, then the row, expired or not).
+     */
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (context.path !== "/sign-out" || !options.signOutRecorders) return;
+        const token = await context.getSignedCookie(
+          context.context.authCookies.sessionToken.name,
+          context.context.secret,
+        );
+        if (!token) return;
+        const found = await context.context.internalAdapter.findSession(token);
+        if (found)
+          await endRecordersOrRefuse(found.session.userId, "/sign-out");
+      }),
+    },
     user: {
       additionalFields: {
         preferences: {
@@ -549,7 +597,37 @@ export function createAuth(
             });
           },
         },
+        delete: {
+          /*
+           * Every other way a live session ends: signing out everywhere (`/revoke-sessions`), ending one session or
+           * all the others (`/revoke-session`, `/revoke-other-sessions`), a password reset or change that signs out
+           * other sessions, the directory deactivating the person (SCIM), the identity provider's single logout,
+           * another account proving the address. Better Auth deletes sessions through this hook on every one of them.
+           * Before the delete, so a refusal leaves the session where it was and the caller is told. Not a sign-out,
+           * whose Recorders ended in the hook above, and not a session Better Auth finds expired and tidies away:
+           * nobody ended that one, and a Recorder lasts its own lifetime.
+           */
+          before: async (session, context) => {
+            if (context?.path === "/sign-out") return;
+            if (new Date(session.expiresAt).getTime() <= Date.now()) return;
+            await endRecordersOrRefuse(
+              session.userId,
+              context?.path ?? "sessions-ended",
+            );
+          },
+        },
       },
     },
   });
+}
+
+/**
+ * How long a session here lasts unused, in milliseconds: Better Auth's `session.expiresIn` as this instance resolved it.
+ * OpenBot sets none, so it is Better Auth's own default, and it is read rather than restated so the two cannot drift.
+ * Better Auth moves a session's expiry to this long from now whenever it is used (at most once per `updateAge`).
+ */
+export async function sessionLifetimeMs(
+  auth: ReturnType<typeof createAuth>,
+): Promise<number> {
+  return (await auth.$context).sessionConfig.expiresIn * 1_000;
 }

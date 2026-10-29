@@ -16,7 +16,7 @@ import { brokeredFor } from "../src/routes/_authed/_app/connections.$key";
 import {
   brokeredAccountsListedOn,
   sharedAccountsListedOn,
-} from "../src/routes/_authed/_app/connections.index";
+} from "../src/lib/plugins/listed";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);

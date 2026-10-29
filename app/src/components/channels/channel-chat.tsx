@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import {
@@ -1081,6 +1082,23 @@ export function ChannelChat({
              * run before closing it; see server/src/channels/stall-guard.ts.
              */
             stopped={runError ?? undefined}
+            /*
+             * What the server says this conversation waits on: a Bot its Bot asked, a routine.
+             * Hidden while this tab's own turn is going, which already shows itself and would
+             * otherwise draw "Asking Ana…" under the sentence saying it had asked. The composer
+             * stays open either way: a person may keep talking while a hop runs, and a relay that
+             * finds them mid-turn waits and is tried again.
+             */
+            working={
+              agent.isRunning || turnsInFlight > 0 ? null : (
+                <ChannelWorkRows
+                  botOf={(botId) =>
+                    agentProfiles?.find((profile) => profile.id === botId)
+                  }
+                  work={channel.work}
+                />
+              )
+            }
           />
         </div>
       </ConversationProvider>
