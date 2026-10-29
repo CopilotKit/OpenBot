@@ -12,6 +12,7 @@ import { Fragment, type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";
 import {
   type ApprovalView,
+  alwaysAllowReach,
   approvalOutcome,
   approvalPlace,
   clockTime,
@@ -45,7 +46,8 @@ const CHOICE =
  * One action a Bot wants to take, and the person's answer to it: what it is, where, who it goes to
  * and what it says, then Decline and Allow once. "Always allow here" is a quiet button under the
  * two, because it saves a rule for this Bot, this action and this place rather than answering only
- * this request. A hand-off is the person's to do, so it asks "I did it myself" or "Don't do it".
+ * this request; the line under it says how far that rule reaches. A hand-off is the person's to do,
+ * so it asks "I did it myself" or "Don't do it".
  *
  * Once decided the card folds: the title, a pill saying how it ended (Allowed, Sent, Done,
  * Declined, Didn't work), and a line saying who decided and when. While it waits, everything the
@@ -80,6 +82,7 @@ export function ApprovalCard({
   const place = approvalPlace(request);
   const caption = [botName, view.app].filter(Boolean).join(" · ");
   const Icon = KIND_ICON[view.kind];
+  const reachId = useId();
 
   return (
     <section
@@ -156,14 +159,23 @@ export function ApprovalCard({
             </Button>
           </div>
           {handOff ? null : (
-            <Button
-              className="mx-auto mt-1 flex h-(--target) rounded-full px-3 type-sub text-muted-foreground hover:text-foreground"
-              disabled={busy}
-              onClick={() => onDecide("allow_always")}
-              variant="ghost"
-            >
-              Always allow here
-            </Button>
+            <>
+              <Button
+                aria-describedby={reachId}
+                className="mx-auto mt-1 flex h-(--target) rounded-full px-3 type-sub text-muted-foreground hover:text-foreground"
+                disabled={busy}
+                onClick={() => onDecide("allow_always")}
+                variant="ghost"
+              >
+                Always allow here
+              </Button>
+              <p
+                className="type-caption text-balance text-center text-muted-foreground"
+                id={reachId}
+              >
+                {alwaysAllowReach(request)}
+              </p>
+            </>
           )}
         </div>
       ) : null}
@@ -220,7 +232,8 @@ function ApprovalContent({
           {request.action.policy.reason}
         </p>
       ) : null}
-      <details className="group px-4">
+      {/* Open by itself when the face above leaves out something the request would send. */}
+      <details className="group px-4" open={view.unshown > 0 || undefined}>
         <summary
           aria-controls={detailsId}
           className="type-caption inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"

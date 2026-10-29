@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  alwaysAllowReach,
   approvalOutcome,
   approvalPlace,
   clockTime,
@@ -216,6 +217,7 @@ test("a send the private-share check asks about reads as the email it is", () =>
     kind: "mail",
     fields: [{ label: "To", value: "ana@hearthandco.example" }],
     body: "Hi Ana, our kiln is down until Monday.",
+    unshown: 0,
   });
 });
 
@@ -261,4 +263,68 @@ test("typing into a page reads as the step does, and a yes-or-no argument reads 
   expect(view.title).toBe("Fill in a field");
   expect(view.body).toBe("OpenBot");
   expect(view.fields).toEqual([{ label: "Submit after typing", value: "Yes" }]);
+});
+
+test("the face counts what it leaves for Details: a second body, objects, fields past its room", () => {
+  expect(
+    describeApproval(
+      action("gmail/GMAIL_SEND_EMAIL", {
+        to: "ana@example.com",
+        subject: "Ship date",
+        body: "Hi Ana",
+        thread_id: "abc",
+      }),
+    ).unshown,
+  ).toBe(0);
+  const view = describeApproval(
+    action("outlook/send_mail", {
+      to: [{ email: "ana@example.com" }],
+      subject: "Ship date",
+      text: "Hi",
+      html: '<a href="https://example.com">Hi</a>',
+      a: "1",
+      b: "2",
+      c: "3",
+      d: "4",
+      id: "msg-1",
+    }),
+  );
+  // The recipients (an object), the html after the text, and the fifth plain field; never the id.
+  expect(view.fields.map((field) => field.label)).toEqual([
+    "Subject",
+    "A",
+    "B",
+    "C",
+  ]);
+  expect(view.unshown).toBe(3);
+});
+
+test("Always allow here says how far its rule reaches, past this one call", () => {
+  const reach = (
+    toolRef: string,
+    extra: Partial<ApprovalRequest["action"]> = {},
+  ) => alwaysAllowReach(action(toolRef, {}, extra));
+  expect(
+    reach("host/run_command", { target: { displayName: "Projects" } }),
+  ).toBe(
+    "This Bot won't ask you again before doing this in Projects, whatever the details.",
+  );
+  expect(reach("gmail/GMAIL_SEND_EMAIL", { scope: "gmail" })).toBe(
+    "This Bot won't ask you again before doing this in Gmail, whatever the details.",
+  );
+  expect(reach("computer_click", { scope: "shop.example" })).toBe(
+    "This Bot won't ask you again before doing this on shop.example, whatever the details.",
+  );
+  expect(reach("computer_run", { scope: "workspace" })).toBe(
+    "This Bot won't ask you again before doing this on its computer, whatever the details.",
+  );
+  expect(reach("computer_write_file", { scope: "notes/drafts" })).toBe(
+    "This Bot won't ask you again before doing this in notes/drafts, whatever the details.",
+  );
+  expect(reach("bot/message_bot", { scope: "research" })).toBe(
+    "This Bot won't ask you again before asking that Bot, whatever it asks.",
+  );
+  expect(reach("openbot/share_private_information")).toBe(
+    "This Bot won't ask you again before sharing private information with these people.",
+  );
 });
