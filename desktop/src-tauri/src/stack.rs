@@ -1,18 +1,16 @@
-//! Raising the stack: the Compose services, then the three processes that are not containers.
+//! Raising the stack: the Compose services, and the one process that is not a container.
 //!
-//! `docker-compose.yml` has no `app`, `server` or `worker` service, and the root `Dockerfile` leaves
-//! out the supervisor because it needs a socket no serverless platform grants. So the shape is not a
-//! choice: containers for postgres, the supervisor, `agent-computer`, the Bots and a one-shot
-//! `migrate`, and three host processes for the rest. `scripts/start.sh` does exactly this for a
-//! developer. This does it for somebody who double-clicked.
+//! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, a one-shot
+//! `migrate`, and the published image's `server` and `worker` under the `openbot` profile. Docker's
+//! restart policy keeps them up.
 //!
-//! A fourth host process runs where this machine can run it: the person's own browser, the local
-//! Chrome computer `scripts/start-local-chrome-computer.ts` starts for a developer. See
-//! `local_browser` for when, and why it is not a container.
+//! One host process runs where this machine can run it: the person's own browser, the local Chrome
+//! computer `scripts/start-local-chrome-computer.ts` starts for a developer. It opens a window on
+//! their desktop, so it cannot be a container; see `local_browser`. The shell is its restart
+//! policy.
 //!
-//! The shell also becomes the restart policy those three do not have. `worker/src/index.ts` names
-//! the gap itself: "this process has no restart policy watching it; it is somebody's laptop, left
-//! running".
+//! [`HOST_PROCESSES`] still names the server, the app and the worker, which earlier versions ran on
+//! the host, so a Start or a Stop can find and end what one of those left running.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -157,6 +155,14 @@ pub const HOST_PROCESSES: [HostProcess; 4] = [
 
 /// The host process that runs the person's own browser.
 pub const LOCAL_BROWSER: &str = "browser";
+
+/// The person's browser, the one host process a Start still runs.
+pub fn local_browser_process() -> &'static HostProcess {
+    HOST_PROCESSES
+        .iter()
+        .find(|process| process.name == LOCAL_BROWSER)
+        .expect("HOST_PROCESSES names the person's browser")
+}
 
 /// The host processes one start runs, in order: the server, the app and the worker always, and the
 /// person's browser where this machine runs one.
@@ -1717,7 +1723,7 @@ fn configure_local_browser(
 
 /// The last build error can precede Bun's wrapper stack, version, and exit message.
 /// Bound both the file read and displayed lines while preserving that useful context.
-fn tail_of(logs: &Path, name: &str) -> String {
+pub fn tail_of(logs: &Path, name: &str) -> String {
     use std::io::{Read, Seek, SeekFrom};
     const MAX_BYTES: u64 = 8 * 1024;
     let read = || -> std::io::Result<Vec<u8>> {

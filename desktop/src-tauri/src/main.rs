@@ -19,7 +19,7 @@ use openbot_desktop_lib::{
     install, local_browser, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, windows as win,
+    supervise, telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -37,6 +37,9 @@ use tauri::{Emitter, Manager};
 struct Shell {
     /// Session-only local folder authority; shutdown retires it before stopping the API server.
     host_access: Mutex<Option<host_access::HostAccess>>,
+    /// The person's browser, the one host process a Start runs (see `local_browser`). Held so Stop
+    /// can let Chrome close its windows and profile before anything is forced.
+    browser: Mutex<Option<std::process::Child>>,
     /// Native Linux engine API owned by this desktop session, kept through Stop/Start.
     #[cfg(target_os = "linux")]
     podman_api: Mutex<engine::local_api::Service>,
@@ -1462,7 +1465,10 @@ fn reset_leftover_database_with(
     }
     let attempt = StartAttempt::begin(shell)?;
     let _startup = attempt.lock_current()?;
-    if shell.containers.lock().unwrap().is_some() || shell.root.lock().unwrap().is_some() {
+    if shell.containers.lock().unwrap().is_some()
+        || shell.root.lock().unwrap().is_some()
+        || shell.browser.lock().unwrap().is_some()
+    {
         return Err(Problem::plain("OpenBot still owns running services. Choose Stop OpenBot before resetting leftover data."));
     }
     if shell
@@ -1733,7 +1739,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let host_token =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
 
-    let (found, secrets, ports) = {
+    let (found, secrets, ports, local_browser) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -2006,7 +2012,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             report(&app, "services", false, detail);
         })?;
 
-        (found, secrets, ports)
+        (found, secrets, ports, local_browser)
     };
 
     /*
@@ -2055,8 +2061,50 @@ async fn start_stack_inner<R: tauri::Runtime>(
         report(&app, "answering", false, problem.said.clone());
         return Err(problem);
     }
+    /*
+     * The person's own browser, the one host process left (see `local_browser`).
+     *
+     * After the server answers: the server reaches it only when the person opens their browser, so
+     * it is not on the way to the window answering. Bun and the computer's packages are prepared the
+     * first time a Start has a browser to run, and reused after that, as the Intelligence sign-in
+     * helper prepares them. Installing OpenBot no longer does.
+     */
+    let browser_bun = match local_browser.as_ref() {
+        Some(_) => {
+            report_running(&app, "browser", "Preparing your browser.", None);
+            let prepare_root = root.clone();
+            let prepared = tauri::async_runtime::spawn_blocking(move || {
+                preparation::install_dependencies_if_needed(&prepare_root, || {
+                    install::ensure_bun(&prepare_root, which_bun())
+                })
+            })
+            .await
+            .unwrap_or_else(|error| {
+                Err(Problem::with(
+                    "OpenBot could not prepare your browser. Try Start again.",
+                    error.to_string(),
+                ))
+            });
+            attempt.require_current()?;
+            Some(
+                prepared
+                    .inspect_err(|problem| report(&app, "browser", false, problem.said.clone()))?,
+            )
+        }
+        None => None,
+    };
     // Stop must not finish between accepting readiness and reporting a successful Start.
     let _startup = attempt.lock_current()?;
+    if let (Some(browser), Some(bun)) = (local_browser.as_ref(), browser_bun.as_ref()) {
+        start_local_browser(&shell, &root, bun, &secrets, &ports, browser)
+            .inspect_err(|problem| report(&app, "browser", false, problem.said.clone()))?;
+        report(
+            &app,
+            "browser",
+            true,
+            format!("{} is ready.", browser.product.name()),
+        );
+    }
     *shell.root.lock().unwrap() = Some(root.clone());
     clear_recovery_required(&shell, &root);
     let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
@@ -2088,6 +2136,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
+    if let (Some(browser), Some(bun)) = (local_browser, browser_bun) {
+        supervise_local_browser(app.clone(), root.clone(), bun, secrets, browser, generation);
+    }
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
     report(&app, "answering", true, "OpenBot is ready.");
@@ -2561,7 +2612,12 @@ where
         .unwrap()
         .clone()
         .unwrap_or_else(|| root.to_path_buf());
-    let result = cleanup(&selected);
+    // Closed while it is still held, before `cleanup` ends whatever was recorded.
+    let result = match (close_held_browser(shell, &selected), cleanup(&selected)) {
+        (Ok(()), result) => result,
+        (Err(problem), Ok(_)) => Err(problem),
+        (Err(_), Err(problem)) => Err(problem),
+    };
     let result = match (host_access_result, result) {
         (Ok(()), result) => result,
         (Err(error), Ok(_)) => Err(Problem::with(
@@ -5581,6 +5637,160 @@ fn publish_connection_failure<R: tauri::Runtime>(
     *shell.last_failure.lock().unwrap() = Some(Problem::plain(said).connection(connection));
     show_setup_and_focus(app.clone())?;
     Ok(true)
+}
+
+/// Start the person's browser and hand it to this window and to the record a later window ends it
+/// from. Called under the startup lock, so a Stop cannot finish between the spawn and the handoff.
+fn start_local_browser(
+    shell: &Shell,
+    root: &Path,
+    bun: &Path,
+    secrets: &stack::Secrets,
+    ports: &openbot_env::Ports,
+    browser: &local_browser::LocalBrowser,
+) -> Result<(), Problem> {
+    let port = ports.browser.ok_or_else(|| {
+        Problem::plain("OpenBot did not choose a port for your browser. Try Start again.")
+    })?;
+    if let Some(problem) = stack::port_already_taken(&[("browser", port)]) {
+        return Err(problem.into());
+    }
+    let child = spawn_local_browser(root, bun, secrets, browser)?;
+    hold_local_browser(shell, root, child)
+}
+
+fn spawn_local_browser(
+    root: &Path,
+    bun: &Path,
+    secrets: &stack::Secrets,
+    browser: &local_browser::LocalBrowser,
+) -> Result<std::process::Child, Problem> {
+    stack::spawn_host_process(
+        stack::local_browser_process(),
+        root,
+        &root.join(".logs"),
+        bun,
+        secrets,
+        Some(browser),
+    )
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start your browser. Try Start again.",
+            error.to_string(),
+        )
+    })
+}
+
+/// Record it, then hold it. One that cannot be recorded is ended, rather than left running where no
+/// later window could find it.
+fn hold_local_browser(
+    shell: &Shell,
+    root: &Path,
+    child: std::process::Child,
+) -> Result<(), Problem> {
+    if let Err(problem) = stack::record_host_processes(root, &[(stack::LOCAL_BROWSER, child.id())])
+    {
+        let mut held = [(stack::LOCAL_BROWSER, child)];
+        if stack::stop_host_children(root, &mut held).is_err() {
+            let [(_, mut child)] = held;
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return Err(problem);
+    }
+    *shell.browser.lock().unwrap() = Some(child);
+    Ok(())
+}
+
+/// The browser this window holds, closed so Chrome closes its windows and profile before anything
+/// is forced (see `stack::stop_host_children`). Kept on failure, so another Stop can try again.
+fn close_held_browser(shell: &Shell, root: &Path) -> Result<(), Problem> {
+    let mut slot = shell.browser.lock().unwrap();
+    let Some(child) = slot.take() else {
+        return Ok(());
+    };
+    let mut held = [(stack::LOCAL_BROWSER, child)];
+    match stack::stop_host_children(root, &mut held) {
+        Ok(_) => Ok(()),
+        Err(problem) => {
+            let [(_, child)] = held;
+            *slot = Some(child);
+            Err(problem)
+        }
+    }
+}
+
+/**
+The person's browser, started again when it dies, as the host-process supervisor once did for all
+four. It ends with the run it was started for, like [`watch_connections`].
+
+Giving up is said, with the tail of its log, and OpenBot is left running: it runs without the
+browser, and sending the window back to setup over it would stop everything else too.
+*/
+fn supervise_local_browser<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: PathBuf,
+    bun: PathBuf,
+    secrets: stack::Secrets,
+    browser: local_browser::LocalBrowser,
+    generation: u64,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut watch = supervise::Watch::new(stack::LOCAL_BROWSER);
+        let current = |shell: &Shell| {
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst) == generation
+                && shell.root.lock().unwrap().as_deref() == Some(root.as_path())
+        };
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let shell = app.state::<Shell>();
+            if !current(&shell) {
+                return;
+            }
+            let exited = match shell.browser.lock().unwrap().as_mut() {
+                // Stop took it.
+                None => return,
+                Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+            };
+            if !exited {
+                continue;
+            }
+            if !watch.should_restart(std::time::Instant::now()) {
+                *shell.browser.lock().unwrap() = None;
+                report(
+                    &app,
+                    stack::LOCAL_BROWSER,
+                    false,
+                    format!(
+                        "{}\n{}",
+                        watch.gave_up(),
+                        stack::tail_of(&root.join(".logs"), stack::LOCAL_BROWSER)
+                    ),
+                );
+                return;
+            }
+            report(
+                &app,
+                stack::LOCAL_BROWSER,
+                false,
+                "Your browser stopped. Starting it again.",
+            );
+            std::thread::sleep(supervise::backoff(watch.restarts - 1));
+
+            // Asked again under the lock: a Stop, or another Start, may have happened meanwhile,
+            // and starting a browser into either is how an orphan is made.
+            let _startup = shell.startup.lock().unwrap();
+            if !current(&shell) {
+                return;
+            }
+            match spawn_local_browser(&root, &bun, &secrets, &browser)
+                .and_then(|child| hold_local_browser(&shell, &root, child))
+            {
+                Ok(()) => report(&app, stack::LOCAL_BROWSER, true, "started again"),
+                Err(problem) => report(&app, stack::LOCAL_BROWSER, false, problem.said),
+            }
+        }
+    })
 }
 
 /**
