@@ -174,3 +174,29 @@ test("a press on a message does not make a layout clamp a scrollbar drag", () =>
 
   expect(following(view.container)).toBe("true");
 });
+
+/*
+ * An overlay scrollbar (macOS with a trackpad) takes no width, and a right-to-left one sits on the
+ * left, so a press on the thumb lands inside the content box. It is still a press on the viewport
+ * itself, not on a message in it.
+ */
+test("dragging an overlay scrollbar up pauses", () => {
+  const view = render(<ChatTranscript messages={HISTORY} restoring={false} />);
+  const element = viewport(view.container);
+  let top = 500;
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    get: () => top,
+  });
+  Object.defineProperty(element, "clientWidth", {
+    configurable: true,
+    get: () => 900,
+  });
+
+  fireEvent.scroll(element);
+  fireEvent.pointerDown(element, { clientX: 890 });
+  top = 400;
+  fireEvent.scroll(element);
+
+  expect(following(view.container)).toBe("false");
+});

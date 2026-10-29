@@ -265,12 +265,14 @@ export function useFollowIntent(
       if (y < last) down(event.currentTarget);
     },
     onPointerDown: (event) => {
-      // Only a press on the scrollbar itself: the viewport is the target, and the press is in the
-      // gutter to the right of its content box.
-      const element = event.currentTarget;
-      pointerDownRef.current =
-        event.target === element &&
-        event.nativeEvent.offsetX >= element.clientWidth;
+      /*
+       * A press on the viewport itself, not on anything in it: its scrollbar, or the bare margin
+       * beside the conversation. Not a gutter check: an overlay scrollbar (macOS with a trackpad)
+       * takes no width and a right-to-left one sits on the left, so a thumb is pressed inside the
+       * content box. A press on a message is never a drag, so a layout clamp under a finger
+       * resting on one is still not the person's.
+       */
+      pointerDownRef.current = event.target === event.currentTarget;
     },
     onScroll: (event) => {
       const element = event.currentTarget;
