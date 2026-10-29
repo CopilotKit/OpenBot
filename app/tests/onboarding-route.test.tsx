@@ -285,7 +285,7 @@ test("the steps run welcome, computer, team, approval, apps, notify, setup, name
       "Welcome",
       "A browser and files of its own",
       "Your team of Bots",
-      "It asks first",
+      "You decide what it asks",
       "Connect apps",
       "Get notified",
       "Check your setup",
@@ -295,7 +295,7 @@ test("the steps run welcome, computer, team, approval, apps, notify, setup, name
   for (const next of [
     "Each Bot has its own browser and files",
     "Pick a Bot or make your own",
-    "It asks before it acts",
+    "You decide what it asks about",
   ]) {
     fireEvent.click(await continueButton(view));
     await heading(view, next);
@@ -370,7 +370,7 @@ test("Back on a step opened by reload replaces it with the step before", async (
 
 test("on a desktop, a step already passed can be picked from the list", async () => {
   const view = open("/onboarding?step=approval");
-  await heading(view, "It asks before it acts");
+  await heading(view, "You decide what it asks about");
 
   const list = view.getByRole("navigation", { name: "Onboarding steps" });
   expect(within(list).queryByRole("button", { name: /Connect apps/ })).toBe(
@@ -384,9 +384,9 @@ test("on a desktop, a step already passed can be picked from the list", async ()
   fireEvent.click(
     within(
       view.getByRole("navigation", { name: "Onboarding steps" }),
-    ).getByRole("button", { name: /It asks first/ }),
+    ).getByRole("button", { name: /You decide what it asks/ }),
   );
-  expect(await heading(view, "It asks before it acts")).toBeTruthy();
+  expect(await heading(view, "You decide what it asks about")).toBeTruthy();
 });
 
 test("a reload stays on the step in the address", async () => {
@@ -465,7 +465,7 @@ test("back from a consent, browser Back goes to the step before, not to the vend
   ).toBeNull();
 
   await act(async () => view.history.back());
-  expect(await heading(view, "It asks before it acts")).toBeTruthy();
+  expect(await heading(view, "You decide what it asks about")).toBeTruthy();
 });
 
 test("the failed line goes once the person moves on, and doesn't come back with Back", async () => {
@@ -573,7 +573,7 @@ test("Skip intro reaches Connect your apps, survives reload, and Back returns to
 test("somebody trying OpenBot alone gets the self-hosting step, with Talk to an engineer", async () => {
   localEvaluation = true;
   const view = open("/onboarding?step=approval");
-  await heading(view, "It asks before it acts");
+  await heading(view, "You decide what it asks about");
 
   fireEvent.click(await continueButton(view));
 
@@ -587,7 +587,7 @@ test("somebody trying OpenBot alone gets the self-hosting step, with Talk to an 
 
 test("an organization's people never see the self-hosting step", async () => {
   const view = open("/onboarding?step=approval");
-  await heading(view, "It asks before it acts");
+  await heading(view, "You decide what it asks about");
 
   fireEvent.click(await continueButton(view));
 
