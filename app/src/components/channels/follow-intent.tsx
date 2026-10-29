@@ -112,6 +112,16 @@ export function nextFollow(state: FollowState, event: FollowEvent): FollowStep {
   }
 }
 
+function isEditable(target: EventTarget): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT")
+  );
+}
+
 export type FollowRequest = { behavior: ScrollBehavior; tick: number };
 
 type ViewportHandlers = Pick<
@@ -203,8 +213,11 @@ export function useFollowIntent(
 
   const viewportHandlers: ViewportHandlers = {
     onWheel: (event) => dispatch({ type: "wheel", deltaY: event.deltaY }),
-    onKeyDown: (event) =>
-      dispatch({ type: "key", key: event.key, shiftKey: event.shiftKey }),
+    onKeyDown: (event) => {
+      // A key typed into a field inside the transcript moves a caret, not the page.
+      if (event.defaultPrevented || isEditable(event.target)) return;
+      dispatch({ type: "key", key: event.key, shiftKey: event.shiftKey });
+    },
     onTouchStart: (event) => {
       touchYRef.current = event.touches[0]?.clientY ?? null;
     },

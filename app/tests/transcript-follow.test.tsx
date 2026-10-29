@@ -129,3 +129,27 @@ test("the scroll button stays mounted", () => {
   expect(button).toBeTruthy();
   expect(button?.getAttribute("data-active")).toBe("false");
 });
+
+/*
+ * Keys typed into a field inside the transcript (a form in an app card) move a caret, not the
+ * page. Pausing on them left somebody at the very end of a conversation not following it, with no
+ * way back short of the button.
+ */
+test("arrow keys in a field inside the transcript do not pause", () => {
+  const view = render(<ChatTranscript messages={HISTORY} restoring={false} />);
+  const input = document.createElement("input");
+  view.getByText("first answer").appendChild(input);
+
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  fireEvent.keyDown(input, { key: " ", shiftKey: true });
+
+  expect(following(view.container)).toBe("true");
+});
+
+test("scroll keys on the transcript itself pause", () => {
+  const view = render(<ChatTranscript messages={HISTORY} restoring={false} />);
+
+  fireEvent.keyDown(viewport(view.container), { key: "PageUp" });
+
+  expect(following(view.container)).toBe("false");
+});
