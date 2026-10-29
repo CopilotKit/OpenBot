@@ -32,7 +32,11 @@ import type { AuditInitiator } from "../audit";
 import type { MemoryStore } from "../memory/store";
 import { REFUSAL_MARKER } from "../plugins/tools";
 import { TASK_RUNS, type TaskOrigin } from "../tasks/types";
-import type { SerialOrder, WorkQueue } from "../work/queue";
+import {
+  DEFAULT_MAX_ATTEMPTS,
+  type SerialOrder,
+  type WorkQueue,
+} from "../work/queue";
 import {
   proactiveInitiator,
   proactiveRunIdOf,
@@ -53,6 +57,8 @@ export const PROACTIVE_RUN_KIND = "proactive.run";
 export const PROACTIVE_TASK_KIND = "proactive.task";
 /** The answer to a question card, carried on by the person-response sweep. */
 export const PERSON_RESPONSE_KIND = "person.response";
+/** A decided approval, carried out and its turn carried on by the approval resume sweep. */
+export const APPROVAL_RESUME_KIND = "approval.resume";
 const RUN_LEASE_MS = 10 * 60_000;
 /**
  * A task's lease, shorter than research's so a turn a restart cut off is picked up again within
@@ -64,22 +70,33 @@ const TASK_LEASE_MS = 3 * 60_000;
 const TASK_RETRY_MS = 10_000;
 
 /**
- * One task's conversation takes one turn at a time: its own turns, the person's replies, and the
- * answers to question cards its Bot asked there. Claimed under this by the task worker below and by
- * the person-response sweep (approvals/person-response-sweep.ts).
+ * One task's conversation takes one turn at a time, in the order the person gave them: its own
+ * turns, the person's replies, the answers to question cards its Bot asked there, and the turns
+ * Allow once carries on. Claimed under this by the task worker below, the person-response sweep
+ * (approvals/person-response-sweep.ts) and the approval resume sweep (approvals/resume-sweep.ts).
  *
- * Two kinds share the order. A task's turn names its task in its payload. An answer names only the
+ * Three kinds share the order. A task's turn names its task in its payload. An answer names only the
  * question it answers, which names the thread it was asked in, so its task is the one whose
  * conversation that thread is, read the way the task's status reads it (tasks/store.ts): the
  * person's own mapping, the person's own task, and the question's channel when it names one. An
- * answer to a question asked anywhere else is in no task, and runs as it always has.
+ * approval's resume names only the approval, which names the thread its turn stopped in, and its
+ * task is found the same way. An answer or an approval anywhere else is in no task, and runs as it
+ * always has.
+ *
+ * A turn stopped for Allow once has finished, so without the resume in the order a reply sent before
+ * the person allowed it could run after the resume, or one sent after it before, and the resume
+ * carries on from the conversation as it was when the turn stopped.
  *
  * Each kind has the attempt cap its worker claims at: a task's turn runs `TASK_RUNS` times, an
- * answer once.
+ * answer once, and a resume as many times as the queue's default allows.
  */
 export const TASK_ORDER: SerialOrder = {
   name: PROACTIVE_TASK_KIND,
-  kinds: { [PROACTIVE_TASK_KIND]: TASK_RUNS, [PERSON_RESPONSE_KIND]: 1 },
+  kinds: {
+    [PROACTIVE_TASK_KIND]: TASK_RUNS,
+    [PERSON_RESPONSE_KIND]: 1,
+    [APPROVAL_RESUME_KIND]: DEFAULT_MAX_ATTEMPTS,
+  },
   groupOf: (row) => sql`case when ${row}.kind = ${PERSON_RESPONSE_KIND} then (
       select task.id from "tasks" as task
       inner join "intelligence_channel_mappings" as mapping
@@ -90,6 +107,16 @@ export const TASK_ORDER: SerialOrder = {
         and mapping.thread_id = ${row}.payload->'question'->>'threadId'
         and (${row}.payload->'question'->>'channelId' is null
           or ${row}.payload->'question'->>'channelId' = task.channel_id)
+    ) when ${row}.kind = ${APPROVAL_RESUME_KIND} then (
+      select task.id from "approval_requests" as approval
+      inner join "intelligence_channel_mappings" as mapping
+        on mapping.user_id = approval.owner_user_id
+        and mapping.thread_id = approval.action->>'threadId'
+      inner join "tasks" as task
+        on task.channel_id = mapping.channel_id
+        and task.owner_user_id = approval.owner_user_id
+      where approval.id = ${row}.payload->>'approvalId'
+        and approval.owner_user_id = ${row}.payload->>'ownerUserId'
     ) else ${row}.payload->>'taskId' end`,
 };
 

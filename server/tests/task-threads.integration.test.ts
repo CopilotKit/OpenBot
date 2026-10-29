@@ -24,6 +24,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createPersonResponseTick } from "../src/approvals/person-response-sweep";
+import { createApprovalResumeTick } from "../src/approvals/resume-sweep";
+import type { ApprovalService } from "../src/approvals/service";
 import {
   createApprovalQuestions,
   type PersonQuestion,
@@ -950,6 +952,102 @@ describe("status", () => {
         { attempts: 1, finished: true, error: null },
       ],
     });
+  });
+
+  test("Allow once carries its turn on in the task's order: after a reply sent before it, before one sent after", async () => {
+    const task = await freshTask();
+    const queue = createWorkQueue(database);
+    const approvalId = `${prefix}-allow-${randomUUID()}`;
+    await database.insert(approvalRequests).values({
+      id: approvalId,
+      ownerUserId: owner.id,
+      runId: `task-${task.id}`,
+      toolCallId: "send",
+      actionDigest: "digest",
+      status: "approved",
+      decision: "allow_once",
+      action: {
+        threadId: task.threadId,
+        botId: bot,
+        toolRef: "google-workspace/gmail_send_reply",
+      } as never,
+    });
+    // What ran, in order. A step with a gate holds there until the test lets it go.
+    const order: string[] = [];
+    const gates = new Map<
+      string,
+      {
+        entered: PromiseWithResolvers<void>;
+        release: PromiseWithResolvers<void>;
+      }
+    >();
+    const gate = (step: string) => {
+      const held = {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      };
+      gates.set(step, held);
+      return held;
+    };
+    const run = async (step: string) => {
+      order.push(step);
+      gates.get(step)?.entered.resolve();
+      await gates.get(step)?.release.promise;
+    };
+    const { engine } = engineFor(
+      ({ acceptedReply }) => run(acceptedReply?.text ?? ""),
+      queue,
+    );
+    const resume = createApprovalResumeTick({
+      approvalQueue: queue,
+      approvalOwner: "approver",
+      approvalService: {
+        resume: () => run("allowed"),
+      } as unknown as ApprovalService,
+      executeApprovedAction: async () => ({ content: "" }),
+      database,
+      responsibilityStore: createResponsibilityStore(database, {
+        resolveTarget: async () => null,
+      }),
+      groupConversations: { continueWaiting: async (_id, turn) => turn() },
+      approvalContinuationRunner: async () => ({ replyText: "" }),
+      channelStore,
+      actorFor,
+      notify: async () => {},
+    });
+
+    // "Make it shorter" is running when the person allows the step: the resume waits for it.
+    const shorter = gate("Make it shorter");
+    await engine.reply(owner.id, task.id, {
+      reply: "Make it shorter",
+      messageId: randomUUID(),
+    });
+    await shorter.entered.promise;
+    await queue.offer({
+      kind: "approval.resume",
+      key: approvalId,
+      payload: { ownerUserId: owner.id, approvalId },
+    });
+    await resume();
+    expect(order).toEqual(["Make it shorter"]);
+    shorter.release.resolve();
+    await engine.idle();
+
+    // The resume is running when the person sends "Send it": the reply waits for it.
+    const allowed = gate("allowed");
+    const resuming = resume();
+    await allowed.entered.promise;
+    await engine.reply(owner.id, task.id, {
+      reply: "Send it",
+      messageId: randomUUID(),
+    });
+    await engine.idle();
+    expect(order).toEqual(["Make it shorter", "allowed"]);
+    allowed.release.resolve();
+    await resuming;
+    await engine.sweep();
+    await engine.idle();
+    expect(order).toEqual(["Make it shorter", "allowed", "Send it"]);
   });
 
   test("an exhausted accepted answer exposes its failure and remains recoverable through Try again", async () => {
