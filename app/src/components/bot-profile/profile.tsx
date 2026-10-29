@@ -7,7 +7,6 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
-import { useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { BotNeedsYou } from "@/components/approvals/waiting";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
@@ -40,6 +39,10 @@ import {
   type BotNotify,
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import {
+  requestNotificationPermission,
+  useNotificationPermission,
+} from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import { BotActivityGlance } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
@@ -65,15 +68,8 @@ export function BotProfile({
   const lifecycle = useQuery(botLifecycleQueryOptions(agent.id));
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
-  const [permission, setPermission] = useState<string>(() => {
-    try {
-      return typeof Notification === "undefined"
-        ? "unsupported"
-        : Notification.permission;
-    } catch {
-      return "unsupported";
-    }
-  });
+  // The browser's answer, shared with onboarding's Get notified step, so a yes there shows here.
+  const permission = useNotificationPermission();
 
   return (
     <>
@@ -186,13 +182,7 @@ export function BotProfile({
                   </ItemContent>
                   <ItemActions>
                     <Button
-                      onClick={async () => {
-                        try {
-                          setPermission(await Notification.requestPermission());
-                        } catch {
-                          setPermission("unsupported");
-                        }
-                      }}
+                      onClick={() => void requestNotificationPermission()}
                       size="sm"
                       variant="outline"
                     >
