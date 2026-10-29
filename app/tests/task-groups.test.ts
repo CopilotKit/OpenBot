@@ -1,5 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
+import type { Message } from "@ag-ui/core";
+import { frameTaskBrief, frameTaskInput } from "@openbot/shared/task-brief";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { toVisibleChatItems } from "@/components/channels/chat-messages";
+import { shortAgo } from "@/components/tasks/task-list";
 import {
   type ApprovalRequest,
   answerPersonQuestionMutationOptions,
@@ -25,7 +29,8 @@ import {
 /**
  * How Tasks' list is grouped, ordered and counted, worked out without drawing anything: the order
  * of the groups, a task's own approval or question making it Needs you, the line under each title,
- * and the sidebar's count being exactly the Needs you group. How often tasks are read again.
+ * and the sidebar's count being exactly the Needs you group. How often tasks are read again. And
+ * a task's ask, drawn once however many times its turn runs.
  */
 
 const NOW = Date.parse("2026-10-28T12:00:00Z");
@@ -242,6 +247,30 @@ test("the sidebar's count is the Needs you group: waiting tasks once, nothing ou
     ),
   ).toBe(2);
   expect(needsYouCount(undefined, undefined)).toBe(0);
+});
+
+test("how long ago, in as few letters as the locale has", () => {
+  expect(shortAgo(at(0), NOW)).toBe("now");
+  expect(shortAgo(at(5), NOW)).toMatch(/^5\s?m/);
+  expect(shortAgo(at(60 * 3), NOW)).toMatch(/^3\s?h/);
+  expect(shortAgo(at(60 * 24), NOW)).toBe("yesterday");
+  expect(shortAgo("not a time", NOW)).toBe("");
+});
+
+test("a task's ask is drawn once however many times its turn runs, and an accepted reply once too", () => {
+  const ask = frameTaskBrief("Find a time for coffee with Sam.");
+  const reply = frameTaskInput("Make it 20 minutes.", {
+    id: "reply-1",
+    text: "Make it 20 minutes.",
+  });
+  const items = toVisibleChatItems([
+    { id: "task-1", role: "user", content: ask },
+    { id: "a1", role: "assistant", content: "Booked Tuesday." },
+    { id: "task-1-0123456789abcdef", role: "user", content: ask },
+    { id: "reply-1", role: "user", content: reply },
+    { id: "task-1-fedcba9876543210", role: "user", content: reply },
+  ]);
+  expect(items.map((item) => item.id)).toEqual(["task-1", "a1", "reply-1"]);
 });
 
 /** How long until a query reads again, for a cache holding `data`. */

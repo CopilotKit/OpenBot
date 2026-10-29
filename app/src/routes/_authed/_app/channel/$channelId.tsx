@@ -274,7 +274,8 @@ function Conversation() {
 
 /**
  * A channel with exactly one coworker is its CopilotKit chat. One with several is a group, which
- * redirects to its shared transcript at `/group/$channelId`.
+ * redirects to its shared transcript at `/group/$channelId`. A task's conversation redirects to the
+ * task's page.
  */
 function ChannelBody({
   channel,
@@ -292,6 +293,21 @@ function ChannelBody({
       <p className="p-8 text-sm text-destructive" role="alert">
         Couldn't load this conversation. Reload the page.
       </p>
+    );
+  }
+
+  /*
+   * A task's conversation is answered on the task's page, where a reply waits its turn in the task's
+   * queue. Drawn here, a reply would run in the browser beside the task's own turn. The redirect
+   * replaces this entry, so Back goes to wherever the link was.
+   */
+  if (channel.taskId) {
+    return (
+      <Navigate
+        params={{ taskId: channel.taskId }}
+        replace
+        to="/tasks/$taskId"
+      />
     );
   }
 

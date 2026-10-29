@@ -38,6 +38,7 @@ import {
   botActivityQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { relativeTime } from "@/lib/relative-time";
+import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -59,8 +60,16 @@ const KIND_LABEL: Record<ActivityKind, string> = {
   follow_up: "Follow-up",
 };
 
-/** Where an item opens: its conversation when it has one, otherwise the screen that owns its kind. */
-function linkFor(item: ActivityItem, agentId: string) {
+/**
+ * Where an item opens: the task it was raised in, its conversation when it has one, otherwise the
+ * screen that owns its kind.
+ */
+function linkFor(
+  item: ActivityItem,
+  agentId: string,
+  taskId: string | undefined,
+) {
+  if (taskId) return <Link params={{ taskId }} to="/tasks/$taskId" />;
   if (item.channelId)
     return (
       <Link to="/channel/$channelId" params={{ channelId: item.channelId }} />
@@ -90,8 +99,13 @@ function ActivityRow({
 }) {
   const stop = useMutation(stopHandoffMutationOptions(queryClient));
   const cancel = useMutation(cancelFollowUpMutationOptions(queryClient));
+  // A task's conversation is the task's: what was raised there is answered on its page.
+  const tasks = useQuery(taskListQueryOptions());
+  const taskId = item.channelId
+    ? tasks.data?.find((task) => task.channelId === item.channelId)?.id
+    : undefined;
   const Icon = ICONS[item.kind];
-  const link = linkFor(item, agentId);
+  const link = linkFor(item, agentId, taskId);
   const when = relativeTime(item.at);
   const control = item.stoppable ? (
     <Button
