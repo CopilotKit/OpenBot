@@ -369,7 +369,7 @@ test("a pending change is drawn in the conversation where the action was, and de
     </QueryClientProvider>,
   );
   await view.findByRole("region", { name: "Waiting for your approval" });
-  expect(view.getByText("This needs you: Click on page")).toBeTruthy();
+  expect(view.getByText("This needs you: Click on the page")).toBeTruthy();
   expect(view.getByText("shop.example")).toBeTruthy();
   // A hand-off is the person's to do: nothing offers to let the Bot do it.
   expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
