@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useBotLook } from "@/components/agents/bot-look";
+import { AiNotice } from "@/components/channels/ai-notice";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import {
   type AgentOption,
@@ -537,6 +538,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
+        <AiNotice />
       </div>
     </div>
   );
