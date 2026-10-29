@@ -539,8 +539,15 @@ export function ChannelChat({
   useActiveBot(runtimeAgentId);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
+  /*
+   * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
+   * it until all three are in, so it lands once at the bottom instead of drawing the conversation
+   * and then splicing call cards into it; the notice waits for the same moment, so it appears in
+   * the commit that shows the history rather than a render later, shrinking the view under it.
+   */
+  const historyLoading = restoring || voiceArchive.pending;
   const historyNotice = channelHistoryNotice({
-    restoring,
+    restoring: historyLoading,
     messageCount: agent.messages.length,
     lastMessageAt: channel.lastMessageAt,
     historyAvailability,
@@ -1064,7 +1071,7 @@ export function ChannelChat({
              * above.
              */
             queueWhileBusy
-            restoring={restoring}
+            restoring={historyLoading}
             /*
              * The run, not the turn. Stop reaches a run through the core's abort controller, and that
              * controller does not exist until `say` has finished waiting for the runtime agent — so
