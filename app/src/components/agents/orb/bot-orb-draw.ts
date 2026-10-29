@@ -491,11 +491,13 @@ function glow(ctx: Ctx, R: number, amt: number, c: Rgb, dark: boolean) {
   ctx.fillRect(-r, -r, 2 * r, 2 * r);
 }
 
+/** How long the landing's ping rings, in seconds. */
+const PING_S = 1;
+
 /** One ring that leaves the orb and fades: the landing's ping. */
 function ping(ctx: Ctx, r0: number, age: number, pal: Palette, dark: boolean) {
-  const dur = 1;
-  if (!(age >= 0 && age < dur)) return;
-  const u = age / dur;
+  if (!(age >= 0 && age < PING_S)) return;
+  const u = age / PING_S;
   const r = r0 * (1.02 + (1.5 - 1.02) * eout(u));
   const a = (1 - u) ** 1.5;
   ctx.strokeStyle = rgba(
@@ -606,6 +608,9 @@ function eyePath(ctx: Ctx, w: number, h: number, smile: number) {
   ctx.closePath();
 }
 
+/** How long an orb stays perked up after the pointer comes close, in seconds. */
+const PERK_S = 1.6;
+
 /** The sphere: the mesh turned toward where it looks, its rim, and two eye-lights that blink and smile. */
 function sphere(
   ctx: Ctx,
@@ -616,7 +621,8 @@ function sphere(
   size: number,
 ) {
   const na = S.noticeAge;
-  const perk = na >= 0 && na < 1.6 ? Math.exp(-2.6 * na) * smooth(na / 0.1) : 0;
+  const perk =
+    na >= 0 && na < PERK_S ? Math.exp(-2.6 * na) * smooth(na / 0.1) : 0;
   const finish = finishPhase(S.finishAge);
   const sc = scaleOf(S, finish);
   ctx.save();
@@ -698,4 +704,26 @@ export function drawBotOrb(
   ping(ctx, r, S.doneAge, pal, dark);
   rays(ctx, r, finish.rays, pal, dark);
   sphere(ctx, r, S, pal, dark, size * 0.72);
+}
+
+/** How long each age in a pose shows, in seconds: after that the orb draws as if it never happened. */
+const SHOWS_FOR: Partial<Record<keyof OrbPose, number>> = {
+  doneAge: PING_S,
+  noticeAge: PERK_S,
+  finishAge: FINISH_S,
+};
+
+/**
+ * Whether two poses draw the same picture, every value within a thousandth of the other's. An age
+ * counts only while what it times still shows, so an orb that has settled poses the same picture
+ * frame after frame and need not draw it again.
+ */
+export function samePicture(a: OrbPose, b: OrbPose): boolean {
+  for (const key of Object.keys(a) as (keyof OrbPose)[]) {
+    const shows = SHOWS_FOR[key];
+    const seen = (v: number) =>
+      shows === undefined || (v >= 0 && v < shows) ? v : -1;
+    if (Math.abs(seen(a[key]) - seen(b[key])) >= 1e-3) return false;
+  }
+  return true;
 }
