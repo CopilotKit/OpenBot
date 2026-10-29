@@ -87,6 +87,27 @@ function sameActivity(
   );
 }
 
+/**
+ * Whether the transcript still waits behind the placeholder.
+ *
+ * A channel opened from the roster waits for its whole history: the stored thread (`restoring`) and
+ * its voice chats. A channel just started from the compose screen has no history; its first message
+ * is already in hand and shows at once, not after a voice-chat request with nothing in it.
+ *
+ * Exported for its tests.
+ */
+export function historyIsLoading({
+  restoring,
+  seeded,
+  voicePending,
+}: {
+  restoring: boolean;
+  seeded: boolean;
+  voicePending: boolean;
+}): boolean {
+  return restoring || (!seeded && voicePending);
+}
+
 export function channelHistoryNotice({
   restoring,
   messageCount,
@@ -545,7 +566,11 @@ export function ChannelChat({
    * and then splicing call cards into it; the notice waits for the same moment, so it appears in
    * the commit that shows the history rather than a render later, shrinking the view under it.
    */
-  const historyLoading = restoring || voiceArchive.pending;
+  const historyLoading = historyIsLoading({
+    restoring,
+    seeded: seed !== null,
+    voicePending: voiceArchive.pending,
+  });
   const historyNotice = channelHistoryNotice({
     restoring: historyLoading,
     messageCount: agent.messages.length,
