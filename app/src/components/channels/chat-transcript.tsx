@@ -72,9 +72,11 @@ import {
   dropRepeatedAppCards,
   groupToolSteps,
   ToolActivity,
+  type ToolGroup,
   useDrawnTool,
   type TranscriptItem,
 } from "./tool-activity";
+import { isBrowserStep } from "./browser-activity";
 import {
   attachmentModality,
   type SentAttachment,
@@ -1294,7 +1296,7 @@ const TranscriptActivity = memo(function TranscriptActivity({
  * `useRenderToolCall` is called HERE rather than passed in as a prop: a function whose identity the
  * parent cannot guarantee is the classic way to make a memo boundary useless.
  */
-const TranscriptToolCall = memo(function TranscriptToolCall({
+const ToolCallBody = memo(function ToolCallBody({
   toolCallId,
   name,
   args,
@@ -1333,28 +1335,69 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   });
 
   return (
-    <Arriving>
-      <ToolRenderBoundary name={name}>
-        {/*
-         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
-         * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
-         * and register no renderer here at all. `renderToolCall` still draws the components the app
-         * registers, and everything else lands below.
-         *
-         * What was called, shimmering until its result arrives, and then the server's own words
-         * drawn the way a Bot's prose is drawn.
-         */}
-        {drawn ?? (
-          <ServerToolLine
-            name={name}
-            place={{ toolCallId, latest }}
-            result={result}
-          />
-        )}
-      </ToolRenderBoundary>
-    </Arriving>
+    <ToolRenderBoundary name={name}>
+      {/*
+       * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
+       * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
+       * and register no renderer here at all. `renderToolCall` still draws the components the app
+       * registers, and everything else lands below.
+       *
+       * What was called, shimmering until its result arrives, and then the server's own words
+       * drawn the way a Bot's prose is drawn.
+       */}
+      {drawn ?? (
+        <ServerToolLine
+          name={name}
+          place={{ toolCallId, latest }}
+          result={result}
+        />
+      )}
+    </ToolRenderBoundary>
   );
 });
+
+type ToolCallProps = React.ComponentProps<typeof ToolCallBody>;
+
+/** A tool call on its own row, arriving as one. */
+function TranscriptToolCall(props: ToolCallProps) {
+  return (
+    <Arriving>
+      <ToolCallBody {...props} />
+    </Arriving>
+  );
+}
+
+/**
+ * A row of calls the transcript folds, drawn by ONE component whatever its size, so the row is not
+ * rebuilt when a second call joins it. A lone call is the line it always was; a run, or a browser
+ * step, is the folded group. See `groupToolSteps` for why the row's key survives the same changes.
+ */
+function FoldedToolRow({
+  group,
+  active,
+  latest,
+}: {
+  group: ToolGroup;
+  active: boolean;
+  latest: boolean;
+}) {
+  const [only] = group.steps;
+  return (
+    <Arriving>
+      {group.steps.length === 1 && only && !isBrowserStep(only) ? (
+        <ToolCallBody
+          args={only.toolCall.function.arguments}
+          latest={latest}
+          name={only.toolCall.function.name}
+          result={only.result}
+          toolCallId={only.toolCall.id}
+        />
+      ) : (
+        <ToolActivity active={active} group={group} />
+      )}
+    </Arriving>
+  );
+}
 
 /**
  * A tool the runtime executed, drawn for the person watching.
@@ -1631,9 +1674,12 @@ export function ChatTranscript({
    * cost was markdown parsing and chart SVGs, and those are skipped by the memoised children below,
    * which is where the 25x came from. This runs per render and is not worth guarding.
    */
+  /* Which row each tool step was drawn in, so a row keeps its key; see `groupToolSteps`. */
+  const rowIdsRef = useRef(new Map<string, string>());
   const items = groupToolSteps(
     dropRepeatedAppCards(toVisibleChatItems(messages)),
     isDrawn,
+    rowIdsRef.current,
   );
 
   /*
@@ -1822,12 +1868,11 @@ export function ChatTranscript({
                     messageId={item.id}
                     {...openingProps(item.id)}
                   >
-                    <Arriving>
-                      <ToolActivity
-                        group={item}
-                        active={busy && index === items.length - 1}
-                      />
-                    </Arriving>
+                    <FoldedToolRow
+                      active={busy && index === items.length - 1}
+                      group={item}
+                      latest={index >= latestIndex}
+                    />
                   </MessageScrollerItem>
                 ) : item.kind === "tool" ? (
                   <MessageScrollerItem

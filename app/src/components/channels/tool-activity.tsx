@@ -55,19 +55,33 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  *
  * `isDrawn` says which tools the app draws itself; the transcript reads it from `useDrawnTool`.
  *
- * The group takes its first step's id, so the row keeps its identity while later steps stream in.
+ * EVERY RUN IS A GROUP, A RUN OF ONE INCLUDED, AND KEEPS ITS ROW ID FOR ITS WHOLE LIFE. A lone call
+ * used to be its own `tool` row and became a `tools` row when a second call arrived, under the same
+ * key but a different tree, so React tore the row down and rebuilt it and its entrance replayed. A
+ * group took its first step's id, so when that step turned out to ask the person something and left,
+ * the group's id changed and it was rebuilt again. Now the transcript draws a group of one as the
+ * line it always was, inside the one row type, and `rowIds` remembers which row each step was drawn
+ * in: a run reuses the row of the first of its steps no earlier run in this pass has claimed. Group
+ * ids carry a `group:` prefix, so they can never collide with a single row's id.
  */
 export function groupToolSteps(
   items: readonly VisibleChatItem[],
   isDrawn: (name: string) => boolean,
+  rowIds: Map<string, string> = new Map(),
 ): TranscriptItem[] {
   const grouped: TranscriptItem[] = [];
+  const claimed = new Set<string>();
   let run: ToolItem[] = [];
   const close = () => {
     const [first] = run;
     if (!first) return;
-    if (run.length === 1 && !isBrowserStep(first)) grouped.push(first);
-    else grouped.push({ kind: "tools", id: first.id, steps: run });
+    const kept = run
+      .map((step) => rowIds.get(step.id))
+      .find((id) => id !== undefined && !claimed.has(id));
+    const id = kept ?? `group:${first.id}`;
+    claimed.add(id);
+    for (const step of run) rowIds.set(step.id, id);
+    grouped.push({ kind: "tools", id, steps: run });
     run = [];
   };
   for (const item of items) {
