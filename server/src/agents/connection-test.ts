@@ -2,6 +2,7 @@ import {
   checkAgentEndpoint,
   createAgentFetch,
   EndpointNotAllowedError,
+  type ResolveHost,
 } from "./endpoint";
 
 /**
@@ -140,6 +141,9 @@ export async function testAgentConnection(
     headers?: Record<string, string>;
     allowPrivateHosts?: boolean;
     allowedHosts?: ReadonlySet<string>;
+    /** Hosts this deployment's own configuration names. See `checkResolvedAgentHost`. */
+    trustedHosts?: ReadonlySet<string>;
+    resolveHost?: ResolveHost;
     fetchImpl?: typeof fetch;
     timeoutMs?: number;
   } = {},
@@ -159,6 +163,8 @@ export async function testAgentConnection(
     ...(options.allowPrivateHosts !== undefined
       ? { allowPrivateHosts: options.allowPrivateHosts }
       : {}),
+    ...(options.trustedHosts ? { trustedHosts: options.trustedHosts } : {}),
+    ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
   let response: Response;

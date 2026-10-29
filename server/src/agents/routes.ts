@@ -6,7 +6,7 @@ import type { AppVariables } from "../auth/guards";
 import { afterExposureChange } from "../plugins/exposure-change";
 import type { SharedUseStore } from "../plugins/shared-use-store";
 import { testAgentConnection } from "./connection-test";
-import { checkAgentEndpoint } from "./endpoint";
+import { checkAgentEndpoint, trustedHostsOf } from "./endpoint";
 import { isolationState, mayIsolate } from "./isolation";
 import { isManagedEndpoint } from "./managed-endpoint";
 import { canManageAgent } from "./profile-policy";
@@ -524,6 +524,11 @@ export function createAgentRoutes(
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
       allowPrivateHosts,
       allowedHosts,
+      // The deployment's own Bot and harness live at names on its own network, and are not an
+      // address somebody is registering.
+      ...(managedRun
+        ? { trustedHosts: trustedHostsOf(managedRun.endpoints) }
+        : {}),
     });
     // 200 either way: the request succeeded, and the verdict is the payload. A failed connection test
     // is an answer, not an error, and a 4xx here would have the surface render it as a broken button.

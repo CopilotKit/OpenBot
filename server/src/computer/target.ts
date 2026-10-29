@@ -72,6 +72,41 @@ function isLocalhostName(hostname: string): boolean {
   return hostname === "localhost" || hostname.endsWith(".localhost");
 }
 
+/**
+ * A name with no dot in it: `postgres`, `supervisor`, `agent-computer`.
+ *
+ * Nothing on the public internet is reached by a single label. Inside a deployment almost everything
+ * is: Docker Compose and Kubernetes name each service this way, so `http://supervisor:4300` is this
+ * deployment's own Docker-socket holder however ordinary it looks as text. IP literals are excluded
+ * (an IPv4 address has dots, an IPv6 one colons) because they have their own checks above.
+ */
+function isSingleLabelHostname(hostname: string): boolean {
+  return hostname !== "" && !hostname.includes(".") && !hostname.includes(":");
+}
+
+/**
+ * Whether an address a name resolved to is one a public check would refuse.
+ *
+ * For callers that resolve before they dial (agents/endpoint.ts): the textual check above cannot see
+ * that `agent.example.com` points at 10.0.0.5, and the resolved address is the one that is dialled.
+ */
+export function isInternalAddress(address: string): boolean {
+  // An IPv4-mapped address with a dotted tail is the IPv4 address it carries.
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+  if (mapped?.[1]) return isInternalAddress(mapped[1]);
+  const host = canonicalHostname(
+    address.includes(":") && !address.startsWith("[")
+      ? `[${address.toLowerCase()}]`
+      : address.toLowerCase(),
+  );
+  return (
+    isNeverAllowedHostname(host) ||
+    INTERNAL_HOSTNAMES.has(host) ||
+    isPrivateIpv4(host) ||
+    isPrivateIpv6(host)
+  );
+}
+
 export type TargetVerdict =
   | { allowed: true; url: string }
   | { allowed: false; reason: string };
@@ -186,7 +221,12 @@ function isPrivateIpv4(hostname: string): boolean {
     return false;
   }
   const [a, b] = octets as [number, number, number, number];
+  // "This network": 0.0.0.0 reaches the local host on Linux, and the rest of 0/8 is never a server.
+  if (a === 0) return true;
   if (a === 10) return true;
+  // Shared address space (RFC 6598). Carrier-grade NAT, and the range cloud providers use for
+  // internal services, so it is no more a public address than 10/8 is.
+  if (a === 100 && b >= 64 && b <= 127) return true;
   if (a === 127) return true;
   if (a === 169 && b === 254) return true; // link-local, includes metadata
   if (a === 172 && b >= 16 && b <= 31) return true;
@@ -284,6 +324,7 @@ export function checkNavigationTarget(
   if (
     INTERNAL_HOSTNAMES.has(hostname) ||
     isLocalhostName(hostname) ||
+    isSingleLabelHostname(hostname) ||
     isPrivateIpv4(hostname) ||
     isPrivateIpv6(hostname)
   ) {

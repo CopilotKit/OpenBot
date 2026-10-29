@@ -31,7 +31,7 @@ import {
 } from "./agents/callback-token";
 import { canUseComputer } from "./agents/computer-access";
 import { wireCoordination } from "./agents/coordination-wiring";
-import { createAgentFetch } from "./agents/endpoint";
+import { createAgentFetch, trustedHostsOf } from "./agents/endpoint";
 import { createHandoffDesk } from "./agents/handoff";
 import { createHandoffRunner } from "./agents/handoff-runner";
 import { startHandoffDelivery } from "./agents/handoff-wiring";
@@ -1678,6 +1678,18 @@ const agentFetch = createAgentFetch({
   allowPrivateHosts: config.computer?.allowPrivateHosts === true,
   // Named addresses are reachable on every hop, not only the one that was registered.
   allowedHosts: config.agentEndpointAllowedHosts,
+  // Addresses this deployment's own configuration points at: the managed Bot, a harness picked during
+  // setup, and a tenant package's remote coworkers. Exempt from resolving where a name points,
+  // because they are the operator's decision rather than an address somebody registered.
+  trustedHosts: trustedHostsOf([
+    config.managedAgent?.endpoint,
+    config.managedAgent?.alsoRun,
+    ...tenantPackage.agents.map((agent) =>
+      typeof agent.configuration.endpoint === "string"
+        ? agent.configuration.endpoint
+        : undefined,
+    ),
+  ]),
   // The refusal is what the run already knows; this is what the deployment knows. Written here
   // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
   // target check it reuses does.

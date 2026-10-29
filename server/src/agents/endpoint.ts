@@ -1,4 +1,6 @@
-import { checkNavigationTarget } from "../computer/target";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import { checkNavigationTarget, isInternalAddress } from "../computer/target";
 
 /**
  * Where an external agent lives, and whether we are willing to talk to it.
@@ -111,6 +113,110 @@ export function checkAgentEndpoint(
   }
 
   return { allowed: true, url: verdict.url };
+}
+
+/** Every address a name resolves to, which is what a dial will actually reach. */
+export type ResolveHost = (hostname: string) => Promise<string[]>;
+
+const resolveWithDns: ResolveHost = async (hostname) =>
+  (await lookup(hostname, { all: true, verbatim: true })).map(
+    (entry) => entry.address,
+  );
+
+/** The host of an address in the spelling `allowedHosts` uses, with and without its port. */
+function hostKeys(url: URL): string[] {
+  const hostname = url.hostname.toLowerCase();
+  return url.port ? [`${hostname}:${url.port}`, hostname] : [hostname];
+}
+
+/**
+ * The hosts of addresses this deployment's own configuration names, which the resolved check below
+ * does not apply to. An operator pointing the managed Bot or a tenant package's coworker at a
+ * service name on its own network has decided that, and is not somebody registering an address.
+ */
+export function trustedHostsOf(
+  addresses: readonly (string | URL | undefined)[],
+): ReadonlySet<string> {
+  const hosts = new Set<string>();
+  for (const address of addresses) {
+    if (!address) continue;
+    try {
+      for (const key of hostKeys(new URL(address))) hosts.add(key);
+    } catch {
+      // Not a URL: nothing to trust.
+    }
+  }
+  return hosts;
+}
+
+/**
+ * The half of the endpoint check that text cannot do: where the name actually points.
+ *
+ * `checkAgentEndpoint` reads the address as written, so `https://agent.example.com` passes however
+ * its DNS answers, including with 10.0.0.5 or the metadata address, and a bare service name such as
+ * `http://supervisor:4300` passes because it is neither an IP nor `localhost`. This server then
+ * POSTs to it with headers the person chose. So before a dial the name is resolved and every address
+ * it gives must be one the textual check would have allowed, and a single-label name is refused
+ * outright: nothing public is reached that way, and inside a deployment almost everything is.
+ *
+ * Skipped where the floor is down (`allowPrivateHosts`), for a host the deployment named
+ * (`allowedHosts`) or configured itself (`trustedHosts`), and for an IP literal, which the textual
+ * check has already judged. Resolution failing is a refusal: a name that does not resolve is not
+ * somewhere a run can go, and answering otherwise would turn a resolver hiccup into a dial.
+ *
+ * What this does not close is a name that answers differently between this lookup and the dial
+ * (DNS rebinding). Pinning the connection to the checked address needs a dialler of its own; a
+ * network policy around the server is the boundary that holds regardless.
+ */
+export async function checkResolvedAgentHost(
+  raw: string,
+  options: {
+    allowPrivateHosts?: boolean;
+    allowedHosts?: ReadonlySet<string>;
+    trustedHosts?: ReadonlySet<string>;
+    resolveHost?: ResolveHost;
+  } = {},
+): Promise<EndpointVerdict> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { allowed: false, reason: "An agent needs a web address." };
+  }
+  if (options.allowPrivateHosts) return { allowed: true, url: url.toString() };
+  const keys = hostKeys(url);
+  if (
+    keys.some(
+      (key) => options.allowedHosts?.has(key) || options.trustedHosts?.has(key),
+    )
+  ) {
+    return { allowed: true, url: url.toString() };
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  if (isIP(hostname)) return { allowed: true, url: url.toString() };
+  if (!hostname.includes(".")) {
+    return {
+      allowed: false,
+      reason:
+        "That is a name inside OpenBot's own network, so an agent may not live there.",
+    };
+  }
+  let addresses: string[];
+  try {
+    addresses = await (options.resolveHost ?? resolveWithDns)(hostname);
+  } catch {
+    return {
+      allowed: false,
+      reason: `${hostname} could not be resolved, so an agent cannot live there.`,
+    };
+  }
+  if (addresses.length === 0 || addresses.some(isInternalAddress)) {
+    return {
+      allowed: false,
+      reason: `${hostname} points inside OpenBot's own network, so an agent may not live there.`,
+    };
+  }
+  return { allowed: true, url: url.toString() };
 }
 
 /**
@@ -258,6 +364,16 @@ export function createAgentFetch(
      * not be a way to arrive somewhere registration would have declined.
      */
     allowedHosts?: ReadonlySet<string>;
+    /**
+     * Hosts of addresses this deployment's own configuration names (the managed Bot, a tenant
+     * package's coworkers), exempt from the resolved check. See {@link checkResolvedAgentHost}.
+     */
+    trustedHosts?: ReadonlySet<string>;
+    /**
+     * How a name is resolved before it is dialled. DNS by default. A caller that substitutes
+     * `fetchImpl` substitutes the network, so with no resolver of its own nothing is resolved.
+     */
+    resolveHost?: ResolveHost;
     fetchImpl?: typeof fetch;
     /**
      * Told about every address this refused to dial, and why.
@@ -295,12 +411,37 @@ export function createAgentFetch(
       ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
     });
 
+  const resolveHost =
+    options.resolveHost ?? (options.fetchImpl ? undefined : resolveWithDns);
+  const resolved = (address: string): Promise<EndpointVerdict> =>
+    resolveHost
+      ? checkResolvedAgentHost(address, {
+          ...(options.allowPrivateHosts !== undefined
+            ? { allowPrivateHosts: options.allowPrivateHosts }
+            : {}),
+          ...(options.allowedHosts
+            ? { allowedHosts: options.allowedHosts }
+            : {}),
+          ...(options.trustedHosts
+            ? { trustedHosts: options.trustedHosts }
+            : {}),
+          resolveHost,
+        })
+      : Promise.resolve({ allowed: true, url: address });
+
   return async function guardedFetch(url: string, init?: RequestInit) {
     const stored = check(url);
     if (!stored.allowed) {
       throw refuse(
         url,
         `${NOT_DIALLED}${url}: ${stored.reason.charAt(0).toLowerCase()}${stored.reason.slice(1)}`,
+      );
+    }
+    const storedResolved = await resolved(stored.url);
+    if (!storedResolved.allowed) {
+      throw refuse(
+        url,
+        `${NOT_DIALLED}${url}: ${storedResolved.reason.charAt(0).toLowerCase()}${storedResolved.reason.slice(1)}`,
       );
     }
 
@@ -328,6 +469,13 @@ export function createAgentFetch(
         throw refuse(
           next,
           `That address redirected to ${next}, and ${verdict.reason.charAt(0).toLowerCase()}${verdict.reason.slice(1)}`,
+        );
+      }
+      const hopResolved = await resolved(verdict.url);
+      if (!hopResolved.allowed) {
+        throw refuse(
+          next,
+          `That address redirected to ${next}, and ${hopResolved.reason.charAt(0).toLowerCase()}${hopResolved.reason.slice(1)}`,
         );
       }
       if (!sameCredentialScope(origin, verdict.url)) {
