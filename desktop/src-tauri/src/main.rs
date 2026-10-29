@@ -249,6 +249,27 @@ struct AlreadyConfigured {
     auto_start: bool,
 }
 
+/// The engine the install step left answering, if it left one.
+///
+/// Starting Docker Desktop leaves Docker answering, and the machine steps after the install step
+/// are Podman's: on a Mac or a PC without Podman, the first of them fails at `podman machine list`
+/// with Docker already running. A Podman the step installed or found answers only once its
+/// machine is up, so it is `None` here and the machine steps run.
+fn answering_after_install(
+    ready: &engine::EngineStatus,
+    composes: impl FnOnce(&engine::Address) -> bool,
+) -> Result<Option<engine::Address>, Problem> {
+    let Some(address) = ready.address.clone().filter(|_| ready.responding) else {
+        return Ok(None);
+    };
+    if !composes(&address) {
+        return Err(Problem::plain(acquire::missing_compose(
+            address.engine.binary(),
+        )));
+    }
+    Ok(Some(address))
+}
+
 struct ReadyRespondingEngine {
     address: engine::Address,
     detail: String,
@@ -697,6 +718,13 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
             report(app, "install-engine", false, problem.said.clone());
             return Err(problem);
         }
+    }
+
+    let after = engine::detect();
+    if let Some(address) = answering_after_install(&after, engine::Address::composes)? {
+        desktop_telemetry::observe_engine(app, &after);
+        report(app, "engine", true, after.detail);
+        return Ok(address);
     }
 
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
@@ -5861,6 +5889,43 @@ mod tests {
         assert_eq!(ready.address.engine, engine::Engine::Podman);
         assert!(ready.address.connection.is_none());
         assert_eq!(*trace.borrow(), ["install", "detect", "compose"]);
+    }
+
+    #[test]
+    fn a_docker_desktop_started_by_the_install_step_skips_the_podman_machine() {
+        let docker = engine::EngineStatus {
+            engine: Some(engine::Engine::Docker),
+            address: Some(engine::Address::new(engine::Engine::Docker, None)),
+            responding: true,
+            engine_socket: None,
+            detail: "docker is answering.".into(),
+        };
+        let address = answering_after_install(&docker, |_| true)
+            .unwrap()
+            .expect("an answering Docker needs no Podman machine");
+        assert_eq!(address.engine, engine::Engine::Docker);
+
+        let problem = answering_after_install(&docker, |_| false).unwrap_err();
+        assert_eq!(
+            problem.said,
+            acquire::missing_compose(engine::Engine::Docker.binary())
+        );
+    }
+
+    #[test]
+    fn a_podman_without_its_machine_still_gets_the_machine_steps() {
+        let podman = engine::EngineStatus {
+            engine: Some(engine::Engine::Podman),
+            address: None,
+            responding: false,
+            engine_socket: None,
+            detail: "podman is installed but not answering. Start it and try again.".into(),
+        };
+        assert!(
+            answering_after_install(&podman, |_| panic!("nothing answers to run Compose"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

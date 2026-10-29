@@ -413,7 +413,13 @@ fn on_path(binary: &str) -> Option<PathBuf> {
 
 /// The fixed places each platform's installers use.
 fn where_installers_put(engine: Engine) -> Option<PathBuf> {
-    let places: Vec<PathBuf> = match engine {
+    installer_places(engine)
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+fn installer_places(engine: Engine) -> Vec<PathBuf> {
+    match engine {
         #[cfg(target_os = "windows")]
         Engine::Podman => {
             // The MSI uses Programs\Podman per user and Program Files\Podman per machine.
@@ -444,15 +450,19 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
         .iter()
         .map(PathBuf::from)
         .collect(),
+        // Docker Desktop's own copy is looked for in every place `docker_desktop` looks for the
+        // app, `~/Applications` included: an app that setup starts has to have a CLI that setup
+        // can find, or Docker answering is never seen and the start times out.
         #[cfg(target_os = "macos")]
-        Engine::Docker => [
-            "/usr/local/bin/docker",
-            "/opt/homebrew/bin/docker",
-            "/Applications/Docker.app/Contents/Resources/bin/docker",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .collect(),
+        Engine::Docker => ["/usr/local/bin/docker", "/opt/homebrew/bin/docker"]
+            .iter()
+            .map(PathBuf::from)
+            .chain(
+                crate::docker_desktop::app_places()
+                    .into_iter()
+                    .map(|app| app.join("Contents/Resources/bin/docker")),
+            )
+            .collect(),
         #[cfg(target_os = "linux")]
         Engine::Podman => ["/usr/bin/podman", "/usr/local/bin/podman"]
             .iter()
@@ -463,8 +473,7 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
             .iter()
             .map(PathBuf::from)
             .collect(),
-    };
-    places.into_iter().find(|candidate| candidate.is_file())
+    }
 }
 
 /// The rootless socket on Linux, which is the one Compose must mount.
@@ -801,6 +810,16 @@ fn main() {
         assert!(text.starts_with("/tmp/openbot-tools"), "{text}");
         if let Some(existing) = std::env::var_os("PATH") {
             assert!(text.ends_with(&*existing.to_string_lossy()), "{text}");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn every_docker_desktop_setup_can_start_has_a_cli_setup_can_find() {
+        let places = installer_places(Engine::Docker);
+        for app in crate::docker_desktop::app_places() {
+            let cli = app.join("Contents/Resources/bin/docker");
+            assert!(places.contains(&cli), "{} is not looked for", cli.display());
         }
     }
 

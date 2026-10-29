@@ -27,7 +27,7 @@ fn installed_app_in(places: &[PathBuf]) -> Option<PathBuf> {
     places.iter().find(|place| place.exists()).cloned()
 }
 
-fn app_places() -> Vec<PathBuf> {
+pub(crate) fn app_places() -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let mut places = vec![PathBuf::from("/Applications/Docker.app")];
