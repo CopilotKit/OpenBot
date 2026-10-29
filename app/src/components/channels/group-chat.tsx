@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
@@ -42,12 +42,27 @@ export function GroupChat({ channelId }: { channelId: string }) {
     (message) => message.status === "running" || message.status === "queued",
   );
 
-  // Follow the conversation down as lines arrive, the way the single-Bot transcript does.
-  const endRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * LAND AT THE BOTTOM BEFORE THE FIRST PAINT, THEN FOLLOW ONLY A READER WHO IS STILL THERE.
+   *
+   * This was `scrollIntoView` in a `useEffect`, which runs after the browser has painted: every
+   * group chat showed its top for a frame and then jumped. A layout effect moves it before paint.
+   * And it followed every new line unconditionally, pulling somebody reading an earlier answer back
+   * down each time a Bot spoke; `atBottom` is where the reader was at their last scroll.
+   */
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const atBottom = useRef(true);
+  const landedFor = useRef<string | null>(null);
   const lastKey = `${messages.length}:${messages.at(-1)?.status ?? ""}`;
-  useEffect(() => {
-    if (lastKey) endRef.current?.scrollIntoView({ block: "end" });
-  }, [lastKey]);
+  useLayoutEffect(() => {
+    const element = viewportRef.current;
+    if (element === null || lastKey === "0:") return;
+    if (landedFor.current !== channelId || atBottom.current) {
+      element.scrollTop = element.scrollHeight;
+      landedFor.current = channelId;
+      atBottom.current = true;
+    }
+  }, [channelId, lastKey]);
 
   if (group.isPending) return null;
   if (group.isError)
@@ -59,7 +74,13 @@ export function GroupChat({ channelId }: { channelId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto"
+        onScroll={(event) => {
+          atBottom.current = isNearBottom(event.currentTarget);
+        }}
+        ref={viewportRef}
+      >
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-6">
           {messages.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -86,7 +107,6 @@ export function GroupChat({ channelId }: { channelId: string }) {
               mine={message.ownerUserId === me?.id}
             />
           ))}
-          <div ref={endRef} />
         </div>
       </div>
       {/* The same column and the same compact composer as a conversation with one Bot. */}
@@ -210,5 +230,19 @@ function GroupLine({
         )}
       </MessageContent>
     </MessageRow>
+  );
+}
+
+/**
+ * Whether a scrolled element is close enough to its end to count as reading the newest line.
+ *
+ * Exported so it can be checked without mounting anything.
+ */
+export function isNearBottom(
+  element: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  threshold = 80,
+): boolean {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <= threshold
   );
 }
