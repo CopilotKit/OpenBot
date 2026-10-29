@@ -101,13 +101,53 @@ const ROOTFUL_HOST_GATEWAY_CONFIG: &str = "/etc/containers/containers.conf.d/90-
 /// reaches the rootful one. The machine's own mode decides only which of the two is the default,
 /// which socket `/var/run/docker.sock` is inside it, and which API it forwards to this computer.
 /// Addressing a rootful machine by its bare name would put OpenBot's containers in the rootless
-/// engine beside a rootful one, with the supervisor mounting a socket it cannot open.
+/// engine beside a rootful one, with the supervisor mounting a socket it cannot open. The one
+/// exception is an OpenBot that already lives there (see `connection_keeping_openbot`).
 pub fn connection_for(machine: &str, rootful: bool) -> String {
     if rootful {
         format!("{machine}-root")
     } else {
         machine.to_string()
     }
+}
+
+/// The connection to address a running machine through: the one for its mode, unless OpenBot's
+/// database is only in the other one's storage.
+///
+/// The two engines in one machine keep separate containers and volumes. Releases up to 0.2.0
+/// reached every machine by its bare name, so an OpenBot that adopted somebody's rootful machine,
+/// or whose own machine was switched to rootful since, has its database in the rootless engine's
+/// storage. Moving it to `<name>-root` would open it on an empty database with the old one
+/// unreachable beside it, so it stays where it is. Only a rootful machine is asked: a rootless one
+/// was always reached by its bare name.
+fn connection_keeping_openbot(
+    machine: &str,
+    rootful: bool,
+    holds_openbot: impl Fn(&str) -> bool,
+) -> String {
+    let own = connection_for(machine, rootful);
+    if rootful && !holds_openbot(&own) && holds_openbot(machine) {
+        return machine.to_string();
+    }
+    own
+}
+
+/// Whether OpenBot's database volume is in the engine behind `connection`.
+///
+/// By Compose's own label for the volume rather than by its full name, which carries the
+/// deployment folder's name. Any project's `postgres-data` counts: a false yes keeps the
+/// connection a release up to 0.2.0 would have used, and a false no is the one that loses data.
+fn holds_openbot(connection: &str) -> bool {
+    podman(&[
+        "--connection",
+        connection,
+        "volume",
+        "ls",
+        "--quiet",
+        "--filter",
+        "label=com.docker.compose.volume=postgres-data",
+    ])
+    .is_ok_and(|listing| !listing.is_empty())
 }
 
 /// The machine a connection belongs to, by the naming `connection_for` describes.
@@ -164,7 +204,8 @@ pub fn machine_behind(connection: &str) -> Result<MachineFacts, String> {
     machine_facts(&podman(&["machine", "inspect", machine])?, machine)
 }
 
-/// The connection for a machine found by name, in the mode it runs in.
+/// The connection for a machine found by name, in the mode it runs in, or where its OpenBot
+/// already is (see `connection_keeping_openbot`).
 ///
 /// A machine that cannot be inspected keeps its bare name, which is how it was addressed before
 /// machines were rootful.
@@ -174,7 +215,7 @@ pub fn connection_of_machine(machine: &str) -> String {
         .ok()
         .and_then(|facts| facts.rootful)
         .unwrap_or(false);
-    connection_for(machine, rootful)
+    connection_keeping_openbot(machine, rootful, holds_openbot)
 }
 
 fn podman(args: &[&str]) -> Result<String, String> {
@@ -247,13 +288,14 @@ pub fn machine_exists() -> Result<bool, String> {
 /// `--rootful`, for local Intelligence: see the module comment.
 ///
 /// AN EXISTING MACHINE IS NEVER SWITCHED TO ROOTFUL, OURS INCLUDED. `podman machine set --rootful`
-/// would do it, on a stopped machine, and it would cost the person their OpenBot. A rootless
-/// machine keeps its containers and volumes in the rootless engine's storage, and the rootful
-/// engine in the same VM does not see them, so OpenBot would come back on an empty database while
-/// the old one sat unreachable beside it. Releases up to 0.2.0 created this machine rootless, so
-/// "ours" is not "empty". A rootless machine is left as it is and OpenBot keeps running on it;
-/// local Intelligence then declines to start there with a sentence that names the switch, which
-/// is the person's to make (see `local_eval::Failure::RootlessPodman`).
+/// would do it, on a stopped machine, which is the person's to stop. A rootless machine keeps its
+/// containers and volumes in the rootless engine's storage, and the rootful engine in the same VM
+/// does not see them. Releases up to 0.2.0 created this machine rootless, so "ours" is not
+/// "empty". A rootless machine is left as it is and OpenBot keeps running on it; local
+/// Intelligence then declines to start there with a sentence that names the switch (see
+/// `local_eval::Failure::RootlessPodman`). After the switch OpenBot stays in the rootless storage
+/// its database is in (see `connection_keeping_openbot`), and Intelligence runs on the rootful
+/// engine of the same machine.
 pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
     create_machine_with(cpus, memory_mib, disk_gib, machine_exists, podman)
 }
@@ -532,12 +574,16 @@ fn explain_machine_error(error: &str) -> String {
 ///
 /// Always by name. The default connection belongs to whoever set it, and after `machine init` it is
 /// usually still pointing somewhere else. The rootful connection for the rootful machine this app
-/// creates; the bare name for one an earlier release created rootless (see `create_machine`).
+/// creates; the bare name for one an earlier release created rootless (see `create_machine`), and
+/// for one switched to rootful since whose database is still in the rootless storage.
 pub fn address() -> Address {
-    address_with(|| podman(&["machine", "inspect", MACHINE]))
+    address_with(|| podman(&["machine", "inspect", MACHINE]), holds_openbot)
 }
 
-fn address_with(inspect: impl FnOnce() -> Result<String, String>) -> Address {
+fn address_with(
+    inspect: impl FnOnce() -> Result<String, String>,
+    holds_openbot: impl Fn(&str) -> bool,
+) -> Address {
     // Unknown reads as rootful: that is how this app creates the machine, and a machine that cannot
     // be inspected is not going to answer on either connection.
     let rootful = inspect()
@@ -545,7 +591,10 @@ fn address_with(inspect: impl FnOnce() -> Result<String, String>) -> Address {
         .ok()
         .and_then(|facts| facts.rootful)
         .unwrap_or(true);
-    Address::new(Engine::Podman, Some(connection_for(MACHINE, rootful)))
+    Address::new(
+        Engine::Podman,
+        Some(connection_keeping_openbot(MACHINE, rootful, holds_openbot)),
+    )
 }
 
 /// The gate before Compose is touched.
@@ -1258,16 +1307,46 @@ mod tests {
         let inspect = |rootful: bool| {
             serde_json::json!([{ "Name": "openbot", "Rootful": rootful }]).to_string()
         };
+        let nowhere = |_: &str| false;
         // Rootful, as this app creates it: its root connection, where the rootful engine is.
-        let addressed = address_with(|| Ok(inspect(true)));
+        let addressed = address_with(|| Ok(inspect(true)), nowhere);
         assert_eq!(addressed.connection.as_deref(), Some("openbot-root"));
         assert_eq!(addressed.engine, Engine::Podman);
         // Rootless, as releases up to 0.2.0 created it: its bare name, where its OpenBot is.
-        let addressed = address_with(|| Ok(inspect(false)));
+        let addressed = address_with(|| Ok(inspect(false)), nowhere);
         assert_eq!(addressed.connection.as_deref(), Some(MACHINE));
         // Not inspectable: as this app creates it.
-        let addressed = address_with(|| Err("no such machine".into()));
+        let addressed = address_with(|| Err("no such machine".into()), nowhere);
         assert_eq!(addressed.connection.as_deref(), Some("openbot-root"));
+        // Switched to rootful since, with its database still in the rootless storage: kept there.
+        let addressed = address_with(|| Ok(inspect(true)), |connection| connection == MACHINE);
+        assert_eq!(addressed.connection.as_deref(), Some(MACHINE));
+    }
+
+    /// An OpenBot is never moved away from its database by the machine's mode.
+    #[test]
+    fn a_rootful_machine_keeps_an_openbot_whose_database_is_in_rootless_storage() {
+        let in_rootless: fn(&str) -> bool = |connection| connection == "podman-machine-default";
+        let in_rootful: fn(&str) -> bool = |connection| connection == "podman-machine-default-root";
+        let in_both: fn(&str) -> bool = |_| true;
+        let in_neither: fn(&str) -> bool = |_| false;
+        let machine = "podman-machine-default";
+        assert_eq!(
+            connection_keeping_openbot(machine, true, in_rootless),
+            "podman-machine-default"
+        );
+        // Wherever else it is, the machine's own mode wins.
+        for holds in [in_rootful, in_both, in_neither] {
+            assert_eq!(
+                connection_keeping_openbot(machine, true, holds),
+                "podman-machine-default-root"
+            );
+        }
+        // A rootless machine was always reached by its bare name, and nothing is asked.
+        assert_eq!(
+            connection_keeping_openbot(machine, false, |_: &str| panic!("not asked")),
+            "podman-machine-default"
+        );
     }
 
     #[test]
