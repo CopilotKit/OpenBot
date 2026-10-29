@@ -898,6 +898,24 @@ fn main() {
     }
 }
 
+/**
+Where a container under rootless Podman reaches this machine's loopback.
+
+Rootless Podman puts its containers in a network namespace of the person's own, and by default
+nothing in it leads back to the host's `127.0.0.1`: slirp4netns runs with host loopback disabled
+and pasta with `--no-map-gw`. The server is a container now, and what it calls on this machine
+listens only on loopback: the person's browser, deliberately, and a local Intelligence. Measured
+on Ubuntu 24.04 (Podman 4.9.3, slirp4netns) and Fedora 44 (Podman 5.8.9, pasta): a container on a
+Compose network reached neither, at any address, until [`local_api::HOST_LOOPBACK_CONFIG`] was in
+place, and then reached both at this address, which is slirp4netns's fixed one and which pasta is
+told to map.
+
+Docker Desktop and the Podman machines on macOS and Windows already forward `host.docker.internal`
+to the host's loopback, so this is for rootless Podman on Linux alone. Compose is pointed at it
+through `OPENBOT_HOST_GATEWAY` (see `env::compose`).
+*/
+pub const ROOTLESS_HOST_LOOPBACK: &str = "10.0.2.2";
+
 /// A native Podman API service belongs to the desktop session only when this session spawned it.
 /// Existing user/systemd services are probed and reused, never stopped or reconfigured.
 #[cfg(any(target_os = "linux", all(test, unix)))]
@@ -915,6 +933,67 @@ pub mod local_api {
     pub struct Service {
         child: Option<Child>,
         socket: Option<(PathBuf, u64, u64)>,
+        /// The host loopback configuration was written or changed since a Start last asked.
+        host_loopback_changed: bool,
+    }
+
+    /// Podman's own drop-in directory, under the person's configuration home.
+    pub const HOST_LOOPBACK_CONFIG: &str = "containers/containers.conf.d/90-openbot-host.conf";
+
+    /**
+    The drop-in that opens the rootless network namespace to this machine's loopback at
+    [`super::ROOTLESS_HOST_LOOPBACK`], for both of the programs rootless Podman builds it with.
+    Only the one in use reads its own key.
+
+    Appended rather than set, so options the person gave either program in their own files are
+    kept: a later drop-in's list otherwise replaces an earlier one's. Both Podman 4.9 and 5.8
+    parse `{append=true}`.
+
+    Nothing here renames `host.containers.internal` or `host.docker.internal` for the person's
+    other containers. OpenBot's own services are pointed at this address by Compose, and anything
+    else would have to ask for it by number.
+    */
+    pub fn host_loopback_config() -> String {
+        let address = super::ROOTLESS_HOST_LOOPBACK;
+        format!(
+            "# Written by OpenBot Desktop: lets its containers reach services this machine runs on\n\
+             # 127.0.0.1, such as the person's browser and a local Intelligence, at {address}.\n\
+             [engine]\n\
+             network_cmd_options = [\"allow_host_loopback=true\", {{append=true}}]\n\
+             \n\
+             [network]\n\
+             pasta_options = [\"--map-host-loopback\", \"{address}\", {{append=true}}]\n"
+        )
+    }
+
+    /// Write [`host_loopback_config`] under `config_home`, saying whether anything changed.
+    /// Replaced whole, through a sibling, so Podman never reads half of it.
+    pub fn write_host_loopback(config_home: &Path) -> Result<bool, String> {
+        let path = config_home.join(HOST_LOOPBACK_CONFIG);
+        let wanted = host_loopback_config();
+        match std::fs::read_to_string(&path) {
+            Ok(current) if current == wanted => return Ok(false),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{}: {error}", path.display())),
+        }
+        let directory = path.parent().expect("the drop-in has a directory");
+        std::fs::create_dir_all(directory)
+            .map_err(|error| format!("{}: {error}", directory.display()))?;
+        let partial = path.with_extension("conf.partial");
+        std::fs::write(&partial, wanted)
+            .and_then(|()| std::fs::rename(&partial, &path))
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        Ok(true)
+    }
+
+    /// Where the person's configuration lives, as Podman looks for it.
+    #[cfg(target_os = "linux")]
+    fn config_home() -> Option<PathBuf> {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }
 
     fn problem(detail: impl Into<String>) -> Problem {
@@ -981,6 +1060,9 @@ pub mod local_api {
                 });
             let socket = runtime.join("podman/podman.sock");
             let log = root.join("logs/podman-api.log");
+            let config_home =
+                config_home().ok_or_else(|| problem("Neither XDG_CONFIG_HOME nor HOME is set."))?;
+            self.allow_host_loopback(&config_home)?;
             self.ensure_with(&socket, &log, || {
                 let mut command = address.command();
                 command
@@ -1079,6 +1161,29 @@ pub mod local_api {
                     cleanup.said, cleanup.detail
                 ),
             }))
+        }
+
+        /// Write the host loopback drop-in before any container needs it. A service this session
+        /// started read its configuration when it started, so a change stops it, and the
+        /// `ensure` that follows starts it again. A service somebody else runs is left alone.
+        pub(super) fn allow_host_loopback(&mut self, config_home: &Path) -> Result<(), Problem> {
+            if write_host_loopback(config_home).map_err(problem)? {
+                self.host_loopback_changed = true;
+                self.stop()?;
+            }
+            Ok(())
+        }
+
+        /**
+        Whether the host loopback configuration changed since the last Start asked, and forget it.
+
+        Podman reads it only when the rootless network namespace is created, and that namespace
+        lives while any container on a Compose network does, so a stack still running from before
+        keeps the old one. Measured: written while a container held the namespace, nothing
+        changed; once the last one stopped, the next container reached the host.
+        */
+        pub fn take_host_loopback_change(&mut self) -> bool {
+            std::mem::take(&mut self.host_loopback_changed)
         }
 
         pub fn stop(&mut self) -> Result<(), Problem> {
@@ -1188,6 +1293,93 @@ mod local_api_tests {
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
                 .unwrap();
         }
+    }
+
+    /// The drop-in opens host loopback for both programs, at the one address Compose is given, and
+    /// appends to what the person configured rather than replacing it.
+    #[test]
+    fn the_host_loopback_drop_in_names_both_programs_and_keeps_the_persons_options() {
+        let config = super::local_api::host_loopback_config();
+        let address = super::ROOTLESS_HOST_LOOPBACK;
+        assert!(config.contains(
+            "[engine]\nnetwork_cmd_options = [\"allow_host_loopback=true\", {append=true}]\n"
+        ));
+        assert!(config.contains(&format!(
+            "[network]\npasta_options = [\"--map-host-loopback\", \"{address}\", {{append=true}}]\n"
+        )));
+        // slirp4netns serves the host's loopback at its gateway, which is fixed.
+        assert_eq!(address, "10.0.2.2");
+        assert!(!config.contains("host_containers_internal_ip"));
+    }
+
+    #[test]
+    fn the_host_loopback_drop_in_is_written_once_and_restored_when_changed() {
+        let home = temp_root("host-loopback-drop-in");
+        let path = home.join(super::local_api::HOST_LOOPBACK_CONFIG);
+        let theirs = path.with_file_name("10-person.conf");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &theirs,
+            "[network]\npasta_options = [\"--mtu\", \"1400\"]\n",
+        )
+        .unwrap();
+
+        assert!(super::local_api::write_host_loopback(&home).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            super::local_api::host_loopback_config()
+        );
+        assert!(!super::local_api::write_host_loopback(&home).unwrap());
+
+        std::fs::write(&path, "[network]\n").unwrap();
+        assert!(super::local_api::write_host_loopback(&home).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            super::local_api::host_loopback_config()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&theirs).unwrap(),
+            "[network]\npasta_options = [\"--mtu\", \"1400\"]\n",
+            "the person's own drop-in is not touched"
+        );
+        assert!(!path.with_extension("conf.partial").exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A change restarts the service this session owns, because it read its configuration when it
+    /// started, and is reported to the next Start once. No change leaves it running.
+    #[test]
+    fn a_host_loopback_change_restarts_the_owned_api_and_is_reported_once() {
+        let root = temp_root("host-loopback-restart");
+        std::fs::create_dir_all(&root).unwrap();
+        let home = root.join("config");
+        let socket = root.join("api.sock");
+        let log = root.join("api.log");
+        let mut owned = Service::default();
+        owned
+            .ensure_with(&socket, &log, || fixture(&socket))
+            .unwrap();
+        let first = owned.child_id().unwrap();
+
+        owned.allow_host_loopback(&home).unwrap();
+        assert_eq!(
+            unsafe { libc::kill(first as i32, 0) },
+            -1,
+            "the owned service that predates the change is stopped"
+        );
+        owned
+            .ensure_with(&socket, &log, || fixture(&socket))
+            .unwrap();
+        let second = owned.child_id().unwrap();
+        assert_ne!(first, second);
+        assert!(owned.take_host_loopback_change());
+        assert!(!owned.take_host_loopback_change());
+
+        owned.allow_host_loopback(&home).unwrap();
+        assert_eq!(owned.child_id(), Some(second), "no change, no restart");
+        assert!(!owned.take_host_loopback_change());
+        owned.stop().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

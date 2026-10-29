@@ -1782,6 +1782,22 @@ async fn start_stack_inner<R: tauri::Runtime>(
         local_eval::use_engine(&found);
         #[cfg(target_os = "linux")]
         ensure_linux_podman_api(&shell, &found)?;
+        /*
+         * A rootless network namespace that predates the host loopback configuration keeps the old
+         * options for as long as any container holds it, and an OpenBot left running by an earlier
+         * version does. Taken down once, here, so the containers about to start build a new one.
+         * See `engine::local_api::take_host_loopback_change`.
+         */
+        #[cfg(target_os = "linux")]
+        if shell.podman_api.lock().unwrap().take_host_loopback_change() {
+            stack::down(&found, &root).map_err(|error| {
+                Problem::with(
+                    "OpenBot could not restart its containers with their new network settings. \
+                     Try Start again.",
+                    error,
+                )
+            })?;
+        }
         #[cfg(target_os = "linux")]
         let status = found.status();
         acquire::prepare_for_compose(&found)?;

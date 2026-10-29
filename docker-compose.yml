@@ -188,9 +188,11 @@ services:
       - "127.0.0.1:${SERVER_PORT:-3001}:3001"
       - "[::1]:${SERVER_PORT:-3001}:3001"
     # For whatever stays on the host and is addressed as such: a model endpoint on this machine, and
-    # anything else the Bots below already reach the same way.
+    # anything else the Bots below already reach the same way. OpenBot Desktop sets
+    # `OPENBOT_HOST_GATEWAY` under rootless Podman on Linux, where `host-gateway` is not this
+    # machine's loopback and the address it gives is.
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -498,7 +500,7 @@ services:
       CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
       BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     volumes:
       # A bind mount, not a named volume, and read-write on purpose. The signed-in plan's access
       # token expires within the hour and the harness renews it, so the renewal has to land back on
@@ -551,7 +553,7 @@ services:
       OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
       AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4201/health')\""]
       interval: 10s
