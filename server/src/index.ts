@@ -282,6 +282,8 @@ import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
+import { createSetupSources, modelKeyOf } from "./setup/checklist";
+import { createComputerCheck } from "./setup/computer-check";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -1293,18 +1295,32 @@ const intentRouter = createIntentRouter({
 
 // Said once at boot: whether the key can call the model the Bots run on. A key without access to it
 // otherwise passes every start-up check and fails at the first message, in front of whoever sent it.
-void reportModelAvailability({
-  provider: runtimeModel.provider,
-  model: runtimeModel.defaultModel,
-  apiKey: () =>
-    resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
-      reader: credentialStore,
-      provider: runtimeModel.provider,
-      keyId: tenantPackage.model.credentialSecretRef,
-      environment: process.env,
-    }),
-});
+// Kept, with a stamp naming the key it asked about, so the setup checklist can repeat the answer
+// for that key and say "not checked yet" for any other. The checklist's "Check again" asks again
+// through the same function. Never rejects: a failed read reads as not checked.
+const checkModelAvailability = () =>
+  reportModelAvailability({
+    provider: runtimeModel.provider,
+    model: runtimeModel.defaultModel,
+    apiKey: () =>
+      resolveModelApiKey({
+        encryptionKey: config.keyEncryptionKey,
+        reader: credentialStore,
+        provider: runtimeModel.provider,
+        keyId: tenantPackage.model.credentialSecretRef,
+        environment: process.env,
+      }),
+  });
+const modelCheckAtBoot = (async () => {
+  const { stamp } = await modelKeyOf({
+    plan: Boolean(runtimeModel.plan),
+    provider: runtimeModel.provider,
+    keyId: tenantPackage.model.credentialSecretRef,
+    credentials: credentialStore,
+    environment: process.env,
+  });
+  return { outcome: await checkModelAvailability(), stamp };
+})().catch(() => undefined);
 
 // Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
 
@@ -2769,6 +2785,34 @@ const app = createApp(
       profiles: agentProfileStore,
       auditStore: bootAuditStore,
     },
+    // The checklist onboarding ends on. Facts and verdicts about this configuration, never values.
+    setup: createSetupSources({
+      productName: tenantPackage.productName,
+      config,
+      environment: process.env,
+      model: {
+        provider: runtimeModel.provider,
+        keyId: tenantPackage.model.credentialSecretRef,
+        defaultModel: runtimeModel.defaultModel,
+        plan: Boolean(runtimeModel.plan),
+        check: checkModelAvailability,
+      },
+      credentials: credentialStore,
+      modelCheckAtBoot,
+      entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
+      computer: Boolean(config.computer),
+      computerCheck: createComputerCheck({
+        provider: computerProvider,
+        controls: enterpriseControls,
+        ...(config.computer?.token ? { token: config.computer.token } : {}),
+        ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
+      }),
+      apps: {
+        configured: Boolean(composio),
+        provider: composio?.provider ?? config.brokerProvider ?? "composio",
+      },
+      chat: Boolean(deliveryProviders.slack),
+    }),
   },
   createSelfHostBanner({
     enabled: config.selfHostBanner,
