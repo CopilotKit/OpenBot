@@ -39,11 +39,17 @@ export function shouldDrawEarlier(view: {
  * opened, fixed for as long as it stays open; rows before it were added later, above, and render in
  * a region of their own (see the `contents` block in `chat-transcript.tsx`).
  *
+ * BOTH ARE HELD AS ROWS, NOT INDICES. Rows are added and removed above them while a conversation is
+ * open — history recovered from storage merges in a prefix, tool steps regroup — and an index then
+ * named a different row: rows crossed the boundary into the live region under another parent, where
+ * they remounted, replayed their entrance and re-typed from nothing, and landed mid-list where the
+ * scroller reads a new turn. A row that has gone keeps the index it last had.
+ *
  * Forgotten while restoring, the same way the opening stagger is, so a conversation opened again
  * (or another channel) starts from its newest page.
  */
 export function useTranscriptPages(
-  count: number,
+  ids: readonly string[],
   restoring: boolean,
 ): {
   from: number;
@@ -52,37 +58,57 @@ export function useTranscriptPages(
   drawTo: (index: number) => void;
 } {
   /* One object per opening, so a page drawn for an earlier opening is recognisably not this one's. */
-  const openingRef = useRef<{ split: number } | null>(null);
+  const openingRef = useRef<{ split: Mark } | null>(null);
   const [earlier, setEarlier] = useState<{
-    opening: { split: number };
-    from: number;
+    opening: { split: Mark };
+    from: Mark;
   } | null>(null);
 
   if (restoring) {
     openingRef.current = null;
   } else if (openingRef.current === null) {
-    openingRef.current = { split: openingFrom(count) };
+    openingRef.current = { split: markAt(ids, openingFrom(ids.length)) };
   }
   const opening = openingRef.current;
-  const split = Math.min(opening?.split ?? 0, count);
+  const split = opening === null ? 0 : place(ids, opening.split);
   const from =
     earlier !== null && earlier.opening === opening
-      ? Math.min(earlier.from, split)
+      ? Math.min(place(ids, earlier.from), split)
       : split;
 
-  const fromRef = useRef(from);
-  fromRef.current = from;
-  const drawEarlier = useCallback(() => {
+  const stateRef = useRef({ ids, from });
+  stateRef.current = { ids, from };
+  const drawFrom = useCallback((index: number) => {
     const current = openingRef.current;
-    if (current === null || fromRef.current === 0) return;
-    setEarlier({ opening: current, from: earlierFrom(fromRef.current) });
+    const { ids: now, from: drawn } = stateRef.current;
+    if (current === null || index >= drawn) return;
+    setEarlier({ opening: current, from: markAt(now, Math.max(0, index)) });
   }, []);
-  /* Every page down to the row at `index`, for a jump to a turn that has not been drawn yet. */
-  const drawTo = useCallback((index: number) => {
-    const current = openingRef.current;
-    if (current === null || index >= fromRef.current) return;
-    setEarlier({ opening: current, from: Math.max(0, index) });
-  }, []);
+  const drawEarlier = useCallback(
+    () => drawFrom(earlierFrom(stateRef.current.from)),
+    [drawFrom],
+  );
 
-  return { from, split, drawEarlier, drawTo };
+  /* `drawTo`: every page down to the row at `index`, for a jump to a turn not drawn yet. */
+  return { from, split, drawEarlier, drawTo: drawFrom };
+}
+
+/**
+ * A row the boundary sits on, and the index it had when last seen. `id` null is the very start of a
+ * conversation that had no rows: rows arriving into it are live.
+ */
+type Mark = { id: string | null; index: number };
+
+function markAt(ids: readonly string[], index: number): Mark {
+  return { id: ids[index] ?? null, index: Math.min(index, ids.length) };
+}
+
+function place(ids: readonly string[], mark: Mark): number {
+  if (mark.id === null) return Math.min(mark.index, ids.length);
+  const index = ids.indexOf(mark.id);
+  if (index !== -1) {
+    mark.index = index;
+    return index;
+  }
+  return Math.min(mark.index, ids.length);
 }

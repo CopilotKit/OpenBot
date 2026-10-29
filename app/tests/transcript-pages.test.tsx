@@ -251,10 +251,9 @@ test("one trigger at the very top draws one page, not the whole history", () => 
 
 /* A jump from the rail to a turn several pages up draws everything down to it, in one go. */
 test("drawing down to a row draws every page from it", () => {
-  const { result } = renderHook(
-    ({ count }) => useTranscriptPages(count, false),
-    { initialProps: { count: 100 } },
-  );
+  const { result } = renderHook(({ ids }) => useTranscriptPages(ids, false), {
+    initialProps: { ids: rowIds(100) },
+  });
   expect(result.current.from).toBe(80);
 
   act(() => result.current.drawTo(33));
@@ -262,4 +261,31 @@ test("drawing down to a row draws every page from it", () => {
 
   act(() => result.current.drawTo(50));
   expect(result.current.from).toBe(33);
+});
+
+function rowIds(count: number, prefix = "r"): string[] {
+  return Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+}
+
+/*
+ * Rows can be added or removed above the boundary while a conversation is open: history recovered
+ * from storage merges in a prefix, tool steps regroup. Held as indices, the boundary then sat on a
+ * different row, and rows crossed it into the live region, where they remounted and replayed their
+ * entrance. Held as rows, it stays where it was.
+ */
+test("rows added above keep the boundary and the first drawn row where they were", () => {
+  const { result, rerender } = renderHook(
+    ({ ids }) => useTranscriptPages(ids, false),
+    { initialProps: { ids: rowIds(100) } },
+  );
+  expect(result.current).toMatchObject({ from: 80, split: 80 });
+
+  rerender({ ids: [...rowIds(5, "recovered"), ...rowIds(100)] });
+  expect(result.current).toMatchObject({ from: 85, split: 85 });
+
+  act(() => result.current.drawEarlier());
+  expect(result.current.from).toBe(65);
+
+  rerender({ ids: rowIds(100).filter((id) => id !== "r3") });
+  expect(result.current).toMatchObject({ from: 59, split: 79 });
 });

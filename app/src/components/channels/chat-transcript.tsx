@@ -1860,7 +1860,10 @@ export function ChatTranscript({
   };
 
   /* Which rows are drawn; see `useTranscriptPages`. */
-  const pages = useTranscriptPages(items.length, restoring);
+  const pages = useTranscriptPages(
+    items.map((item) => item.id),
+    restoring,
+  );
   const { drawEarlier, drawTo, from: pagesFrom } = pages;
   const drawEarlierNearTop = useCallback(
     (from: number) => {
