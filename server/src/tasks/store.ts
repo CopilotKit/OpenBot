@@ -152,6 +152,13 @@ type TaskState = {
 
 /** A JSON field of a work item's payload, as text. */
 const payload = (field: string) => sql<string>`${workItems.payload}->>${field}`;
+/*
+ * The same expressions as `work_items_owner_task_idx`, so the reads use it however their statement
+ * is planned. Through `payload` the field is a parameter, which a plan made once for every value
+ * cannot match to the index. See work.ts.
+ */
+const workOwner = sql<string>`(${workItems.payload}->>'ownerUserId')`;
+const turnTask = sql<string>`(${workItems.payload}->>'taskId')`;
 /** The conversation an approval was raised in, as text. */
 const approvalThread = sql<string>`${approvalRequests.action}->>'threadId'`;
 
@@ -203,11 +210,18 @@ export function createTaskStore(
         lastMessage: channels.lastMessage,
         byBot: sql<boolean>`${channels.lastMessageAgentId} is not null`,
         sourceId: channels.lastMessageSourceId,
+        spoken: sql<boolean>`${channels.lastMessageAt} is not null`,
         afterResolution: sql<boolean>`coalesce(${channels.lastMessageAt} > ${tasks.resolvedAt}, true)`,
       })
       .from(channels)
       .innerJoin(tasks, eq(tasks.channelId, channels.id))
       .where(inArray(channels.id, channelIds));
+    // Tasks whose conversation has had anything said in it, which a turn starts by doing.
+    const spokenIn = new Set(
+      lastSaid.flatMap((said) =>
+        said.spoken ? [taskOfChannel.get(said.id) ?? ""] : [],
+      ),
+    );
     for (const said of lastSaid) {
       const entry = state.get(taskOfChannel.get(said.id) ?? "");
       // The ask a turn starts on is the task itself, not a step: "Just started" says that better.
@@ -326,22 +340,24 @@ export function createTaskStore(
             string[] | null
           >`${workItems.payload}->'questionIds'`,
           messageId: payload("messageId"),
-          taskId: payload("taskId"),
+          taskId: turnTask,
           suggestionId: payload("suggestionId"),
         })
         .from(workItems)
-        .leftJoin(tasks, eq(tasks.id, payload("taskId")))
+        .leftJoin(tasks, eq(tasks.id, turnTask))
         .where(
           and(
             eq(workItems.kind, PROACTIVE_TASK_KIND),
+            // Every task turn names the person it runs as, from before tasks too.
+            eq(workOwner, owner),
             or(
               inArray(
-                payload("taskId"),
+                turnTask,
                 rows.map((row) => row.id),
               ),
               suggestionIds.length > 0
                 ? and(
-                    sql`${payload("taskId")} is null`,
+                    sql`${turnTask} is null`,
                     inArray(payload("suggestionId"), suggestionIds),
                   )
                 : undefined,
@@ -390,7 +406,7 @@ export function createTaskStore(
         .where(
           and(
             eq(workItems.kind, "person.response"),
-            sql`${payload("ownerUserId")} = ${owner}`,
+            eq(workOwner, owner),
             sql`${responseQuestion}->>'actorId' = ${owner}`,
             inArray(
               tasks.id,
@@ -500,9 +516,13 @@ export function createTaskStore(
         /*
          * Opened, and its turn not queued yet: the moment between the two writes that start a task.
          * Past that, it never will be, so it failed to start rather than reading Working for ever.
+         *
+         * Unless something was said in its conversation, as a turn's first step is to say the ask
+         * there. Then it did start, and its turns have since left the queue: it reads from what was
+         * said, so clearing old turns never turns every old task into one that never started.
          */
         if (at - row.createdAt.getTime() < STARTING_MS) entry.working = true;
-        else {
+        else if (!spokenIn.has(row.id)) {
           entry.failure = plainFailure(NEVER_STARTED);
           entry.failedAt = new Date(row.createdAt.getTime() + STARTING_MS);
         }
