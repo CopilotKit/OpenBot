@@ -67,8 +67,9 @@ export function SetupChecklist({
 
   /*
    * Check again asks the server to ask Intelligence, the model provider and the computers again,
-   * which a plain refetch would not: those answers are kept from the last time they were asked. A
-   * checklist that could not be read at all is read again first.
+   * and waits for their answers. A plain refetch is answered from what they last said, and asks
+   * again only for the read after it, once an answer failed or is a few minutes old. A checklist
+   * that could not be read at all is read again first.
    */
   const checking = checklist.isFetching || recheck.isPending;
   const checkAgain = (

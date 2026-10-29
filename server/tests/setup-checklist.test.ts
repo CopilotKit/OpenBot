@@ -1,10 +1,11 @@
-import { describe, expect, jest, test } from "bun:test";
+import { describe, expect, jest, setSystemTime, test } from "bun:test";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import type { CredentialStatus } from "../src/credentials";
 import type { ModelCheckOutcome } from "../src/model-availability-check";
 import type { RuntimeEntitlementResponse } from "../src/self-host-banner";
 import {
+  ANSWER_KEPT_MS,
   createSetupSources,
   intelligenceFact,
   modelKeyOf,
@@ -13,6 +14,7 @@ import {
   type SetupChecklist,
   type SetupFacts,
   type SetupRow,
+  type SetupSources,
   setupRows,
 } from "../src/setup/checklist";
 import { createComputerCheck } from "../src/setup/computer-check";
@@ -465,7 +467,7 @@ function appWith(input: {
   who: keyof typeof PEOPLE;
   credentials?: CredentialStatus[];
   modelCheckAtBoot?: ModelCheckOutcome;
-  /** What a "Check again" hears from the provider; counted in `checks`. */
+  /** What asking the provider again hears; counted in `checks`. */
   modelCheck?: () => ModelCheckOutcome;
   entitlements?: () => Promise<RuntimeEntitlementResponse>;
   computer?: boolean;
@@ -473,39 +475,43 @@ function appWith(input: {
   apps?: boolean;
   chat?: boolean;
   signedIn?: boolean;
+  /** Another app's sources, for a second reader of the same server. */
+  setup?: SetupSources;
 }) {
   const config = loadConfig(testEnvironment(input.environment));
   const person = PEOPLE[input.who];
   const counts = { checks: 0 };
-  const setup = createSetupSources({
-    productName: PRODUCT,
-    config,
-    environment: testEnvironment(input.environment),
-    model: {
-      provider: "openai",
-      keyId: "openai-api-key",
-      defaultModel: "gpt-5.6-terra",
-      plan: false,
-      check: async () => {
-        counts.checks += 1;
-        return input.modelCheck?.() ?? { kind: "available" };
+  const setup =
+    input.setup ??
+    createSetupSources({
+      productName: PRODUCT,
+      config,
+      environment: testEnvironment(input.environment),
+      model: {
+        provider: "openai",
+        keyId: "openai-api-key",
+        defaultModel: "gpt-5.6-terra",
+        plan: false,
+        check: async () => {
+          counts.checks += 1;
+          return input.modelCheck?.() ?? { kind: "available" };
+        },
       },
-    },
-    credentials: { list: async () => input.credentials ?? [] },
-    ...(input.modelCheckAtBoot
-      ? {
-          modelCheckAtBoot: Promise.resolve({
-            outcome: input.modelCheckAtBoot,
-            stamp: "environment",
-          }),
-        }
-      : {}),
-    entitlements: input.entitlements ?? (async () => ENTITLED),
-    computer: input.computer ?? Boolean(config.computer),
-    computerCheck: input.computerCheck ?? (async () => "ready"),
-    apps: { configured: input.apps ?? false, provider: "composio" },
-    chat: input.chat ?? false,
-  });
+      credentials: { list: async () => input.credentials ?? [] },
+      ...(input.modelCheckAtBoot
+        ? {
+            modelCheckAtBoot: Promise.resolve({
+              outcome: input.modelCheckAtBoot,
+              stamp: "environment",
+            }),
+          }
+        : {}),
+      entitlements: input.entitlements ?? (async () => ENTITLED),
+      computer: input.computer ?? Boolean(config.computer),
+      computerCheck: input.computerCheck ?? (async () => "ready"),
+      apps: { configured: input.apps ?? false, provider: "composio" },
+      chat: input.chat ?? false,
+    });
   const app = createApp(
     config,
     {
@@ -523,8 +529,14 @@ function appWith(input: {
     ...(Array.from({ length: 31 }) as never[]),
     { setup } as never,
   );
-  return Object.assign(app, { counts });
+  return Object.assign(app, { counts, setup });
 }
+
+/**
+ * Lets every ask a read started in the background finish. The stand-ins answer at once, so one
+ * turn of the event loop is enough.
+ */
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function checklistFrom(
   app: ReturnType<typeof appWith>,
@@ -616,7 +628,7 @@ describe("GET /api/setup", () => {
     });
   });
 
-  test("a key added since the boot check is not checked until Check again asks", async () => {
+  test("a key added since the boot check is not checked, and the next read has its answer", async () => {
     const app = appWith({
       who: "admin",
       environment: { OPENAI_API_KEY: "sk-set" },
@@ -645,16 +657,17 @@ describe("GET /api/setup", () => {
 
     const before = await checklistFrom(app);
     expect(row(before.checklist.rows, "model").status).toBe("not_checked");
-    expect(app.counts.checks).toBe(0);
 
-    const after = await checklistFrom(app, "POST");
+    // The read asked about the new key for the one after it, without waiting for the answer.
+    await settled();
     expect(app.counts.checks).toBe(1);
+    const after = await checklistFrom(app);
     expect(row(after.checklist.rows, "model")).toMatchObject({
       status: "needs_setup",
       detail: "OpenAI refused the model key, so OpenBot can't answer.",
     });
 
-    // A second press inside the interval is answered from the first, with no second call out.
+    // Check again inside the interval is answered from that ask, with no second call out.
     expect(RECHECK_INTERVAL_MS).toBeGreaterThan(1000);
     await checklistFrom(app, "POST");
     expect(app.counts.checks).toBe(1);
@@ -775,6 +788,137 @@ describe("GET /api/setup", () => {
   });
 });
 
+/*
+ * The answers that need another service are kept between reads, and a read asks again for any
+ * that failed or are old. Without that, an Intelligence slower to start than OpenBot read red until
+ * somebody pressed Check again, and a key refused days after boot still read Ready.
+ */
+describe("answers a read asks again for", () => {
+  test("a failed answer is asked again, so the next read has the new one", async () => {
+    let asked = 0;
+    const app = appWith({
+      who: "admin",
+      environment: {},
+      entitlements: async () => {
+        asked += 1;
+        if (asked === 1) throw new Error("ECONNREFUSED");
+        return ENTITLED;
+      },
+    });
+    const first = await checklistFrom(app);
+    expect(row(first.checklist.rows, "intelligence").status).toBe(
+      "needs_setup",
+    );
+    await settled();
+    expect(asked).toBe(2);
+    const next = await checklistFrom(app);
+    expect(row(next.checklist.rows, "intelligence").status).toBe("ready");
+  });
+
+  test("an answer older than a few minutes is asked again, so a later failure shows", async () => {
+    let refused = false;
+    let asked = 0;
+    const app = appWith({
+      who: "member",
+      environment: { OPENAI_API_KEY: "sk-set" },
+      modelCheckAtBoot: { kind: "available" },
+      modelCheck: () => ({
+        kind: "warning",
+        line: {
+          type: "model-credential-rejected",
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          status: 401,
+          fix: "replace it",
+        },
+      }),
+      entitlements: async () => {
+        asked += 1;
+        return refused ? UNLICENSED : ENTITLED;
+      },
+    });
+    try {
+      const fresh = await checklistFrom(app);
+      await settled();
+      expect(row(fresh.checklist.rows, "intelligence").ready).toBe(true);
+      expect(row(fresh.checklist.rows, "model").ready).toBe(true);
+      // Working answers inside the window are served as they are.
+      expect([asked, app.counts.checks]).toEqual([1, 0]);
+
+      refused = true;
+      setSystemTime(new Date(Date.now() + ANSWER_KEPT_MS + 1));
+      const stale = await checklistFrom(app);
+      expect(row(stale.checklist.rows, "intelligence").ready).toBe(true);
+      await settled();
+      expect([asked, app.counts.checks]).toEqual([2, 1]);
+      const next = await checklistFrom(app);
+      expect(row(next.checklist.rows, "intelligence").status).toBe(
+        "needs_setup",
+      );
+      expect(row(next.checklist.rows, "model").status).toBe("needs_setup");
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("reads inside the interval share one ask, whoever reads", async () => {
+    let asked = 0;
+    const admin = appWith({
+      who: "admin",
+      environment: {},
+      entitlements: async () => {
+        asked += 1;
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    const member = appWith({
+      who: "member",
+      environment: {},
+      setup: admin.setup,
+    });
+    await checklistFrom(admin);
+    await checklistFrom(member);
+    await settled();
+    await checklistFrom(member);
+    await checklistFrom(admin);
+    await settled();
+    // Once at boot, and once for every read in the interval after it.
+    expect(asked).toBe(2);
+  });
+
+  test("a read never waits on an ask in flight", async () => {
+    const slow = Promise.withResolvers<"ready">();
+    let asked = 0;
+    const app = appWith({
+      who: "admin",
+      environment: {},
+      computer: true,
+      computerCheck: () => {
+        asked += 1;
+        return asked === 1 ? Promise.resolve("needs_setup") : slow.promise;
+      },
+    });
+    const first = await checklistFrom(app);
+    expect(row(first.checklist.rows, "computer").status).toBe("needs_setup");
+    await settled();
+    expect(asked).toBe(2);
+
+    // The fleet is still answering: the read is given the last answer, at once.
+    const during = await Promise.race([
+      checklistFrom(app),
+      new Promise<"waited">((resolve) => setTimeout(resolve, 1_000, "waited")),
+    ]);
+    expect(during).not.toBe("waited");
+    if (during !== "waited")
+      expect(row(during.checklist.rows, "computer").status).toBe("needs_setup");
+
+    slow.resolve("ready");
+    await settled();
+    const after = await checklistFrom(app);
+    expect(row(after.checklist.rows, "computer").status).toBe("ready");
+  });
+});
+
 test("healthy sequential computer pushes keep their own deadlines in the checklist", async () => {
   const first = Promise.withResolvers<void>();
   const second = Promise.withResolvers<void>();
@@ -892,14 +1036,23 @@ test("a configured computer that refuses its policy is Needs setup, then recover
   const response = await app.request("/api/setup");
   const first = await response.json();
   expect(row(first.checklist.rows, "computer").status).toBe("needs_setup");
+  // The read asked again in the background, and heard the same refusal.
+  await settled();
   ready = true;
-  const after = await app.request("/api/setup/check", {
-    method: "POST",
-  });
-  expect(row((await after.json()).checklist.rows, "computer").status).toBe(
-    "ready",
-  );
+  // Check again inside the interval would be answered from that ask, so it comes after it.
+  setSystemTime(new Date(Date.now() + RECHECK_INTERVAL_MS));
+  try {
+    const after = await app.request("/api/setup/check", {
+      method: "POST",
+    });
+    expect(row((await after.json()).checklist.rows, "computer").status).toBe(
+      "ready",
+    );
+  } finally {
+    setSystemTime();
+  }
   expect(tokens).toEqual([
+    "configured-computer-token",
     "configured-computer-token",
     "configured-computer-token",
   ]);

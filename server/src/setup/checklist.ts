@@ -23,7 +23,8 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
  * "set" because the environment or the vault has one, and nothing here reads, masks, measures or
  * echoes what it is. The two outbound reads, Intelligence's entitlement and one `GET /v1/models/<id>`
  * at the provider, are the ones the server already makes at boot; "Check again" repeats them, at
- * most once every {@link RECHECK_INTERVAL_MS}.
+ * most once every {@link RECHECK_INTERVAL_MS}. A plain read repeats them too, under the same limit,
+ * once an answer has failed or is older than {@link ANSWER_KEPT_MS}, for the read after it.
  *
  * WHO READS IT DECIDES WHAT IT SAYS. An admin, and somebody trying OpenBot alone on their own
  * machine, is told how to fix each gap: the page to open, or the variable to set. Everybody else is
@@ -42,6 +43,9 @@ const QUICK_START = "https://github.com/CopilotKit/openbot#quick-start";
 
 /** How long a "Check again" is answered from the last one, so a held button is not a flood. */
 export const RECHECK_INTERVAL_MS = 10_000;
+
+/** How long a working answer from another service is served before a read asks again. */
+export const ANSWER_KEPT_MS = 5 * 60_000;
 
 /** How long Intelligence has to answer before the row says it could not be reached. */
 const INTELLIGENCE_TIMEOUT_MS = 5_000;
@@ -444,6 +448,10 @@ export type SetupSources = {
   productName: string;
   /** A local install for one person, whose only reader is the person running it. */
   localEvaluation: boolean;
+  /**
+   * The facts, from the last answers that are all in. Reading them also asks again, in the
+   * background, when one of those answers failed or is older than {@link ANSWER_KEPT_MS}.
+   */
   facts: () => Promise<SetupFacts>;
   /** Ask Intelligence, the model provider and the computers again. Resolves when all have answered. */
   recheck: () => Promise<void>;
@@ -470,8 +478,12 @@ function withinTime<T>(promise: Promise<T>, ms: number): Promise<T | Error> {
  *
  * Built once at boot and asked on every request, so a credential added a moment ago shows up on the
  * next read. The verdicts that need another service, Intelligence's entitlement, the model
- * provider's answer and the computers', are kept from the last time they were asked (at boot) and
- * asked again on `recheck`.
+ * provider's answer and the computers', are kept from the last time they were asked, and asked
+ * again on `recheck` or by a read that finds one failed or old.
+ *
+ * A read is answered from the last round of answers that is all in, never from one still being
+ * asked, so it waits only at boot, before there is any answer to give. A fleet slow to answer a
+ * recheck holds up the Check again that asked, and no read.
  */
 export function createSetupSources(input: {
   productName: string;
@@ -520,27 +532,68 @@ export function createSetupSources(input: {
       return "needs_setup";
     }
   };
-  let computerStatus = askComputer();
-  let intelligence = askIntelligence();
-  let modelCheck: Promise<
-    { outcome: ModelCheckOutcome; stamp: string | null } | undefined
-  > = (input.modelCheckAtBoot ?? Promise.resolve(undefined)).catch(
-    () => undefined,
-  );
+  /** One round of asking, and when it started. */
+  type Round = {
+    at: number;
+    intelligence: Promise<IntelligenceFact>;
+    modelCheck: Promise<
+      { outcome: ModelCheckOutcome; stamp: string | null } | undefined
+    >;
+    computerStatus: Promise<SetupStatus>;
+  };
+  // The round a read is answered from: boot's, until a later one is all in.
+  let kept: Round = {
+    at: Date.now(),
+    intelligence: askIntelligence(),
+    modelCheck: (input.modelCheckAtBoot ?? Promise.resolve(undefined)).catch(
+      () => undefined,
+    ),
+    computerStatus: askComputer(),
+  };
   let lastRecheck: { at: number; done: Promise<void> } | null = null;
+
+  const recheck = () => {
+    const now = Date.now();
+    if (lastRecheck && now - lastRecheck.at < RECHECK_INTERVAL_MS)
+      return lastRecheck.done;
+    const check = input.model.check;
+    const round: Round = {
+      at: now,
+      intelligence: askIntelligence(),
+      computerStatus: askComputer(),
+      modelCheck: check
+        ? (async () => {
+            const { stamp } = await modelKeyOf(keyFacts);
+            return stamp === null
+              ? undefined
+              : { outcome: await check(), stamp };
+          })().catch(() => undefined)
+        : kept.modelCheck,
+    };
+    const done = Promise.all([
+      round.intelligence,
+      round.modelCheck,
+      round.computerStatus,
+    ]).then(() => {
+      kept = round;
+    });
+    lastRecheck = { at: now, done };
+    return done;
+  };
 
   return {
     productName: input.productName,
     localEvaluation: input.config.singleUser,
     facts: async () => {
-      const [key, check, intelligenceNow, computerNow] = await Promise.all([
+      const round = kept;
+      const [key, check, intelligence, computerStatus] = await Promise.all([
         modelKeyOf(keyFacts),
-        modelCheck,
-        intelligence,
-        computerStatus,
+        round.modelCheck,
+        round.intelligence,
+        round.computerStatus,
       ]);
-      return {
-        intelligence: intelligenceNow,
+      const facts: SetupFacts = {
+        intelligence,
         model: {
           provider: input.model.provider,
           source: key.source,
@@ -548,31 +601,38 @@ export function createSetupSources(input: {
           model: input.model.defaultModel,
         },
         computer: input.computer,
-        computerStatus: computerNow,
+        computerStatus,
         apps: input.apps,
         chat: input.chat,
       };
-    },
-    recheck: () => {
-      const now = Date.now();
-      if (lastRecheck && now - lastRecheck.at < RECHECK_INTERVAL_MS)
-        return lastRecheck.done;
-      intelligence = askIntelligence();
-      computerStatus = askComputer();
-      const check = input.model.check;
-      if (check) {
-        modelCheck = (async () => {
-          const { stamp } = await modelKeyOf(keyFacts);
-          return stamp === null ? undefined : { outcome: await check(), stamp };
-        })().catch(() => undefined);
+      if (Date.now() - round.at >= ANSWER_KEPT_MS || failed(facts)) {
+        // For the next read, so this one never waits on it. A round that throws keeps the answers
+        // it would have replaced, and Check again reports it.
+        recheck().catch(() => {});
       }
-      const done = Promise.all([intelligence, modelCheck, computerStatus]).then(
-        () => {},
-      );
-      lastRecheck = { at: now, done };
-      return done;
+      return facts;
     },
+    recheck,
   };
+}
+
+/**
+ * Whether an answer from another service failed in a way asking again could change: Intelligence
+ * did not confirm, the provider refused the key in use or has not answered about it, or a set-up
+ * computer did not take its policy. A key set to a custom endpoint, no key, and no computer running
+ * are not failures, and wait for the answer to grow old.
+ */
+function failed(facts: SetupFacts): boolean {
+  const { model } = facts;
+  const keyInHand =
+    model.source === "credential" || model.source === "environment";
+  return (
+    facts.intelligence.state !== "ready" ||
+    (keyInHand &&
+      model.verdict !== "available" &&
+      model.verdict !== "cannot_check") ||
+    (facts.computer && facts.computerStatus === "needs_setup")
+  );
 }
 
 /**
