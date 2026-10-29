@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { BotNeedsYou } from "@/components/approvals/waiting";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
+import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -55,11 +56,22 @@ function serving() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (init?.method && init.method !== "GET") {
-      sent.push({
-        path: url,
-        method: init.method,
-        body: init.body ? JSON.parse(String(init.body)) : undefined,
-      });
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      sent.push({ path: url, method: init.method, body });
+      // A decision is read back from the inbox, as the server's is.
+      const decided = url.match(/^\/api\/approvals\/([^/]+)\/decision$/);
+      if (decided) {
+        const status = body.decision === "deny" ? "denied" : "approved";
+        inbox = {
+          ...inbox,
+          requests: (inbox.requests as { id: string }[]).map((row) =>
+            row.id === decided[1]
+              ? { ...row, status, decision: body.decision }
+              : row,
+          ),
+        };
+        return Response.json({ id: decided[1], status });
+      }
       return Response.json({ ok: true });
     }
     if (url === "/api/approvals") return Response.json(inbox);
@@ -119,8 +131,8 @@ test("the target of a waiting action is shown whole, however long", async () => 
   serving();
   const view = draw(<BotNeedsYou agentId="expenses" />);
   const scope = await view.findByText(long.action.scope);
-  expect(scope.className).toContain("line-clamp-none");
-  expect(scope.className).toContain("break-all");
+  expect(scope.className).toContain("[overflow-wrap:anywhere]");
+  expect(scope.closest(".truncate, [class*='line-clamp-']")).toBeNull();
 });
 
 test("only what this Bot waits on is shown, and it can be decided here", async () => {
@@ -151,7 +163,12 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
   expect(view.queryByText(/Which wiki\?/)).toBeNull();
   expect(view.getAllByRole("button", { name: "Allow once" })).toHaveLength(1);
   expect(view.getByRole("button", { name: "Always allow here" })).toBeTruthy();
-  expect(view.getByRole("button", { name: "Deny" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Decline" })).toBeTruthy();
+  // What the action is and where, in words, and who asks: this page shows every Bot's requests.
+  expect(view.getByText("Click")).toBeTruthy();
+  expect(view.getByText("shop.example").parentElement?.textContent).toBe(
+    "Expenses · shop.example",
+  );
   expect(view.getByRole("button", { name: "Send answer" })).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Allow once" }));
   await waitFor(() =>
@@ -161,6 +178,28 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
       body: { decision: "allow_once" },
     }),
   );
+});
+
+test("an action decided on the Bot's page stays there, folded to who decided", async () => {
+  inbox = { ...base, requests: [request("r1", "expenses")], questions: [] };
+  serving();
+  // The app's own cache, which the decision writes to, as it is on the page.
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <BotNeedsYou agentId="expenses" />
+    </QueryClientProvider>,
+  );
+  try {
+    fireEvent.click(await view.findByRole("button", { name: "Decline" }));
+    expect(await view.findByText("Declined by you")).toBeTruthy();
+    expect(view.getByText("Declined")).toBeTruthy();
+    expect(view.getByText("Needs you")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Decline" })).toBeNull();
+  } finally {
+    cleanup();
+    queryClient.clear();
+  }
 });
 
 test("a hand-off is marked done by the person, never allowed on their behalf", async () => {

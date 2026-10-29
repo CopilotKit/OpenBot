@@ -2,7 +2,13 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, renderHook } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  within,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import {
@@ -587,8 +593,62 @@ test("a step held on its approval card waits for the person, named for what it w
   );
   expect(view.getByText("Waiting for you")).toBeDefined();
   expect(view.queryByText("Not completed")).toBeNull();
-  expect(view.getByText("Send your email")).toBeDefined();
+  const steps = view.container.querySelector("ol");
+  if (!steps) throw new Error("no steps");
+  expect(within(steps).getByText("Send your email")).toBeDefined();
   expect(view.queryByText("Sending your email")).toBeNull();
+  // Its card, beside the folded line, names the same action.
+  const card = view.getByRole("region", { name: "Waiting for your approval" });
+  expect(within(card).getByText("Send your email")).toBeDefined();
+});
+
+test("a run of steps that has done nothing because one waits on its card says it waits for you", () => {
+  const client = idle();
+  client.setQueryData(["approvals"], {
+    enabled: true,
+    requests: [
+      {
+        id: "approval-2",
+        status: "pending",
+        createdAt: new Date(0).toISOString(),
+        action: {
+          botId: "b",
+          toolRef: "computer_click",
+          effect: "write",
+          scope: "shop.example",
+          threadId: "t",
+          toolCallId: "pay",
+          args: { element: "Pay now" },
+          target: {},
+          policy: { behaviour: "ask", source: "rule", reason: "Asked." },
+        },
+      },
+    ],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToolActivity
+        active={false}
+        group={{
+          kind: "tools",
+          id: "a",
+          steps: [
+            call("look", "computer_snapshot"),
+            call("pay", "computer_click"),
+          ],
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  const summary = view.container.querySelector("summary");
+  expect(summary?.textContent).toContain("waiting for you");
+  expect(summary?.textContent).not.toContain("not done yet");
+  expect(
+    view.getByRole("region", { name: "Waiting for your approval" }),
+  ).toBeDefined();
 });
 
 test("while running, the line names the step in progress; opened, a step shows its inputs", () => {

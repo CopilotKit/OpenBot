@@ -21,6 +21,7 @@ export function ToolLine({
   failed,
   declined,
   notYet,
+  waiting,
   children,
 }: {
   /** Drawn after the label, small and muted. A group of steps puts its kinds here. */
@@ -42,6 +43,11 @@ export function ToolLine({
    * does not read as one.
    */
   notYet?: boolean;
+  /**
+   * Held on its approval card until the person answers. Not running, and not done: muted, with the
+   * card under the line saying what it would do.
+   */
+  waiting?: boolean;
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
 }) {
@@ -58,13 +64,13 @@ export function ToolLine({
   const Mark =
     refused || failed || declined
       ? IconX
-      : running || notYet
+      : running || notYet || waiting
         ? IconClock
         : IconCircleCheck;
   const markTone =
     refused || failed
       ? tone
-      : running || notYet || declined
+      : running || notYet || waiting || declined
         ? "text-muted-foreground"
         : "text-status-done";
   const text = (
@@ -106,7 +112,9 @@ export function ToolLine({
                 ? `${label}, didn't work`
                 : notYet
                   ? `${label}, not done yet`
-                  : label}
+                  : waiting
+                    ? `${label}, waiting for you`
+                    : label}
         </span>
         {detail ? <span className="truncate opacity-70">{detail}</span> : null}
       </span>

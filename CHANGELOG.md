@@ -184,6 +184,14 @@ changes for a deployment.
   it ran, newest last, marked done, waiting for you or didn't work. The pane opens by itself only
   when it fits beside the conversation; on a narrow screen the computer button lights up instead.
   The box for a password or a code names the site it goes to.
+- When a Bot asks before acting, its card says in plain words what it will do, in which app or
+  where, to whom, and what it will send, with everything else under Details. Decline and Allow once
+  answer it, and a quieter Always allow here saves a rule for that Bot, action and place; a step
+  handed to you asks "I did it myself" or "Don't do it". The same card is in the conversation, on
+  the Bot's page and in the list of what needs you. Once you answer, it folds to how it went
+  (Allowed, Sent, Done, Declined, Didn't work) and says who decided. A request for a step that is
+  alone in its turn now shows in the conversation too, where before it waited only on the Bot's
+  page.
 
 ### Generated interfaces use A2UI 1.0
 

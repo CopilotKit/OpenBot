@@ -916,7 +916,15 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     serve();
     renderAt("/s/activity");
     // OpenBot's Needs you section, with OpenBot's own approval and its details always shown.
-    expect(await page().findByText("Muse wants to open url")).toBeTruthy();
+    expect(await page().findByText("Open url")).toBeTruthy();
+    // Which Bot asks, and where.
+    expect(
+      page().getByText(
+        (_, node) =>
+          node?.tagName === "P" &&
+          node.textContent === "Muse · https://example.com",
+      ),
+    ).toBeTruthy();
     expect(page().getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
@@ -980,7 +988,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
       await page().findByRole("button", { name: "Needs you, 1 waiting" }),
     );
     const sheet = within(await page().findByRole("dialog"));
-    expect(await sheet.findByText("Muse wants to open url")).toBeTruthy();
+    expect(await sheet.findByText("Open url")).toBeTruthy();
     // What it will send is always on screen, as in OpenBot.
     expect(sheet.getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     expect(sheet.queryByText(/send email/)).toBeNull();
