@@ -86,7 +86,8 @@ describe("a task's turn", () => {
     expect(asked[0]?.systemMessages).toEqual([
       { id: "task:ending", role: "system", content: TASK_ENDING },
     ]);
-    expect(TASK_ENDING).toContain("Ask the person a question only if");
+    expect(TASK_ENDING).toContain("Ask them a question only if");
+    expect(TASK_ENDING).toContain('written to the person as "you"');
     expect(TASK_ENDING).toContain("Don't label");
   });
 
