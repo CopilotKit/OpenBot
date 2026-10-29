@@ -1031,3 +1031,27 @@ test("a configured computer without a reachability verdict is not yet checked", 
     ).status,
   ).toBe("not_checked");
 });
+
+/*
+ * The usual state of a set-up computer: none runs until a Bot first needs one. Told to set the
+ * variables and restart, an admin would restart for something already set.
+ */
+test("a configured computer with none running says it is set up, and sends no restart", () => {
+  const facts: SetupFacts = { ...READY, computerStatus: "not_checked" };
+  expect(
+    row(
+      setupRows(facts, { productName: PRODUCT, audience: "admin" }),
+      "computer",
+    ),
+  ).toMatchObject({
+    status: "not_checked",
+    detail: "Set up. No computer is running yet, so there's nothing to check.",
+    fix: { kind: "page", label: "Computers", path: "/admin/computers" },
+  });
+  expect(
+    row(
+      setupRows(facts, { productName: PRODUCT, audience: "member" }),
+      "computer",
+    ),
+  ).toMatchObject({ detail: "Set up, not checked yet.", fix: null });
+});
