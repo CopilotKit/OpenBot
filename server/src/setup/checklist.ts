@@ -33,8 +33,7 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
  * reader rather than by the page: onboarding is a page anybody opens, so the server decides per
  * reader and a member's browser never holds the deployment's configuration vocabulary.
  *
- * Ported from OpenDuet's checklist without its Google rows: OpenBot does not ship a Google app, and
- * a person's own apps are the Connect your apps step's to draw.
+ * A person's own apps have no row here: the Connect your apps step draws those.
  */
 
 /** The guides a fix links to. The repository is where the docs ship from. */
