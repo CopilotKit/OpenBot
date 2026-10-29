@@ -88,3 +88,26 @@ export function turnsOf(items: readonly TranscriptItem[]): Turn[] {
 
   return turns;
 }
+
+/** How close to the end, in pixels, counts as being at the end of the conversation. */
+export const AT_END_PX = 8;
+
+/**
+ * Which turn is being read, from where each drawn turn's first row starts relative to the view: the
+ * last to start above `line` (a third of the way down), or the first drawn when none has. At the end
+ * of the conversation it is the last turn, which may be too short to reach the line: opened at the
+ * bottom, a short last answer starts low on the screen, and the turn before it would win.
+ */
+export function currentTurn(
+  rows: readonly { id: string; top: number }[],
+  line: number,
+  atEnd: boolean,
+): string | null {
+  if (atEnd) return rows.at(-1)?.id ?? null;
+  let current: string | null = null;
+  for (const row of rows) {
+    if (current !== null && row.top > line) break;
+    current = row.id;
+  }
+  return current;
+}

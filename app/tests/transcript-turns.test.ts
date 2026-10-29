@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { frameFiring } from "@openbot/shared/routine-firing";
 import type { TranscriptItem } from "@/components/channels/tool-activity";
-import { turnsOf } from "@/components/channels/transcript-turns";
+import { currentTurn, turnsOf } from "@/components/channels/transcript-turns";
 
 /**
  * The rail beside a conversation has one mark per turn: something the person sent, and what the Bot
@@ -101,4 +101,33 @@ test("markdown is read as plain words", () => {
   ]);
 
   expect(turn?.reply).toBe("Summary Two things, see the doc.");
+});
+
+/*
+ * Which turn is being read: the last to start above a third of the way down the view — except at the
+ * end of the conversation, where a short last turn starts below that line and is still the one on
+ * screen.
+ */
+test("the turn being read is the last to start above the reading line", () => {
+  const rows = [
+    { id: "u1", top: -900 },
+    { id: "u2", top: 120 },
+    { id: "u3", top: 700 },
+  ];
+  expect(currentTurn(rows, 300, false)).toBe("u2");
+  expect(currentTurn(rows, 50, false)).toBe("u1");
+});
+
+test("at the end of the conversation the last turn is the one being read", () => {
+  const rows = [
+    { id: "u1", top: -900 },
+    { id: "u2", top: 120 },
+    { id: "u3", top: 700 },
+  ];
+  expect(currentTurn(rows, 300, true)).toBe("u3");
+});
+
+test("with no turn above the line, the first one drawn is being read", () => {
+  expect(currentTurn([{ id: "u1", top: 500 }], 300, false)).toBe("u1");
+  expect(currentTurn([], 300, false)).toBeNull();
 });

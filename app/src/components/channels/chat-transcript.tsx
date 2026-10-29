@@ -83,7 +83,13 @@ import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import { FollowScroll, useFollowIntent } from "./follow-intent";
 import { usePacedReveal } from "./paced-reveal";
 import { TranscriptRail } from "./transcript-rail";
-import { isPersonSentMessage, type Turn, turnsOf } from "./transcript-turns";
+import {
+  AT_END_PX,
+  currentTurn,
+  isPersonSentMessage,
+  type Turn,
+  turnsOf,
+} from "./transcript-turns";
 import { useLateRenderers } from "./late-renderers";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
@@ -1894,17 +1900,22 @@ export function ChatTranscript({
   const readActiveTurn = useCallback(() => {
     const element = viewportRef.current;
     if (element === null || turnIds === "") return;
-    /* The last turn to start above a third of the way down the view is the one being read. */
-    const line = element.getBoundingClientRect().top + element.clientHeight / 3;
-    let current: string | null = null;
+    const view = element.getBoundingClientRect();
+    const rows: { id: string; top: number }[] = [];
     for (const id of turnIds.split("\n")) {
       const row = element.querySelector(
         `[data-message-id="${CSS.escape(id)}"]`,
       );
-      if (row === null) continue;
-      if (current !== null && row.getBoundingClientRect().top > line) break;
-      current = id;
+      if (row !== null) {
+        rows.push({ id, top: row.getBoundingClientRect().top - view.top });
+      }
     }
+    const current = currentTurn(
+      rows,
+      element.clientHeight / 3,
+      element.scrollHeight - element.scrollTop - element.clientHeight <=
+        AT_END_PX,
+    );
     setActiveTurn(current);
   }, [turnIds]);
   useLayoutEffect(() => {
