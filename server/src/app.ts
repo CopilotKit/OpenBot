@@ -1737,7 +1737,13 @@ export function createApp(
       ),
     );
   if (coworker?.tasks)
-    app.route("/api/tasks", createTaskRoutes(coworker.tasks, requireUser));
+    app.route(
+      "/api/tasks",
+      // A task's turns run on the proactive engine, so replying and Try again are its.
+      createTaskRoutes(coworker.tasks, requireUser, {
+        retry: coworker.proactive?.engine,
+      }),
+    );
   if (coworker?.memory)
     app.route(
       "/api/memory",

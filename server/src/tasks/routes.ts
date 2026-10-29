@@ -1,19 +1,91 @@
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@openbot/shared/attachments";
+import type { DurableTaskReply } from "@openbot/shared/task-reply";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { z } from "zod";
+import { AgentNotFoundError } from "../agents/profile-store";
 import type { AppVariables } from "../auth/guards";
+import { ProactiveRefusedError } from "../proactive/types";
 import type { TaskStore } from "./store";
 import { TaskNotFoundError } from "./types";
 
-/** `/api/tasks`: the person's own tasks, as Tasks and the task page read them. */
+/** Replies to a task, and Try again: the proactive engine's `reply` and `again`. */
+export type TaskRetry = {
+  reply(
+    ownerUserId: string,
+    taskId: string,
+    input: DurableTaskReply,
+  ): Promise<unknown>;
+  again(
+    ownerUserId: string,
+    taskId: string,
+    input?: { reply?: string; messageId?: string },
+  ): Promise<unknown>;
+};
+
+/** The longest reply a task takes. */
+const MAX_REPLY = 4000;
+/**
+ * The id the browser drew the person's message under, so the message the run records is the same
+ * one and is not drawn twice.
+ */
+const messageId = z.string().regex(/^[A-Za-z0-9-]{8,64}$/);
+
+const againSchema = z
+  .object({
+    reply: z.string().trim().max(MAX_REPLY).optional(),
+    messageId: messageId.optional(),
+  })
+  .strict();
+
+/** A reply carries words, files, or both, and the skills picked for it. Try again takes words only. */
+const replySchema = z
+  .object({
+    reply: z.string().trim().max(MAX_REPLY).default(""),
+    messageId,
+    attachmentIds: z
+      .array(z.uuid())
+      .max(MAX_ATTACHMENTS_PER_MESSAGE)
+      .optional(),
+    skillIds: z.array(z.string().min(1).max(200)).max(32).optional(),
+  })
+  .strict()
+  .refine(
+    (input) => input.reply.length > 0 || (input.attachmentIds?.length ?? 0) > 0,
+  );
+
+/** A request the routes refuse as it stands: the person can fix it and send it again. */
+export class TaskRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TaskRefusedError";
+  }
+}
+
+/** `/api/tasks`: the person's own tasks, as Tasks and the task page read and steer them. */
 export function createTaskRoutes(
   store: TaskStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  options: {
+    /** Absent, replying and Try again are not served: there is nothing to run them. */
+    retry?: TaskRetry | undefined;
+  } = {},
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser, bodyLimit({ maxSize: 16_384 }));
   routes.onError((error, context) => {
     if (error instanceof TaskNotFoundError)
       return context.json({ error: error.message }, 404);
+    // Asked for something the task's state refuses: Try again on one that did not fail, say.
+    if (error instanceof ProactiveRefusedError)
+      return context.json({ error: error.message }, 409);
+    if (error instanceof AgentNotFoundError)
+      return context.json(
+        { error: "Couldn't find that Bot. Reload the page." },
+        404,
+      );
+    if (error instanceof TaskRefusedError)
+      return context.json({ error: error.message }, 400);
     console.error(
       JSON.stringify({
         type: "tasks-route-error",
@@ -32,6 +104,52 @@ export function createTaskRoutes(
       task: await store.get(context.var.actor.id, context.req.param("id")),
     }),
   );
+  const retry = options.retry;
+  if (retry) {
+    /*
+     * A reply in the task's conversation, to steer it. Taken onto the queue and answered at once,
+     * with the task as it now reads: its turn runs when the conversation is free, and until then
+     * the reply is in `queuedReplies`.
+     */
+    routes.post("/:id/reply", async (context) => {
+      const owner = context.var.actor.id;
+      const id = context.req.param("id");
+      const parsed = replySchema.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      if (!parsed.success)
+        throw new TaskRefusedError(
+          `A reply of at most ${MAX_REPLY} characters or an attachment, and its message id, are required.`,
+        );
+      await store.get(owner, id);
+      await retry.reply(owner, id, parsed.data);
+      return context.json({ task: await store.get(owner, id) }, 202);
+    });
+    /*
+     * Try again: the failed turn runs once more, in the task's own conversation. A reply typed on a
+     * failed task comes here too, and goes with the ask, so the run has the task and the person's
+     * words both.
+     */
+    routes.post("/:id/again", async (context) => {
+      const owner = context.var.actor.id;
+      const id = context.req.param("id");
+      const body = context.req
+        .header("content-type")
+        ?.includes("application/json")
+        ? await context.req.json().catch(() => null)
+        : {};
+      const parsed = againSchema.safeParse(body ?? {});
+      if (!parsed.success)
+        throw new TaskRefusedError(
+          `Say it in at most ${MAX_REPLY} characters.`,
+        );
+      await retry.again(owner, id, {
+        ...(parsed.data.reply ? { reply: parsed.data.reply } : {}),
+        ...(parsed.data.messageId ? { messageId: parsed.data.messageId } : {}),
+      });
+      return context.json({ task: await store.get(owner, id) });
+    });
+  }
   routes.post("/:id/resolve", async (context) =>
     context.json({
       task: await store.resolve(context.var.actor.id, context.req.param("id")),

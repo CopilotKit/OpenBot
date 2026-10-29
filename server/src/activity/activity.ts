@@ -12,6 +12,7 @@
 import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
+import { pendingPersonQuestion } from "../approvals/questions";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
@@ -338,9 +339,8 @@ export function createActivityStore(database: Database) {
         .from(workItems)
         .where(
           and(
-            eq(workItems.kind, "person.question"),
-            isNull(workItems.finishedAt),
-            sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
+            // Less any a reply in a task's conversation has already answered.
+            pendingPersonQuestion(ownerUserId),
             sql`coalesce(${workItems.payload}->>'sourceBotId', ${workItems.payload}->>'botId') = ${agentId}`,
           ),
         )
@@ -478,13 +478,7 @@ export function createActivityStore(database: Database) {
           total: sql<number>`count(*)::int`,
         })
         .from(workItems)
-        .where(
-          and(
-            eq(workItems.kind, "person.question"),
-            isNull(workItems.finishedAt),
-            sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
-          ),
-        )
+        .where(pendingPersonQuestion(ownerUserId))
         .groupBy(
           sql`coalesce(${workItems.payload}->>'sourceBotId', ${workItems.payload}->>'botId')`,
         );
