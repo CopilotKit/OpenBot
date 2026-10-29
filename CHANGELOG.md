@@ -133,6 +133,21 @@ again when they come back to the end or press the arrow. A rail beside a convers
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
 
+### First run shows what OpenBot does, one step at a time
+
+- The looping intro is replaced by OpenDuet's onboarding steps: what OpenBot does (a computer of its
+  own, a team of Bots, and asking before it acts), then Connect your apps, Get notified, Check your
+  setup, and the name step, whose Get started opens the app. On a desktop the steps are listed on the
+  left beside a picture of each; on a phone they come one at a time. A reload, browser Back and a
+  connection's return all keep the person's place, which is now saved as they go.
+- Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
+  more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
+  shown the page or the variables that close a gap; everybody else only that their admin sets it up.
+  Check again asks Intelligence and the model provider again, at most every 10 seconds, and pushes
+  each running Bot computer its network policy to see that it answers; it wakes none.
+- A connection started from onboarding, or cancelled at the app's own sign-in page, now returns to
+  the screen it started on instead of the Connections list.
+
 ### OpenBot has a new look
 
 - Every screen has new colours: cool neutral greys, a near-black primary button that turns light
