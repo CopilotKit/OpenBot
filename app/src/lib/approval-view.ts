@@ -13,6 +13,12 @@ export type ApprovalView = {
   kind: "mail" | "browser" | "command" | "other";
   fields: { label: string; value: string }[];
   body: string | null;
+  /**
+   * How many of the request's own arguments the card's face leaves out: past the fields it has
+   * room for, a second body, or values that are not plain text. Plumbing (ids, refs) is not
+   * counted. When any are left out, Details opens by itself, so nothing being agreed to is hidden.
+   */
+  unshown: number;
 };
 
 const RECIPIENT =
@@ -100,6 +106,7 @@ function describeShare(args: Record<string, unknown>): ApprovalView {
     kind: mail ? "mail" : "other",
     fields: named ? [{ label: "To", value: to }] : [],
     body: display(args.preview),
+    unshown: 0,
   };
 }
 
@@ -167,17 +174,21 @@ export function describeApproval(
 
   const fields: ApprovalView["fields"] = [];
   let body: string | null = null;
+  let unshown = 0;
   if (args) {
     const entries = Object.entries(args);
     const hidden = (key: string) =>
       HIDDEN.test(key) || (server === "host" && HOST_HIDDEN.test(key));
+    const shownKeys = new Set<string>();
     // The first key matching, under `label` or, without one, under its own name.
     const pick = (pattern: RegExp, label?: string) => {
       for (const [key, value] of entries) {
         if (!pattern.test(key)) continue;
         const shown = display(value);
-        if (shown)
+        if (shown) {
           fields.push({ label: label ?? sentence(words(key)), value: shown });
+          shownKeys.add(key);
+        }
         return;
       }
     };
@@ -188,22 +199,67 @@ export function describeApproval(
     for (const [key, value] of entries) {
       if (!BODY.test(key)) continue;
       body = display(value);
-      if (body) break;
+      if (body) {
+        shownKeys.add(key);
+        break;
+      }
     }
     for (const [key, value] of entries) {
       if (fields.length >= MAX_FIELDS) break;
       if ([RECIPIENT, SUBJECT, BODY].some((test) => test.test(key))) continue;
       if (hidden(key) || /^b?cc$/i.test(key)) continue;
       const shown = display(value);
-      if (shown)
+      if (shown) {
         fields.push({
           label: LABELS[key] ?? sentence(words(key)),
           value: shown,
         });
+        shownKeys.add(key);
+      }
     }
+    unshown = entries.filter(
+      ([key, value]) =>
+        !shownKeys.has(key) &&
+        !hidden(key) &&
+        value !== null &&
+        value !== undefined &&
+        !(typeof value === "string" && !value.trim()),
+    ).length;
   }
 
-  return { title: title || toolRef, app, kind, fields, body };
+  return { title: title || toolRef, app, kind, fields, body, unshown };
+}
+
+/**
+ * What "Always allow here" lets this Bot do from then on. The server saves the rule for this Bot,
+ * this action and this place (`approvals/store.ts`), whatever the arguments, so a card that leads
+ * with one call's details says how much further its rule reaches: not only this command, every
+ * command in the folder; not only this email, every email from the app.
+ */
+export function alwaysAllowReach(
+  request: Pick<ApprovalRequest, "action">,
+): string {
+  const { toolRef, scope, target } = request.action;
+  if (toolRef === PRIVATE_SHARE)
+    return "This Bot won't ask you again before sharing private information with these people.";
+  const server = serverOf(toolRef);
+  if (server === "bot")
+    return "This Bot won't ask you again before asking that Bot, whatever it asks.";
+  const where =
+    server === "host"
+      ? `in ${display(record(target)?.displayName) ?? "this folder"}`
+      : server && !OWN_PREFIXES.has(server)
+        ? `in ${connectorName(server)}`
+        : !scope || scope === "*"
+          ? "anywhere"
+          : scope === "browser"
+            ? "in its browser"
+            : scope === "workspace"
+              ? "on its computer"
+              : scope.includes("/")
+                ? `in ${scope}`
+                : `on ${scope}`;
+  return `This Bot won't ask you again before doing this ${where}, whatever the details.`;
 }
 
 /** Who decided, in the person's words, for the line under a decided card. */

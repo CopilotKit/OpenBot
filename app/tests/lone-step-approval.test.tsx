@@ -181,9 +181,18 @@ test("a gated call alone in its turn draws its approval card under its own line"
   const waiting = within(await card(view));
   expect(waiting.getByRole("button", { name: "Allow once" })).toBeTruthy();
   expect(waiting.getByRole("button", { name: "Decline" })).toBeTruthy();
+  // How far the rule it saves reaches, read with the button: every email from Gmail, not this one.
   expect(
-    waiting.getByRole("button", { name: "Always allow here" }),
-  ).toBeTruthy();
+    waiting
+      .getByRole("button", { name: "Always allow here" })
+      .getAttribute("aria-describedby"),
+  ).toBe(
+    waiting.getByText(
+      "This Bot won't ask you again before doing this in Gmail, whatever the details.",
+    ).id,
+  );
+  // Everything the request would send fits on the face, so Details stays shut.
+  expect(waiting.getByText("Details").closest("details")?.open).toBe(false);
   // What will happen, to whom, and what it says, in plain words.
   expect(waiting.getByText("Send your email")).toBeTruthy();
   expect(waiting.getByText("Gmail")).toBeTruthy();
@@ -238,6 +247,25 @@ test("a decline folds the card to who decided, and it stays folded when the inbo
     decision: "deny",
     decidedAt: expect.any(String),
   });
+});
+
+test("a request with more than its face shows opens Details by itself", async () => {
+  approvals = [
+    send("toolu_send", {
+      action: {
+        ...send("toolu_send").action,
+        args: {
+          recipient_email: "sam@marlowceramics.com",
+          subject: "Re: Which box for the Hearth order?",
+          body: "Hi Sam, please use the double-wall boxes.",
+          html: '<a href="https://example.com/pay">Pay here</a>',
+        },
+      },
+    }),
+  ];
+  const view = draw();
+  const waiting = within(await card(view));
+  expect(waiting.getByText("Details").closest("details")?.open).toBe(true);
 });
 
 test("an allowed send folds to Allowed, then to Sent once it has run", async () => {
