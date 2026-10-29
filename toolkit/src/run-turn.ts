@@ -73,6 +73,9 @@ import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
 
 /** Everything a headless turn needs, injectable so tests never dial a model. */
+/** What a suspended turn says when whatever stopped it gave no words of its own. */
+export const HEADLESS_WAITING_FALLBACK = "The turn is waiting for human input.";
+
 export type TurnRunner = (input: {
   ownerUserId: string; // the actor the run asserts — grants and connections resolve to them
   routineId: string; // what the trail names as having started this turn, rather than the owner
@@ -533,7 +536,7 @@ export function settle(evidence: TurnEvidence): TurnOutcome {
     return {
       kind: "suspended",
       suspension: new HeadlessToolSuspension(
-        carried.message ?? "The turn is waiting for human input.",
+        carried.message ?? HEADLESS_WAITING_FALLBACK,
         carried,
       ),
     };
@@ -895,7 +898,7 @@ export function createTurnRunner(options: {
                   message?: string;
                 };
                 waiting = new HeadlessToolSuspension(
-                  value.message ?? "The turn is waiting for human input.",
+                  value.message ?? HEADLESS_WAITING_FALLBACK,
                   value,
                 );
               }
