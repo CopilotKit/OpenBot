@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { personWasAsked } from "@/lib/approval-view";
 import {
   type ApprovalRequest,
-  approvalInboxOptions,
+  approvalInboxCacheOptions,
   decideApprovalMutationOptions,
 } from "@/lib/approvals";
 import { ApprovalCard } from "./approval-card";
@@ -31,7 +31,7 @@ export function InlineApproval({
   fallback: ReactNode;
 }) {
   const cache = useQueryClient();
-  const inbox = useQuery(approvalInboxOptions());
+  const inbox = useQuery(approvalInboxCacheOptions());
   const decision = useMutation(decideApprovalMutationOptions(cache));
   const request = toolCallId
     ? inbox.data?.requests.find(
@@ -70,7 +70,7 @@ export function ToolCallApprovals({
 }: {
   toolCallIds: readonly string[];
 }) {
-  const inbox = useQuery(approvalInboxOptions());
+  const inbox = useQuery(approvalInboxCacheOptions());
   const asked = new Set(
     (inbox.data?.requests ?? [])
       .filter(

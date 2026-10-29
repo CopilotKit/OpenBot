@@ -204,6 +204,7 @@ export function ConversationPresenceProvider({
   const [store] = useState(createStore);
   const presence = useMemo(() => ({ store, channelId }), [store, channelId]);
   const channels = useInfiniteQuery(channelListQueryOptions());
+  // The conversation's one poll of the inbox. Its rows and cards read the cache this keeps fresh.
   const inbox = useQuery(approvalInboxOptions());
   const row = channels.data?.find((channel) => channel.id === channelId);
   // The sidebar's rule (`ChannelRow`), so the header and the conversation's row agree.
