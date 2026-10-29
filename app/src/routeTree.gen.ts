@@ -25,6 +25,7 @@ import { Route as AuthedAppReachabilityRouteImport } from './routes/_authed/_app
 import { Route as AuthedAppResponsibilitiesRouteImport } from './routes/_authed/_app/responsibilities'
 import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
+import { Route as AuthedAppTasksRouteImport } from './routes/_authed/_app/tasks'
 import { Route as AuthedAppTeamBotsRouteImport } from './routes/_authed/_app/team-bots'
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
 import { Route as AuthedAdminApprovalsRouteImport } from './routes/_authed/admin/approvals'
@@ -59,6 +60,8 @@ import { Route as AuthedAppConnectionsKeyRouteImport } from './routes/_authed/_a
 import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_app/group/$channelId'
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
+import { Route as AuthedAppTasksIndexRouteImport } from './routes/_authed/_app/tasks.index'
+import { Route as AuthedAppTasksTaskIdRouteImport } from './routes/_authed/_app/tasks.$taskId'
 import { Route as AuthedAdminBoundariesIndexRouteImport } from './routes/_authed/admin/boundaries_.$index'
 import { Route as AuthedAdminBoundariesNewRouteImport } from './routes/_authed/admin/boundaries_.new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
@@ -162,6 +165,11 @@ const AuthedAppRoutinesRoute = AuthedAppRoutinesRouteImport.update({
 const AuthedAppSkillsRoute = AuthedAppSkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppTasksRoute = AuthedAppTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppTeamBotsRoute = AuthedAppTeamBotsRouteImport.update({
@@ -341,6 +349,16 @@ const AuthedAppSScreenRoute = AuthedAppSScreenRouteImport.update({
   path: '/s/$screen',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAppTasksIndexRoute = AuthedAppTasksIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthedAppTasksRoute,
+} as any)
+const AuthedAppTasksTaskIdRoute = AuthedAppTasksTaskIdRouteImport.update({
+  id: '/$taskId',
+  path: '/$taskId',
+  getParentRoute: () => AuthedAppTasksRoute,
+} as any)
 const AuthedAdminBoundariesIndexRoute =
   AuthedAdminBoundariesIndexRouteImport.update({
     id: '/boundaries_/$index',
@@ -505,6 +523,7 @@ export interface FileRoutesByFullPath {
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
+  '/tasks': typeof AuthedAppTasksRouteWithChildren
   '/team-bots': typeof AuthedAppTeamBotsRoute
   '/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
@@ -535,6 +554,7 @@ export interface FileRoutesByFullPath {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
+  '/tasks/$taskId': typeof AuthedAppTasksTaskIdRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -548,6 +568,7 @@ export interface FileRoutesByFullPath {
   '/bots/': typeof AuthedAppBotsIndexRoute
   '/capabilities/': typeof AuthedAppCapabilitiesIndexRoute
   '/connections/': typeof AuthedAppConnectionsIndexRoute
+  '/tasks/': typeof AuthedAppTasksIndexRoute
   '/admin/components/': typeof AuthedAdminComponentsIndexRoute
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
@@ -607,6 +628,7 @@ export interface FileRoutesByTo {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
+  '/tasks/$taskId': typeof AuthedAppTasksTaskIdRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -620,6 +642,7 @@ export interface FileRoutesByTo {
   '/bots': typeof AuthedAppBotsIndexRoute
   '/capabilities': typeof AuthedAppCapabilitiesIndexRoute
   '/connections': typeof AuthedAppConnectionsIndexRoute
+  '/tasks': typeof AuthedAppTasksIndexRoute
   '/admin/components': typeof AuthedAdminComponentsIndexRoute
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
@@ -654,6 +677,7 @@ export interface FileRoutesById {
   '/_authed/_app/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
+  '/_authed/_app/tasks': typeof AuthedAppTasksRouteWithChildren
   '/_authed/_app/team-bots': typeof AuthedAppTeamBotsRoute
   '/_authed/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
@@ -685,6 +709,7 @@ export interface FileRoutesById {
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
+  '/_authed/_app/tasks/$taskId': typeof AuthedAppTasksTaskIdRoute
   '/_authed/admin/boundaries_/$index': typeof AuthedAdminBoundariesIndexRoute
   '/_authed/admin/boundaries_/new': typeof AuthedAdminBoundariesNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -698,6 +723,7 @@ export interface FileRoutesById {
   '/_authed/_app/bots/': typeof AuthedAppBotsIndexRoute
   '/_authed/_app/capabilities/': typeof AuthedAppCapabilitiesIndexRoute
   '/_authed/_app/connections/': typeof AuthedAppConnectionsIndexRoute
+  '/_authed/_app/tasks/': typeof AuthedAppTasksIndexRoute
   '/_authed/admin/components/': typeof AuthedAdminComponentsIndexRoute
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
@@ -732,6 +758,7 @@ export interface FileRouteTypes {
     | '/responsibilities'
     | '/routines'
     | '/skills'
+    | '/tasks'
     | '/team-bots'
     | '/admin/approvals'
     | '/admin/audit'
@@ -762,6 +789,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/s/$screen'
+    | '/tasks/$taskId'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -775,6 +803,7 @@ export interface FileRouteTypes {
     | '/bots/'
     | '/capabilities/'
     | '/connections/'
+    | '/tasks/'
     | '/admin/components/'
     | '/admin/plugins/'
     | '/settings/components-gallery/'
@@ -834,6 +863,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/s/$screen'
+    | '/tasks/$taskId'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -847,6 +877,7 @@ export interface FileRouteTypes {
     | '/bots'
     | '/capabilities'
     | '/connections'
+    | '/tasks'
     | '/admin/components'
     | '/admin/plugins'
     | '/settings/components-gallery'
@@ -880,6 +911,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/responsibilities'
     | '/_authed/_app/routines'
     | '/_authed/_app/skills'
+    | '/_authed/_app/tasks'
     | '/_authed/_app/team-bots'
     | '/_authed/admin/approvals'
     | '/_authed/admin/audit'
@@ -911,6 +943,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
     | '/_authed/_app/s/$screen'
+    | '/_authed/_app/tasks/$taskId'
     | '/_authed/admin/boundaries_/$index'
     | '/_authed/admin/boundaries_/new'
     | '/_authed/admin/components/$name'
@@ -924,6 +957,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/'
     | '/_authed/_app/capabilities/'
     | '/_authed/_app/connections/'
+    | '/_authed/_app/tasks/'
     | '/_authed/admin/components/'
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
@@ -1059,6 +1093,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/skills'
       preLoaderRoute: typeof AuthedAppSkillsRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/tasks': {
+      id: '/_authed/_app/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof AuthedAppTasksRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/team-bots': {
@@ -1298,6 +1339,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/s/$screen'
       preLoaderRoute: typeof AuthedAppSScreenRouteImport
       parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/tasks/': {
+      id: '/_authed/_app/tasks/'
+      path: '/'
+      fullPath: '/tasks/'
+      preLoaderRoute: typeof AuthedAppTasksIndexRouteImport
+      parentRoute: typeof AuthedAppTasksRoute
+    }
+    '/_authed/_app/tasks/$taskId': {
+      id: '/_authed/_app/tasks/$taskId'
+      path: '/$taskId'
+      fullPath: '/tasks/$taskId'
+      preLoaderRoute: typeof AuthedAppTasksTaskIdRouteImport
+      parentRoute: typeof AuthedAppTasksRoute
     }
     '/_authed/admin/boundaries_/$index': {
       id: '/_authed/admin/boundaries_/$index'
@@ -1586,6 +1641,20 @@ const AuthedAppCapabilitiesRouteWithChildren =
     AuthedAppCapabilitiesRouteChildren,
   )
 
+interface AuthedAppTasksRouteChildren {
+  AuthedAppTasksTaskIdRoute: typeof AuthedAppTasksTaskIdRoute
+  AuthedAppTasksIndexRoute: typeof AuthedAppTasksIndexRoute
+}
+
+const AuthedAppTasksRouteChildren: AuthedAppTasksRouteChildren = {
+  AuthedAppTasksTaskIdRoute: AuthedAppTasksTaskIdRoute,
+  AuthedAppTasksIndexRoute: AuthedAppTasksIndexRoute,
+}
+
+const AuthedAppTasksRouteWithChildren = AuthedAppTasksRoute._addFileChildren(
+  AuthedAppTasksRouteChildren,
+)
+
 interface AuthedAppRouteChildren {
   AuthedAppApprovalsRoute: typeof AuthedAppApprovalsRoute
   AuthedAppBotRoute: typeof AuthedAppBotRoute
@@ -1596,6 +1665,7 @@ interface AuthedAppRouteChildren {
   AuthedAppResponsibilitiesRoute: typeof AuthedAppResponsibilitiesRoute
   AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
+  AuthedAppTasksRoute: typeof AuthedAppTasksRouteWithChildren
   AuthedAppTeamBotsRoute: typeof AuthedAppTeamBotsRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
@@ -1629,6 +1699,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppResponsibilitiesRoute: AuthedAppResponsibilitiesRoute,
   AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
+  AuthedAppTasksRoute: AuthedAppTasksRouteWithChildren,
   AuthedAppTeamBotsRoute: AuthedAppTeamBotsRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,
