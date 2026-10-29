@@ -7,6 +7,7 @@ import {
   makeGalleryRender,
 } from "@/lib/copilot/gallery-tools";
 import { createGrantStore } from "@/lib/copilot/grant-store";
+import { DataTable } from "@/components/gallery/table";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { settleReactWork } from "./settle-react-work";
 
@@ -146,8 +147,8 @@ test("an earlier call keeps drawing after a revoke while a new call is refused",
 
 test("a decision waits disabled, then enables in place", () => {
   const store = createGrantStore();
-  const Render = makeDecisionRender(spec(CountedDecision), store);
   const respond = async () => {};
+  const Render = makeDecisionRender(spec(CountedDecision), store, respond);
   const view = render(
     <Render args={{ title: "Approve" }} respond={respond} status="executing" />,
   );
@@ -183,4 +184,26 @@ test("a half-arrived number is held back until the call completes", () => {
     <Render args={{ title: "Sales", value: 125 }} status="complete" />,
   );
   expect(view.getByText("Sales: 125")).toBeTruthy();
+});
+
+test("a streaming table draws its complete rows through the gallery render", () => {
+  const store = createGrantStore();
+  store.set({ grants: heldGrants });
+  const Render = makeGalleryRender(
+    spec(DataTable as GalleryComponent["Component"]),
+    store,
+  );
+  const view = render(
+    <Render
+      args={{
+        title: "Sales",
+        columns: ["Quarter", "Revenue"],
+        rows: [{ cells: ["Q1", 8] }, { cells: ["Q2", 9] }],
+      }}
+      status="inProgress"
+    />,
+  );
+
+  expect(view.queryByText(/Waiting for complete table data/)).toBeNull();
+  expect(view.getByText("Q1")).toBeTruthy();
 });

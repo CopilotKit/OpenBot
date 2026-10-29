@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
 import { MetricsCard } from "@/components/gallery/cards";
 import { BarChartCard } from "@/components/gallery/charts";
+import { GalleryStreamingContext } from "@/components/gallery/streaming";
 import { DataTable } from "@/components/gallery/table";
 import { settleReactWork } from "./settle-react-work";
 
@@ -95,4 +96,32 @@ test("a table cell keeps its node while its column name streams", () => {
   );
 
   expect(view.getByText("north").closest("td")).toBe(before);
+});
+
+test("a table draws its complete rows while the last one is still arriving", () => {
+  const view = render(
+    <GalleryStreamingContext.Provider value>
+      <DataTable
+        columns={["Quarter", "Revenue"]}
+        rows={[{ cells: ["Q1", 8] }, { cells: ["Q2"] }]}
+        title="Sales"
+      />
+    </GalleryStreamingContext.Provider>,
+  );
+
+  expect(view.queryByText(/Waiting for complete table data/)).toBeNull();
+  expect(view.getByText("Q1")).toBeTruthy();
+  expect(view.container.querySelectorAll("tbody tr").length).toBe(2);
+});
+
+test("a complete table with a short last row is still refused", () => {
+  const view = render(
+    <DataTable
+      columns={["Quarter", "Revenue"]}
+      rows={[{ cells: ["Q1", 8] }, { cells: ["Q2"] }]}
+      title="Sales"
+    />,
+  );
+
+  expect(view.getByText(/Waiting for complete table data/)).toBeTruthy();
 });

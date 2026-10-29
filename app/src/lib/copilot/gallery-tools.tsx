@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { RefusedCard } from "@/components/gallery/refused";
+import { GalleryStreamingContext } from "@/components/gallery/streaming";
 import {
   agentComponentsQueryOptions,
   announceGallery,
@@ -198,10 +199,11 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
       return <RefusedCard reason={state.refused} title={spec.title} />;
     }
     // A number, link or colour still arriving is held back; see `settledArgs`.
+    const complete = props.status === "complete";
     return (
-      <Component
-        {...settledArgs(props.args ?? {}, props.status === "complete")}
-      />
+      <GalleryStreamingContext.Provider value={!complete}>
+        <Component {...settledArgs(props.args ?? {}, complete)} />
+      </GalleryStreamingContext.Provider>
     );
   };
 }
