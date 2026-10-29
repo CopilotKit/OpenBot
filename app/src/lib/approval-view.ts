@@ -1,4 +1,5 @@
 import type { ApprovalRequest } from "./approvals";
+import { BROWSER_STEP_PLAIN } from "./computers/step-names";
 import { connectorName, humanise, readToolName } from "./plugins/tool-name";
 
 /**
@@ -21,6 +22,8 @@ const BODY = /^(body|text|message|content|message_?body|html|plain_?text)$/i;
 /** Plumbing the person cannot act on: page references, ids and the content's digest. */
 const HIDDEN =
   /^(ref|snapshot_?id|element_?ref|id|thread_?id|tool_?call_?id|bot_?id|actor_?id|owner_?user_?id|grant_?id|content_?digest)$/i;
+/** Argument names that need a few words to read as a question somebody can answer. */
+const LABELS: Record<string, string> = { submit: "Submit after typing" };
 /** A command on the person's computer also names its own kind and the folder's write switch. */
 const HOST_HIDDEN = /^(kind|writable)$/i;
 const MAX_FIELDS = 4;
@@ -48,8 +51,8 @@ const sentence = (parts: string[]) => {
 
 const display = (value: unknown): string | null => {
   if (typeof value === "string") return value.trim() || null;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
   if (
     Array.isArray(value) &&
     value.length > 0 &&
@@ -149,7 +152,8 @@ export function describeApproval(
       ? readToolName(`mcp__${server}__${tool}`, "plain").label
       : server
         ? humanise(tool)
-        : sentence(words(tool.replace(/^computer_/, ""))));
+        : (BROWSER_STEP_PLAIN[tool] ??
+          sentence(words(tool.replace(/^computer_/, "")))));
   const app =
     server && !OWN_PREFIXES.has(server) ? connectorName(server) : null;
 
@@ -191,7 +195,11 @@ export function describeApproval(
       if ([RECIPIENT, SUBJECT, BODY].some((test) => test.test(key))) continue;
       if (hidden(key) || /^b?cc$/i.test(key)) continue;
       const shown = display(value);
-      if (shown) fields.push({ label: sentence(words(key)), value: shown });
+      if (shown)
+        fields.push({
+          label: LABELS[key] ?? sentence(words(key)),
+          value: shown,
+        });
     }
   }
 
