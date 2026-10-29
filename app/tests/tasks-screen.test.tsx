@@ -29,7 +29,8 @@ const defaults = queryClient.getDefaultOptions();
 /**
  * Tasks: the list beside the open task. Every task is grouped by what it needs, Needs you first and
  * Done folded; each row is its Bot's orb, its title and what it needs next, and opens the task.
- * The keyboard moves through the list, opens a task and closes it again. And the
+ * Up next under it holds the Bots' open suggestions. The keyboard moves through the list, opens a
+ * task and closes it again. The + starts a task with a Bot of the person's choosing. And the
  * sidebar's Tasks entry counts what needs the person, while a task's own conversation stays out of
  * the conversation list.
  *
@@ -367,6 +368,124 @@ test("a refresh of the list that fails keeps the tasks on screen, and says it co
   expect(rows()).toEqual(["ask", "run", "broke", "read"]);
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.getByRole("heading", { name: "Open task run" })).toBeTruthy();
+});
+
+test("Up next lists the Bots' open suggestions: Start opens the task it started, Dismiss puts one away", async () => {
+  const sent = serve({
+    tasks: [task({ id: "run", status: "working" })],
+    suggestions: [
+      suggestion({ id: "s-1", title: "Confirm Friday's ship date" }),
+      suggestion({
+        id: "s-2",
+        title: "Chase the overdue invoice",
+        agentId: "scout",
+        sourceApp: null,
+      }),
+    ],
+    writes: {
+      "/api/proactive/suggestions/s-1/start": {
+        status: 200,
+        body: {
+          suggestion: { id: "s-1" },
+          task: { id: "from-s-1", channelId: "c", title: "Confirm" },
+        },
+      },
+    },
+  });
+  const { view, router } = draw();
+  const upNext = await view.findByRole("region", { name: /Up next/ });
+  expect(within(upNext).getByText("Ana · From Gmail")).toBeTruthy();
+  expect(within(upNext).getByText("Scout")).toBeTruthy();
+
+  fireEvent.click(
+    within(upNext).getByRole("button", {
+      name: "Dismiss Chase the overdue invoice",
+    }),
+  );
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      method: "POST",
+      path: "/api/proactive/suggestions/s-2/dismiss",
+      body: null,
+    }),
+  );
+  fireEvent.click(
+    within(upNext).getByRole("button", {
+      name: "Start Confirm Friday's ship date",
+    }),
+  );
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/tasks/from-s-1"),
+  );
+  expect(sent).toContainEqual({
+    method: "POST",
+    path: "/api/proactive/suggestions/s-1/start",
+    body: null,
+  });
+});
+
+test("the + asks which Bot and what to do, starts with the default Bot, and opens the task it started", async () => {
+  const sent = serve({
+    tasks: [],
+    writes: {
+      "/api/tasks": {
+        status: 201,
+        body: { task: task({ id: "new-1", title: "Find a time" }) },
+      },
+    },
+  });
+  const { view, router, user } = draw();
+  await view.findByText("No tasks yet");
+  await user.click(view.getByRole("button", { name: "New task" }));
+  const dialog = await view.findByRole("dialog", { name: "New task" });
+  // The person's default Bot, until they choose another.
+  await waitFor(() =>
+    expect(within(dialog).getByRole("combobox").textContent).toContain("Scout"),
+  );
+  const start = within(dialog).getByRole("button", { name: "Start task" });
+  expect(start.hasAttribute("disabled")).toBe(true);
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "What should it do?" }),
+    "  Find a time for coffee with Sam.  ",
+  );
+  await user.click(start);
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/tasks/new-1"),
+  );
+  expect(sent).toEqual([
+    {
+      method: "POST",
+      path: "/api/tasks",
+      body: { botId: "scout", instruction: "Find a time for coffee with Sam." },
+    },
+  ]);
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+});
+
+test("a task the server refuses keeps the dialog open with the server's words", async () => {
+  serve({
+    writes: {
+      "/api/tasks": {
+        status: 404,
+        body: { error: "Couldn't find that Bot. Reload the page." },
+      },
+    },
+  });
+  const { view, user } = draw();
+  await view.findByText("No tasks yet");
+  await user.click(view.getByRole("button", { name: "New task" }));
+  const dialog = await view.findByRole("dialog", { name: "New task" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "What should it do?" }),
+    "Do it",
+  );
+  await user.keyboard("{Meta>}{Enter}{/Meta}");
+  expect((await within(dialog).findByRole("alert")).textContent).toBe(
+    "Couldn't find that Bot. Reload the page.",
+  );
+  expect(within(dialog).getByRole<HTMLTextAreaElement>("textbox").value).toBe(
+    "Do it",
+  );
 });
 
 test("the sidebar has Tasks above Bots with how many need you, and keeps tasks' conversations out of its list", async () => {
