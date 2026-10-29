@@ -100,12 +100,33 @@ export function historyIsLoading({
   restoring,
   seeded,
   voicePending,
+  voiceWaitedOut = false,
 }: {
   restoring: boolean;
   seeded: boolean;
   voicePending: boolean;
+  /** The voice chats have had their `VOICE_WAIT_MS` since the thread came in. */
+  voiceWaitedOut?: boolean;
 }): boolean {
-  return restoring || (!seeded && voicePending);
+  return restoring || (!seeded && voicePending && !voiceWaitedOut);
+}
+
+/**
+ * How long, once the thread is in, the conversation waits for its voice chats before showing
+ * without them. A slow or failing voice service must not hold up text chat; cards that arrive after
+ * this join the transcript where they belong.
+ */
+export const VOICE_WAIT_MS = 1500;
+
+/** Whether `VOICE_WAIT_MS` has passed since `waiting` became true. Reset whenever it is false. */
+function useWaitedOut(waiting: boolean, key: string): boolean {
+  const [waitedOut, setWaitedOut] = useState<string | null>(null);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setTimeout(() => setWaitedOut(key), VOICE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [waiting, key]);
+  return waiting && waitedOut === key;
 }
 
 export function channelHistoryNotice({
@@ -566,10 +587,15 @@ export function ChannelChat({
    * and then splicing call cards into it; the notice waits for the same moment, so it appears in
    * the commit that shows the history rather than a render later, shrinking the view under it.
    */
+  const voiceWaitedOut = useWaitedOut(
+    !restoring && seed === null && voiceArchive.pending,
+    channel.id,
+  );
   const historyLoading = historyIsLoading({
     restoring,
     seeded: seed !== null,
     voicePending: voiceArchive.pending,
+    voiceWaitedOut,
   });
   const historyNotice = channelHistoryNotice({
     restoring: historyLoading,

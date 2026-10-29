@@ -29,6 +29,11 @@ const keys = {
 export function voiceSessionQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: keys.saved(channelId),
+    /*
+     * A channel's history waits on this (see `historyIsLoading`), so a failure is final at once:
+     * retried, it held the conversation behind the placeholder for another second.
+     */
+    retry: false,
     queryFn: async ({ signal }): Promise<VoiceSessionRecord[]> => {
       const sessions: VoiceSessionRecord[] = [];
       let cursor: string | null = null;

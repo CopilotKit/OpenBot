@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { historyIsLoading } from "@/components/channels/channel-chat";
+import {
+  historyIsLoading,
+  VOICE_WAIT_MS,
+} from "@/components/channels/channel-chat";
+import { voiceSessionQueryOptions } from "@/lib/voice/archive";
 
 /**
  * When the transcript waits behind the placeholder. A channel opened from the roster waits for its
@@ -30,4 +34,28 @@ test("nothing left to wait for", () => {
   expect(
     historyIsLoading({ restoring: false, seeded: false, voicePending: false }),
   ).toBe(false);
+});
+
+/*
+ * A slow or failing voice service must not hold up text chat: once the thread is in, the voice chats
+ * get VOICE_WAIT_MS more, and the conversation shows without them after that. A failure is final at
+ * once rather than retried behind the placeholder.
+ */
+test("a channel stops waiting for voice chats that take too long", () => {
+  expect(
+    historyIsLoading({
+      restoring: false,
+      seeded: false,
+      voicePending: true,
+      voiceWaitedOut: true,
+    }),
+  ).toBe(false);
+});
+
+test("a failed voice-chat load is not retried behind the placeholder", () => {
+  expect(voiceSessionQueryOptions("c1").retry).toBe(false);
+});
+
+test("the wait for voice chats is short", () => {
+  expect(VOICE_WAIT_MS).toBeLessThanOrEqual(1500);
 });
