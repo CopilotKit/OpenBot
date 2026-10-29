@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
 
 /**
  * A component that throws must not take the conversation with it.
@@ -21,6 +22,9 @@ export class ToolRenderBoundary extends Component<
   },
   { failed: boolean; failedFinal: boolean; key: unknown }
 > {
+  static contextType = ArgumentsArrivingContext;
+  declare context: React.ContextType<typeof ArgumentsArrivingContext>;
+
   state = { failed: false, failedFinal: false, key: undefined as unknown };
 
   static getDerivedStateFromError() {
@@ -49,6 +53,19 @@ export class ToolRenderBoundary extends Component<
   }
 
   render() {
+    /*
+     * Failed on arguments that are still arriving: nothing, until the next chunk retries it. Shown,
+     * the error box flashed between chunks for the whole stream of a card that then drew fine.
+     */
+    if (
+      this.state.failed &&
+      !this.state.failedFinal &&
+      !this.props.final &&
+      this.props.resetKey !== undefined &&
+      this.context
+    ) {
+      return null;
+    }
     if (this.state.failed) {
       return (
         <p className="my-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

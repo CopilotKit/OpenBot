@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
 import { ToolRenderBoundary } from "@/components/channels/tool-boundary";
+import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -37,7 +38,8 @@ test("recovers on the next chunk", () => {
       <Fragile args="bad" />
     </ToolRenderBoundary>,
   );
-  expect(view.getByText(FALLBACK)).toBeTruthy();
+  // Nothing between chunks: the error box flashing on every half-sent chunk read as a failure.
+  expect(view.queryByText(FALLBACK)).toBeNull();
 
   view.rerender(
     <ToolRenderBoundary name="Chart" resetKey="good">
@@ -79,6 +81,21 @@ test("no reset key keeps today's behaviour", () => {
     <ToolRenderBoundary name="Chart">
       <Fragile args="good" />
     </ToolRenderBoundary>,
+  );
+
+  expect(view.getByText(FALLBACK)).toBeTruthy();
+  quiet.mockRestore();
+});
+
+/* A call whose arguments can no longer arrive (its run stopped) has no next chunk to wait for. */
+test("a failure in a row that can no longer receive arguments shows", () => {
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  const view = render(
+    <ArgumentsArrivingContext.Provider value={false}>
+      <ToolRenderBoundary name="Chart" resetKey="bad">
+        <Fragile args="bad" />
+      </ToolRenderBoundary>
+    </ArgumentsArrivingContext.Provider>,
   );
 
   expect(view.getByText(FALLBACK)).toBeTruthy();
