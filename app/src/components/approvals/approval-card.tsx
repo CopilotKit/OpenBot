@@ -196,7 +196,7 @@ function ApprovalContent({
         <Fragment key={field.label}>
           <Hairline />
           <div className="flex min-h-11 items-baseline gap-3 px-4 py-2.5">
-            <span className="type-caption w-16 shrink-0 font-medium text-muted-foreground">
+            <span className="type-caption min-w-16 max-w-[45%] shrink-0 font-medium text-muted-foreground">
               {field.label}
             </span>
             <span className="type-sub min-w-0 font-medium [overflow-wrap:anywhere]">
