@@ -135,7 +135,7 @@ changes for a deployment.
 
 ### First run shows what OpenBot does, one step at a time
 
-- The looping intro is replaced by OpenDuet's onboarding steps: what OpenBot does (a computer of its
+- The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
   own, a team of Bots, and asking before it acts), then Connect your apps, Get notified, Check your
   setup, and the name step, whose Get started opens the app. On a desktop the steps are listed on the
   left beside a picture of each; on a phone they come one at a time. A reload, browser Back and a
@@ -147,8 +147,9 @@ changes for a deployment.
   checklist does the same once an answer has failed or is five minutes old, without waiting for it,
   so the next read has the new answer. To check the Bot computer, the server sends each running
   computer its network policy whenever it asks, and sees that it answers; it wakes none.
-- A connection started from onboarding, or cancelled at the app's own sign-in page, now returns to
-  the screen it started on instead of the Connections list.
+- An app connected from Connect your apps comes back to that step from the app's own sign-in page,
+  whether it connected, failed or was cancelled there. A connection started from Connections or an
+  app's admin page comes back where it did before.
 
 ### OpenBot has a new look
 
