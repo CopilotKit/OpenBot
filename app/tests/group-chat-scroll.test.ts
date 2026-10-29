@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { isNearBottom } from "@/components/channels/group-chat";
+import {
+  isNearBottom,
+  shouldFollowGroup,
+} from "@/components/channels/group-chat";
 
 /**
  * A group chat follows new lines only for a reader who is already at the bottom. Somebody scrolled
@@ -31,4 +34,28 @@ test("a custom threshold is respected", () => {
       200,
     ),
   ).toBe(false);
+});
+
+test("the first landing always goes to the bottom", () => {
+  expect(
+    shouldFollowGroup({ landed: false, atBottom: false, newestIsMine: false }),
+  ).toBe(true);
+});
+
+test("a reader scrolled up keeps their place when a Bot speaks", () => {
+  expect(
+    shouldFollowGroup({ landed: true, atBottom: false, newestIsMine: false }),
+  ).toBe(false);
+});
+
+test("the person's own message is always brought into view", () => {
+  expect(
+    shouldFollowGroup({ landed: true, atBottom: false, newestIsMine: true }),
+  ).toBe(true);
+});
+
+test("a reader at the bottom follows", () => {
+  expect(
+    shouldFollowGroup({ landed: true, atBottom: true, newestIsMine: false }),
+  ).toBe(true);
 });

@@ -52,17 +52,26 @@ export function GroupChat({ channelId }: { channelId: string }) {
    */
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const atBottom = useRef(true);
-  const landedFor = useRef<string | null>(null);
-  const lastKey = `${messages.length}:${messages.at(-1)?.status ?? ""}`;
+  // Once per mount, which is once per channel: the route keys `GroupChat` on its channel id.
+  const landed = useRef(false);
+  const newest = messages.at(-1);
+  const newestIsMine = newest !== undefined && newest.ownerUserId === me?.id;
+  const lastKey = `${messages.length}:${newest?.status ?? ""}`;
   useLayoutEffect(() => {
     const element = viewportRef.current;
     if (element === null || lastKey === "0:") return;
-    if (landedFor.current !== channelId || atBottom.current) {
+    if (
+      shouldFollowGroup({
+        landed: landed.current,
+        atBottom: atBottom.current,
+        newestIsMine,
+      })
+    ) {
       element.scrollTop = element.scrollHeight;
-      landedFor.current = channelId;
+      landed.current = true;
       atBottom.current = true;
     }
-  }, [channelId, lastKey]);
+  }, [lastKey, newestIsMine]);
 
   if (group.isPending) return null;
   if (group.isError)
@@ -245,4 +254,25 @@ export function isNearBottom(
   return (
     element.scrollHeight - element.scrollTop - element.clientHeight <= threshold
   );
+}
+
+/**
+ * Whether the group chat moves to its newest line.
+ *
+ * Always on opening, and always for the person's own message: they just sent it and are looking for
+ * it. A Bot's line only for a reader already at the bottom, so somebody reading an earlier answer
+ * keeps their place.
+ *
+ * Exported so it can be checked without mounting anything.
+ */
+export function shouldFollowGroup({
+  landed,
+  atBottom,
+  newestIsMine,
+}: {
+  landed: boolean;
+  atBottom: boolean;
+  newestIsMine: boolean;
+}): boolean {
+  return !landed || atBottom || newestIsMine;
 }
