@@ -165,6 +165,23 @@ function heldBack(order: SerialOrder) {
   )`;
 }
 
+/**
+ * At most `max` items of one kind running at once for each value `by` gives, as SQL over the
+ * `work_items` row named `row`: one person's task turns, say. Running is a live lease.
+ */
+export type RunningCap = { by: (row: SQL) => SQL; max: number };
+
+/** Whether the row named `due` would be one too many running for its value of `cap.by`. */
+function atCap(kind: string, cap: RunningCap) {
+  return sql`(
+    select count(*) from "work_items" as ${other}
+    where ${other}.kind = ${kind}
+      and ${other}.finished_at is null
+      and ${other}.lease_until > now()
+      and ${cap.by(other)} = ${cap.by(due)}
+  ) >= ${cap.max}`;
+}
+
 export type WorkQueue = {
   /**
    * Put work on the queue, or leave what is there. Idempotent on (kind, key).
@@ -206,6 +223,12 @@ export type WorkQueue = {
      * of this kind alone, grouped by that field's value.
      */
     serialBy?: string | SerialOrder;
+    /**
+     * Leave an item queued while its value already has as many running as the cap allows
+     * ({@link RunningCap}). It is claimed once one of those finishes or is let go, never refused.
+     * One item per claim.
+     */
+    runningAtMost?: RunningCap;
   }) => Promise<WorkItem[]>;
   /**
    * Keep a claim alive while the work runs. False means it expired, finished, or went to somebody
@@ -380,11 +403,15 @@ export function createWorkQueue(database: Database): WorkQueue {
       limit = 1,
       maxAttempts = DEFAULT_MAX_ATTEMPTS,
       serialBy,
+      runningAtMost,
     }) {
       const order =
         typeof serialBy === "string"
           ? orderByField(kind, serialBy, maxAttempts)
           : serialBy;
+      // Its lock below is waited for, and two claims each waiting on the other's would deadlock.
+      if (runningAtMost && limit !== 1)
+        throw new Error("A claim under a running cap takes one item.");
       return database.transaction(async (transaction) => {
         /*
          * `skip locked` is what makes this concurrent rather than merely correct. Without it a
@@ -396,7 +423,8 @@ export function createWorkQueue(database: Database): WorkQueue {
          * every sweep and starve every other group.
          */
         const selected = await transaction.execute(sql`
-          select "kind", "key", ${order ? order.groupOf(due) : sql`null`} as "group"
+          select "kind", "key", ${order ? order.groupOf(due) : sql`null`} as "group",
+            ${runningAtMost ? runningAtMost.by(due) : sql`null`} as "runner"
           from "work_items" as ${due}
           where "kind" = ${kind}
             and "finished_at" is null
@@ -404,6 +432,7 @@ export function createWorkQueue(database: Database): WorkQueue {
             and "run_at" <= now()
             and ("lease_until" is null or "lease_until" <= now())
             ${order ? sql`and not ${heldBack(order)}` : sql``}
+            ${runningAtMost ? sql`and not ${atCap(kind, runningAtMost)}` : sql``}
           order by "run_at" asc, "created_at" asc, "key" asc
           limit ${limit}
           for update skip locked
@@ -417,6 +446,7 @@ export function createWorkQueue(database: Database): WorkQueue {
           kind: string;
           key: string;
           group: string | null;
+          runner: string | null;
         }[];
         if (rows.length === 0) return [];
 
@@ -440,6 +470,23 @@ export function createWorkQueue(database: Database): WorkQueue {
               where ${due}.kind = ${kind} and ${due}.key = ${row.key}
             `);
             if (check?.blocked !== false) continue;
+          }
+          if (runningAtMost && row.runner !== null) {
+            /*
+             * Counted again, one claimer per value at a time: two replicas could each count one
+             * fewer running than the cap and each start another. Waited for, not skipped as a group
+             * is: a group runs one item anyway, but under a cap of three a claim that lost the race
+             * would leave a turn queued with room to run until something else looked.
+             */
+            await transaction.execute(sql`
+              select pg_advisory_xact_lock(hashtext(${`${kind}:running`}), hashtext(${row.runner}))
+            `);
+            const [check] = await transaction.execute<{ full: boolean }>(sql`
+              select ${atCap(kind, runningAtMost)} as "full"
+              from "work_items" as ${due}
+              where ${due}.kind = ${kind} and ${due}.key = ${row.key}
+            `);
+            if (check?.full !== false) continue;
           }
           const [updated] = await transaction
             .update(workItems)

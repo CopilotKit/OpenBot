@@ -62,6 +62,7 @@ import {
   PROACTIVE_TASK_KIND,
   type ProactiveScope,
   type TaskThreads,
+  TASK_TURNS_PER_PERSON,
   type TaskTurnEnding,
 } from "../src/proactive/engine";
 import { createProactiveRoutes } from "../src/proactive/routes";
@@ -254,6 +255,7 @@ function engineFor(
   durable?: WorkQueue,
   replyContext?: ReturnType<typeof createTaskReplyContext>,
   tasks: TaskThreads = threads,
+  options: { taskTurnsAtOnce?: number } = {},
 ) {
   const memory = memoryQueue();
   const queue = durable ?? memory.queue;
@@ -293,6 +295,7 @@ function engineFor(
     catalogue: { listServers: async () => [] },
     mintThreadId: () => `${prefix}-research-thread`,
     taskRetryMs: 0,
+    ...options,
   });
   engines.add(engine);
   return { engine, items, started };
@@ -2666,6 +2669,144 @@ describe("start_task", () => {
     expect(
       results.filter((result) => result?.startsWith("Refused.")),
     ).toHaveLength(2);
+  });
+});
+
+describe("task turns at once", () => {
+  /** Turns that hold until let go, by ask, and a way to wait until so many have started. */
+  function gatedTurns(gated: (ask: string) => boolean = () => true) {
+    const entered: string[] = [];
+    const gates = new Map<string, PromiseWithResolvers<void>>();
+    let open = false;
+    const waits: { count: number; reached: () => void }[] = [];
+    const turn = async ({ text }: Started) => {
+      const ask = readTaskBrief(text) ?? text;
+      const gate = Promise.withResolvers<void>();
+      gates.set(ask, gate);
+      entered.push(ask);
+      for (const wait of waits)
+        if (entered.length === wait.count) wait.reached();
+      if (gated(ask) && !open) await gate.promise;
+    };
+    const started = (count: number) =>
+      new Promise<void>((reached) => {
+        if (entered.length >= count) reached();
+        else waits.push({ count, reached });
+      });
+    const release = (ask: string) => gates.get(ask)?.resolve();
+    // Whatever a test leaves held, so a failure never leaves a turn running into the next test.
+    const releaseAll = () => {
+      open = true;
+      for (const gate of gates.values()) gate.resolve();
+    };
+    return { entered, turn, started, release, releaseAll };
+  }
+  /**
+   * The real queue, counting what each claim handed out, and a way to wait for so many claims. On a
+   * pool of its own: a burst of claims beside the engine's reads on this file's two connections
+   * trips Bun's SQL client (see `busySignals`).
+   */
+  function countedQueue() {
+    const pool = createDatabase(databaseUrl.toString(), { max: 6 });
+    const real = createWorkQueue(pool);
+    const claims: string[][] = [];
+    const waits: { count: number; reached: () => void }[] = [];
+    const queue: WorkQueue = {
+      ...real,
+      claim: async (input) => {
+        const items = await real.claim(input);
+        if (input.kind === PROACTIVE_TASK_KIND) {
+          claims.push(items.map((item) => item.key));
+          for (const wait of waits)
+            if (claims.length === wait.count) wait.reached();
+        }
+        return items;
+      },
+    };
+    const claimed = (count: number) =>
+      new Promise<void>((reached) => {
+        if (claims.length >= count) reached();
+        else waits.push({ count, reached });
+      });
+    return { queue, claims, claimed, close: () => pool.$client.close() };
+  }
+
+  test(`one person's run ${TASK_TURNS_PER_PERSON} at a time, and the rest wait, Working, to start as one finishes`, async () => {
+    const turns = gatedTurns();
+    const counted = countedQueue();
+    const { engine } = engineFor(turns.turn, counted.queue);
+    const asks = Array.from(
+      { length: TASK_TURNS_PER_PERSON + 1 },
+      (_, n) => `Draft note ${n + 1}.`,
+    );
+    try {
+      const opened: OpenedTask[] = [];
+      for (const ask of asks)
+        opened.push(
+          await engine.startAsked(owner.id, bot, {
+            title: ask,
+            instruction: ask,
+          }),
+        );
+      // Each start claims once; the last finds the person at their limit, and leaves it queued.
+      await counted.claimed(asks.length);
+      expect(counted.claims.flat()).toHaveLength(TASK_TURNS_PER_PERSON);
+      await turns.started(TASK_TURNS_PER_PERSON);
+      const waiting = opened.find(
+        (task) => !turns.entered.includes(task.title),
+      );
+      expect(await taskStore.get(owner.id, waiting?.id ?? "")).toMatchObject({
+        status: "working",
+      });
+
+      // One finishing makes room, and the turn that finished starts the one waiting.
+      turns.release(turns.entered[0] ?? "");
+      await turns.started(asks.length);
+      expect(turns.entered.toSorted()).toEqual(asks);
+    } finally {
+      turns.releaseAll();
+      await engine.idle();
+      await counted.close();
+    }
+  });
+
+  test("past the process's own limit, a start leaves its turn queued for the next to finish", async () => {
+    const turns = gatedTurns((ask) => ask === "Book the room.");
+    const counted = countedQueue();
+    const { engine } = engineFor(
+      turns.turn,
+      counted.queue,
+      undefined,
+      threads,
+      {
+        taskTurnsAtOnce: 1,
+      },
+    );
+    try {
+      const first = await engine.startAsked(owner.id, bot, {
+        title: "Book the room.",
+        instruction: "Book the room.",
+      });
+      await turns.started(1);
+      const second = await engine.startAsked(owner.id, bot, {
+        title: "Order lunch.",
+        instruction: "Order lunch.",
+      });
+      // Neither its start nor the sweep claims it while the one turn this process may run is busy.
+      await engine.sweep();
+      expect(counted.claims).toEqual([[`task:${first.id}`]]);
+      expect(await taskStore.get(owner.id, second.id)).toMatchObject({
+        status: "working",
+      });
+      turns.release("Book the room.");
+      await turns.started(2);
+      await engine.idle();
+      expect(turns.entered).toEqual(["Book the room.", "Order lunch."]);
+    } finally {
+      turns.releaseAll();
+      await engine.idle();
+      await counted.close();
+    }
   });
 });
 
