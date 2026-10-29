@@ -1,12 +1,20 @@
+import { IconPlus } from "@tabler/icons-react";
 import {
   createFileRoute,
   Outlet,
   useNavigate,
   useParams,
 } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
 import { TaskList, taskRows } from "@/components/tasks/task-list";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/_app/tasks")({
@@ -44,6 +52,7 @@ const somethingOpen = () =>
 function TasksLayout() {
   const { taskId } = useParams({ strict: false }) as { taskId?: string };
   const navigate = useNavigate();
+  const [adding, setAdding] = useState(false);
   const list = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -92,6 +101,21 @@ function TasksLayout() {
             <SidebarToggle />
             <h1 className="type-sub truncate pl-1 font-semibold">Tasks</h1>
           </div>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label="New task"
+                  onClick={() => setAdding(true)}
+                  size="icon"
+                  variant="ghost"
+                />
+              }
+            >
+              <IconPlus />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New task</TooltipContent>
+          </Tooltip>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto" ref={list}>
           <TaskList openTaskId={taskId} />
@@ -106,6 +130,18 @@ function TasksLayout() {
       >
         <Outlet />
       </div>
+      {adding ? (
+        <NewTaskDialog
+          onClose={() => setAdding(false)}
+          onStarted={(task) => {
+            setAdding(false);
+            void navigate({
+              to: "/tasks/$taskId",
+              params: { taskId: task.id },
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

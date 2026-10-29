@@ -80,6 +80,7 @@ import { isBrowserStep } from "./browser-activity";
 import {
   attachmentModality,
   type SentAttachment,
+  startedTasksLast,
   toVisibleChatItems,
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
@@ -1966,7 +1967,7 @@ export function ChatTranscript({
   /* Which row each tool step was drawn in, so a row keeps its key; see `groupToolSteps`. */
   const rowIdsRef = useRef(new Map<string, string>());
   const items = groupToolSteps(
-    dropRepeatedAppCards(toVisibleChatItems(messages)),
+    startedTasksLast(dropRepeatedAppCards(toVisibleChatItems(messages))),
     isDrawn,
     rowIdsRef.current,
   );

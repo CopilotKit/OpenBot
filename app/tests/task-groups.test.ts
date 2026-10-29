@@ -2,7 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/core";
 import { frameTaskBrief, frameTaskInput } from "@openbot/shared/task-brief";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
-import { toVisibleChatItems } from "@/components/channels/chat-messages";
+import {
+  startedTasksLast,
+  toVisibleChatItems,
+} from "@/components/channels/chat-messages";
 import { shortAgo } from "@/components/tasks/task-list";
 import {
   type ApprovalRequest,
@@ -10,6 +13,7 @@ import {
   decideApprovalMutationOptions,
   type PersonQuestion,
 } from "@/lib/approvals";
+import { readStartedTask } from "@/lib/copilot/task-card-tool";
 import {
   GROUP_ORDER,
   needsYouCount,
@@ -30,7 +34,8 @@ import {
  * How Tasks' list is grouped, ordered and counted, worked out without drawing anything: the order
  * of the groups, a task's own approval or question making it Needs you, the line under each title,
  * and the sidebar's count being exactly the Needs you group. How often tasks are read again. And
- * a task's ask, drawn once however many times its turn runs.
+ * the two things the conversation does with tasks: a started task's card under the Bot's words, and
+ * a rerun's ask drawn once.
  */
 
 const NOW = Date.parse("2026-10-28T12:00:00Z");
@@ -255,6 +260,44 @@ test("how long ago, in as few letters as the locale has", () => {
   expect(shortAgo(at(60 * 3), NOW)).toMatch(/^3\s?h/);
   expect(shortAgo(at(60 * 24), NOW)).toBe("yesterday");
   expect(shortAgo("not a time", NOW)).toBe("");
+});
+
+test("start_task's answer is a started task only when it started one", () => {
+  const started = { taskId: "t-1", channelId: "c-1", title: "Reply to Rosa" };
+  expect(readStartedTask(JSON.stringify({ ...started, note: "…" }))).toEqual(
+    started,
+  );
+  // A server tool's text can arrive encoded once more.
+  expect(readStartedTask(JSON.stringify(JSON.stringify(started)))).toEqual(
+    started,
+  );
+  expect(readStartedTask("Refused. start_task takes a title")).toBeNull();
+  expect(readStartedTask(JSON.stringify({ title: "no id" }))).toBeNull();
+  expect(readStartedTask(undefined)).toBeNull();
+});
+
+test("a started task's card goes under the Bot's words in its turn, before the person's next message", () => {
+  const messages: Message[] = [
+    { id: "u1", role: "user", content: "Draft the summary" },
+    {
+      id: "a1",
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: "call-1",
+          type: "function",
+          function: { name: "start_task", arguments: "{}" },
+        },
+      ],
+    },
+    { id: "r1", role: "tool", toolCallId: "call-1", content: "{}" },
+    { id: "a2", role: "assistant", content: "On it." },
+    { id: "u2", role: "user", content: "Thanks" },
+  ];
+  expect(
+    startedTasksLast(toVisibleChatItems(messages)).map((item) => item.id),
+  ).toEqual(["u1", "a2", "call-1", "u2"]);
 });
 
 test("a task's ask is drawn once however many times its turn runs, and an accepted reply once too", () => {

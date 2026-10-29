@@ -13,6 +13,7 @@ import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
 import { SignInTool } from "./sign-in-tool";
 import { SkillTools } from "./skill-tools";
+import { TaskCardTool } from "./task-card-tool";
 
 /**
  * The CopilotKit client, wrapped once for the whole authenticated app.
@@ -66,6 +67,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         */}
         <HandoffTool />
         <EscalationTool />
+        {/* Draws a Bot handing work to a task of its own: the task's card, opening its page. */}
+        <TaskCardTool />
         {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}

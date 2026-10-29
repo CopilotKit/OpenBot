@@ -21,6 +21,7 @@ import { conversationFacts } from "@/lib/tasks/use-task";
 import { cn } from "@/lib/utils";
 import { STATUS_TONE } from "./task-status";
 import { TaskSection } from "./task-section";
+import { UpNext } from "./up-next";
 
 /** What marks a task's row, so the keyboard can find the rows in the order they are drawn. */
 export const TASK_ROW = "data-task-row";
@@ -76,7 +77,7 @@ export function moveThroughRows(event: KeyboardEvent<HTMLElement>) {
 }
 
 /**
- * The Tasks list: every task, grouped by what it needs from the person (`taskGroups`).
+ * The Tasks list: every task, grouped by what it needs from the person (`taskGroups`), then Up next.
  * Needs you comes first, then Working, Failed and Ready for review, each headed with how many. Done
  * starts folded. Each row is the Bot's orb, the task's title and the one line of what it needs next,
  * and opens the task beside the list.
@@ -154,6 +155,7 @@ export function TaskList({ openTaskId }: { openTaskId?: string }) {
           );
         })
       )}
+      <UpNext bots={bots.data} />
     </div>
   );
 }

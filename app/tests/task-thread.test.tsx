@@ -13,11 +13,19 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BotActivityGlance } from "@/components/bot-profile/activity";
+import { ChannelChat } from "@/components/channels/channel-chat";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { TaskPage } from "@/components/tasks/task-page";
+import { TaskCardTool } from "@/lib/copilot/task-card-tool";
 import { queryClient } from "@/query-client";
 import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import { settleReactWork } from "./settle-react-work";
@@ -25,13 +33,14 @@ import { settleReactWork } from "./settle-react-work";
 const defaults = queryClient.getDefaultOptions();
 
 /**
- * A task's page, through the real conversation: the provider, the agent, the
+ * A task's page and its card in Chat, through the real conversation: the provider, the agent, the
  * transcript and the composer are real, and only `fetch` is a fixture.
  *
  * The page is the task's own conversation with its report above it. A reply goes to the server,
  * which queues it behind whatever the task is doing, so nothing typed there runs in the browser.
  * A task that couldn't finish has Try again, and takes a reply as Try again with the person's words.
- * A task's conversation reached as a conversation, from a link anywhere, opens as the task.
+ * Chat draws a Bot's `start_task` as a card under its "On it", opening the task. A task's
+ * conversation reached as a conversation, from a link anywhere, opens as the task.
  */
 
 const NativeResponse = globalThis.Response;
@@ -255,6 +264,7 @@ function drawAt(path: string, page: () => React.ReactNode) {
   const root = createRootRoute({
     component: () => (
       <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
+        <TaskCardTool />
         <Outlet />
       </CopilotKitProvider>
     ),
@@ -595,6 +605,96 @@ test("on a Bot's page, what was raised in a task opens the task, and the rest op
   expect(
     view.getByRole("link", { name: /Which deck\?/ }).getAttribute("href"),
   ).toBe("/channel/chat");
+});
+
+test("Chat draws a Bot's start_task as the task's card under its On it, live, opening the task", async () => {
+  setUp({ status: "working", next: null });
+  history = [
+    { id: "u-1", role: "user", content: "Find a time for coffee with Sam" },
+    {
+      id: "a-1",
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: "call-1",
+          type: "function",
+          function: { name: "start_task", arguments: "{}" },
+        },
+      ],
+    },
+    {
+      id: "r-1",
+      role: "tool",
+      toolCallId: "call-1",
+      content: JSON.stringify({
+        taskId: "t-1",
+        channelId: "task-channel",
+        title: "Coffee with Sam",
+        note: "…",
+      }),
+    },
+    { id: "a-2", role: "assistant", content: "On it." },
+  ];
+  const { view, router } = drawAt("/here", () => (
+    <ChannelChat
+      channel={channelOf("chat", "chat-thread")}
+      runtimeAgentId="scout"
+    />
+  ));
+  const card = await view.findByRole("link", {
+    name: /Find a time for coffee with Sam/,
+  });
+  expect(card.getAttribute("href")).toBe("/tasks/t-1");
+  expect(within(card).getByText("Working").getAttribute("data-status")).toBe(
+    "working",
+  );
+  // Under the Bot's words, not above them.
+  const onIt = view.getByText("On it.");
+  expect(
+    onIt.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // Where the task stands follows the task.
+  current = task({ status: "ready_for_review" });
+  await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  expect(await within(card).findByText("Ready for review")).toBeTruthy();
+  fireEvent.click(card);
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/tasks/t-1"),
+  );
+});
+
+test("a refused start_task draws no card", async () => {
+  setUp();
+  history = [
+    {
+      id: "a-1",
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: "call-1",
+          type: "function",
+          function: { name: "start_task", arguments: "{}" },
+        },
+      ],
+    },
+    {
+      id: "r-1",
+      role: "tool",
+      toolCallId: "call-1",
+      content: "Refused. start_task takes a title.",
+    },
+    { id: "a-2", role: "assistant", content: "Let me answer here instead." },
+  ];
+  const { view } = drawAt("/here", () => (
+    <ChannelChat
+      channel={channelOf("chat", "chat-thread")}
+      runtimeAgentId="scout"
+    />
+  ));
+  await view.findByText("Let me answer here instead.");
+  expect(view.queryByRole("link", { name: /coffee/ })).toBeNull();
 });
 
 test("a task's turn running on the server reads as the Bot working on it, never as a routine", () => {
