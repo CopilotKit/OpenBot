@@ -216,3 +216,28 @@ test("a conversation shorter than a page draws everything with nothing before th
     contentsBlock(view.container),
   );
 });
+
+/*
+ * At the very top the browser has nothing to anchor against, so `scrollTop` stays 0 until the
+ * scroller puts the reader back, which it does after the commit. Checking again inside that commit
+ * read 0 every time and drew the whole history in one burst (and past ~50 pages, crashed React).
+ */
+test("one trigger at the very top draws one page, not the whole history", () => {
+  const view = render(
+    <ChatTranscript messages={conversation(100)} restoring={false} />,
+  );
+  const element = viewport(view.container);
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: 5000,
+  });
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    value: 0,
+    writable: true,
+  });
+
+  fireEvent.scroll(element);
+
+  expect(rows(view.container).length).toBe(40);
+});

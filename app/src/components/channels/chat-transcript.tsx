@@ -1805,12 +1805,21 @@ export function ChatTranscript({
     [drawEarlier],
   );
   /*
-   * After every page, before paint: a page that does not reach LOAD_MARGIN_PX above the fold (short
-   * rows, a tall screen) draws the one before it straight away. Runs after the scroller's landing,
-   * which happens in the provider's own layout effect, a child of this one.
+   * After every page: a page that does not reach LOAD_MARGIN_PX above the fold (short rows, a tall
+   * screen) draws the one before it. ON THE NEXT FRAME, NOT IN THIS COMMIT. The scroller puts the
+   * reader back after a prepend from a MutationObserver callback, which runs after layout effects;
+   * checked here, a reader at the very top (where the browser has nothing to anchor against) still
+   * read `scrollTop` 0, drew another page, read 0 again, and drew the whole history in one burst,
+   * which past about fifty pages is more nested updates than React allows. A frame later the
+   * position is the restored one, and a page is only drawn if the reader really is still near the
+   * top. Each extra page lands above the fold and is held in place, so the wait is never seen.
    */
   useLayoutEffect(() => {
-    if (!restoring) drawEarlierNearTop(pagesFrom);
+    if (restoring) return;
+    const frame = window.requestAnimationFrame(() =>
+      drawEarlierNearTop(pagesFrom),
+    );
+    return () => window.cancelAnimationFrame(frame);
   }, [pagesFrom, restoring, drawEarlierNearTop]);
 
   /*
