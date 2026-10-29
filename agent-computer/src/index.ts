@@ -57,6 +57,7 @@ import {
   parseScrollDelta,
 } from "./request-validation";
 import { type InputMessage, startScreencast } from "./screencast";
+import { hideProcessFromChildren, takeSecretFromEnv } from "./secret-env";
 import {
   HIDDEN_FIELD_SELECTOR,
   hiddenValues,
@@ -125,7 +126,23 @@ import { createWorkspaces } from "./workspaces";
  * Refusing to start without a token makes missing authentication a deployment failure, never an open
  * computer.
  */
-const COMPUTER_TOKEN = process.env.COMPUTER_TOKEN?.trim();
+/*
+ * Taken out of the environment as it is read, and the process marked non-dumpable, so neither the
+ * browser, nor Xvfb, nor a Bot's shell command can read it back from `/proc`. See secret-env.ts.
+ */
+const COMPUTER_TOKEN = takeSecretFromEnv("COMPUTER_TOKEN");
+{
+  const hidden = await hideProcessFromChildren();
+  if (!hidden.hidden) {
+    console.warn(
+      JSON.stringify({
+        type: "computer-process-dumpable",
+        note: "This process could not be marked non-dumpable, so a process running as the same user may be able to read its memory.",
+        reason: hidden.reason,
+      }),
+    );
+  }
+}
 if (!COMPUTER_TOKEN) {
   console.error(
     "COMPUTER_TOKEN is not set. This process drives a browser holding real logins and will not start without the secret its caller must present.",
