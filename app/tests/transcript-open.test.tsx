@@ -79,3 +79,67 @@ test("an empty conversation shows neither placeholder nor rows once restored", (
   expect(view.queryByLabelText(PLACEHOLDER)).toBeNull();
   expect(view.container.querySelectorAll("[data-message-id]").length).toBe(0);
 });
+
+/**
+ * Only what arrives while the conversation is open animates in. History is already there when it
+ * opens; fading it in row by row read as the conversation still loading. motion renders `initial`
+ * as inline style on the first paint, so a row that animates starts at `opacity: 0`.
+ */
+function startsHidden(element: Element): boolean {
+  return /opacity:\s*0(?![.\d])/.test(element.getAttribute("style") ?? "");
+}
+
+function arriving(container: HTMLElement): Element[] {
+  return [...container.querySelectorAll('[data-slot="message-arriving"]')];
+}
+
+test("history rows do not animate in", () => {
+  const view = render(
+    <ChatTranscript
+      messages={[
+        user("u1", "one"),
+        assistant("a1", "two"),
+        user("u2", "three"),
+      ]}
+      restoring={false}
+    />,
+  );
+
+  const rows = arriving(view.container);
+  expect(rows.length).toBe(3);
+  expect(rows.filter(startsHidden).length).toBe(0);
+});
+
+test("a live row animates in", () => {
+  const history = [user("u1", "one"), assistant("a1", "two")];
+  const view = render(<ChatTranscript messages={history} restoring={false} />);
+
+  view.rerender(
+    <ChatTranscript
+      messages={[...history, user("u2", "new")]}
+      restoring={false}
+    />,
+  );
+
+  const rows = arriving(view.container);
+  expect(rows.length).toBe(3);
+  expect(rows.map(startsHidden)).toEqual([false, false, true]);
+});
+
+test("switching channels does not animate the new history", () => {
+  const view = render(
+    <ChatTranscript messages={[user("u1", "one")]} restoring={false} />,
+  );
+
+  view.rerender(<ChatTranscript messages={[]} restoring />);
+  view.rerender(
+    <ChatTranscript
+      messages={[user("b1", "elsewhere"), assistant("b2", "reply")]}
+      restoring={false}
+    />,
+  );
+
+  const rows = arriving(view.container);
+  expect(rows.length).toBe(2);
+  expect(rows.filter(startsHidden).length).toBe(0);
+});

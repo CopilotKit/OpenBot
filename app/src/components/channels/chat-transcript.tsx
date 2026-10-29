@@ -14,7 +14,9 @@ import {
 } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
+  createContext,
   memo,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -424,51 +426,27 @@ function ScrollNewestQueuedIntoView({ newest }: { newest: string | null }) {
 }
 
 /**
- * How many of the newest turns cascade when a channel is opened, and how far apart.
+ * Whether a row mounting now is arriving live or was already there when the conversation opened.
  *
- * The tail rather than the head: opening a channel lands you at the bottom, so these are the ones
- * actually on screen. Staggering from the top of a long history would spend the whole budget on
- * messages nobody can see and leave the visible ones arriving last.
- *
- * Twelve at 40ms is 440ms of cascade before the last one starts. Past roughly half a second this
- * stops reading as settling and starts reading as waiting.
+ * A ref, not state: it is read once, at a row's first render, and flipping it must not re-render
+ * anything. `ArrivalsLive` provides a fresh one with the scroller, so it starts false for the commit
+ * that mounts the whole history and turns true in the effect after it; every row mounted from then
+ * on is something that arrived while the person was here.
  */
-const FIRST_PAINT_STAGGER_COUNT = 12;
-const FIRST_PAINT_STAGGER_SECONDS = 0.04;
+const ArrivalsLiveContext = createContext<React.RefObject<boolean> | null>(
+  null,
+);
 
-/**
- * Decide, once per message, whether it waits its turn.
- *
- * FROZEN PER ID ON PURPOSE. `delay` is a prop on a memoised component, so a value that changed
- * between renders would break the memo that makes the streaming path cheap — and worse, a message
- * whose delay changed could replay its entrance mid-stream. Each id is decided the first time it is
- * seen and never revisited.
- *
- * `settled` flips after the first render that has any items, which is NOT the first render: history
- * is restored asynchronously, so a channel's transcript is empty for a beat. Anything appearing
- * after that is a live turn and is given no delay at all.
- */
-function createFirstPaintDelays() {
-  const decided = new Map<string, number>();
-  let settled = false;
-
-  return {
-    settle() {
-      settled = true;
-    },
-    delayFor(id: string, index: number, total: number): number {
-      const known = decided.get(id);
-      if (known !== undefined) {
-        return known;
-      }
-      const offset = total - FIRST_PAINT_STAGGER_COUNT;
-      const place = index - Math.max(0, offset);
-      const delay =
-        settled || place < 0 ? 0 : place * FIRST_PAINT_STAGGER_SECONDS;
-      decided.set(id, delay);
-      return delay;
-    },
-  };
+function ArrivalsLive({ children }: { children: React.ReactNode }) {
+  const live = useRef(false);
+  useEffect(() => {
+    live.current = true;
+  }, []);
+  return (
+    <ArrivalsLiveContext.Provider value={live}>
+      {children}
+    </ArrivalsLiveContext.Provider>
+  );
 }
 
 /**
@@ -490,19 +468,16 @@ function createFirstPaintDelays() {
  * accelerated and drops frames exactly when the main thread is busy, which here is while a reply is
  * streaming.
  *
- * STAGGERED ONLY ON THE FIRST PAINT OF A CHANNEL. A turn sent mid-conversation arrives alone and
- * must not wait behind anything, so `delay` is zero for it. Opening a channel is the one moment the
- * whole history mounts at once, and cascading the last few reads as the conversation settling
- * rather than as a page appearing all at once. `createFirstPaintDelays` decides which is which.
+ * ONLY FOR WHAT ARRIVES WHILE THE CONVERSATION IS OPEN. History is already there when it opens:
+ * it was cascading the newest dozen rows in, 40ms apart, and the bottom of the conversation filling
+ * in over half a second read as the conversation still loading. A row mounted with the history
+ * draws at rest; `ArrivalsLiveContext` says which is which, decided once at the row's first render
+ * so a streaming answer can never replay it.
  */
-function Arriving({
-  children,
-  delay = 0,
-}: {
-  children: React.ReactNode;
-  delay?: number;
-}) {
+function Arriving({ children }: { children: React.ReactNode }) {
   const shouldReduceMotion = useReducedMotion();
+  const liveRef = useContext(ArrivalsLiveContext);
+  const [live] = useState(() => liveRef?.current ?? true);
 
   return (
     <motion.div
@@ -523,15 +498,16 @@ function Arriving({
        * all outside a flex container.
        */
       className="flex w-full flex-col"
-      initial={{
-        opacity: 0,
-        // Reduced motion keeps the fade and drops the movement: gentler, not absent.
-        transform: shouldReduceMotion ? "none" : "translateY(8px)",
-      }}
+      initial={
+        live
+          ? {
+              opacity: 0,
+              // Reduced motion keeps the fade and drops the movement: gentler, not absent.
+              transform: shouldReduceMotion ? "none" : "translateY(8px)",
+            }
+          : false
+      }
       transition={{
-        // Reduced motion gets the fade with no queue: a cascade is movement too, just spread over
-        // time, and somebody who asked for less of it should not wait for their history to arrive.
-        delay: shouldReduceMotion ? 0 : delay,
         duration: ENTRANCE_SECONDS,
         ease: EASE_OUT,
       }}
@@ -633,12 +609,10 @@ function ResponsibilityFiring({
  */
 const TranscriptMessage = memo(function TranscriptMessage({
   commandNames = "",
-  delay,
   role,
   text,
 }: {
   commandNames?: string;
-  delay: number;
   role: "user" | "assistant";
   text: string;
 }) {
@@ -653,7 +627,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
     return (
       <MessageRow align="start">
         <MessageContent>
-          <Arriving delay={delay}>
+          <Arriving>
             <RoutineFiring instruction={firing} />
           </Arriving>
         </MessageContent>
@@ -669,7 +643,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
   return (
     <MessageRow align={align}>
       <MessageContent>
-        <Arriving delay={delay}>
+        <Arriving>
           {/*
             A Bot's message takes the whole column, not the width of its words: block content
             inside it — a fenced code block, a table — should span the transcript rather than
@@ -751,7 +725,6 @@ const ATTACHMENT_URL_PREFIX = attachmentUrl("");
  */
 type AttachmentRowProps = {
   attachments: readonly SentAttachment[];
-  delay: number;
 };
 
 /**
@@ -777,9 +750,6 @@ export function sameAttachmentRow(
   previous: AttachmentRowProps,
   next: AttachmentRowProps,
 ): boolean {
-  if (previous.delay !== next.delay) {
-    return false;
-  }
   if (previous.attachments.length !== next.attachments.length) {
     return false;
   }
@@ -799,12 +769,11 @@ export function sameAttachmentRow(
 
 export const TranscriptAttachments = memo(function TranscriptAttachments({
   attachments,
-  delay,
 }: AttachmentRowProps) {
   return (
     <MessageRow align="end">
       <MessageContent>
-        <Arriving delay={delay}>
+        <Arriving>
           <AttachmentTiles attachments={attachments} />
         </Arriving>
       </MessageContent>
@@ -1268,10 +1237,8 @@ function activityName(activityType: string): string {
  * from re-rendering a mounted iframe.
  */
 const TranscriptActivity = memo(function TranscriptActivity({
-  delay,
   message,
 }: {
-  delay: number;
   message: ActivityMessage;
 }) {
   const { renderActivityMessage } = useRenderActivityMessage();
@@ -1284,7 +1251,7 @@ const TranscriptActivity = memo(function TranscriptActivity({
   if (!drawn) return null;
 
   return (
-    <Arriving delay={delay}>
+    <Arriving>
       <ToolRenderBoundary name={activityName(message.activityType)}>
         {drawn}
       </ToolRenderBoundary>
@@ -1303,14 +1270,12 @@ const TranscriptActivity = memo(function TranscriptActivity({
  * parent cannot guarantee is the classic way to make a memo boundary useless.
  */
 const TranscriptToolCall = memo(function TranscriptToolCall({
-  delay,
   toolCallId,
   name,
   args,
   result,
   latest,
 }: {
-  delay: number;
   toolCallId: string;
   name: string;
   args: string;
@@ -1343,7 +1308,7 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   });
 
   return (
-    <Arriving delay={delay}>
+    <Arriving>
       <ToolRenderBoundary name={name}>
         {/*
          * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
@@ -1655,30 +1620,6 @@ export function ChatTranscript({
   const anchorRows = anchorRowIds(items);
 
   /*
-   * One decider per mounted transcript, so opening a different channel starts the cascade over and
-   * a message never inherits a delay from a conversation it was not in.
-   */
-  const delaysRef = useRef<ReturnType<typeof createFirstPaintDelays> | null>(
-    null,
-  );
-  if (delaysRef.current === null) {
-    delaysRef.current = createFirstPaintDelays();
-  }
-  const delays = delaysRef.current;
-
-  /*
-   * Settled AFTER the render that first had items, not on mount: history arrives asynchronously, so
-   * on mount there is nothing to stagger yet and marking it settled then would mean the history
-   * cascade never happens.
-   */
-  const hasItems = items.length > 0;
-  useEffect(() => {
-    if (hasItems) {
-      delays.settle();
-    }
-  }, [hasItems, delays]);
-
-  /*
    * NOTHING BUT THE PLACEHOLDER UNTIL HISTORY IS COMPLETE, AND THE SCROLLER MOUNTED FRESH AFTER IT.
    *
    * History arrives in pieces: the gateway snapshot, then the stored thread merged into it, then
@@ -1701,148 +1642,140 @@ export function ChatTranscript({
   }
 
   return (
-    <MessageScrollerProvider autoScroll scrollPreviousItemPeek={48}>
-      <MessageScroller>
-        <MessageScrollerViewport ref={viewportRef}>
-          <MessageScrollerContent
-            aria-busy={busy}
-            className="mx-auto w-full max-w-2xl px-4 py-6"
-            spacerClassName="order-2"
-          >
-            {/*
-             * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
-             * at this block, worked the mechanism out from the library's bundle, and reached the
-             * same place; it had no comment for any of them to read. This is that comment.
-             *
-             * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
-             * `order-2`, these children take `order-1`, and the transcript rows below keep the
-             * default `0`. Visual order is therefore items, then anything parked or in flight, then
-             * the spacer — while DOM order puts this block first.
-             *
-             * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
-             * On every content change it takes `Array.from(content.children)` minus the spacer,
-             * compares the length against the previous length, and when it grew scans FROM THE OLD
-             * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
-             * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
-             * very end of that list. Put this block after `items.map` and every appended row lands
-             * one slot short of the end, the scan finds this div instead, returns null, and the
-             * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
-             * to the top of the viewport with a peek of the previous one, silently, with no test
-             * failing.
-             *
-             * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
-             * promotes these children to flex items of the column so they can carry `order`, while
-             * the div itself stays a single, always-present entry in `content.children` — one
-             * stable slot the row count can be offset by. Wrapping `items.map` the same way would
-             * be the natural symmetry and is fatal: the rows would leave `content.children`
-             * entirely and the scroller would see a transcript of two elements, neither carrying a
-             * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
-             *
-             * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
-             * not the DOM, so it moves neither focus order nor the reading order of the enclosing
-             * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
-             * button of every parked message before any control in the conversation, though those
-             * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
-             * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
-             * follow on screen (WCAG 1.3.2).
-             *
-             * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
-             * this file were each tried on paper and each breaks something worse: `aria-owns` needs
-             * a generated id per row and re-sequences only the accessibility tree, leaving tab
-             * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
-             * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
-             * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
-             * outside a column that is `min-h-full`, so it lands below the fold on a short
-             * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
-             * Paying it properly means the scroller identifying new rows by identity rather than by
-             * position, which is the library's to change and is worth asking for.
-             */}
-            <div className="contents [&>*]:order-1">
-              {stopped ? (
-                <Stopped reason={stopped} />
-              ) : waitingOnFirstToken ? (
-                <Thinking />
-              ) : null}
-              {working}
-              {queued.map((message) => (
-                <Queued
-                  attachments={message.attachments}
-                  key={message.id}
-                  onRemove={
-                    onRemoveQueued
-                      ? () => onRemoveQueued(message.id)
-                      : undefined
-                  }
-                  text={message.text}
-                />
-              ))}
-            </div>
-            {items.map((item, index) =>
-              item.kind === "tools" ? (
-                <MessageScrollerItem key={item.id} messageId={item.id}>
-                  <Arriving
-                    delay={delays.delayFor(item.id, index, items.length)}
-                  >
-                    <ToolActivity
-                      group={item}
-                      active={busy && index === items.length - 1}
+    <ArrivalsLive>
+      <MessageScrollerProvider autoScroll scrollPreviousItemPeek={48}>
+        <MessageScroller>
+          <MessageScrollerViewport ref={viewportRef}>
+            <MessageScrollerContent
+              aria-busy={busy}
+              className="mx-auto w-full max-w-2xl px-4 py-6"
+              spacerClassName="order-2"
+            >
+              {/*
+               * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
+               * at this block, worked the mechanism out from the library's bundle, and reached the
+               * same place; it had no comment for any of them to read. This is that comment.
+               *
+               * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
+               * `order-2`, these children take `order-1`, and the transcript rows below keep the
+               * default `0`. Visual order is therefore items, then anything parked or in flight, then
+               * the spacer — while DOM order puts this block first.
+               *
+               * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
+               * On every content change it takes `Array.from(content.children)` minus the spacer,
+               * compares the length against the previous length, and when it grew scans FROM THE OLD
+               * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
+               * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
+               * very end of that list. Put this block after `items.map` and every appended row lands
+               * one slot short of the end, the scan finds this div instead, returns null, and the
+               * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
+               * to the top of the viewport with a peek of the previous one, silently, with no test
+               * failing.
+               *
+               * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
+               * promotes these children to flex items of the column so they can carry `order`, while
+               * the div itself stays a single, always-present entry in `content.children` — one
+               * stable slot the row count can be offset by. Wrapping `items.map` the same way would
+               * be the natural symmetry and is fatal: the rows would leave `content.children`
+               * entirely and the scroller would see a transcript of two elements, neither carrying a
+               * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
+               *
+               * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
+               * not the DOM, so it moves neither focus order nor the reading order of the enclosing
+               * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
+               * button of every parked message before any control in the conversation, though those
+               * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
+               * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
+               * follow on screen (WCAG 1.3.2).
+               *
+               * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
+               * this file were each tried on paper and each breaks something worse: `aria-owns` needs
+               * a generated id per row and re-sequences only the accessibility tree, leaving tab
+               * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
+               * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
+               * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
+               * outside a column that is `min-h-full`, so it lands below the fold on a short
+               * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
+               * Paying it properly means the scroller identifying new rows by identity rather than by
+               * position, which is the library's to change and is worth asking for.
+               */}
+              <div className="contents [&>*]:order-1">
+                {stopped ? (
+                  <Stopped reason={stopped} />
+                ) : waitingOnFirstToken ? (
+                  <Thinking />
+                ) : null}
+                {working}
+                {queued.map((message) => (
+                  <Queued
+                    attachments={message.attachments}
+                    key={message.id}
+                    onRemove={
+                      onRemoveQueued
+                        ? () => onRemoveQueued(message.id)
+                        : undefined
+                    }
+                    text={message.text}
+                  />
+                ))}
+              </div>
+              {items.map((item, index) =>
+                item.kind === "tools" ? (
+                  <MessageScrollerItem key={item.id} messageId={item.id}>
+                    <Arriving>
+                      <ToolActivity
+                        group={item}
+                        active={busy && index === items.length - 1}
+                      />
+                    </Arriving>
+                  </MessageScrollerItem>
+                ) : item.kind === "tool" ? (
+                  <MessageScrollerItem key={item.id} messageId={item.id}>
+                    <TranscriptToolCall
+                      args={item.toolCall.function.arguments}
+                      latest={index >= latestIndex}
+                      name={item.toolCall.function.name}
+                      result={item.result}
+                      toolCallId={item.toolCall.id}
                     />
-                  </Arriving>
-                </MessageScrollerItem>
-              ) : item.kind === "tool" ? (
-                <MessageScrollerItem key={item.id} messageId={item.id}>
-                  <TranscriptToolCall
-                    args={item.toolCall.function.arguments}
-                    delay={delays.delayFor(item.id, index, items.length)}
-                    latest={index >= latestIndex}
-                    name={item.toolCall.function.name}
-                    result={item.result}
-                    toolCallId={item.toolCall.id}
-                  />
-                </MessageScrollerItem>
-              ) : item.kind === "activity" ? (
-                <MessageScrollerItem key={item.id} messageId={item.id}>
-                  <TranscriptActivity
-                    delay={delays.delayFor(item.id, index, items.length)}
-                    message={item.message}
-                  />
-                </MessageScrollerItem>
-              ) : item.kind === "text" ? (
-                <MessageScrollerItem
-                  key={item.id}
-                  messageId={item.id}
-                  scrollAnchor={anchorRows.has(item.id)}
-                >
-                  <TranscriptMessage
-                    commandNames={commandNames}
-                    delay={delays.delayFor(item.id, index, items.length)}
-                    role={item.role}
-                    text={item.text}
-                  />
-                </MessageScrollerItem>
-              ) : item.kind === "attachments" ? (
-                <MessageScrollerItem
-                  key={item.id}
-                  messageId={item.id}
-                  scrollAnchor={anchorRows.has(item.id)}
-                >
-                  <TranscriptAttachments
-                    attachments={item.attachments}
-                    delay={delays.delayFor(item.id, index, items.length)}
-                  />
-                </MessageScrollerItem>
-              ) : (
-                // Every member of the union is handled above. `assertNever` types `item` as
-                // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
-                // this call instead of silently falling into this branch and rendering nothing.
-                assertNever(item)
-              ),
-            )}
-          </MessageScrollerContent>
-        </MessageScrollerViewport>
-        <MessageScrollerButton />
-        <ScrollNewestQueuedIntoView newest={queued.at(-1)?.id ?? null} />
-      </MessageScroller>
-    </MessageScrollerProvider>
+                  </MessageScrollerItem>
+                ) : item.kind === "activity" ? (
+                  <MessageScrollerItem key={item.id} messageId={item.id}>
+                    <TranscriptActivity message={item.message} />
+                  </MessageScrollerItem>
+                ) : item.kind === "text" ? (
+                  <MessageScrollerItem
+                    key={item.id}
+                    messageId={item.id}
+                    scrollAnchor={anchorRows.has(item.id)}
+                  >
+                    <TranscriptMessage
+                      commandNames={commandNames}
+                      role={item.role}
+                      text={item.text}
+                    />
+                  </MessageScrollerItem>
+                ) : item.kind === "attachments" ? (
+                  <MessageScrollerItem
+                    key={item.id}
+                    messageId={item.id}
+                    scrollAnchor={anchorRows.has(item.id)}
+                  >
+                    <TranscriptAttachments attachments={item.attachments} />
+                  </MessageScrollerItem>
+                ) : (
+                  // Every member of the union is handled above. `assertNever` types `item` as
+                  // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
+                  // this call instead of silently falling into this branch and rendering nothing.
+                  assertNever(item)
+                ),
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton />
+          <ScrollNewestQueuedIntoView newest={queued.at(-1)?.id ?? null} />
+        </MessageScroller>
+      </MessageScrollerProvider>
+    </ArrivalsLive>
   );
 }
