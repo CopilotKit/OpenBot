@@ -25,8 +25,11 @@ const ORB_STATE: Record<AIState, BotOrbState> = {
 
 export interface AgentOrbProps {
   className?: string;
-  /** Its footprint, in px, as "64px". */
-  size?: string;
+  /**
+   * Its footprint, in px, as "64px". Only px: the orb is drawn on a canvas at that size, so a share
+   * of its container, as "100%", has nothing to be a share of.
+   */
+  size?: `${number}px`;
   state?: AIState;
 }
 
@@ -36,6 +39,9 @@ export default function AgentOrb({
   size = "192px",
   state = "idle",
 }: AgentOrbProps) {
+  if (!/^\d+(\.\d+)?px$/.test(size)) {
+    throw new Error(`AgentOrb's size is in px, as "64px", not "${size}".`);
+  }
   return (
     <BotOrb
       className={cn("agent-orb block", className)}

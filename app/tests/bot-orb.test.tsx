@@ -633,4 +633,14 @@ describe("a Bot's face and OpenBot's mark", () => {
     const view = render(<AgentOrb />);
     expect(orbOf(view.container).style.width).toBe("192px");
   });
+
+  test("OpenBot's mark is drawn at a size in px, and refuses a share of its container", () => {
+    const view = render(<AgentOrb size="27.5px" />);
+    expect(orbOf(view.container).style.width).toBe("27.5px");
+    // Read as a number, "100%" would draw a 100px orb whatever its container is.
+    // @ts-expect-error Only a size in px type-checks.
+    expect(() => AgentOrb({ size: "100%" })).toThrow(
+      `AgentOrb's size is in px, as "64px", not "100%".`,
+    );
+  });
 });
