@@ -1227,6 +1227,20 @@ struct CliEngine {
 
 impl CliEngine {
     fn of(address: &crate::engine::Address) -> Self {
+        Self::of_with(address, crate::acquire::machine_behind)
+    }
+
+    /// The machine's mode and API, not the connection's.
+    ///
+    /// A rootful machine whose OpenBot is still in its rootless storage keeps OpenBot on the
+    /// machine's bare connection (see `acquire::connection_keeping_openbot`). Intelligence then
+    /// runs on that same machine's rootful engine, the one its forwarded API reaches: one VM, so
+    /// none of the cost of two engines above, and the only engine there Intelligence runs on.
+    /// Only a rootless machine has no rootful engine to offer, and is declined.
+    fn of_with(
+        address: &crate::engine::Address,
+        machine_behind: impl FnOnce(&str) -> Result<crate::acquire::MachineFacts, String>,
+    ) -> Self {
         use crate::engine::Engine;
         let named_only = || Self {
             engine: address.engine,
@@ -1242,7 +1256,7 @@ impl CliEngine {
             .connection
             .clone()
             .or_else(|| address.pin().ok().and_then(|pinned| pinned.connection));
-        match connection.map(|connection| crate::acquire::machine_behind(&connection)) {
+        match connection.map(|connection| machine_behind(&connection)) {
             Some(Ok(facts)) => Self {
                 engine: Engine::Podman,
                 api: facts.api,
@@ -3308,6 +3322,41 @@ mod tests {
                     "{name} is neither inherited nor the engine's"
                 );
             }
+        }
+    }
+
+    /// OpenBot on the bare connection of a rootful machine: Intelligence goes to the same machine's
+    /// rootful engine. OpenBot on a rootless machine, by either connection: declined.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn intelligence_runs_on_the_rootful_engine_of_the_machine_openbot_is_on() {
+        use crate::acquire::MachineFacts;
+        use crate::engine::{Address, Engine};
+        let api = "unix:///tmp/podman/openbot-api.sock";
+        let machine = |rootful| {
+            move |name: &str| {
+                assert_eq!(name.strip_suffix("-root").unwrap_or(name), "openbot");
+                Ok(MachineFacts {
+                    rootful: Some(rootful),
+                    api: Some(api.into()),
+                })
+            }
+        };
+        for connection in ["openbot", "openbot-root"] {
+            let address = Address::new(Engine::Podman, Some(connection.into()));
+            assert_eq!(
+                CliEngine::of_with(&address, machine(true)),
+                CliEngine {
+                    engine: Engine::Podman,
+                    api: Some(api.into()),
+                    rootless: false,
+                },
+                "{connection}"
+            );
+            assert!(
+                CliEngine::of_with(&address, machine(false)).rootless,
+                "{connection}"
+            );
         }
     }
 

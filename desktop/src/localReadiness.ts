@@ -152,7 +152,8 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "retry",
   ),
   // OpenBot runs on a Podman machine without root, and Intelligence needs root. Switching it is
-  // the person's call: the containers already in that machine stay with its current mode.
+  // the person's call. OpenBot stays in the storage its database is in, and Intelligence runs on
+  // the machine's rootful engine.
   "rootless-podman": blocked(
     "Intelligence needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
     "retry",
