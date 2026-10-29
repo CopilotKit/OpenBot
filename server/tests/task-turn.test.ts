@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { frameTaskBrief, TASK_ENDING } from "@openbot/shared/task-brief";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { ThreadLockBusyError } from "@openbot/toolkit/lease";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
+import {
+  HEADLESS_WAITING_FALLBACK,
+  type TurnRunner,
+} from "@openbot/toolkit/run-turn";
 import { createTaskTurn } from "../src/tasks/threads";
 
 const SCOPE = {
@@ -117,6 +120,22 @@ describe("a task's turn", () => {
       agentId: "assistant",
       id: "task-1:waiting",
     });
+  });
+
+  test("that stops with no words of its own says in plain words what it waits for", async () => {
+    for (const [kind, line] of [
+      ["approval", "Waiting for you to allow a step."],
+      ["question", "Waiting for your answer."],
+    ] as const) {
+      const turn = turnWith(async () => {
+        throw new HeadlessToolSuspension(HEADLESS_WAITING_FALLBACK, {
+          kind,
+          requestId: "a",
+        });
+      });
+      await turn.start();
+      expect(turn.said.at(-1)?.text).toBe(line);
+    }
   });
 
   test("that fails says so to the queue, and nothing in the conversation while it has a run left", async () => {
