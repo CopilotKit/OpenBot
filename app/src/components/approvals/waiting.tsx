@@ -1,4 +1,4 @@
-import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
+import { IconMessageQuestion } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
@@ -20,37 +20,54 @@ import {
   decideApprovalMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
+import { ApprovalCard } from "./approval-card";
 
 /**
- * Questions and actions waiting on the person, one row each, decided where it is shown: the answer
- * box and the decision buttons sit on the row's own footer line. Given a Bot, only that Bot's. The
- * same requests the conversation draws inline, so a decision made in either place is the one
- * decision.
+ * Questions and actions waiting on the person, one row each, decided where it is shown: a question's
+ * answer box sits on its row's footer line, and an action is the same approval card the
+ * conversation draws, so a decision made in either place is the one decision. An action answered
+ * here stays, folded to how it went, until the page is left. Given a Bot, only that Bot's.
+ *
+ * Given a `title`, it is its own section of a page, drawn only while something is listed.
  */
-export function WaitingForYou({ agentId }: { agentId?: string }) {
+export function WaitingForYou({
+  agentId,
+  title,
+}: {
+  agentId?: string;
+  title?: string;
+}) {
   const inbox = useQuery(approvalInboxOptions());
   const agents = useQuery(agentListQueryOptions());
   const botName = (id: string) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? id;
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
+  const [decidedHere, setDecidedHere] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const ours = (botId: string) => agentId === undefined || botId === agentId;
   const questions = (inbox.data?.questions ?? []).filter((question) =>
     ours(question.conversationBotId ?? question.botId),
   );
-  const pending = (inbox.data?.requests ?? []).filter(
-    (request) => request.status === "pending" && ours(request.action.botId),
+  const requests = (inbox.data?.requests ?? []).filter(
+    (request) =>
+      ours(request.action.botId) &&
+      (request.status === "pending" || decidedHere.has(request.id)),
   );
-  const error = inbox.error ?? decision.error ?? answer.error;
-  return (
+  // A decision's failure is said on its own card.
+  const error = inbox.error ?? answer.error;
+  const listed = questions.length + requests.length > 0;
+  if (title && !listed) return null;
+  const list = (
     <>
       {error ? (
         <p role="alert" className="mt-4 text-sm text-destructive">
           {error.message}
         </p>
       ) : null}
-      {questions.length + pending.length > 0 ? (
+      {listed ? (
         <PageRows>
           {questions.map((question, index) => (
             <Fragment key={question.id}>
@@ -97,103 +114,32 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
               </Item>
             </Fragment>
           ))}
-          {pending.map((request, index) => (
+          {requests.map((request, index) => (
             <Fragment key={request.id}>
               {questions.length + index > 0 ? <Separator /> : null}
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <IconHandStop />
-                </ItemMedia>
-                <ItemContent className="min-w-0">
-                  <ItemTitle className="line-clamp-none">
-                    {botName(request.action.botId)} wants to{" "}
-                    {request.action.toolRef
-                      .replace(/^computer_|^host\//, "")
-                      .replaceAll("_", " ")}
-                  </ItemTitle>
-                  <ItemDescription className="line-clamp-none break-all">
-                    {request.action.scope}
-                  </ItemDescription>
-                  {request.action.policy ? (
-                    <p className="text-sm">
-                      {request.action.policy.behaviour === "hand_off"
-                        ? "Handed to you: "
-                        : ""}
-                      {request.action.policy.reason}
-                    </p>
-                  ) : null}
-                  <pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
-                    {JSON.stringify(request.action.args, null, 2)}
-                  </pre>
-                </ItemContent>
-                {request.action.policy?.behaviour === "hand_off" ? (
-                  <ItemFooter className="flex-wrap justify-start">
-                    <Button
-                      disabled={decision.isPending}
-                      onClick={() =>
-                        decision.mutate({ id: request.id, choice: "handled" })
-                      }
-                      size="sm"
-                    >
-                      I did it myself
-                    </Button>
-                    <Button
-                      disabled={decision.isPending}
-                      onClick={() =>
-                        decision.mutate({ id: request.id, choice: "deny" })
-                      }
-                      size="sm"
-                      variant="outline"
-                    >
-                      Don't do it
-                    </Button>
-                  </ItemFooter>
-                ) : (
-                  <ItemFooter className="flex-wrap justify-start">
-                    <Button
-                      disabled={decision.isPending}
-                      onClick={() =>
-                        decision.mutate({
-                          id: request.id,
-                          choice: "allow_once",
-                        })
-                      }
-                      size="sm"
-                    >
-                      Allow once
-                    </Button>
-                    <Button
-                      disabled={decision.isPending}
-                      onClick={() =>
-                        decision.mutate({
-                          id: request.id,
-                          choice: "allow_always",
-                        })
-                      }
-                      size="sm"
-                      variant="outline"
-                    >
-                      Always allow here
-                    </Button>
-                    <Button
-                      disabled={decision.isPending}
-                      onClick={() =>
-                        decision.mutate({ id: request.id, choice: "deny" })
-                      }
-                      size="sm"
-                      variant="outline"
-                    >
-                      Deny
-                    </Button>
-                  </ItemFooter>
-                )}
-              </Item>
+              <ApprovalCard
+                botName={botName(request.action.botId)}
+                busy={decision.isPending}
+                error={
+                  decision.variables?.id === request.id
+                    ? (decision.error?.message ?? null)
+                    : null
+                }
+                frame="row"
+                onDecide={(choice) => {
+                  // Kept here, folded, once answered: the person sees how it went.
+                  setDecidedHere((prior) => new Set(prior).add(request.id));
+                  decision.mutate({ id: request.id, choice });
+                }}
+                request={request}
+              />
             </Fragment>
           ))}
         </PageRows>
       ) : null}
     </>
   );
+  return title ? <PageSection title={title}>{list}</PageSection> : list;
 }
 
 /**
@@ -201,19 +147,5 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
  * waits: the sidebar's badge already said whether to look.
  */
 export function BotNeedsYou({ agentId }: { agentId: string }) {
-  const inbox = useQuery(approvalInboxOptions());
-  const waiting =
-    (inbox.data?.questions ?? []).some(
-      (question) => (question.conversationBotId ?? question.botId) === agentId,
-    ) ||
-    (inbox.data?.requests ?? []).some(
-      (request) =>
-        request.status === "pending" && request.action.botId === agentId,
-    );
-  if (!waiting) return null;
-  return (
-    <PageSection title="Needs you">
-      <WaitingForYou agentId={agentId} />
-    </PageSection>
-  );
+  return <WaitingForYou agentId={agentId} title="Needs you" />;
 }
