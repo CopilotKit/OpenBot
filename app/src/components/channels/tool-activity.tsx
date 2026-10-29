@@ -15,7 +15,7 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
-import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { ToolCallApprovals } from "@/components/approvals/inline-approval";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
@@ -775,6 +775,8 @@ export function ToolActivity({
    * and marked for how the group stands, so it never carries the done mark.
    */
   const nothingDone = !running && !steps.some(isDone);
+  // Nothing done yet because a step waits on its card, which is drawn beside this line.
+  const waiting = nothingDone && steps.some((step) => held.has(step.id));
   // The folded line draws its own steps, so a waiting approval gets its card beside it, not inside.
   return (
     <>
@@ -790,7 +792,13 @@ export function ToolActivity({
           steps.some((step) => step.refused)
         }
         declined={nothingDone && !issues && steps.some((step) => step.declined)}
-        notYet={nothingDone && !issues && !steps.some((step) => step.declined)}
+        notYet={
+          nothingDone &&
+          !issues &&
+          !waiting &&
+          !steps.some((step) => step.declined)
+        }
+        waiting={waiting && !issues && !steps.some((step) => step.declined)}
       >
         <ol className="space-y-2 py-1">
           {steps.map((step) => (
@@ -803,7 +811,7 @@ export function ToolActivity({
           ))}
         </ol>
       </ToolLine>
-      <PendingApprovals
+      <ToolCallApprovals
         toolCallIds={group.steps.map((step) => step.toolCall.id)}
       />
     </>

@@ -31,6 +31,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { ToolCallApprovals } from "@/components/approvals/inline-approval";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
@@ -99,6 +100,7 @@ import {
   type ToolGroup,
   type TranscriptItem,
   useDrawnTool,
+  useHeldForPerson,
 } from "./tool-activity";
 import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -1515,6 +1517,8 @@ const ToolCallBody = memo(function ToolCallBody({
   spokeAfter: boolean;
 }) {
   const renderToolCall = useRenderToolCall();
+  // Held on its approval card: the same inbox the card under it reads.
+  const waiting = useHeldForPerson().has(toolCallId);
   const toolCall = useMemo(
     () => ({
       id: toolCallId,
@@ -1561,13 +1565,22 @@ const ToolCallBody = memo(function ToolCallBody({
          *
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
+         *
+         * WITH ITS APPROVAL CARD UNDER IT when the server held the call for the person. A run of
+         * steps gets its cards beside the folded line (`ToolActivity`); a call alone in its turn
+         * keeps this line instead, and without the card here the request waited only on the Bot's
+         * page. A tool the app draws itself is left alone: its own renderer places its card.
          */}
         {drawn ?? (
-          <ServerToolLine
-            name={name}
-            place={{ toolCallId, latest }}
-            result={result}
-          />
+          <>
+            <ServerToolLine
+              name={name}
+              place={{ toolCallId, latest }}
+              result={result}
+              waiting={waiting}
+            />
+            <ToolCallApprovals toolCallIds={[toolCallId]} />
+          </>
         )}
       </ToolPlaceContext.Provider>
     </ToolRenderBoundary>
@@ -1663,13 +1676,17 @@ export function ServerToolLine({
   name,
   result,
   place,
+  waiting = false,
 }: {
   name: string;
   result?: string;
   /** Where this call sits in the conversation, for an app card that may carry the task on. */
   place?: CardPlace;
+  /** Held on its approval card for the person's answer, so it is not running yet. */
+  waiting?: boolean;
 }) {
-  const running = result === undefined;
+  const held = waiting && result === undefined;
+  const running = result === undefined && !held;
   // Said no on its card: nothing was done, and the line says so rather than naming it as done.
   const declined = toolResultDeclined(result);
   /*
@@ -1682,10 +1699,10 @@ export function ServerToolLine({
   const answer = result === undefined ? undefined : asText(result);
   const refused = !declined && (answer?.startsWith(REFUSAL_MARKER) ?? false);
   const failed = !refused && !declined && toolResultFailed(result);
-  // A call that did not happen is named plainly ("Send your email"), never as done.
+  // A call that did not happen, or waits on its card, is named plainly ("Send your email").
   const { label, detail } = readToolName(
     name,
-    refused || failed || declined ? "plain" : running,
+    refused || failed || declined || held ? "plain" : running,
   );
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
@@ -1725,6 +1742,7 @@ export function ServerToolLine({
       failed={failed}
       declined={declined}
       running={running}
+      waiting={held}
     >
       {shown ? (
         <Streamdown components={markdownComponents} plugins={markdownPlugins}>

@@ -170,10 +170,13 @@ test("the Tasks badge counts exactly what OpenBot's Needs input list draws", asy
       <WaitingForYou />
     </QueryClientProvider>,
   );
+  // A question is a row of its own; an action is OpenBot's approval card, named while it waits.
   await waitFor(() =>
-    expect(view.container.querySelectorAll('[data-slot="item"]').length).toBe(
-      waitingCount(inbox),
-    ),
+    expect(
+      view.container.querySelectorAll('[data-slot="item"]').length +
+        view.queryAllByRole("region", { name: "Waiting for your approval" })
+          .length,
+    ).toBe(waitingCount(inbox)),
   );
   expect(waitingCount(inbox)).toBe(2);
   expect(waitingCount(undefined)).toBe(0);
