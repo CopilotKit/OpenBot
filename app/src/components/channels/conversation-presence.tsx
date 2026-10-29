@@ -20,6 +20,7 @@ import {
   browserSteps,
   type StepApproval,
   stepFor,
+  turnWaitsOnPerson,
 } from "@/lib/channels/step";
 import { cn } from "@/lib/utils";
 
@@ -258,7 +259,8 @@ function useUnownedBusy(
 /**
  * The Bot's orb state for what the conversation is doing. The Bot working outranks the person
  * typing, since a correction typed mid-answer waits for the turn to end; typing cuts a landing
- * short. Resting outside a conversation route.
+ * short, and so does an approval waiting here, since the line then says "Needs you". Resting
+ * outside a conversation route.
  */
 export function useConversationOrb(): BotOrbState {
   const presence = useContext(StoreContext);
@@ -285,6 +287,7 @@ export function useConversationOrb(): BotOrbState {
   }, [answers, present, landed]);
   if (working || server.working) return "thinking";
   if (drafting) return "listening";
+  if (server.waiting) return "idle";
   return present && answers !== landed ? "done" : "idle";
 }
 
@@ -335,7 +338,8 @@ export function useConversationSteps(): readonly ConversationStep[] {
  * one run and starts another, and the orb would land in the gap. `failed` is the turn having ended
  * without an answer. The step is read off `messages` on every render, as the transcript reads them,
  * because the agent grows the same array in place. Hand the composer `onTextChange`, and call
- * `onStop` when somebody presses Stop, so a stopped answer does not land either.
+ * `onStop` when somebody presses Stop, so a stopped answer does not land either. Nor does a turn
+ * that ended on a call held for the person, which has no answer yet.
  */
 export function useReportConversation({
   working,
@@ -351,6 +355,9 @@ export function useReportConversation({
   const step = presence ? stepFor(messages, working, approvals) : null;
   // Read on every render for the same reason as the step.
   const steps = presence ? browserSteps(messages) : NO_STEPS;
+  // Asked only as the turn ends, so it is not read again on every token of the answer.
+  const waitsOnPerson =
+    presence && !working ? turnWaitsOnPerson(messages) : false;
   const wasWorking = useRef(false);
   const stopped = useRef(false);
   /*
@@ -388,14 +395,18 @@ export function useReportConversation({
   useEffect(() => {
     if (working && !wasWorking.current) stopped.current = false;
     const answered =
-      wasWorking.current && !working && !failed && !stopped.current;
+      wasWorking.current &&
+      !working &&
+      !failed &&
+      !stopped.current &&
+      !waitsOnPerson;
     wasWorking.current = working;
     report((current) =>
       current.working === working && !answered
         ? null
         : { working, answers: current.answers + (answered ? 1 : 0) },
     );
-  }, [report, working, failed]);
+  }, [report, working, failed, waitsOnPerson]);
 
   useEffect(() => {
     report((current) => (current.step === step ? null : { step }));
