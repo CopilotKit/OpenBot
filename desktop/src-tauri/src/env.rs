@@ -835,10 +835,13 @@ pub fn compose(
      * keeps a line it does not own, so Start purges the value an earlier run wrote.
      */
     if let Some(port) = ports.browser {
+        let address = format!("http://127.0.0.1:{port}");
+        // The server is a container, and this is the host's loopback. See `container_address`.
         env.insert(
-            crate::local_browser::BROWSER_URL_ENV.into(),
-            format!("http://127.0.0.1:{port}"),
+            BROWSER_CONTAINER_URL_ENV.into(),
+            container_address(&address),
         );
+        env.insert(crate::local_browser::BROWSER_URL_ENV.into(), address);
     }
 
     // The worker refuses to start without this, by design: it is a fact about where this process
@@ -1046,13 +1049,18 @@ pub const MINTED: [&str; 6] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 5] = [
+pub const REMOVED_WHEN_UNSET: [&str; 6] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
     crate::local_browser::BROWSER_URL_ENV,
+    BROWSER_CONTAINER_URL_ENV,
     crate::local_browser::BROWSER_ABSENT_ENV,
 ];
+
+/// [`crate::local_browser::BROWSER_URL_ENV`] as the server's container reaches it, which
+/// `docker-compose.yml` prefers for the `server` service.
+pub const BROWSER_CONTAINER_URL_ENV: &str = "OPENBOT_BROWSER_CONTAINER_URL";
 
 /// Tell the server why this machine runs no browser of the person's own (`BROWSER_ABSENT_ENV`), so
 /// the app can say it to them in a sentence of their own rather than leave it in Desktop's log.

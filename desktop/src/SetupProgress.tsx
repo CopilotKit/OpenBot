@@ -187,6 +187,8 @@ function label(step: string): string {
       return "Dependencies";
     case "recorder":
       return "Recorder";
+    case "browser":
+      return "Your browser";
     case "images":
       return "Local software";
     case "installation":
