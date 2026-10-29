@@ -5,6 +5,7 @@ import {
   forDisplay,
   saidItWentAhead,
   toolResultFailed,
+  toolResultHeldBack,
 } from "../src/lib/plugins/tool-result";
 
 /**
@@ -139,5 +140,54 @@ describe("telling a failed tool from a successful one", () => {
     expect(toolResultFailed("Found 12 results.")).toBe(false);
     expect(toolResultFailed("Refused. The rule says no.")).toBe(false);
     expect(toolResultFailed(undefined)).toBe(false);
+  });
+});
+
+/*
+ * What the server tells a Bot when the person's own answer held a call back, in each shape it
+ * arrives in. `DECLINED_BY_PERSON` and `ALREADY_WAITING` in server/src/approvals/service.ts.
+ */
+const DECLINED =
+  "The person declined this action when you asked for their approval, so it was not done. This was their decision, not a policy or a boundary.";
+const ALREADY_WAITING =
+  "An identical request is already waiting for the person's decision on the Bot's page in OpenBot, so this was not done and no second request was made. Do not repeat it; wait for their answer.";
+
+describe("telling a call the person held back from one a boundary refused", () => {
+  test("a decline reads as one in every shape the server sends it", () => {
+    for (const result of [
+      // Answered on its card.
+      DECLINED,
+      JSON.stringify(DECLINED),
+      // A connector refusing a call the person already declined.
+      `Refused. ${DECLINED}`,
+      JSON.stringify(`Refused. ${DECLINED}`),
+      // The server's computer, and the browser's.
+      JSON.stringify({ ok: false, error: DECLINED }),
+      JSON.stringify({ ok: false, reason: DECLINED }),
+    ])
+      expect(toolResultHeldBack(result)).toBe("declined");
+  });
+
+  test("a request already waiting is its own state, in every shape, and never a decline", () => {
+    for (const result of [
+      ALREADY_WAITING,
+      `Refused. ${ALREADY_WAITING}`,
+      JSON.stringify({ ok: false, error: ALREADY_WAITING }),
+      JSON.stringify({ ok: false, reason: ALREADY_WAITING }),
+    ])
+      expect(toolResultHeldBack(result)).toBe("alreadyWaiting");
+  });
+
+  test("a refusal, a failure, a result and a call still running are none of these", () => {
+    expect(toolResultHeldBack("Refused. The rule says no.")).toBeNull();
+    expect(
+      toolResultHeldBack(JSON.stringify({ ok: false, reason: "Gone." })),
+    ).toBeNull();
+    // A result that only quotes the words is somebody else's text.
+    expect(toolResultHeldBack(`Found an email saying: ${DECLINED}`)).toBeNull();
+    expect(
+      toolResultHeldBack(JSON.stringify({ ok: true, reason: DECLINED })),
+    ).toBeNull();
+    expect(toolResultHeldBack(undefined)).toBeNull();
   });
 });
