@@ -2086,7 +2086,7 @@ export function ChatTranscript({
    * drawn, so "the last row" and "latest" mean the same with or without older pages above.
    */
   const renderRow = (item: TranscriptItem, index: number) =>
-    item.kind === "tools" ? (
+    item.kind === "tools" || item.kind === "tool" ? (
       <MessageScrollerItem
         key={item.id}
         messageId={item.id}
@@ -2096,20 +2096,7 @@ export function ChatTranscript({
           active={busy && index === items.length - 1}
           id={item.id}
           latest={index >= latestIndex}
-          steps={item.steps}
-        />
-      </MessageScrollerItem>
-    ) : item.kind === "tool" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <ToolRow
-          active={busy && index === items.length - 1}
-          id={item.id}
-          latest={index >= latestIndex}
-          steps={[item]}
+          steps={item.kind === "tools" ? item.steps : [item]}
         />
       </MessageScrollerItem>
     ) : item.kind === "activity" ? (

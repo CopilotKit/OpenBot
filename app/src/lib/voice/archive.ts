@@ -203,7 +203,6 @@ export function cachedVoiceArchive(channelId: string): VoiceChatEntry[] {
   );
 }
 
-/** Card position is anchored to the message preceding the call, ahead of its delegated work. */
 /*
  * One card message per call, kept for as long as the call object is: the transcript skips redrawing
  * a card whose message is the one it drew last time, and a fresh object on every render redrew every
@@ -225,6 +224,7 @@ function cardMessageOf(call: VoiceChatEntry): ActivityMessage {
   return message;
 }
 
+/** Card position is anchored to the message preceding the call, ahead of its delegated work. */
 export function withVoiceChats(
   messages: readonly Message[],
   calls: readonly VoiceChatEntry[],

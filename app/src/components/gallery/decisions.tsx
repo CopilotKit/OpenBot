@@ -242,8 +242,8 @@ function readChoice(result: string | undefined): string | undefined {
 }
 
 /**
- * `kind: "decision"` is what makes these suspend the run: they are registered with
- * `useHumanInTheLoop` rather than as ordinary tools, and the person's answer IS the tool result, so
+ * `kind: "decision"` is what makes these suspend the run: they are registered as human-in-the-loop
+ * tools (`useDecisionTool`) rather than as ordinary ones, and the person's answer IS the tool result, so
  * there is no confirmation line to give the model.
  */
 export const GALLERY: GalleryComponent[] = [

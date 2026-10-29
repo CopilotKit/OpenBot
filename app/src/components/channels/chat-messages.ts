@@ -320,8 +320,7 @@ function isReadableMessage(message: unknown): message is Readonly<Message> {
  * row it builds is keyed on the id". `message.id` is keyed on harder and was checked nowhere: it
  * becomes `VisibleChatItem.id`, which is DECLARED `string`, and downstream that one value is the
  * React key, `MessageScrollerItem`'s `messageId`, the turn-grouping key `anchorRowIds` and `turnOf`
- * cut apart at the last colon, and the memo key `createFirstPaintDelays` hangs an entrance delay
- * off.
+ * cut apart at the last colon, and the key `openingStagger` hangs a row's entrance delay off.
  *
  * IT SURVIVED BECAUSE IT DOES NOT THROW — the same reason `readAttachmentMetadata` gives for its
  * own fields having gone unchecked, and the claim there that `metadata` was "the last unchecked
