@@ -610,7 +610,11 @@ test("gives the selected harness the same governed callback as the framework Bot
  */
 test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
   const config = runComposeConfig({ OPENBOT_HOST_GATEWAY: "10.0.2.2" });
-  for (const service of ["server", "agent-harness", "agent-langgraph"] as const) {
+  for (const service of [
+    "server",
+    "agent-harness",
+    "agent-langgraph",
+  ] as const) {
     expect(config.services[service].extra_hosts).toContain(
       "host.docker.internal=10.0.2.2",
     );
