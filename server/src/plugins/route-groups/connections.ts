@@ -1621,7 +1621,7 @@ export function mountConnectionRoutes({
        * construction, the adapter's own refusals are ours, and {@link VendorTimeoutError} is ours.
        *
        * NOT AN AUDIT ROW. Nothing here writes to `pending_authorizations`, and the attempt's
-       * missing trail rows are already debt in `pending-authorization-audit-ledger.test.ts`, under
+       * missing trail rows are tracked in https://github.com/CopilotKit/OpenBot/issues/876, under
        * the claim and the expiry overwrite (B5e). Filing an event for this one branch while the
        * claim it follows files none would put half a lifecycle on the trail.
        */

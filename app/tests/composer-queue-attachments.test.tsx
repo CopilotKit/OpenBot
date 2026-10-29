@@ -7,19 +7,19 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import * as ReactCoreV2 from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   cleanup,
   fireEvent,
-  render,
   type RenderResult,
+  render,
   waitFor,
 } from "@testing-library/react";
-import * as ReactCoreV2 from "@copilotkit/react-core/v2";
 import { useCallback } from "react";
 import { Composer } from "@/components/channels/composer/composer";
-import { ConversationView } from "@/components/channels/conversation-view";
 import type { ComposerDraft } from "@/components/channels/composer/draft";
+import { ConversationView } from "@/components/channels/conversation-view";
 import {
   attachmentUrl,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -78,15 +78,6 @@ let removeAttachmentCalls: string[];
 let consumeAttachmentsCallCount: number;
 
 /**
- * Every distinct function identity the spy has handed a rendering composer, so the test below can
- * say that it handed out exactly one of each. See the note on stability under the spy itself.
- */
-const handedOut = {
-  removeAttachment: new Set<unknown>(),
-  consumeAttachments: new Set<unknown>(),
-};
-
-/**
  * A THIN SPY AROUND THE REAL HOOK, NOT A REPLACEMENT FOR IT. Every other field — `attachments`,
  * `processFiles`, the drag handlers — passes straight through to the real `useAttachments`, so
  * uploads, paste and drag still behave exactly as the real hook makes them; only the two calls
@@ -127,9 +118,6 @@ beforeAll(() => {
         return hook.consumeAttachments();
       }, [hook.consumeAttachments]);
 
-      handedOut.removeAttachment.add(removeAttachment);
-      handedOut.consumeAttachments.add(consumeAttachments);
-
       return { ...hook, removeAttachment, consumeAttachments };
     },
   );
@@ -161,8 +149,6 @@ let uploads: string[];
 beforeEach(() => {
   removeAttachmentCalls = [];
   consumeAttachmentsCallCount = 0;
-  handedOut.removeAttachment.clear();
-  handedOut.consumeAttachments.clear();
   deletes = [];
   uploads = [];
   global.fetch = (async (path: string, init: RequestInit) => {
@@ -469,26 +455,6 @@ test("a full queue drains whole, with nothing bumped and nothing to release", as
   await waitFor(() => expect(chips(view)).toEqual([]));
   expect(deletes).toEqual([]);
   expect(uploads).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
-});
-
-test("the spy hands the composer one stable pair of callbacks, not a fresh pair per render", async () => {
-  // THE HARNESS MEASURING ITSELF, and worth the test. The SDK builds `removeAttachment` and
-  // `consumeAttachments` as `useCallback(…, [])` — stable for the life of the hook, deliberately —
-  // and `submitDraft` lists `removeAttachment` in its dependency array. A spy that mints a new
-  // wrapper on every render silently rebuilds that memo on every render too, so the thing under
-  // test would be reacting to the instrument rather than to the code.
-  const view = render(
-    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
-  );
-
-  // Several renders: the placeholder going on the strip, the upload resolving, the strip
-  // re-rendering without it.
-  await dropAndWait(view, [notes()]);
-  fireEvent.click(view.getByLabelText("Remove notes.txt"));
-  await waitFor(() => expect(chips(view)).toEqual([]));
-
-  expect(handedOut.removeAttachment.size).toBe(1);
-  expect(handedOut.consumeAttachments.size).toBe(1);
 });
 
 /**

@@ -24,7 +24,7 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
-import { serversListedFor } from "@/routes/_authed/_app/connections.index";
+import { serversListedFor } from "@/lib/plugins/listed";
 import { settleReactWork } from "./settle-react-work";
 
 /**

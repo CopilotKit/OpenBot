@@ -132,14 +132,16 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: agent-computer
-      - run: bunx playwright install --with-deps chromium
+      # `--no-shell` as the image does, so the headless run below proves nothing needs the shell.
+      - run: bunx playwright install --with-deps --no-shell chromium
         working-directory: agent-computer
       # Headless here: these launch through the profile path without the computer's own X server.
       # The headless run of the Web Bot Auth test is also the one that checks the user agent fix.
       - run: >-
           bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
           tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
-          tests/handoff-page-restore.test.ts tests/enter-text.test.ts
+          tests/handoff-page-restore.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
+          tests/screencast-keys-browser.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'

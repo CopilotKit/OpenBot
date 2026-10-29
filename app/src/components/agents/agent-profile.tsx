@@ -84,9 +84,11 @@ export function AgentProfile({
           <h1 className="w-full text-balance text-2xl font-semibold leading-tight tracking-tight">
             {profile.name}
           </h1>
-          <p className="w-full text-balance text-sm text-muted-foreground">
-            {profile.title}
-          </p>
+          {profile.title && (
+            <p className="w-full text-balance text-sm text-muted-foreground">
+              {profile.title}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap justify-center gap-1.5">

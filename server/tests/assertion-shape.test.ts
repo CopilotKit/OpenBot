@@ -78,6 +78,8 @@ export type Offence = {
   line: number;
   shape: Shape;
   text: string;
+  expression: string;
+  context: string[];
 };
 
 function blankLiterals(text: string): string {
@@ -211,10 +213,48 @@ const UNDEFINED_PASSES = /^(?:toBeUndefined|toBeFalsy|toBeNil|toBeNullish)$/;
 
 type Range = { start: number; end: number };
 
+/** Ignore formatting outside literals; literal contents remain part of the identity. */
+function expressionIdentity(source: string): string {
+  return source.replace(
+    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\s+/g,
+    (_match, literal: string | undefined) => literal ?? "",
+  );
+}
+
 export function offencesIn(file: string, source: string): Offence[] {
   const stripped = stripComments(source);
   const code = blankLiterals(stripped);
   const found: Offence[] = [];
+  // Include the enclosing test/describe names so identical assertions in sibling tests
+  // remain distinct. Neither the name nor the expression depends on its source line.
+  const contexts: { start: number; end: number; name: string }[] = [];
+  for (const match of code.matchAll(
+    /(?<![.\w$])(?:describe|test|it)(?:\s*\.\s*\w+)*\s*\(/g,
+  )) {
+    let open = match.index + match[0].length - 1;
+    let end = closerOf(code, open);
+    if (end < 0) continue;
+    let next = end + 1;
+    while (/\s/.test(code[next] ?? "") && next < code.length) next++;
+    if (code[next] === "(") {
+      open = next;
+      end = closerOf(code, open);
+      if (end < 0) continue;
+    }
+    const first = topLevelArgs(code.slice(open + 1, end))[0];
+    const leading =
+      code.slice(open + 1, end).length -
+      code.slice(open + 1, end).trimStart().length;
+    // The blanked first argument can be a quoted literal or a computed test name.
+    const nameStart = open + 1 + leading;
+    contexts.push({
+      start: match.index,
+      end,
+      name: expressionIdentity(
+        stripped.slice(nameStart, nameStart + first.length),
+      ),
+    });
+  }
   // The logical line an offence sits in, for the message: a wrapped expression reads as one.
   const joined = logicalLines(stripped);
   const quote = (line: number) => {
@@ -225,9 +265,20 @@ export function offencesIn(file: string, source: string): Offence[] {
     }
     return best.trim().replace(/\s+/g, " ").slice(0, 110);
   };
-  const at = (index: number, shape: Shape) => {
+  const at = (index: number, shape: Shape, expressionStart = index) => {
     const line = lineOf(code, index);
-    found.push({ file, line, shape, text: quote(line) });
+    found.push({
+      file,
+      line,
+      shape,
+      text: quote(line),
+      expression: expressionIdentity(
+        stripped.slice(expressionStart, statementEnd(code, expressionStart)),
+      ),
+      context: contexts
+        .filter((c) => c.start <= index && c.end >= index)
+        .map((c) => c.name),
+    });
   };
 
   const expects: { index: number; open: number; close: number }[] = [];
@@ -248,7 +299,7 @@ export function offencesIn(file: string, source: string): Offence[] {
     const prefix = head.slice(0, own);
     if (/\b(?:await|return|yield)\b/.test(prefix)) continue;
     if (/=>\s*$/.test(prefix)) continue;
-    at(start + (head.length - head.trimStart().length), "a");
+    at(start + (head.length - head.trimStart().length), "a", start + own);
   }
 
   // (b) `?.` in the subject, under a matcher `undefined` satisfies
@@ -279,8 +330,14 @@ export function offencesIn(file: string, source: string): Offence[] {
     const open = (m.index as number) + m[0].length - 1;
     const close = closerOf(code, open);
     if (close < 0) continue;
-    if (/:\s*undefined\s*[,}]/.test(code.slice(open + 1, close)))
-      at(m.index as number, "c");
+    if (/:\s*undefined\s*[,}]/.test(code.slice(open + 1, close))) {
+      const subject = expects.findLast(
+        (e) =>
+          e.close < m.index &&
+          /^[\s.\w]*$/.test(code.slice(e.close + 1, m.index)),
+      );
+      at(m.index, "c", subject?.index ?? m.index);
+    }
   }
 
   // guarded regions: the statement an `if` controls
@@ -418,19 +475,20 @@ export function scanTree(root: string, from = root): Offence[] {
  *
  * One ground covers every entry below and no other ground is accepted: the offence predates this
  * guard, so it is fix-cycle work rather than a licence. `finding` names the review that found it,
- * or marks it as one this scan turned up that the review rounds did not. `why` quotes the
- * expression, so an entry can be read without opening the file.
+ * or marks it as one this scan turned up that the review rounds did not. `expression` quotes the full
+ * expression, and `context` names its enclosing tests. Formatting and line shifts do not change
+ * that identity; an assertion in a different test is never grandfathered by it.
  */
 type Allowed = {
   file: string;
-  line: number;
+  expression: string;
+  context: string[];
   shape: Shape;
   finding: string;
-  why: string;
 };
 
-const key = (o: { file: string; line: number; shape: Shape }) =>
-  `${o.file}:${o.line}:${o.shape}`;
+const key = (o: Pick<Offence, "file" | "shape" | "context" | "expression">) =>
+  JSON.stringify([o.file, o.shape, o.context, o.expression]);
 
 /**
  * THE STANDING OFFENDERS, as of the commit that added this file.
@@ -450,504 +508,685 @@ const key = (o: { file: string; line: number; shape: Shape }) =>
 const ALLOW: Allowed[] = [
   {
     file: "app/tests/auth-client.test.ts",
-    line: 83,
     shape: "a",
+    context: ['"signInWith"', '"throws what the client said when it refuses"'],
+    expression:
+      'expect(signInWith("okta",refuse)).rejects.toThrow("That provider is not configured.",)',
     finding: "round 2 — auth-client.test.ts, six sites",
-    why: 'expect(signInWith("okta", refuse)).rejects.toThrow( "That provider is not configured.", );',
   },
   {
     file: "app/tests/auth-client.test.ts",
-    line: 97,
     shape: "a",
+    context: [
+      '"signInWith"',
+      '"names the provider when the client says nothing"',
+    ],
+    expression:
+      'expect(signInWith("microsoft",refuse)).rejects.toThrow("Microsoft")',
     finding: "round 2 — auth-client.test.ts, six sites",
-    why: 'test("names the provider when the client says nothing", async () => { const refuse = async () => ({ error: {} ',
   },
   {
     file: "app/tests/auth-client.test.ts",
-    line: 101,
     shape: "a",
+    context: [
+      '"signInWith"',
+      '"resolves quietly when the redirect is under way"',
+    ],
+    expression:
+      'expect(signInWith("google",async()=>({error:null})),).resolves.toBeUndefined()',
     finding: "round 2 — auth-client.test.ts, six sites",
-    why: 'test("resolves quietly when the redirect is under way", async () => { expect( signInWith("google", async () =>',
   },
   {
     file: "app/tests/auth-client.test.ts",
-    line: 162,
     shape: "a",
+    context: [
+      '"signInWithEmailDomain"',
+      '"throws what the client said when it refuses"',
+    ],
+    expression:
+      'expect(signInWithEmailDomain("someone@company.com",refuse),).rejects.toThrow("That domain is registered to another tenant.")',
     finding: "round 2 — auth-client.test.ts, six sites",
-    why: 'expect( signInWithEmailDomain("someone@company.com", refuse), ).rejects.toThrow("That domain is registered to ',
   },
   {
     file: "app/tests/auth-client.test.ts",
-    line: 170,
     shape: "a",
+    context: [
+      '"signInWithEmailDomain"',
+      '"says no provider is registered when the client says nothing"',
+    ],
+    expression:
+      'expect(signInWithEmailDomain("someone@company.com",refuse),).rejects.toThrow("No identity provider is registered for that address.")',
     finding: "round 2 — auth-client.test.ts, six sites",
-    why: 'test("says no provider is registered when the client says nothing", async () => { const refuse = async () => (',
   },
   {
     file: "app/tests/auth-client.test.ts",
-    line: 176,
     shape: "a",
+    context: [
+      '"signInWithEmailDomain"',
+      '"resolves quietly when the redirect is under way"',
+    ],
+    expression:
+      'expect(signInWithEmailDomain("someone@company.com",async()=>({error:null,})),).resolves.toBeUndefined()',
     finding: "round 2 — auth-client.test.ts, six sites",
-    why: 'test("resolves quietly when the redirect is under way", async () => { expect( signInWithEmailDomain("someone@c',
   },
   {
     file: "server/tests/audit-initiator.integration.test.ts",
-    line: 291,
     shape: "a",
+    context: [
+      '"what started a run"',
+      '"the trail stays append-only, so a row cannot be re-attributed later"',
+    ],
+    expression: "expect(reattribute()).rejects.toThrow()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(reattribute()).rejects.toThrow();",
   },
   {
     file: "server/tests/component-store.integration.test.ts",
-    line: 149,
     shape: "a",
+    context: [
+      '"withholding"',
+      '"withholding a component that does not exist is an error, not a silent row"',
+    ],
+    expression:
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: This is the literal source expression being identified.
+      'expect(store.revoke(`nothing_${suite}`,botA,"x@example.test"),).rejects.toThrow(ComponentNotFoundError)',
     finding: "NEW (round 2 did not find this)",
-    why: 'test("withholding a component that does not exist is an error, not a silent row", async () => { expect( store.',
   },
   {
     file: "server/tests/component-store.integration.test.ts",
-    line: 372,
     shape: "a",
+    context: [
+      '"what a component may read"',
+      '"revoking from a component that does not exist is an error, not a silent no-op"',
+    ],
+    expression:
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: This is the literal source expression being identified.
+      "expect(store.revokeFunction(`nothing_${suite}`,fn)).rejects.toThrow(ComponentNotFoundError,)",
     finding: "NEW (round 2 did not find this)",
-    why: 'test("revoking from a component that does not exist is an error, not a silent no-op", async () => { expect(sto',
   },
   {
     file: "server/tests/component-store.integration.test.ts",
-    line: 404,
     shape: "a",
+    context: [
+      '"what a component may read"',
+      '"a function this build does not ship cannot be run"',
+    ],
+    expression:
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: This is the literal source expression being identified.
+      "expect(store.callFunction(`nothing_${suite}`,{})).rejects.toThrow()",
     finding: "NEW (round 2 did not find this)",
-    why: 'test("a function this build does not ship cannot be run", async () => { expect(store.callFunction(`nothing_${s',
   },
   {
     file: "server/tests/computer-client.test.ts",
-    line: 263,
     shape: "a",
+    context: [
+      '"acting on an element that is not there"',
+      '"is its own condition, not an unavailable computer"',
+    ],
+    expression:
+      'expect(timingOut().click({ref:"e5",snapshotId:1}),).rejects.toBeInstanceOf(ElementNotFoundError)',
     finding: "NEW (round 2 did not find this)",
-    why: 'test("is its own condition, not an unavailable computer", async () => { expect( timingOut().click({ ref: "e5",',
   },
   {
     file: "server/tests/computer-client.test.ts",
-    line: 305,
     shape: "a",
+    context: [
+      '"a 409 from the computer"',
+      '"is a person holding the wheel when the computer says so"',
+    ],
+    expression:
+      'expect(refusing({error:"A person has taken control of this computer.",humanHasControl:true,}).click({ref:"e1",snapshotId:1}),).rejects.toBeInstanceOf(HumanHasControlError)',
     finding: "NEW (round 2 did not find this)",
-    why: 'test("is a person holding the wheel when the computer says so", async () => { expect( refusing({ error: "A per',
   },
   {
     file: "server/tests/computer-client.test.ts",
-    line: 316,
     shape: "a",
+    context: [
+      '"a 409 from the computer"',
+      '"is a stale snapshot when it does not"',
+    ],
+    expression:
+      'expect(refusing({error:"Snapshot 3 is not the current one."}).click({ref:"e1",snapshotId:1,}),).rejects.toBeInstanceOf(StaleSnapshotError)',
     finding: "NEW (round 2 did not find this)",
-    why: 'test("is a stale snapshot when it does not", async () => { expect( refusing({ error: "Snapshot 3 is not the cu',
   },
   {
     file: "server/tests/computer-client.test.ts",
-    line: 334,
     shape: "a",
+    context: [
+      '"a 409 from the computer"',
+      '"is a stale snapshot for every shape that is not the flag"',
+    ],
+    expression:
+      'expect(refusing(body).click({ref:"e1",snapshotId:1}),).rejects.toBeInstanceOf(StaleSnapshotError)',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect( refusing(body).click({ ref: "e1", snapshotId: 1 }), ).rejects.toBeInstanceOf(StaleSnapshotError);',
   },
   {
     file: "server/tests/computer-client.test.ts",
-    line: 342,
     shape: "a",
+    context: [
+      '"a 409 from the computer"',
+      '"a 409 with no body at all is still a refusal, not a crash"',
+    ],
+    expression:
+      'expect(bodyless.click({ref:"e1",snapshotId:1})).rejects.toBeInstanceOf(StaleSnapshotError,)',
     finding: "NEW (round 2 did not find this)",
-    why: 'test("a 409 with no body at all is still a refusal, not a crash", async () => { const bodyless = clientWith(()',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 65,
     shape: "a",
+    context: [
+      '"locating a Bot\'s computer"',
+      '"a computer with no address at all is an error, not a fallback"',
+    ],
+    expression:
+      'expect(client.locate("sales")).rejects.toThrow(SupervisorError)',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(client.locate("sales")).rejects.toThrow(SupervisorError);',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 75,
     shape: "a",
+    context: [
+      '"locating a Bot\'s computer"',
+      '"a refusal from the supervisor is reported in its own words"',
+    ],
+    expression:
+      'expect(client.locate("bad id")).rejects.toThrow("A bot id may contain only letters.",)',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(client.locate("bad id")).rejects.toThrow( "A bot id may contain only letters.", );',
   },
   {
     file: "server/tests/computer-supervisor.test.ts",
-    line: 89,
     shape: "a",
+    context: [
+      '"locating a Bot\'s computer"',
+      '"an unreachable supervisor says so, rather than looking like a broken computer"',
+    ],
+    expression:
+      'expect(client.locate("sales")).rejects.toThrow(/couldnotbereached/)',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(client.locate("sales")).rejects.toThrow(/could not be reached/);',
   },
   {
     file: "server/tests/people-last-sign-in.integration.test.ts",
-    line: 127,
     shape: "a",
+    context: [
+      '"when somebody was last here"',
+      '"a stamp that cannot be written does not refuse the sign-in"',
+    ],
+    expression:
+      'expect(stampSignIn(broken,"anybody",SIGNED_IN_AT),).resolves.toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect( stampSignIn(broken, "anybody", SIGNED_IN_AT), ).resolves.toBeUndefined();',
   },
   {
     file: "server/tests/plugin-user-credential.integration.test.ts",
-    line: 369,
     shape: "a",
+    context: [
+      '"a person who has not connected"',
+      '"is refused, and told to connect rather than told it broke"',
+    ],
+    expression:
+      "expect(store.callTool({ref,args:{},botId,actorId:askerId}),).rejects.toThrow(PluginRefusedError)",
     finding: "round 2 — plugin-user-credential.integration.test.ts:361",
-    why: 'describe("a person who has not connected", () => { test("is refused, and told to connect rather than told it b',
   },
   {
     file: "app/tests/bot-setup.test.tsx",
-    line: 178,
     shape: "b",
+    context: [
+      '"a built-in coworker can be renamed on a deployment whose own Bot lives on localhost"',
+    ],
+    expression: "expect(updates[0]?.endpoint).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(updates[0]?.endpoint).toBeUndefined();",
   },
   {
     file: "app/tests/voice-archive.test.ts",
-    line: 98,
     shape: "b",
+    context: [
+      '"a busy summary response retains the server\'s durable transcript instead of marking it unsaved"',
+    ],
+    expression: "expect(records[0]?.saveState).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(records[0]?.saveState).toBeUndefined();",
   },
   {
     file: "app/tests/voice-archive.test.ts",
-    line: 149,
     shape: "b",
+    context: [
+      '"save failure remains retryable with the same session id and original transcript"',
+    ],
+    expression:
+      'expect((awaitloadVoiceArchive("channel-1"))[0]?.saveState).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect((await loadVoiceArchive("channel-1"))[0]?.saveState).toBeUndefined();',
   },
   {
     file: "server/tests/agent-endpoint.test.ts",
-    line: 483,
     shape: "b",
+    context: [
+      '"dialling a stored agent endpoint"',
+      '"a hop to another host does not take the signed run with it"',
+    ],
+    expression: "expect(forwarded.forwardedProps?.openbotRun).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(forwarded.forwardedProps?.openbotRun).toBeUndefined();",
-  },
-  {
-    file: "server/tests/agent-escalation.test.ts",
-    line: 78,
-    shape: "b",
-    finding: "NEW (round 2 did not find this)",
-    why: "expect(written[0]?.initiator).toBe(undefined);",
-  },
-  {
-    file: "server/tests/agent-handoff.test.ts",
-    // Moved from 366 by the work-list change, which added tests above it; the offence is the same one and
-    // is re-keyed rather than re-found.
-    line: 409,
-    shape: "b",
-    finding: "NEW (round 2 did not find this)",
-    why: "expect(plain.events[0]?.initiator).toBe(undefined);",
   },
   {
     file: "server/tests/approvals-interactive.integration.test.ts",
-    line: 229,
     shape: "b",
+    context: [
+      '"a click from a person\'s own chat waits, runs once on allow once, and is never repeated"',
+    ],
+    expression: "expect(continued[0]?.error).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(continued[0]?.error).toBeUndefined();",
   },
   {
     file: "server/tests/approvals-policy.test.ts",
-    line: 779,
     shape: "b",
+    context: [
+      '"delegation is gated"',
+      '"an approved hand-off is re-checked, sent once, and its answer continues the conversation"',
+    ],
+    expression: "expect(continued[0]?.error).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(continued[0]?.error).toBeUndefined();",
   },
   {
     file: "server/tests/arcade-adapter-errors.test.ts",
-    line: 63,
     shape: "b",
+    context: [
+      '"normalizeArcadeError"',
+      '"a connection failure keeps status undefined"',
+    ],
+    expression:
+      'expect(normalizeArcadeError(newAPIConnectionError({message:"down"}))?.status,).toBeUndefined()',
     finding: "round 2 — arcade-adapter-errors.test.ts:62-66",
-    why: 'test("a connection failure keeps status undefined", () => { expect( normalizeArcadeError(new APIConnectionErro',
   },
   {
     file: "server/tests/arcade-sibling-collateral.test.ts",
-    line: 417,
     shape: "b",
+    context: [
+      '"offboarding a person"',
+      '"records a sibling app as revoked, naming the app whose revoke ended it"',
+    ],
+    expression: "expect(row(t.gmail)?.payload.endedWith).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(row(t.gmail)?.payload.endedWith).toBeUndefined();",
   },
   {
     file: "server/tests/arcade-sibling-collateral.test.ts",
-    line: 421,
     shape: "b",
+    context: [
+      '"offboarding a person"',
+      '"records a sibling app as revoked, naming the app whose revoke ended it"',
+    ],
+    expression: "expect(row(t.slack)?.payload.endedWith).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(row(t.slack)?.payload.endedWith).toBeUndefined();",
   },
   {
     file: "server/tests/audit-export.test.ts",
-    line: 181,
     shape: "b",
+    context: [
+      '"readAuditExportRows"',
+      '"walks every matching page and drops the list\'s own paging"',
+    ],
+    expression: "expect(seen[0]?.cursor).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(seen[0]?.cursor).toBeUndefined();",
   },
   {
     file: "server/tests/computer-gateway.test.ts",
-    line: 381,
     shape: "b",
+    context: [
+      '"the computer gateway"',
+      '"the local development actor is kept out of the audit foreign key"',
+    ],
+    expression: "expect(rows[0]?.actorUserId).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(rows[0]?.actorUserId).toBeUndefined();",
   },
   {
     file: "server/tests/computer-gateway.test.ts",
-    line: 443,
     shape: "b",
+    context: [
+      '"the computer gateway"',
+      '"a permitted command runs and is recorded by command, never by output"',
+    ],
+    expression: "expect(rows[0]?.payload.element).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(rows[0]?.payload.element).toBeUndefined();",
   },
   {
     file: "server/tests/computer-gateway.test.ts",
-    line: 646,
     shape: "b",
+    context: [
+      '"the computer gateway"',
+      '"an action that never named an element records no element"',
+    ],
+    expression: "expect(rows.at(-1)?.payload.element).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(rows.at(-1)?.payload.element).toBeUndefined();",
   },
   {
     file: "server/tests/computer-provider.test.ts",
-    line: 356,
     shape: "b",
+    context: [
+      '"shared computer provider"',
+      '"answers undefined when the computer cannot say, rather than throwing"',
+    ],
+    expression: 'expect(awaitprovider.sessionOf?.("sales")).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(await provider.sessionOf?.("sales")).toBeUndefined();',
   },
   {
     file: "server/tests/computer-provider.test.ts",
-    line: 365,
     shape: "b",
+    context: [
+      '"shared computer provider"',
+      '"answers undefined when the computer answers without one"',
+    ],
+    expression: 'expect(awaitprovider.sessionOf?.("sales")).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(await provider.sessionOf?.("sales")).toBeUndefined();',
   },
   {
     file: "server/tests/computer-sandbox.test.ts",
-    line: 79,
     shape: "b",
+    context: [
+      '"telling one run of a Bot\'s computer from the next"',
+      '"a suspended computer has no run to name"',
+    ],
+    expression:
+      'expect(awaitproviderWith(suspended).sessionOf?.("knowledge"),).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect( await providerWith(suspended).sessionOf?.("knowledge"), ).toBeUndefined();',
   },
   {
     file: "server/tests/headless-components.integration.test.ts",
-    line: 350,
     shape: "b",
+    context: [
+      '"an unattended routine turn answering with a governed chart"',
+      '"a grant revoked after the turn started is refused at call time"',
+    ],
+    expression: "expect(bar?.hidden).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(bar?.hidden).toBeUndefined();",
   },
   {
     file: "server/tests/headless-components.test.ts",
-    line: 202,
     shape: "b",
+    context: [
+      '"headless component tools"',
+      '"a held chart is offered with its published description and records a confirmation"',
+    ],
+    expression: "expect(bar?.hidden).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(bar?.hidden).toBeUndefined();",
   },
   {
     file: "server/tests/identity-retire.integration.test.ts",
-    line: 124,
     shape: "b",
+    context: [
+      '"retiring a removed person\'s links revokes their tokens and keeps the rows"',
+    ],
+    expression: "expect(audit.rows[0]?.actorUserId).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(audit.rows[0]?.actorUserId).toBeUndefined();",
   },
   {
     file: "server/tests/identity-retire.integration.test.ts",
-    line: 247,
     shape: "b",
+    context: [
+      '"a directory remover is recorded in the payload only, never as the acting user"',
+    ],
+    expression: "expect(audit.rows[0]?.actorUserId).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(audit.rows[0]?.actorUserId).toBeUndefined();",
   },
   {
     file: "server/tests/mcp-listing.test.ts",
-    line: 168,
     shape: "b",
+    context: [
+      '"what an MCP listing tells the classifier"',
+      '"a vendor\'s read-only claim records nothing at all"',
+    ],
+    expression: "expect(fetch?.effect).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(fetch?.effect).toBeUndefined();",
   },
   {
     file: "server/tests/mcp-listing.test.ts",
-    line: 179,
     shape: "b",
+    context: [
+      '"what an MCP listing tells the classifier"',
+      '"a tool with no annotations is unchanged in every respect"',
+    ],
+    expression: "expect(search?.effect).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(search?.effect).toBeUndefined();",
   },
   {
     file: "server/tests/mcp-listing.test.ts",
-    line: 180,
     shape: "b",
+    context: [
+      '"what an MCP listing tells the classifier"',
+      '"a tool with no annotations is unchanged in every respect"',
+    ],
+    expression: "expect(search?.destructive).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(search?.destructive).toBeUndefined();",
   },
   {
     file: "server/tests/picked-harness-auth.test.ts",
-    line: 290,
     shape: "b",
+    context: [
+      '"a plan\'s installed picked harness authenticates without advertising a bundled Bot"',
+    ],
+    expression: "expect(result.config.managedAgent?.endpoint).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: 'test("a plan\'s installed picked harness authenticates without advertising a bundled Bot", async () => { const ',
   },
   {
     file: "server/tests/picked-harness-auth.test.ts",
-    line: 355,
     shape: "b",
+    context: [
+      '"the default package\'s case-only picked URL authenticates through the real HTTP client"',
+    ],
+    expression: "expect(result.config.managedAgent?.endpoint).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(result.config.managedAgent?.endpoint).toBeUndefined();",
   },
   {
     file: "server/tests/plugin-catalogue.test.ts",
-    line: 210,
     shape: "b",
+    context: ['"Notion"', '"is in the catalogue with the MCP transport"'],
+    expression: "expect(entry?.transport).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(entry?.transport).toBeUndefined();",
   },
   {
     file: "server/tests/shared-computer-run.integration.test.ts",
-    line: 264,
     shape: "b",
+    context: [
+      '"a Bot on the one shared computer, against the table"',
+      '"a computer that cannot say which run it is on leaves the row unordered, not refused"',
+    ],
+    expression:
+      'expect((awaitsnapshots.load("bot-1"))?.session).toBeUndefined()',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect((await snapshots.load("bot-1"))?.session).toBeUndefined();',
   },
   {
     file: "server/tests/tenant-package.test.ts",
-    line: 358,
     shape: "b",
+    context: [
+      '"tenant YAML validation"',
+      '"parses an explicit avatar seed and leaves an omitted seed undefined"',
+    ],
+    expression: "expect(tenantPackage.agents[1]?.avatarSeed).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(tenantPackage.agents[1]?.avatarSeed).toBeUndefined();",
   },
   {
     file: "server/tests/tool-selection.integration.test.ts",
-    line: 834,
     shape: "b",
+    context: [
+      '"a remote Mastra Bot"',
+      '"keeps only authoritative OpenBot governance through the runtime clone and native Mastra request"',
+    ],
+    expression: "expect(run?.forwardedProps?.openbotRun).toBeUndefined()",
     finding: "NEW (round 2 did not find this)",
-    why: "expect(run?.forwardedProps?.openbotRun).toBeUndefined();",
   },
   {
     file: "app/tests/user-preferences.test.tsx",
-    line: 75,
     shape: "c",
+    context: [
+      '"loads preferences from the account and renders the saved emphasis"',
+    ],
+    expression:
+      'expect(requests).toEqual([{path:"/api/settings/preferences",method:"GET",body:undefined},])',
     finding: "NEW (round 2 did not find this)",
-    why: 'test("loads preferences from the account and renders the saved emphasis", async () => { const { view } = setup',
   },
   {
     file: "server/tests/agent-handoff.test.ts",
-    // Moved from 620 by the work-list change, which added tests above it; the offence is the same one and
-    // is re-keyed rather than re-found.
-    line: 663,
     shape: "c",
+    context: [
+      '"the same ask a second time"',
+      '"is refused plainly rather than reported as handed over"',
+    ],
+    expression:
+      'expect(twice.events.map((event)=>({eventType:event.eventType,reason:(event.payloadas{reason?:string}).reason,})),).toEqual([{eventType:"agent.handoff_offered",reason:undefined},{eventType:"agent.handoff_refused",reason:"duplicate"},])',
     finding: "NEW (round 2 did not find this)",
-    why: ').toEqual([ { eventType: "agent.handoff_offered", reason: undefined }, { eventType: "agent.handoff_refused", r',
   },
   {
     file: "server/tests/agent-test-connection-headers.test.ts",
-    line: 12,
     shape: "c",
+    context: ['"parseConnectionHeaders"', '"absent headers stay absent"'],
+    expression:
+      "expect(parseConnectionHeaders(undefined)).toEqual({ok:true,value:undefined,})",
     finding: "NEW (round 2 did not find this)",
-    why: 'describe("parseConnectionHeaders", () => { test("absent headers stay absent", () => { expect(parseConnectionHe',
   },
   {
     file: "server/tests/arcade-adapter-errors.test.ts",
-    line: 55,
     shape: "c",
+    context: [
+      '"normalizeArcadeError"',
+      '"an error with no body leaves name and message undefined"',
+    ],
+    expression:
+      "expect(normalizeArcadeError(newAPIError(500,undefined,undefined,newHeaders()),),).toEqual({status:500,name:undefined,message:undefined,})",
     finding: "round 2 — arcade-adapter-errors.test.ts:50-60",
-    why: ").toEqual({",
   },
   {
     file: "server/tests/composio-adapter.test.ts",
-    // Moved from 5412 by OB-05, which added fifteen lines of tests above it, then back three by the
-    // Plugins screen, which shortened a test above it; the offence is the same one and is re-keyed
-    // rather than re-found.
-    line: 5424,
     shape: "c",
+    context: [
+      '"an action that publishes no description, schema or version is still listed"',
+    ],
+    expression:
+      'expect(awaitactions.listActions("gmail",{limit:WHOLE_LISTING}),).toEqual([{slug:"GMAIL_FETCH_EMAILS",description:undefined,inputParameters:undefined,tags:undefined,version:undefined,},])',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect( await actions.listActions("gmail", { limit: WHOLE_LISTING }), ).toEqual([ { slug: "GMAIL_FETCH_EMAILS"',
   },
   {
     file: "server/tests/composio-adapter.test.ts",
-    // Moved from 5458 by OB-05, which added fifteen lines of tests above it, then back three by the
-    // Plugins screen, which shortened a test above it; the offence is the same one and is re-keyed
-    // rather than re-found.
-    line: 5470,
     shape: "c",
+    context: [
+      '"an action whose description, schema or version is null is still listed"',
+    ],
+    expression:
+      'expect(awaitactions.listActions("gmail",{limit:WHOLE_LISTING}),).toEqual([{slug:"GMAIL_FETCH_EMAILS",description:undefined,inputParameters:undefined,tags:undefined,version:undefined,},])',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect( await actions.listActions("gmail", { limit: WHOLE_LISTING }), ).toEqual([ { slug: "GMAIL_FETCH_EMAILS"',
   },
   {
     file: "server/tests/computer-gateway.test.ts",
-    line: 808,
     shape: "c",
+    context: [
+      '"the computer gateway"',
+      "\"computers maps provider status 'running' and 'stopped' directly and preserves egress distinctions\"",
+    ],
+    expression:
+      'expect(result).toEqual({isolation:"per-bot",computers:[{botId:"bot-proxied",running:true,startedAt:"2026-08-20T12:00:00.000Z",egress:"198.51.100.42",},{botId:"bot-direct",running:false,startedAt:"2026-08-20T11:00:00.000Z",egress:null,},{botId:"bot-unknown-egress",running:false,startedAt:"2026-08-20T10:00:00.000Z",egress:undefined,},],})',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(result).toEqual({ isolation: "per-bot", computers: [ { botId: "bot-proxied",',
   },
   {
     file: "server/tests/demonstrations.test.ts",
-    line: 294,
     shape: "c",
+    context: [
+      '"scheduling creates a routine for the recording\'s own Bot through the routine store"',
+    ],
+    expression:
+      'expect(created).toEqual([{ownerUserId:"owner",agentId:"bot",instruction:demonstrationRoutineInstruction({title:"Find invoice",slug:"find-invoice",}),cron:"0 9 * * 1-5",timezone:undefined,channelId:undefined,},])',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(created).toEqual([ { ownerUserId: "owner", agentId: "bot", instruction: demonstrationRoutineInstruction',
   },
   {
     file: "server/tests/routine-runner.test.ts",
-    // Moved from 169 by the work-list change, which added tests above it; the offence is the same one and
-    // is re-keyed rather than re-found.
-    line: 185,
     shape: "c",
+    context: [
+      '"createRoutineRunner"',
+      '"runs the owner\'s thread and records the reply exactly once"',
+    ],
+    expression:
+      'expect(recorded.finished).toEqual([{runId:RUN_ID,status:"succeeded",error:undefined},])',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(recorded.finished).toEqual([ { runId: RUN_ID, status: "succeeded", error: undefined }, ]);',
   },
   {
     file: "server/tests/routine-runner.test.ts",
-    // Moved from 272 by the work-list change, which added tests above it; the offence is the same one and
-    // is re-keyed rather than re-found.
-    line: 289,
     shape: "c",
+    context: [
+      '"createRoutineRunner"',
+      '"keeps a succeeded run recorded when the channel cannot be written to"',
+    ],
+    expression:
+      'expect(recorded.finished).toEqual([{runId:RUN_ID,status:"succeeded",error:undefined},])',
     finding: "NEW (round 2 did not find this)",
-    why: 'expect(recorded.finished).toEqual([ { runId: RUN_ID, status: "succeeded", error: undefined }, ]);',
   },
   {
     file: "app/tests/connected-accounts-authorized-notice.test.tsx",
-    line: 104,
     shape: "d",
+    context: [
+      '"what ?authorized=%s answers is a sentence or nothing, never a function or an object"',
+    ],
+    expression:
+      'test.each(["no-attempt","toString","constructor","__proto__","something-somebody-made-up",])("what ?authorized=%s answers is a sentence or nothing, never a function or an object",(value)=>{constnotice=authorizationNoticeFor(value);if(notice!==null)expect(typeofnotice).toBe("string");},)',
     finding: "round 2 — connected-accounts-authorized-notice.test.tsx:103-115",
-    why: 'test.each([ "no-attempt", "toString", "constructor", "__proto__",',
   },
   {
     file: "app/tests/connected-account-grants.test.tsx",
-    line: 126,
     shape: "e",
+    context: [],
+    expression: "constsiblingReads:string[]=[]",
     finding: "NEW (round 2 did not find this)",
-    why: "const siblingReads: string[] = [];",
   },
-  /*
-   * `server/tests/arcade-attempt-store.integration.test.ts:81` — `const actors: string[] = []`,
-   * written and never read — is GONE rather than renumbered. The list it collects is now read by
-   * the `removePeople` in that file's `afterAll`: `pending_authorizations.actor_id` keys to `users`
-   * and cascades, so the ids the suite invents are people it has to create and then take away, and
-   * the collection that was decorative is now what the cleanup runs on.
-   */
   {
     file: "server/tests/arcade-disconnect-cascade.test.ts",
-    // Moved from 36 by round 2's A5 fix, which added three tests above it; the offence is the
-    // same one and is re-keyed rather than re-found.
-    line: 39,
     shape: "e",
+    context: [],
+    expression: "constrevoked:string[]=[]",
     finding: "round 2 — arcade-disconnect-cascade.test.ts:36,60",
-    why: "const revoked: string[] = [];",
   },
   {
     file: "server/tests/arcade-grants-route.test.ts",
-    line: 139,
     shape: "e",
+    context: [],
+    expression: "consttoolkits:string[]=[]",
     finding: "NEW (round 2 did not find this)",
-    why: "const toolkits: string[] = [];",
   },
   {
     file: "server/tests/arcade-grants-route.test.ts",
-    line: 140,
     shape: "e",
+    context: [],
+    expression: "constviewers:string[]=[]",
     finding: "NEW (round 2 did not find this)",
-    why: "const viewers: string[] = [];",
   },
   {
     file: "server/tests/enterprise-controls.integration.test.ts",
-    line: 59,
     shape: "e",
+    context: [],
+    expression: "conststopped:string[]=[]",
     finding: "NEW (round 2 did not find this)",
-    why: "const stopped: string[] = []; — pushed to at :65, cleared at :718, read nowhere; the `.stopped` at :704 and :720 is the response's own field",
   },
   {
     file: "server/tests/arcade-vendor-error-engine.test.ts",
-    line: 186,
     shape: "f",
+    context: [
+      '"a refusal from Arcade is an Error this deployment wrote"',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: This is the literal source expression being identified.
+      "`${door} throws an Error carrying no vendor words`",
+    ],
+    expression: "JSON.stringify(thrown,Object.keys(thrownasobject)),",
     finding: "round 2 — arcade-vendor-error-engine.test.ts:174",
-    why: 'expect( JSON.stringify(thrown, Object.keys(thrown as object)), ).not.toContain("SECRET-BEARER");',
   },
 ];
+
+/** Consume each allowance once: a second copy in the same test is still a new offence. */
+function unmatched<
+  T extends Pick<Offence, "file" | "shape" | "context" | "expression">,
+>(
+  candidates: T[],
+  baseline: Pick<Offence, "file" | "shape" | "context" | "expression">[],
+): T[] {
+  const remaining = new Map<string, number>();
+  for (const entry of baseline)
+    remaining.set(key(entry), (remaining.get(key(entry)) ?? 0) + 1);
+  return candidates.filter((entry) => {
+    const identity = key(entry);
+    const count = remaining.get(identity) ?? 0;
+    if (count === 0) return true;
+    remaining.set(identity, count - 1);
+    return false;
+  });
+}
 
 /** One offence per line, the way a reader wants to see it. */
 const report = (
@@ -958,9 +1197,8 @@ const report = (
 
 for (const root of ROOTS) {
   test(`${root} grows no assertion shape the fix cycle does not already own`, () => {
-    const allowed = new Set(ALLOW.map(key));
     const scanned = scanTree(join(REPO, root), REPO);
-    expect(report(scanned.filter((o) => !allowed.has(key(o))))).toEqual([]);
+    expect(report(unmatched(scanned, ALLOW))).toEqual([]);
     // And the walk reached the tree at all: a scan of nothing reports nothing.
     expect(sourceFiles(join(REPO, root), EXTENSIONS).length).toBeGreaterThan(
       20,
@@ -969,12 +1207,67 @@ for (const root of ROOTS) {
 }
 
 test("the allow-list holds no offence the fix cycle has already cleared", () => {
-  const found = new Set(
-    ROOTS.flatMap((root) => scanTree(join(REPO, root), REPO)).map(key),
-  );
-  const stale = ALLOW.filter((entry) => !found.has(key(entry)));
+  const found = ROOTS.flatMap((root) => scanTree(join(REPO, root), REPO));
+  const stale = unmatched(ALLOW, found);
   // A fixed offence must leave the list with its fix, or the list stops meaning anything.
   expect(stale.map((entry) => `${key(entry)}  ${entry.finding}`)).toEqual([]);
+});
+
+test("allowances survive comments, line shifts and expression wrapping", () => {
+  const before = offencesIn(
+    "fixture.ts",
+    'test("existing", () => { expect(row?.value).toBeUndefined(); });',
+  );
+  const wrapped = offencesIn(
+    "fixture.ts",
+    `// New introduction.
+
+
+test("existing", () => {
+  expect(
+    row?.value
+  ).toBeUndefined();
+});`,
+  );
+  expect(before).toHaveLength(1);
+  expect(wrapped[0].line).not.toBe(before[0].line);
+  expect(unmatched(wrapped, before)).toEqual([]);
+  expect(unmatched(before, wrapped)).toEqual([]);
+});
+
+test("an allowance cannot cover the same expression in another test or a second copy", () => {
+  const original =
+    'test("existing", () => { expect(row?.value).toBeUndefined(); });';
+  const allowed = offencesIn("fixture.ts", original);
+  const addedTest = offencesIn(
+    "fixture.ts",
+    original +
+      '\ntest("new case", () => { expect(row?.value).toBeUndefined(); });',
+  );
+  const duplicate = offencesIn(
+    "fixture.ts",
+    'test("existing", () => { expect(row?.value).toBeUndefined(); expect(row?.value).toBeUndefined(); });',
+  );
+  expect(unmatched(addedTest, allowed).map((o) => o.context)).toEqual([
+    ['"new case"'],
+  ]);
+  expect(unmatched(duplicate, allowed)).toHaveLength(1);
+  expect(unmatched(allowed, [])).toEqual(allowed);
+});
+
+test("the full expression identity keeps literal contents and changes beyond diagnostic truncation", () => {
+  const prefix = "x".repeat(150);
+  const original = offencesIn(
+    "fixture.ts",
+    `test("existing", () => { expect(row?.["${prefix} a"]).toBeUndefined(); });`,
+  );
+  const changed = offencesIn(
+    "fixture.ts",
+    `test("existing", () => { expect(row?.["${prefix}  a"]).toBeUndefined(); });`,
+  );
+  expect(original).toHaveLength(1);
+  expect(original[0].text).toBe(changed[0].text);
+  expect(unmatched(changed, original)).toHaveLength(1);
 });
 
 /* POSITIVE CONTROLS.

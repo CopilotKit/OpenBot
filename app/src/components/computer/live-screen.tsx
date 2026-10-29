@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { readControl } from "@/lib/computers/control";
 import {
   connectScreen,
@@ -65,23 +72,8 @@ function isPasteShortcut(event: KeyboardEvent): boolean {
   return (event.ctrlKey || event.metaKey) && keyOf(event) === "v";
 }
 
-/**
- * Whether a keystroke is aimed at a field on this page rather than at the Bot's browser.
- *
- * The canvas cannot hold focus, so a keystroke meant for the remote page arrives targeted at the
- * body (or whatever non-editable element last took a click). One targeted at an input, textarea,
- * select or contenteditable is someone typing into this page while driving: the recorder's
- * workflow name, the secret box under the screen. Taking those keys left the fields dead.
- */
-function isLocalField(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.tagName === "SELECT")
-  );
-}
+/** What a page can ask of its live screen: to take the keyboard, as a click on the screen does. */
+export type LiveScreenHandle = { focus: () => void };
 
 type Props = {
   /**
@@ -95,6 +87,14 @@ type Props = {
   /** Called while a dropped stream is being retried on its own, and again when it is back or gone. */
   onReconnecting?: (reconnecting: boolean) => void;
   retryKey?: number;
+  /** What a screen reader calls the screen while driving. A Bot's screen unless this says whose it is. */
+  label?: string;
+  /**
+   * Take the keyboard as soon as there is input to take, without a click: for a view opened to drive the screen, where
+   * the screen is what the person came to type into (the full-size view of a Bot's screen).
+   */
+  autoFocus?: boolean;
+  ref?: Ref<LiveScreenHandle>;
 };
 
 type FrameMessage = {
@@ -109,11 +109,30 @@ export function LiveScreen({
   onProblem,
   onReconnecting,
   retryKey = 0,
+  label = "The Bot's screen. You have control. Click and type here.",
+  autoFocus = false,
+  ref,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  /** Keydowns handled locally whose matching keyup must not leak to the remote browser. */
-  const localKeyUps = useRef(new Set<string>());
+  /** Keys sent down to the remote browser, by code, whose release goes there too, wherever the focus is by then. */
+  const keysDown = useRef(new Map<string, ReturnType<typeof remoteKey>>());
+  /**
+   * Every key still down in the remote browser, released there: when the keyboard stops being forwarded (control handed
+   * back, the screen closed, its stream ended) with a key held, its release would never be sent, and a Shift or a Control
+   * left down there changes every key and click after it. Straight to the socket, as the person's own release would
+   * have gone; with modifiers none, since every one is being let go.
+   */
+  const releaseKeys = useCallback(() => {
+    const socket = socketRef.current;
+    for (const key of keysDown.current.values())
+      if (socket?.readyState === WebSocket.OPEN)
+        socket.send(
+          JSON.stringify({ type: "key", event: "up", ...key, modifiers: 0 }),
+        );
+    keysDown.current.clear();
+  }, []);
+
   /** The size of the frames Chrome is sending, which is what input coordinates are relative to. */
   const frameSize = useRef<{ width: number; height: number } | null>(null);
   /** Latest validated encoded frame. Hidden tabs keep only this, never decoded bitmaps. */
@@ -296,6 +315,8 @@ export function LiveScreen({
     document.addEventListener("visibilitychange", drawLatestFrame);
     return () => {
       closed = true;
+      // Before the socket goes: a key still down over there would stay held in the remote browser.
+      releaseKeys();
       connection.stop();
       document.removeEventListener("visibilitychange", drawLatestFrame);
       socketRef.current = null;
@@ -359,6 +380,10 @@ export function LiveScreen({
   const onMouse = useCallback(
     (kind: "pressed" | "released" | "moved") =>
       (event: React.MouseEvent<HTMLCanvasElement>) => {
+        // A press on the screen gives it the keyboard, as a press on any focusable element does, so typing into the
+        // remote page after clicking a field on it needs no second click.
+        if (kind === "pressed")
+          event.currentTarget.focus({ preventScroll: true });
         const point = at(event);
         if (!point) return;
         send({
@@ -392,29 +417,52 @@ export function LiveScreen({
     [at, send],
   );
 
-  /**
-   * Keystrokes, forwarded while driving.
-   *
-   * Listen on window because canvas cannot hold focus. `preventDefault` keeps Tab and typing directed
-   * at the remote page while takeover is active.
-   *
-   * The keydown in the capture phase, and stopped as well as prevented, because a keystroke sent to
-   * the Bot's browser is not also this page's. The app's own shortcuts listen on this window too,
-   * and they were bound first, when the signed-in app mounted, so they saw every keystroke before
-   * this did: a capital N typed into the remote page started a new chat, and Ctrl+B there toggled
-   * the sidebar here. Escape and the paste shortcut are not stopped, because both are meant for this
-   * page, and neither is a keystroke typed into one of this page's own fields.
+  useImperativeHandle(
+    ref,
+    () => ({ focus: () => canvasRef.current?.focus({ preventScroll: true }) }),
+    [],
+  );
+
+  /*
+   * A view opened to drive the screen puts the keyboard on it, as a dialog puts focus inside itself: taking control
+   * and typing needs no click on the page first, as it needed none before the screen took keys only with focus.
    */
   useEffect(() => {
-    if (!driving || !connected) return;
+    if (autoFocus && driving && connected)
+      canvasRef.current?.focus({ preventScroll: true });
+  }, [autoFocus, driving, connected]);
+
+  /**
+   * Keystrokes, forwarded while driving, and only those the screen itself has: it takes the keyboard the way any focused
+   * element does, by a click on it (or Tab to it), and gives it back on Escape or a click anywhere else.
+   *
+   * It used to take every keystroke on the window that was not aimed at a text field, because the canvas could not hold
+   * focus. So nothing else on the page could have a key: the Browser page's tabs never heard their arrows, Home, End or
+   * Delete, no button took Enter or Space, and Tab never left anything. And every one of those keys went to the remote
+   * browser instead, where a stray arrow is not harmless. Now the canvas holds focus, as noVNC's does (its keyboard
+   * listens on the canvas it focuses on a click), and a key aimed anywhere else is that element's.
+   *
+   * Still listened for on the window, in the capture phase, and stopped as well as prevented, because a keystroke sent to
+   * the Bot's browser is not also this page's: the app's own shortcuts listen on this window too, and they were bound
+   * first, when the signed-in app mounted, so they would see it first (a capital N typed into the remote page started a
+   * new chat, and Ctrl+B there toggled the sidebar here). The paste shortcut is not stopped, because the paste event it
+   * makes is how the clipboard's text arrives. Nor is Escape, which closes a full-size view; on its way it also takes the
+   * keyboard off the screen, which is how a person who reached it with Tab leaves it again (WCAG's "no keyboard trap").
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!driving || !connected || !canvas) return;
+    const held = keysDown.current;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") return; // Escape still closes the view.
-      if (isPasteShortcut(event) || isLocalField(event.target)) {
-        localKeyUps.current.add(event.code);
+      if (event.target !== canvas) return;
+      if (event.key === "Escape") {
+        canvas.blur();
         return;
       }
+      if (isPasteShortcut(event)) return;
       event.preventDefault();
       event.stopPropagation();
+      held.set(event.code, remoteKey(event));
       send({
         type: "key",
         event: "down",
@@ -425,11 +473,13 @@ export function LiveScreen({
         modifiers: modifierBits(event),
       });
     };
+    /**
+     * The release of a key that went down to the remote browser, wherever the focus is now: a key released after a
+     * click took the focus elsewhere is still held over there otherwise. Only those: the Tab that brought the focus to
+     * the screen, say, was this page's, and its release is too.
+     */
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === "Escape") return;
-      if (localKeyUps.current.delete(event.code) || isPasteShortcut(event)) {
-        return;
-      }
+      if (!held.delete(event.code)) return;
       event.preventDefault();
       send({
         type: "key",
@@ -440,7 +490,7 @@ export function LiveScreen({
     };
     /** Paste arrives as one block; CDP inserts it as text rather than key events. */
     const onPaste = (event: ClipboardEvent) => {
-      if (isLocalField(event.target)) return;
+      if (event.target !== canvas) return;
       const text = event.clipboardData?.getData("text");
       if (!text) return;
       event.preventDefault();
@@ -454,9 +504,9 @@ export function LiveScreen({
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("paste", onPaste);
-      localKeyUps.current.clear();
+      releaseKeys();
     };
-  }, [driving, connected, send]);
+  }, [driving, connected, send, releaseKeys]);
 
   /**
    * The wheel, forwarded while driving, from a listener that is allowed to stop it here.
@@ -488,21 +538,20 @@ export function LiveScreen({
   return (
     <canvas
       ref={canvasRef}
-      className={`block h-auto w-full ${driving ? "cursor-crosshair" : ""}`}
-      // Only forward input during takeover.
+      className={`block h-auto w-full ${driving ? "cursor-crosshair focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
+      // Only forward input during takeover. Then the screen is a stop in the Tab order and takes every key while it has
+      // the focus, which is what a screen reader is told by `application`.
       {...(driving
         ? {
             onMouseDown: onMouse("pressed"),
             onMouseUp: onMouse("released"),
             onMouseMove: onMouse("moved"),
             onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
+            role: "application",
+            tabIndex: 0,
           }
         : {})}
-      aria-label={
-        driving
-          ? "The Bot's screen. You have control. Click and type here."
-          : "The Bot's screen, live"
-      }
+      aria-label={driving ? label : "The Bot's screen, live"}
       data-connected={connected}
     />
   );

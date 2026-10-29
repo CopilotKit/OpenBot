@@ -787,6 +787,8 @@ export function ComputerView({
                   ) : showLiveScreen ? (
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <LiveScreen
+                        // The person opened this view to drive: taking control puts the keyboard on the screen.
+                        autoFocus
                         computerId={computerId}
                         driving={driving}
                         onProblem={setStreamProblem}

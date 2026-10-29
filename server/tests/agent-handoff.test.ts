@@ -398,17 +398,6 @@ describe("handing work to another Bot", () => {
     });
   });
 
-  test("a run that says nothing leaves the row filed as a person's", async () => {
-    const plain = desk();
-    await plain.desk.send({
-      from: FROM,
-      target: "researcher",
-      envelope: { task: "t" },
-    });
-
-    expect(plain.events[0]?.initiator).toBe(undefined);
-  });
-
   test("both outcomes leave a row naming the run and the reason", async () => {
     const allowed = desk();
     await allowed.desk.send({

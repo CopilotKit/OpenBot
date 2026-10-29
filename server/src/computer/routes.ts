@@ -1,10 +1,13 @@
+import { downloadHeaders } from "@openbot/shared/file-download";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { downloadHeaders } from "@openbot/shared/file-download";
 import type { BotAccessCheck } from "../agents/profile-policy";
+import { ApprovalNeedsConversationError } from "../approvals/types";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { ownsPersonBrowser } from "../browser/person";
 import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
@@ -36,6 +39,9 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * Every computer call goes through the gateway. That is the governance seam: each acting route in
  * this file passes through a policy decision and audit row before it reaches the computer.
  */
+
+/** What a person's own browser answers under this router: the reads its live screen makes. */
+const PERSON_BROWSER_READS = new Set(["control", "status", "screenshot"]);
 
 export function createComputerRoutes(
   gateway: ComputerGateway,
@@ -86,6 +92,23 @@ export function createComputerRoutes(
     const path = context.req.path.replace(/\/+$/, "");
     if (botId && DEPLOYMENT_ROUTES.has(botId) && path.endsWith(`/${botId}`)) {
       return next();
+    }
+
+    /*
+     * A person's own OpenBot browser, named for the person (browser/person.ts), answers here only what its live screen
+     * reads, and only to that person: who holds the wheel, whether it is up, and a picture of the page. Asked here and
+     * not of `canUseBot`, which a deployment with no profile store answers yes to for everybody. Nothing that acts as a
+     * Bot (a click through the boundary, a command, a file) reaches a person's browser: no Bot uses one yet.
+     */
+    if (botId && isPersonBrowserId(botId)) {
+      const route = path.slice(
+        path.lastIndexOf(`/${botId}/`) + botId.length + 2,
+      );
+      return context.req.method === "GET" &&
+        PERSON_BROWSER_READS.has(route) &&
+        ownsPersonBrowser(context.var.actor, botId)
+        ? next()
+        : context.json({ error: "There is no such Bot." }, 404);
     }
 
     if (botId && !(await canUseBot(context.var.actor, botId))) {
@@ -1030,6 +1053,13 @@ function errorBody(error: unknown): Record<string, unknown> {
     ...(error instanceof ComputerStillStartingError
       ? { starting: true, notPerformed: true }
       : {}),
+    /*
+     * A rule asks about this call and it came without the conversation the asking happens in. Marked
+     * so the browser sends the same call again through the approval route, which carries it.
+     */
+    ...(error instanceof ApprovalNeedsConversationError
+      ? { needsConversation: true, notPerformed: true }
+      : {}),
   };
 }
 
@@ -1053,6 +1083,8 @@ function statusFor(error: unknown): 400 | 403 | 404 | 409 | 413 | 500 | 503 {
   // another snapshot. Not 503, which says the computer is unavailable and sends an operator hunting a
   // container that is running perfectly.
   if (error instanceof ElementNotFoundError) return 409;
+  // Nothing is broken here either: the call has to come again with its conversation first.
+  if (error instanceof ApprovalNeedsConversationError) return 409;
   // A person holding the wheel, or a person driving before taking it. Nothing is broken; the caller
   // has to wait or take control first, and 409 is how both of those are already reported.
   if (

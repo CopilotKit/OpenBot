@@ -657,8 +657,7 @@ export type ConnectedAppBroker = {
    * IT PAIRS WITH {@link ConnectedAppBroker.authorizations}: a broker declaring `null` there
    * answers `null` here, and a broker declaring a flow answers a non-null id on every successful
    * mint. A broker that grew a flow and forgot the id would leave D24 with no source while every
-   * type still checked, so `broker-authorization-pairing.test.ts` asserts the pair over every
-   * broker literal in the tree.
+   * type still checked. A broker's authorization tests must verify this pairing.
    */
   authorize(request: {
     account: AccountRef;

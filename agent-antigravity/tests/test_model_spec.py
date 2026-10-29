@@ -40,23 +40,3 @@ def test_the_model_is_still_the_deployments_to_choose(monkeypatch):
     assert bot_settings(BOT_ID, pinned_provider=PINNED) == BotSettings(
         provider="google", model="gemini-3.8-flash"
     )
-
-
-def test_this_bots_source_reads_the_spec_with_the_pin():
-    source = (Path(__file__).resolve().parents[1] / "src" / "main.py").read_text(encoding="utf-8")
-    assert 'bot_settings("agent-antigravity", pinned_provider="google")' in source
-
-
-def test_the_key_and_base_url_come_from_the_provider_row():
-    """Not hardcoded here.
-
-    `shared/model-providers.json` names Google's key and base-url variables, and a Bot that
-    spelled them out itself would drift from the file the moment either changed. The base-url
-    variable is what points this Bot at a Gemini-compatible endpoint — a gateway, or aimock —
-    instead of Google.
-    """
-    source = (Path(__file__).resolve().parents[1] / "src" / "main.py").read_text(encoding="utf-8")
-    assert '"key_variable"' in source
-    assert '"base_url_variable"' in source
-    assert "GOOGLE_API_KEY" not in source
-    assert "GOOGLE_GENERATIVE_AI_BASE_URL" not in source

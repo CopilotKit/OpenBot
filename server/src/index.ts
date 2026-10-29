@@ -4,6 +4,7 @@ import {
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { computerGuidance } from "@openbot/shared/bot-prompt";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -15,6 +16,8 @@ import {
   guardDeliveryStore,
   guardHostAccess,
   installEnterpriseControls,
+  skillSharingAllowed,
+  skillSharingInSnapshot,
 } from "./admin/controls";
 import {
   CoworkerUnavailableError,
@@ -67,14 +70,13 @@ import {
   recordAuditEvent,
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
-import { createAuth } from "./auth";
+import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
-import type { OpenBotRole } from "./auth/roles";
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
@@ -100,6 +102,14 @@ import { createChannelTitler } from "./channels/titler";
 import { headlessComponentCatalog } from "./components/headless";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
+import { openbotAddress } from "./browser/address";
+import { personBrowserEgressPolicy } from "./browser/egress";
+import {
+  directBrowserComputers,
+  gatewayBrowserComputers,
+  personBrowserPlace,
+  withPersonBrowsers,
+} from "./browser/host";
 import { createComputerGateway } from "./computer/gateway";
 import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
@@ -116,8 +126,7 @@ import {
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import {
-  type IdentifyActor,
-  type IdentifyUser,
+  chooseOpenAIApi,
   mountCopilotRuntime,
   normalizeModelBaseUrls,
   runtimeModelForEnvironment,
@@ -135,6 +144,7 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
 import {
@@ -160,6 +170,7 @@ import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
+import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -167,24 +178,35 @@ import {
 } from "./learning/auto-assign";
 import {
   cliLoginPresent,
+  createLearningContainer,
   ensureLearningContainer,
   intelligenceApiOrigin,
   keyIntelligence,
+  type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import {
+  createPersonalLearningSpaces,
+  createPersonSpaceStore,
+} from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
+import {
+  createLearningSharingStore,
+  createOpenSkillIndex,
+} from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
-import { reportModelAvailability } from "./model-availability-check";
 import { memoryTools } from "./memory/tools";
+import { reportModelAvailability } from "./model-availability-check";
 import { appAccessTools } from "./plugins/app-access-tool";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
+import { createProfileStore } from "./people/profile";
 import { createPeopleStore } from "./people/store";
 import { createAccountModeSwitch } from "./plugins/account-mode";
 import { assertActivatable, providerDecision } from "./plugins/broker";
@@ -225,6 +247,8 @@ import {
 } from "./proactive/restriction";
 import { createProactiveStore } from "./proactive/store";
 import { createProviderOAuthProxy } from "./provider-oauth";
+import { createRecorderExtension } from "./recorder/wiring";
+import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
 import {
   createEmailTriggerRoutes,
@@ -249,7 +273,6 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
-import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
@@ -264,66 +287,6 @@ import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 
-/**
- * Who is asking, for a CopilotKit request.
- *
- * One resolver, because a run has two questions to answer about the same person: whose threads and
- * memory these are, and which coworkers they may run. Answering them from different places is how
- * one person ends up running another's private coworker, or reading their thread.
- */
-async function resolveRequestActor(request: Request): Promise<{
-  id: string;
-  name: string;
-  role: OpenBotRole;
-}> {
-  if (config.singleUser) {
-    return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
-  }
-  const session = await auth?.api.getSession({ headers: request.headers });
-  const user = session?.user;
-  if (!user) {
-    throw new Error("A CopilotKit run requires a signed-in user.");
-  }
-  const roles = user.role
-    ? [user.role]
-    : await roleRepository.rolesForUser(user.id);
-  if (!roles.includes("admin") && !roles.includes("user")) {
-    throw new Error("A CopilotKit run requires an authorized user.");
-  }
-  return {
-    id: user.id,
-    name: user.name ?? user.email ?? user.id,
-    role: roles.includes("admin") ? "admin" : "user",
-  };
-}
-
-/** The Intelligence projection of {@link resolveRequestActor}: threads are scoped to this person. */
-const identifyUser: IdentifyUser = async (request) => {
-  const { id, name } = await resolveRequestActor(request);
-  return { id, name };
-};
-
-/**
- * The authorization projection of the same person: agent visibility is decided from this.
- *
- * An unauthenticated request resolves to a person who owns nothing rather than an error, so the
- * runtime can still describe itself, `/info` reports the licence and the public roster, which is
- * what a deployment check reads to tell "the licence is invalid" apart from "chat is silently
- * broken". It grants nothing: this actor matches no private profile and is not an administrator,
- * and a run still fails in `identifyUser`, which has no anonymous case because a thread must belong
- * to somebody.
- */
-const ANONYMOUS_ACTOR = { id: "", role: "user" } as const;
-
-const identifyActor: IdentifyActor = async (request) => {
-  try {
-    const { id, role } = await resolveRequestActor(request);
-    return { id, role };
-  } catch {
-    return ANONYMOUS_ACTOR;
-  }
-};
-
 const config = loadConfig();
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
 // after an administrator clears a pin to follow the latest published Skills.
@@ -332,6 +295,7 @@ clearLearningRevisionFallback();
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
+const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
 const learningSettingsStore = createLearningSettingsStore(
@@ -357,6 +321,26 @@ const learningApiOrigin = (() => {
 const learningCanCreate =
   learningApiOrigin !== undefined &&
   (config.learningSetup !== undefined || cliLoginPresent());
+/** The credential that can create a Learning container, for the `openbot` default and for each person's own space. */
+const learningCredentials = (apiUrl: string): LearningContainerCredentials => ({
+  directory: process.cwd(),
+  apiUrl,
+  nonInteractive: true,
+  key: keyIntelligence(
+    apiUrl,
+    config.runtime.intelligence.apiKey,
+    config.runtime.intelligence.gatewayWsUrl,
+  ),
+  cliLogin: cliLoginPresent(),
+  ...(config.learningSetup
+    ? {
+        serviceToken: {
+          token: config.learningSetup.serviceToken,
+          projectId: config.learningSetup.projectId,
+        },
+      }
+    : {}),
+});
 const learningAutoAssign = createLearningAutoAssign({
   enabled: config.learningAutoAssign,
   store: learningSettingsStore,
@@ -368,28 +352,42 @@ const learningAutoAssign = createLearningAutoAssign({
   ...(learningCanCreate && learningApiOrigin
     ? {
         create: () =>
-          ensureLearningContainer({
-            directory: process.cwd(),
-            apiUrl: learningApiOrigin,
-            nonInteractive: true,
-            key: keyIntelligence(
-              learningApiOrigin,
-              config.runtime.intelligence.apiKey,
-              config.runtime.intelligence.gatewayWsUrl,
-            ),
-            cliLogin: cliLoginPresent(),
-            ...(config.learningSetup
-              ? {
-                  serviceToken: {
-                    token: config.learningSetup.serviceToken,
-                    projectId: config.learningSetup.projectId,
-                  },
-                }
-              : {}),
-          }),
+          ensureLearningContainer(learningCredentials(learningApiOrigin)),
       }
     : {}),
   audit: createAuditStore(database),
+});
+/*
+ * Each person's own Learning space: every recording they make joins it, and every Bot they run uses its Skills. Made
+ * with the same credential as the default container, on first need: when their browser connects, and again on a
+ * capture pass if it is still missing. With no such credential a missing space cannot be made, and the Recorder says so.
+ */
+const personalLearningSpaces = createPersonalLearningSpaces({
+  readSettings: () => learningSettingsStore.read(),
+  snapshots: learningProbeIntelligence,
+  store: createPersonSpaceStore(database),
+  ...(learningCanCreate && learningApiOrigin
+    ? {
+        create: (container) =>
+          createLearningContainer({
+            ...learningCredentials(learningApiOrigin),
+            container,
+          }),
+      }
+    : {}),
+  nameFor: async (userId) =>
+    (
+      await database
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+    ).map((row) => row.name?.trim() || null)[0] ?? null,
+});
+const learningSharingStore = createLearningSharingStore(database);
+/** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
+const openSkillIndex = createOpenSkillIndex({
+  read: () => learningSharingStore.openSources(),
 });
 const learningSettings = withLearningAutoAssign(
   learningSettingsStore,
@@ -488,6 +486,8 @@ const peopleStore = createPeopleStore(
           userId,
           by,
         ),
+      // Removing somebody ends their sessions, so it ends their browsers' Recorders too.
+      recorders: () => signOutRecorders(userId, "person_removed"),
     }),
 );
 const identityProviderStore = createIdentityProviderStore(database);
@@ -496,27 +496,70 @@ const identityProviderStore = createIdentityProviderStore(database);
  * store that receives those rows has to exist before anything can sign in.
  */
 const signInAuditStore = createAuditStore(database);
-const auth: AuthService | undefined = config.organizationAuthUrl
+/*
+ * A person's sign-in ending here ends their browsers' Recorders with it, however it ends: they sign out, their sessions
+ * are ended (by them, an administrator, the directory, the identity provider), or they are removed. Retried, and when it
+ * still fails the sign-in does not end either (recorder/sign-out.ts). Called only once something ends, which comes after
+ * the Recorder's wiring below exists.
+ */
+const signOutRecorders = (userId: string, ending: string) =>
+  recorderExtension.signOut(userId, ending);
+// Its own const so the Recorder can re-check a stored session through `verifySessionQuietly`.
+const organizationAuth = config.organizationAuthUrl
   ? createOrganizationAuth({
       authorityUrl: config.organizationAuthUrl,
       materializeUser: organizationUserStore(database),
+      signOutRecorders,
     })
-  : config.auth
+  : undefined;
+// Its own const so the Recorder's connections can last as long as one of its sessions does.
+const betterAuth =
+  !organizationAuth && config.auth
     ? createAuth(
         config,
         database,
         (email) => peopleStore.isRevoked(email),
         signInAuditStore,
+        { signOutRecorders },
       )
     : undefined;
+const auth: AuthService | undefined = organizationAuth ?? betterAuth;
+const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
+  {
+    singleUser: config.singleUser,
+    // Answered only on the capture pass. Called per request, after the Recorder's wiring below exists.
+    resolveRecorder: (request) => recorderExtension.resolve(request),
+    getSession: async (headers) =>
+      (await auth?.api.getSession({ headers })) ?? null,
+    rolesForUser: (id) => roleRepository.rolesForUser(id),
+  },
+);
+// Where a person's own OpenBot browser may go: not where Bots may, but where their browser on their own laptop would
+// (browser/egress.ts). On OpenBot Desktop's host-side computer that is their own desktop, so everywhere.
+const personBrowserPolicy = personBrowserEgressPolicy({
+  native: config.browser !== undefined,
+  allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
+  openbotUrls: [config.publicUrl, config.appUrl],
+  gatewayUrl: config.runtime.intelligence.gatewayWsUrl,
+});
 // Each computer is pushed its network policy on the way to the action that woke it, because a
-// computer refuses every connection until one arrives (see `withPolicyPushOnWake`).
+// computer refuses every connection until one arrives (see `withPolicyPushOnWake`). A person's own
+// browser is found where it runs (OPENBOT_BROWSER_URL, else the same provider) and pushed theirs.
 const computerProvider = config.computer
-  ? withPolicyPushOnWake(createComputerProvider(config.computer), {
-      policyForBot: (botId) => enterpriseControls()?.policyForBot(botId),
-      ...(config.computer.token ? { token: config.computer.token } : {}),
-      ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
-    })
+  ? withPolicyPushOnWake(
+      withPersonBrowsers(
+        createComputerProvider(config.computer),
+        config.browser?.url,
+      ),
+      {
+        policyForBot: (botId) =>
+          isPersonBrowserId(botId)
+            ? Promise.resolve(personBrowserPolicy)
+            : enterpriseControls()?.policyForBot(botId),
+        ...(config.computer.token ? { token: config.computer.token } : {}),
+        ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
+      },
+    )
   : undefined;
 
 if (computerProvider?.warm) {
@@ -653,6 +696,16 @@ const storedApprovals = createApprovalStore(database);
 // Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
 normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+// And before any Bot's model is resolved: behind a gateway, the API that model takes tools on (chooseOpenAIApi).
+if (chooseOpenAIApi(runtimeModel) === "responses")
+  console.info(
+    JSON.stringify({
+      type: "openai-api",
+      api: "responses",
+      model: runtimeModel.defaultModel,
+      message: `${runtimeModel.defaultModel} takes tools only through the Responses API, so the built-in Bots call /responses at OPENAI_BASE_URL. Set COPILOTKIT_OPENAI_API=chat to call /chat/completions instead.`,
+    }),
+  );
 
 /**
  * Pass one of tool selection: which skills a message needs, on the deployment's own model.
@@ -1247,13 +1300,44 @@ const personalMemoryStore = createMemoryStore(database, {
     client: createIntelligenceClient(config.runtime.intelligence),
   }),
 });
+const recorderExtension = createRecorderExtension({
+  config,
+  database,
+  organizationAuth,
+  roleRepository,
+  peopleStore,
+  personalSpaces: personalLearningSpaces,
+  auditStore: bootAuditStore,
+  ...(betterAuth
+    ? { sessionLifetimeMs: await sessionLifetimeMs(betterAuth) }
+    : {}),
+  // A connection is made or ended exactly when its row is written: both in one transaction.
+  auditFor: (executor) => createAuditStore(executor),
+});
+/*
+ * Connections whose lifetime has run out already resolve to nobody; this ends them for good, with the sealed
+ * organization session any of them still held, and writes their rows. Every replica runs it, and each row is ended once.
+ */
+const recorderExpirySweep = repeatAfterEach(async () => {
+  try {
+    await recorderExtension.connections.expire();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "recorder-expiry-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
+}, 60_000);
 const demonstrationStore = createDemonstrationStore(database);
 const demonstrationRecorder = createDemonstrationRecorder({
   store: demonstrationStore,
   // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
-  ownsBot: async (owner, bot) =>
-    (await pluginStore.agentOwner(bot)) === owner ||
-    (await agentProfileStore.get(await actorFor(owner), bot)) !== null,
+  ownsBot: async (ownerUserId, botId) =>
+    (await pluginStore.agentOwner(botId)) === ownerUserId ||
+    (await agentProfileStore.get(await actorFor(ownerUserId), botId)) !== null,
   ownsSkill: async (owner, slug) =>
     (await pluginStore.skillOwner(slug)) === owner,
   routines: routineStore,
@@ -1716,6 +1800,10 @@ const actorAgentResolver = createActorAgentResolver({
       coordinationForActor(actorId, initiator, depth),
     ),
   loadInstructionsForActor,
+  loadNameForActor: async (actorId) => {
+    const profile = await profileStore.read(actorId);
+    return profile.needsName ? null : profile.name;
+  },
   loadAttachmentForActor,
   markAttachmentsSentForActor,
   // The runtime owns Learning. Resolve its reader only when a turn is built, after boot wiring.
@@ -1735,6 +1823,12 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
+    personalSkills: {
+      containerFor: personalLearningSpaces.containerFor,
+      openSkills: () => openSkillIndex.sources(),
+      sharingAllowed: skillSharingInSnapshot,
+    },
+    trajectoryCapture: recorderExtension.trajectoryCapture,
   },
 );
 
@@ -2339,12 +2433,17 @@ await installEnterpriseControls({
   database,
   databaseUrl: config.databaseUrl,
   auditStore: bootAuditStore,
+  personBrowserPolicy,
   ...(computerProvider ? { provider: computerProvider } : {}),
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
+  recorders: {
+    holders: () => recorderExtension.connections.holders(),
+    signOut: signOutRecorders,
+  },
 });
 guardDeliveryStore(
   deliveryStore,
@@ -2520,6 +2619,48 @@ const app = createApp(
       store: demonstrationStore,
       recorder: demonstrationRecorder,
     },
+    recorder: recorderExtension,
+    // Only where a person's browser can run: OpenBot Desktop's host-side computer, or computers Bots run on that give
+    // each its own. Where every Bot shares one, the routes have no computers and say why (browser/host.ts).
+    ...(computerGateway || config.browser
+      ? {
+          browser: {
+            ...personBrowserPlace({
+              provider: computerProvider,
+              browserUrl: config.browser?.url,
+              ...(config.browserAbsent ? { absent: config.browserAbsent } : {}),
+              computers: () =>
+                computerGateway
+                  ? gatewayBrowserComputers(
+                      computerGateway,
+                      config.browser?.url,
+                    )
+                  : directBrowserComputers({
+                      browserUrl: (config.browser as { url: string }).url,
+                      policy: personBrowserPolicy,
+                      ...(config.browser?.token
+                        ? { token: config.browser.token }
+                        : {}),
+                    }),
+            }),
+            ...((config.computer?.token ?? config.browser?.token)
+              ? { token: config.computer?.token ?? config.browser?.token }
+              : {}),
+            recorder: recorderExtension,
+            openbotUrl: openbotAddress(config),
+            // On a single-user OpenBot the person is its admin: a setup failure is theirs to see to.
+            singleUser: config.singleUser,
+          },
+        }
+      : {}),
+    personalLearning: {
+      store: learningSharingStore,
+      skillsOf: (userId) =>
+        copilotRuntime.learning?.personalSkills(userId) ??
+        Promise.resolve({ unavailable: "unavailable" as const }),
+      invalidate: () => openSkillIndex.invalidate(),
+      sharingAllowed: skillSharingAllowed,
+    },
     delivery: {
       authenticated: {
         store: deliveryStore,
@@ -2576,6 +2717,7 @@ const app = createApp(
 
   identityStore,
   identityGithubCallback,
+  profileStore,
 );
 
 startHttpServer({
@@ -2610,6 +2752,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     approvalSweep.stop();
     personResponseSweep.stop();
     groupSweep.stop();
+    recorderExpirySweep.stop();
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
       channelActivityListener.stop(),

@@ -238,8 +238,9 @@ which makes them the shortest path from nothing to a running deployment.
 
 **The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the
 published `agent-computer` Dockerfile both build from Ubuntu and run Playwright's pinned
-`install --with-deps chromium` path, so Firefox and WebKit are never introduced into the final image
-layers. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
+`install --with-deps --no-shell chromium` path, so Firefox and WebKit are never introduced into the
+final image layers. `--no-shell` leaves out Playwright's separate headless shell: every launch names a
+Chromium channel, and Playwright runs the full browser for a named channel even when headless. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
 the other can make the browser protocol and executable revision diverge. The images keep the
 baseline Node command-line tools (`node`, `npm`, and `npx`) from the official Node 24.18.1 image.
 Measured as local zstd OCI layer descriptors against the previous Playwright-base `agent-computer`

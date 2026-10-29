@@ -1,7 +1,9 @@
 import type { Message } from "@ag-ui/core";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { NewBotSheet } from "@/components/agents/new-bot-sheet";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import {
   canSend,
@@ -54,6 +56,9 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
 
 function RouteComponent() {
   const { agent } = Route.useSearch();
+  const queryClient = useQueryClient();
+  const [creatingBot, setCreatingBot] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState<boolean | undefined>(undefined);
   const navigate = Route.useNavigate();
   const { startChosen, startGroup, pending } = useStartChannel();
   const { data: profiles, isError: rosterError } = useQuery(
@@ -119,12 +124,16 @@ function RouteComponent() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="h-12 border-b border-border sticky top-0 flex flex-row px-2 items-center">
+      <div
+        className="h-12 border-b border-border sticky top-0 flex flex-row px-2 items-center"
+        data-slot="conversation-header"
+      >
         <SidebarToggle className="mr-1" />
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
           // Do not auto-open when the recipient came from the URL; the field is already answered.
-          defaultOpen={!chosen && !loadError && !waitingForUrlAgent}
+          open={pickerOpen ?? (!chosen && !loadError && !waitingForUrlAgent)}
+          onOpenChange={setPickerOpen}
           autoHighlight
           multiple
           items={profiles ?? []}
@@ -174,11 +183,25 @@ function RouteComponent() {
           {/* Allow max-w to constrain the popup even though its anchor is full-width. */}
           <ComboboxContent
             anchor={anchor}
-            className="min-w-0 max-w-lg"
+            className="flex min-w-0 max-w-lg flex-col"
             sideOffset={12}
           >
+            <div className="shrink-0 border-b p-1">
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => {
+                  setPickerOpen(false);
+                  setCreatingBot(true);
+                }}
+              >
+                <AgentOrb size="24px" state="idle" />
+                <span className="font-medium">New Bot</span>
+                <span className="text-muted-foreground">Create a new Bot</span>
+              </button>
+            </div>
             <ComboboxEmpty>No Bots found.</ComboboxEmpty>
-            <ComboboxList>
+            <ComboboxList className="min-h-0">
               {(item: AgentProfile) => (
                 <ComboboxItem key={item.id} value={item} className="h-10">
                   <ChannelAvatar participantIds={[item.id]} size={24} />
@@ -192,6 +215,30 @@ function RouteComponent() {
           </ComboboxContent>
         </Combobox>
       </div>
+      <NewBotSheet
+        open={creatingBot}
+        onClose={() => setCreatingBot(false)}
+        onCreated={(agentId) => {
+          setCreatingBot(false);
+          void queryClient
+            .fetchQuery(agentQueryOptions(agentId))
+            .then((profile) => {
+              setPicked((current) => {
+                const existing = current ?? selected;
+                return existing.some((bot) => bot.id === profile.id)
+                  ? existing
+                  : [...existing, profile];
+              });
+              if (selected.length === 0)
+                void navigate({ replace: true, search: { agent: agentId } });
+            })
+            .catch(() => {
+              setError(
+                "Your Bot was created, but could not be selected. Choose it from the recipient list.",
+              );
+            });
+        }}
+      />
       <ConversationView
         // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
         // lands in the composer the moment a recipient exists, whether picked here or in the URL.

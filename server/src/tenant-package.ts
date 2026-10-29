@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { parse } from "yaml";
 import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
@@ -303,6 +304,13 @@ function requiredString(value: unknown, name: string): string {
   return value;
 }
 
+function agentTitle(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length > 120) {
+    throw new Error("agent.title must be text of 120 characters or fewer");
+  }
+  return value.trim();
+}
+
 function stringArray(value: unknown, name: string): string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     throw new Error(`${name} must be an array of strings`);
@@ -393,6 +401,13 @@ function parseAgents(
         `${source}: agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
       );
     }
+    // Nor after a person's own OpenBot browser, which is a computer named the same way a Bot's is: a Bot with that id
+    // would share its computer with the person whose browser it is.
+    if (isPersonBrowserId(id)) {
+      throw new Error(
+        `${source}: agent.id "${id}" is the shape of a person's OpenBot browser and cannot name a Bot`,
+      );
+    }
     if (type === "remote_ag_ui" || type === "remote_mastra") {
       const endpoint =
         typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
@@ -405,7 +420,7 @@ function parseAgents(
       {
         id,
         name: requiredString(agent.name, "agent.name"),
-        title: requiredString(agent.title, "agent.title"),
+        title: agentTitle(agent.title),
         roleDescription: requiredString(
           agent.role_description,
           "agent.role_description",
