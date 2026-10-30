@@ -18,9 +18,9 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
-import { EditSkill } from "@/components/skills/edit-skill";
 import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
 import { Route as SkillsRoute } from "@/routes/_authed/_app/capabilities.skills";
+import { Route as EditSkillRoute } from "@/routes/_authed/_app/capabilities.skills_.$slug";
 import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
 
 /**
@@ -119,18 +119,32 @@ function restoreRouteState(
 }
 
 const pristineSkillsRouteState = captureRouteState(SkillsRoute);
+const pristineEditRouteState = captureRouteState(EditSkillRoute);
 let skillsRouteSnapshot: Record<string, unknown>;
+let editRouteSnapshot: Record<string, unknown>;
 
 beforeEach(() => {
   skillsRouteSnapshot = captureRouteState(pristineSkillsRouteState);
+  editRouteSnapshot = captureRouteState(pristineEditRouteState);
 });
 
 afterEach(() => {
   restoreRouteState(SkillsRoute, skillsRouteSnapshot);
+  restoreRouteState(EditSkillRoute, editRouteSnapshot);
 });
 
 /** `/skills`, at the id its `Route.useSearch()` reads: `/_authed/_app/skills`. */
 function renderSkills(client: QueryClient) {
+  return renderRoute(client, SkillsRoute, "/skills", "/skills");
+}
+
+/** One route file's page, mounted under `/_authed/_app` at `path` and opened at `entry`. */
+function renderRoute(
+  client: QueryClient,
+  route: object,
+  path: string,
+  entry: string,
+) {
   const rootRoute = createRootRoute({ component: Outlet });
   const authedRoute = createRoute({
     id: "/_authed",
@@ -142,18 +156,18 @@ function renderSkills(client: QueryClient) {
     getParentRoute: () => authedRoute,
     component: Outlet,
   });
-  const skills = (
-    SkillsRoute as unknown as { update: (options: unknown) => unknown }
+  const page = (
+    route as unknown as { update: (options: unknown) => unknown }
   ).update({
-    path: "/skills",
+    path,
     getParentRoute: () => appRoute,
   });
   const tree = rootRoute.addChildren([
-    authedRoute.addChildren([appRoute.addChildren([skills as never])]),
+    authedRoute.addChildren([appRoute.addChildren([page as never])]),
   ]);
   const router = createRouter({
     routeTree: tree,
-    history: createMemoryHistory({ initialEntries: ["/skills"] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   });
   return render(
     <QueryClientProvider client={client}>
@@ -231,7 +245,12 @@ test("a deployment with genuinely no skills still says so on the admin page", as
 
 test("opening a skill to edit says it failed to load, not that it no longer exists", async () => {
   const client = failingQueryClient();
-  const view = renderAlone(client, () => <EditSkill slug="triage" />);
+  const view = renderRoute(
+    client,
+    EditSkillRoute,
+    "/skills/$slug",
+    "/skills/triage",
+  );
   await waitForFailedRead(client);
 
   expect(
