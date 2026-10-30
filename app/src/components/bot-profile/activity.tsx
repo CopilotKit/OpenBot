@@ -197,22 +197,31 @@ function ActivitySection({
 /** How many running or scheduled items the Bot's page shows before "All activity". */
 const GLANCE = 3;
 
+/** Running work first, then what is lined up, as many as the Bot's page shows. */
+function upcomingOf(activity: BotActivity | undefined) {
+  return activity
+    ? [
+        ...activity.inProgress.map((item) => ({ item, live: true })),
+        ...activity.scheduled.map((item) => ({ item, live: false })),
+      ].slice(0, GLANCE)
+    : [];
+}
+
 /**
  * The Bot page's view of its activity: what is under way and what is lined up, so either is seen
  * without opening anything, then a row to the full lists. Running work comes first, with its dot.
+ *
+ * Only when there is something running or lined up. With nothing to show, a whole section for one
+ * row to the full lists is a heading over nothing; that row joins "For you" instead, through
+ * `BotActivityRow`.
  *
  * The full lists used to sit here and ran on for screens; finished work is the long part and the
  * least urgent, so it lives only on the Activity page.
  */
 export function BotActivityGlance({ agentId }: { agentId: string }) {
   const activity = useQuery(botActivityQueryOptions(agentId));
-  if (activity.isPending) return null;
-  const upcoming = activity.data
-    ? [
-        ...activity.data.inProgress.map((item) => ({ item, live: true })),
-        ...activity.data.scheduled.map((item) => ({ item, live: false })),
-      ].slice(0, GLANCE)
-    : [];
+  const upcoming = upcomingOf(activity.data);
+  if (activity.isPending || upcoming.length === 0) return null;
   return (
     <PageSection title="Activity">
       <PageRows>
@@ -222,29 +231,66 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
             <Separator />
           </Fragment>
         ))}
-        <Item
-          render={<Link params={{ agentId }} to="/bots/$agentId/activity" />}
-          size="sm"
-        >
-          {upcoming.length ? null : (
-            <ItemMedia variant="icon">
-              <IconHistory />
-            </ItemMedia>
-          )}
-          <ItemContent>
-            <ItemTitle>All activity</ItemTitle>
-            <ItemDescription>
-              {activity.data
-                ? activitySummary(activity.data)
-                : "Couldn't load this Bot's activity."}
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <IconChevronRight className="size-4 text-muted-foreground" />
-          </ItemActions>
-        </Item>
+        <AllActivityItem activity={activity.data} agentId={agentId} />
       </PageRows>
     </PageSection>
+  );
+}
+
+/**
+ * The row to a Bot's activity, inside "For you", for when nothing is running or lined up and
+ * `BotActivityGlance` draws no section of its own. Starts with a separator, because it follows the
+ * card's other rows.
+ */
+export function BotActivityRow({ agentId }: { agentId: string }) {
+  const activity = useQuery(botActivityQueryOptions(agentId));
+  if (activity.isPending || upcomingOf(activity.data).length > 0) return null;
+  return (
+    <>
+      <Separator />
+      <AllActivityItem
+        activity={activity.data}
+        agentId={agentId}
+        title="Activity"
+        withIcon
+      />
+    </>
+  );
+}
+
+function AllActivityItem({
+  activity,
+  agentId,
+  title = "All activity",
+  withIcon = false,
+}: {
+  activity: BotActivity | undefined;
+  agentId: string;
+  title?: string;
+  withIcon?: boolean;
+}) {
+  return (
+    <Item
+      render={<Link params={{ agentId }} to="/bots/$agentId/activity" />}
+      size="sm"
+    >
+      {withIcon ? (
+        <ItemMedia variant="icon">
+          <IconHistory />
+        </ItemMedia>
+      ) : null}
+      <ItemContent>
+        <ItemTitle>{title}</ItemTitle>
+        <ItemDescription>
+          {activity
+            ? activitySummary(activity)
+            : "Couldn't load this Bot's activity."}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <IconChevronRight className="size-4 text-muted-foreground" />
+      </ItemActions>
+    </Item>
   );
 }
 
