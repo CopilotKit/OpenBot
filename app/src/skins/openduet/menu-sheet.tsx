@@ -13,7 +13,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { isUnread, pinnedFirst } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
-import { needsInput } from "@/components/bot-profile/attention";
+import { waitingOnYou } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import {
@@ -272,7 +272,7 @@ export function MenuSheet({
 function AccentBadge() {
   const attention = useQuery(botAttentionQueryOptions());
   const bots = attention.data ?? [];
-  const waiting = bots.reduce((total, bot) => total + needsInput(bot), 0);
+  const waiting = bots.reduce((total, bot) => total + waitingOnYou(bot), 0);
   if (waiting > 0)
     return (
       <span

@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
-import { WaitingForYou } from "@/components/approvals/waiting";
+import { useWaitingRows } from "@/components/approvals/waiting";
+import { NeedsYouRows, useNeedsYou } from "@/components/needs-you/needs-you";
 import { BotResponsibilities } from "@/components/responsibilities/responsibilities";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
-import { approvalInboxOptions } from "@/lib/approvals";
 import { routinesQueryOptions } from "@/lib/routines/queries";
+import { TASK_ORDER } from "@/lib/tasks/groups";
+import { TASK_STATUS_LABEL } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { FOCUS } from "./kit";
-import { waitingCount } from "./tasks-model";
 
 /** Which list Tasks shows: what waits on you and what your Bots carry, or what to start next. */
 export type TasksView = "active" | "up_next";
@@ -37,11 +38,11 @@ function rememberView(view: TasksView) {
 /**
  * OpenDuet's Tasks: its two big words, Active and Up next, over OpenBot's own screens.
  *
- * Every list here is OpenBot's component, unchanged: `WaitingForYou` for approvals and questions,
- * `BotResponsibilities` for responsibilities, `RoutinesList` for routines and `SuggestionsInbox`
- * for suggested next steps. So every choice, field and confirmation OpenBot offers is here, and a
- * new one arrives without this screen changing. The skin adds only the switch, the headings and
- * the layout around them.
+ * Every row here is OpenBot's own: its task rows and its approval and question rows, then
+ * `BotResponsibilities` for responsibilities, `RoutinesList` for routines and `SuggestionsInbox` for
+ * what check-ins found. So every choice, field and confirmation OpenBot offers is here, and a new
+ * one arrives without this screen changing. The skin adds only the switch, the headings and the
+ * layout around them.
  */
 export function TasksScreen() {
   const [view, setView] = useState<TasksView>(rememberedView);
@@ -135,20 +136,37 @@ function SwitchTab({
 }
 
 /**
- * Active: what waits on the person, decided in OpenBot's own rows, then the responsibilities and
- * routines their Bots carry, in OpenBot's own lists. Needs input is left out when nothing waits.
+ * Active: the person's tasks grouped by what each needs from them, in OpenDuet's order (Ready for
+ * review, Needs input, Failed, Working, Resolved this week), then the responsibilities and routines
+ * their Bots carry, in OpenBot's own lists. Needs input also holds the approvals and questions
+ * waiting outside any task, decided in OpenBot's own rows. A group with nothing in it is left out.
  */
 function ActiveView() {
-  const inbox = useQuery(approvalInboxOptions());
   const routines = useQuery(routinesQueryOptions());
-  const waiting = waitingCount(inbox.data);
+  const waiting = useWaitingRows(undefined);
+  const { tasks, done } = useNeedsYou();
+  const listed = [...tasks, ...done];
 
   return (
     <div className="flex flex-col gap-9">
-      {waiting > 0 ? (
-        <Section count={waiting} label="Needs input">
-          <WaitingForYou />
-        </Section>
+      {TASK_ORDER.map((status) => {
+        const group = listed.filter((entry) => entry.status === status);
+        const lead = status === "needs_input" ? waiting.rows : [];
+        if (group.length + lead.length === 0) return null;
+        return (
+          <Section
+            count={group.length + lead.length}
+            key={status}
+            label={TASK_STATUS_LABEL[status]}
+          >
+            <NeedsYouRows items={[]} lead={lead} tasks={group} />
+          </Section>
+        );
+      })}
+      {waiting.error ? (
+        <p className="text-destructive text-sm" role="alert">
+          {waiting.error.message}
+        </p>
       ) : null}
       <BotResponsibilities />
       <Section count={routines.data?.routines.length} label="Routines">

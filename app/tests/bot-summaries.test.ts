@@ -60,9 +60,9 @@ test("reach names the places a Bot continues the conversation", () => {
   expect(reachSummary(["teams"])).toBe("Microsoft Teams");
 });
 
-test("memory names the sources and whether research is on", () => {
+test("memory names the sources and whether check-ins are on", () => {
   expect(memorySummary(0, false)).toBe("Nothing connected");
   expect(memorySummary(2, false)).toBe("2 sources");
-  expect(memorySummary(0, true)).toBe("Background research on");
-  expect(memorySummary(1, true)).toBe("1 source, background research on");
+  expect(memorySummary(0, true)).toBe("Check-ins on");
+  expect(memorySummary(1, true)).toBe("1 source, check-ins on");
 });
