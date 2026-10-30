@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Authorization attempts whose vendor answer cannot be reconciled now leave a safe, correlated
+  audit event when they settle as unreconciled. If that event cannot be saved, the attempt remains
+  unsettled rather than losing the audit trail.
+
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the

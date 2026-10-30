@@ -1,6 +1,7 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { recordAuditEvent } from "../../audit";
+import { createAuditStore, recordAuditEvent } from "../../audit";
+import type { Database } from "../../db/client";
 import {
   type CredentialExecutor,
   CredentialUnusableError,
@@ -370,10 +371,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         );
 
   /**
-   * The one statement behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
-   * `markAuthorizationWithdrawn`, so the three verdicts cannot drift into three row shapes.
-   * `completed_at` is truncated to milliseconds for the reason `claimAuthorizationAttempt`
-   * truncates `created_at`.
+   * The shared transition behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
+   * `markAuthorizationWithdrawn`, so the verdicts cannot drift into three row shapes.
+   * An unreconciled transition and its safe audit record commit together; a failed audit leaves
+   * the attempt unsettled. `completed_at` is truncated to milliseconds for the reason
+   * `claimAuthorizationAttempt` truncates `created_at`.
    *
    * CONDITIONAL ON `completed_at IS NULL`, EXACTLY AS THE COMPLETION ABOVE IS, BECAUSE A SETTLED
    * ATTEMPT IS A RECORD AND NOT A DRAFT. Without that condition this UPDATE matched on
@@ -404,21 +406,56 @@ export function createStoreContext(options: PluginStoreOptions) {
     input: { actorId: string; authId: string },
     outcome: "failed" | "unreconciled" | "withdrawn",
   ) => {
-    const written = await database
-      .update(pendingAuthorizations)
-      .set({
-        completedAt: sql`date_trunc('milliseconds', now())`,
-        outcome,
-      })
-      .where(
-        and(
-          eq(pendingAuthorizations.actorId, input.actorId),
-          eq(pendingAuthorizations.authId, input.authId),
-          isNull(pendingAuthorizations.completedAt),
-        ),
-      )
-      .returning({ actorId: pendingAuthorizations.actorId });
-    return written.length > 0;
+    return await database.transaction(async (transaction) => {
+      const [attempt] = await transaction
+        .update(pendingAuthorizations)
+        .set({
+          completedAt: sql`date_trunc('milliseconds', now())`,
+          outcome,
+        })
+        .where(
+          and(
+            eq(pendingAuthorizations.actorId, input.actorId),
+            eq(pendingAuthorizations.authId, input.authId),
+            isNull(pendingAuthorizations.completedAt),
+          ),
+        )
+        .returning({
+          serverId: pendingAuthorizations.serverId,
+          action: pendingAuthorizations.action,
+          holder: pendingAuthorizations.holder,
+          createdAt: pendingAuthorizations.createdAt,
+        });
+      if (!attempt) return false;
+      if (outcome === "unreconciled") {
+        const [server] = await transaction
+          .select({ url: mcpServers.url })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, attempt.serverId))
+          .limit(1);
+        const toolkit = server
+          ? toolkitOfFor(brokerProvider, server.url)
+          : null;
+        await recordAuditEvent(
+          createAuditStore(transaction as unknown as Database),
+          {
+            eventType: "mcp.authorization_unreconciled",
+            targetType: "mcp_server",
+            targetId: toolkit ?? attempt.serverId,
+            payload: {
+              actor: input.actorId,
+              server: toolkit,
+              serverId: attempt.serverId,
+              action: attempt.action,
+              holder: attempt.holder,
+              attemptStartedAt: attempt.createdAt.toISOString(),
+              outcome,
+            },
+          },
+        );
+      }
+      return true;
+    });
   };
 
   /**
