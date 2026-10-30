@@ -9,9 +9,9 @@
  *
  * WHERE PERMISSION LIVES. In the existing approvals ledger, always on, regardless of the owner's
  * general approvals switch: this is a check dots makes unconditionally. An "allow always" answer is
- * a standing rule for this Bot and this audience; "allow once" covers the same content to the same
- * audience in the same conversation for thirty minutes, so the Bot's retry after an approval passes
- * instead of asking again.
+ * a standing rule for this Bot and this audience; "allow once" covers the same share — this Bot,
+ * this audience, this conversation — for thirty minutes, so the Bot's reworded retry after an
+ * approval passes instead of asking again.
  *
  * OUTCOMES. `allowed`; `denied` (the person said no); or `pending`, where the caller must not send
  * and either throws the returned suspension (headless turns wait and resume on the decision) or
@@ -156,10 +156,15 @@ export function createPrivateShareCheck(deps: {
     };
     const action = approvalAction(candidate);
 
-    // The retry after an "allow once": same content, same audience, same conversation, recently.
+    // The retry after an "allow once": the Bot rewords the send, so what the
+    // approval covers is the share itself — this Bot, this audience, this
+    // conversation — and not the identical bytes. Without this, every reworded
+    // retry opens a fresh request the person has already answered.
     const recent = (await deps.approvals.list(input.ownerUserId)).find(
       (record) =>
-        record.action.actionDigest === action.actionDigest &&
+        record.action.toolRef === action.toolRef &&
+        record.action.botId === action.botId &&
+        record.action.scope === action.scope &&
         record.action.threadId === action.threadId &&
         (record.decision === "allow_once" ||
           record.decision === "allow_always") &&

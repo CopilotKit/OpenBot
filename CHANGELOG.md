@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### An allowed share is not asked about again when the Bot rewords it
+
+Sharing private information asks you once per share, and "allow once" covers the Bot's next attempt
+for thirty minutes. The check compared the exact bytes of what the Bot was about to send, so when
+the Bot reworded its reply after your approval it asked you again — and again — for the same share.
+The approval now covers the share itself (this Bot, this audience, this conversation), so the retry
+goes through and a different audience still asks.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half

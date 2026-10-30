@@ -739,4 +739,77 @@ describe("private information sharing check", () => {
     expect((await check(input)).status).toBe("allowed");
     expect(opened).toHaveLength(0);
   });
+
+  test("an allow-once covers the bot's reworded retry to the same audience", async () => {
+    const gmail = {
+      kind: "external" as const,
+      id: "composio-gmail/GMAIL_REPLY_TO_THREAD",
+      label: "Gmail reply",
+      recipientUserIds: ["someone@example.com"],
+    };
+    const decidedAt = new Date();
+    const { store, opened } = approvals("pending");
+    const check = createPrivateShareCheck({
+      approvals: {
+        ...store,
+        list: async () => [
+          {
+            action: {
+              toolRef: "openbot/share_private_information",
+              botId: "bot",
+              scope: "external:composio-gmail/GMAIL_REPLY_TO_THREAD",
+              threadId: "thread",
+              actionDigest: "digest-of-the-first-wording",
+            },
+            decision: "allow_once",
+            decidedAt,
+          },
+        ],
+      },
+    });
+    // The person allowed the share; the bot's retry words the reply differently.
+    // That must not open a second request for the same share.
+    const verdict = await check({
+      ...input,
+      audience: gmail,
+      content: "Reworded reply with different bytes.",
+    });
+    expect(verdict.status).toBe("allowed");
+    expect(opened).toHaveLength(0);
+  });
+
+  test("an allow-once for another audience still asks again", async () => {
+    const decidedAt = new Date();
+    const { store, opened } = approvals("pending");
+    const check = createPrivateShareCheck({
+      approvals: {
+        ...store,
+        list: async () => [
+          {
+            action: {
+              toolRef: "openbot/share_private_information",
+              botId: "bot",
+              scope: "external:composio-gmail/GMAIL_REPLY_TO_THREAD",
+              threadId: "thread",
+              actionDigest: "digest-of-the-first-wording",
+            },
+            decision: "allow_once",
+            decidedAt,
+          },
+        ],
+      },
+    });
+    const verdict = await check({
+      ...input,
+      audience: {
+        kind: "external" as const,
+        id: "composio-slack/SLACK_POST_MESSAGE",
+        label: "Slack post",
+        recipientUserIds: ["someone@example.com"],
+      },
+      content: "Same words, different audience.",
+    });
+    expect(verdict.status).toBe("pending");
+    expect(opened).toHaveLength(1);
+  });
 });
