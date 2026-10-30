@@ -72,8 +72,9 @@ export function PageColumn({
              */
             "mx-auto flex w-full flex-col px-4 pb-16",
             "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
-            // Without a bar above it the heading keeps the full original space.
-            bar ? "pt-8" : "pt-12",
+            // Under the bar: its 56px, then the 32px the heading keeps below it. Without one, the
+            // heading keeps the full original space.
+            bar ? "pt-22" : "pt-12",
             "max-w-3xl",
             className,
           )}
