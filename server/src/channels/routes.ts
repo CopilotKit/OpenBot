@@ -23,6 +23,7 @@ import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  botTasks,
   channelAgents,
   channelMemberships,
   channels,
@@ -170,7 +171,16 @@ const ROSTER_ORDER = [
 type ChannelTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export type ChannelStore = {
-  create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
+  /**
+   * A new conversation. On `transaction` when one is given, so a record that names the conversation
+   * (a task's, tasks/runner.ts) commits with it or not at all: the conversation is never visible
+   * without the record that says what it is for.
+   */
+  create(
+    actor: AgentActor,
+    agentIds: string[],
+    transaction?: ChannelTransaction,
+  ): Promise<AgentChannel>;
   /**
    * The one conversation this person has with this Bot alone, made if they have not had one yet.
    *
@@ -180,7 +190,8 @@ export type ChannelStore = {
    * five Knowledge channels, four of them empty, and no way to tell which one holds the answer.
    *
    * The one it finds is the one the person already talks to that Bot in, which is also where they
-   * would look for the answer.
+   * would look for the answer. Never a task's own conversation: that one holds one piece of work,
+   * and is often the newest, so ordering alone would pick it.
    */
   direct(actor: AgentActor, agentId: string): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
@@ -406,7 +417,8 @@ export function createChannelStore(
   };
 
   const store: ChannelStore = {
-    create(actor, agentIds) {
+    create(actor, agentIds, transaction) {
+      if (transaction) return makeChannel(transaction, actor, agentIds);
       return database.transaction(
         async (transaction) => makeChannel(transaction, actor, agentIds),
         { isolationLevel: "read committed" },
@@ -459,6 +471,9 @@ export function createChannelStore(
               and(
                 isNull(channels.deletedAt),
                 sql`(select count(*) from ${channelAgents} where ${channelAgents.channelId} = ${channels.id}) = 1`,
+                // A task's conversation is made with its task row in one transaction, so a
+                // conversation without one is never a task's caught halfway.
+                sql`not exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
               ),
             )
             .orderBy(...ROSTER_ORDER)
