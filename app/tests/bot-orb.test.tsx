@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { BOT_COLOURS, seedFor } from "@openbot/shared/bot-look";
 import { cleanup, render } from "@testing-library/react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb, { type AIState } from "@/components/agents/orb/agent-orb";
@@ -222,6 +223,106 @@ describe("the colours", () => {
     }
     // Eight colours can't go round nine Bots, so the team has Bots that share one.
     expect(sharing).toBeGreaterThan(0);
+  });
+
+  test("every Bot that never chose a look keeps the face it had", () => {
+    // Every part of every default Bot's look, pinned: a seed that names no colour draws as before.
+    expect(
+      Object.fromEntries(TEAM.map((seed) => [seed, orbLookFor(seed)])),
+    ).toEqual({
+      "expense-review": {
+        palette: "berry",
+        turn: 0.8835729338221293,
+        hue: 1,
+        eyes: 1.07375,
+      },
+      "feedback-digest": {
+        palette: "sky",
+        turn: 2.6261751088602177,
+        hue: -3,
+        eyes: 1.03125,
+      },
+      "interview-notes": {
+        palette: "slate",
+        turn: 3.436116964863836,
+        hue: 3,
+        eyes: 0.948125,
+      },
+      "meeting-follow-ups": {
+        palette: "coral",
+        turn: 2.5034566458293663,
+        hue: -2,
+        eyes: 0.975625,
+      },
+      "onboarding-buddy": {
+        palette: "moss",
+        turn: 5.6941366846315,
+        hue: 1,
+        eyes: 1.065,
+      },
+      "oncall-handover": {
+        palette: "coral",
+        turn: 0.6872233929727672,
+        // A nudge that rounds to nothing from below, which draws the same as 0.
+        hue: -0,
+        eyes: 0.945,
+      },
+      "release-notes": {
+        palette: "ocean",
+        turn: 6.062292073724054,
+        hue: 1,
+        eyes: 1.015,
+      },
+      "research-desk": {
+        palette: "ocean",
+        turn: 1.4480778637640452,
+        hue: 4,
+        eyes: 0.9875,
+      },
+      "ticket-triage": {
+        palette: "sun",
+        turn: 1.6935147898257479,
+        hue: 2,
+        eyes: 0.92625,
+      },
+    });
+  });
+
+  test("a seed that names a colour is drawn in it, and the rest of its look still comes from the whole seed", () => {
+    for (const colour of BOT_COLOURS) {
+      for (let i = 0; i < 20; i++) {
+        expect(orbLookFor(seedFor(colour, `face-${i}`)).palette).toBe(colour);
+      }
+    }
+    // The pattern, hue and eyes are the hash's, as for any seed: "ember:k2p9x7aq" hashes to ocean,
+    // and is drawn in ember with the turn, nudge and eyes that hash gives it.
+    expect(orbLookFor("ember:k2p9x7aq")).toEqual({
+      palette: "ember",
+      turn: 4.246058820867455,
+      hue: -1,
+      eyes: 0.945,
+    });
+    // So two faces in one chosen colour still look apart, and so does one face in two colours.
+    const one = orbLookFor(seedFor("sky", "a"));
+    expect(orbLookFor(seedFor("sky", "b")).turn).not.toBe(one.turn);
+    expect(orbLookFor(seedFor("moss", "a")).turn).not.toBe(one.turn);
+  });
+
+  test("violet, or a colour no Bot has, is not honoured: the seed is drawn as any other", () => {
+    expect(orbLookFor("violet:k2p9x7aq").palette).toBe("berry");
+    expect(orbLookFor("purple:k2p9x7aq").palette).toBe("moss");
+    expect(orbLookFor("Moss:k2p9x7aq").palette).toBe("ocean");
+    const named = Array.from(
+      { length: 200 },
+      (_, i) => orbLookFor(`violet:${i}`).palette,
+    );
+    expect(named).not.toContain("violet");
+  });
+
+  test("the colours a seed can name are exactly the ones the orb draws a Bot in", () => {
+    expect([...BOT_COLOURS].sort()).toEqual(
+      ORB_PALETTES.filter((name) => name !== "violet").sort(),
+    );
   });
 
   test("each palette is a colour of its own", () => {
