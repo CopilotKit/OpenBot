@@ -13,6 +13,7 @@ Each coworker gets a real browser with its own logins, its own files, and only t
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 ![Beta](https://img.shields.io/badge/status-beta-yellow.svg)
 
+[![GitHub Trending: #5 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
 [![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
 
 </div>
