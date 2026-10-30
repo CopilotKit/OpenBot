@@ -475,7 +475,6 @@ describe("agent profile store integration", () => {
       // reaches here already validated by the same check that guards creation.
       endpoint: "https://moved.example.test/ag-ui",
       ownerUserId: "forged-owner",
-      avatarSeed: "forged-avatar",
       packageId: deploymentPackage.id,
       deletedAt: new Date(),
     } as unknown as CreateAgentInput);
@@ -519,6 +518,59 @@ describe("agent profile store integration", () => {
     );
     expect(profile?.updatedAt.getTime()).toBeGreaterThan(
       oldTimestamp.getTime(),
+    );
+  });
+
+  test("an edit changes a Bot's look only when it brings one, and only for whoever may manage it", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const admin = await createUser("admin");
+    const source = await createProfileFixture({ owner, visibility: "public" });
+    const input: CreateAgentInput = {
+      name: source.name,
+      title: source.title,
+      roleDescription: source.roleDescription,
+      visibility: "public",
+    };
+    const seedOf = async () =>
+      (await profileById(owner, source.agentId)).avatarSeed;
+
+    expect(
+      (
+        await store.update(owner, source.agentId, {
+          ...input,
+          avatarSeed: "moss:k2p9x7aq",
+        })
+      ).avatarSeed,
+    ).toBe("moss:k2p9x7aq");
+    // An edit to anything else keeps the face.
+    await store.update(owner, source.agentId, { ...input, title: "Retitled" });
+    expect(await seedOf()).toBe("moss:k2p9x7aq");
+
+    // The same rule as a rename: somebody who may use the Bot but not manage it can't restyle it.
+    await expect(
+      store.update(other, source.agentId, { ...input, avatarSeed: "sun:x" }),
+    ).rejects.toBeInstanceOf(AgentNotManageableError);
+    expect(await seedOf()).toBe("moss:k2p9x7aq");
+
+    // An admin may, as an admin may rename it.
+    await store.update(admin, source.agentId, {
+      ...input,
+      avatarSeed: "sky:x",
+    });
+    expect(await seedOf()).toBe("sky:x");
+
+    // And nobody may restyle a Bot a tenant package owns: its look is the package's.
+    const deploymentPackage = await createPackage();
+    const packaged = await createProfileFixture({
+      owner,
+      packageId: deploymentPackage.id,
+    });
+    await expect(
+      store.update(admin, packaged.agentId, { ...input, avatarSeed: "sun:x" }),
+    ).rejects.toBeInstanceOf(ProtectedAgentError);
+    expect((await profileById(admin, packaged.agentId)).avatarSeed).toBe(
+      packaged.avatarSeed,
     );
   });
 
