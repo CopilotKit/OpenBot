@@ -77,14 +77,12 @@ export function BotProfile({
 
   return (
     <>
+      {/* The one-liner is the page's description, under the title; here, the face and its title. */}
       <div className="mt-6 flex items-center gap-3">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
-        <div className="min-w-0">
-          {agent.title && <p className="truncate font-medium">{agent.title}</p>}
-          <p className="line-clamp-2 text-muted-foreground text-sm">
-            {agent.roleDescription}
-          </p>
-        </div>
+        {agent.title ? (
+          <p className="min-w-0 truncate font-medium">{agent.title}</p>
+        ) : null}
       </div>
       <div className="mt-4">
         <BotPausedBanner agentId={agent.id} />
