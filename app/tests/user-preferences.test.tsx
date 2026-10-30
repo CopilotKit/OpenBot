@@ -72,9 +72,13 @@ test("loads preferences from the account and renders the saved emphasis", async 
   const { view } = setup();
   const agent = await view.findByText("General Assistant");
   expect(agent.className).toContain("text-[0.9rem]");
-  expect(requests).toEqual([
-    { path: "/api/settings/preferences", method: "GET", body: undefined },
-  ]);
+  // Reads only: the preferences, and the Bots list the preview row's face is drawn from.
+  await waitFor(() =>
+    expect(requests).toEqual([
+      { path: "/api/settings/preferences", method: "GET", body: undefined },
+      { path: "/api/agents", method: "GET", body: undefined },
+    ]),
+  );
 });
 
 test("shows loading and read errors without enabling a save", async () => {
