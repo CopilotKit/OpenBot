@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { replyEnding, replyTail } from "../src/tasks/reply-ending";
 import { titleFrom } from "../src/tasks/routes";
 import { nextStepOf, plainFailure, taskStatus } from "../src/tasks/store";
+import { START_TASK_TOOL, taskTools } from "../src/tasks/tools";
 
 describe("plainFailure", () => {
   test("says why a run couldn't finish without the error itself", () => {
@@ -200,5 +202,41 @@ describe("titleFrom", () => {
     expect(title).toBe(
       "Draft a reply to Rosa saying we will take Oat Satin instead of the discontinued…",
     );
+  });
+});
+
+/*
+ * What start_task's optional fields are described as, in the JSON schema the model is given. A
+ * recording showed a task's report giving the Bot's own reason for making a task as its why: "This
+ * is a multi-step planning request that benefits from a dedicated task and a polished itinerary."
+ *
+ * Whether a model follows a description cannot be unit-tested. What this pins is that the
+ * descriptions say it: why is the person's reason or deadline in their words and is left out when
+ * they gave none, and none of the three is a place for the Bot's own reasoning.
+ */
+describe("start_task's optional fields", () => {
+  test("hold what the person said or where the work came from, never the Bot's own reasoning", async () => {
+    const [tool] = await taskTools({
+      actorId: "person",
+      botId: "bot",
+      initiator: { kind: "person" },
+      start: async () => {
+        throw new Error("not started here");
+      },
+      builtIn: async () => true,
+    });
+    if (tool?.name !== START_TASK_TOOL)
+      throw new Error(`${START_TASK_TOOL} is not held`);
+    const { properties } = z.toJSONSchema(tool.parameters) as {
+      properties: Record<string, { description?: string }>;
+    };
+    const why = properties.why?.description ?? "";
+    expect(why).toContain("only as they said it and in their words");
+    expect(why).toContain("leave it out when they said neither");
+    expect(why).toContain("Never your own reason for making this a task");
+    expect(properties.source?.description).toContain(
+      "never what kind of request it is or why it is a task",
+    );
+    expect(properties.link?.description).toContain("never one you made up");
   });
 });
