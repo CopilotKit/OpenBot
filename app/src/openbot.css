@@ -44,13 +44,13 @@
  * stays at the pane's edge. A skin keeps the `max-w-2xl` column it was designed with.
  */
 :root:not([data-skin])
-:is([data-slot="composer-column"], [data-slot="transcript-column"]) {
+:is([data-slot="composer-column"], [data-transcript-column]) {
   max-width: none;
   padding-inline: 16px;
 }
 @media (min-width: 48rem) {
   :root:not([data-skin])
-    :is([data-slot="composer-column"], [data-slot="transcript-column"]) {
+    :is([data-slot="composer-column"], [data-transcript-column]) {
     padding-inline: max(32px, calc((100% - 720px) / 2));
   }
 }

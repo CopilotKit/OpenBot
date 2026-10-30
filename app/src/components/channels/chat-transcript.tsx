@@ -1828,7 +1828,8 @@ export function ChatTranscript({
   const isDrawn = useDrawnTool();
   /*
    * The transcript's column. OpenBot's own look widens it to a centered 720px in openbot.css,
-   * through its `transcript-column` slot.
+   * through `data-transcript-column`, an attribute of its own because the scroller's content keeps
+   * its `data-slot`.
    */
   const column = "mx-auto w-full max-w-2xl px-4";
   /*
@@ -2113,7 +2114,7 @@ export function ChatTranscript({
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
         <div
           className={cn("flex flex-col gap-6 py-6", column)}
-          data-slot="transcript-column"
+          data-transcript-column=""
         >
           <RestoringTranscript />
           {/*
@@ -2219,7 +2220,7 @@ export function ChatTranscript({
               <MessageScrollerContent
                 aria-busy={busy}
                 className={cn("py-6", column)}
-                data-slot="transcript-column"
+                data-transcript-column=""
                 spacerClassName="order-2"
               >
                 {/*
