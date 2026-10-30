@@ -130,15 +130,36 @@ export function cliEnvironment(
   return kept;
 }
 
+/**
+ * How the CLI's process is started on this platform.
+ *
+ * On Windows npm installs `npx` as a `npx.cmd` shim, and since the fix for CVE-2024-27980 Node
+ * and Bun refuse to spawn a `.cmd` without a shell. That refusal is a synchronous `EINVAL` thrown
+ * by `spawn()` itself, so the `error` handler below never runs and the CLI looks simply absent.
+ * Going through the shell is safe here because every argument `runCli` ever passes is a literal
+ * this package chose (`whoami`, `project list --json`), never input; nothing is quoted by a shell
+ * line that has nothing to quote. macOS and Linux keep plain argv.
+ */
+export function cliSpawn(platform: NodeJS.Platform = process.platform): {
+  file: string;
+  shell: boolean;
+} {
+  return platform === "win32"
+    ? { file: "npx.cmd", shell: true }
+    : { file: "npx", shell: false };
+}
+
 /** Run `npx --yes copilotkit@latest <args>` in `directory`, for at most two minutes. */
 export const runCli: RunCli = (args, directory) =>
   new Promise((resolvePromise) => {
+    const invocation = cliSpawn();
     const child = spawn(
-      process.platform === "win32" ? "npx.cmd" : "npx",
+      invocation.file,
       ["--yes", "copilotkit@latest", ...args],
       {
         cwd: directory,
         env: cliEnvironment(),
+        shell: invocation.shell,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

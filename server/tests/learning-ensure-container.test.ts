@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { ContainerProbe } from "../src/learning/auto-assign";
 import {
   cliEnvironment,
+  cliSpawn,
   cliLoginPresent,
   ensureLearningContainer,
   type KeyIntelligence,
@@ -212,6 +213,14 @@ describe("the CopilotKit CLI", () => {
     expect(
       cliLoginPresent({ COPILOTKIT_CONFIG_DIR: configured }, "linux", home),
     ).toBe(true);
+  });
+
+  test("spawns through a shell on Windows only", () => {
+    // Node and Bun refuse a bare `.cmd` spawn (CVE-2024-27980) with a synchronous EINVAL the
+    // process's own error handler never sees, which is how `setup-learning.ts` died on Windows.
+    expect(cliSpawn("win32")).toEqual({ file: "npx.cmd", shell: true });
+    expect(cliSpawn("darwin")).toEqual({ file: "npx", shell: false });
+    expect(cliSpawn("linux")).toEqual({ file: "npx", shell: false });
   });
 
   test("runs without this process's secrets", () => {
