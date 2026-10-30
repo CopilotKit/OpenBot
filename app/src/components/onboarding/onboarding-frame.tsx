@@ -1,5 +1,5 @@
 import { IconCheck, IconChevronLeft } from "@tabler/icons-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { buttonVariants } from "@/components/ui/button";
 import { appConfig } from "@/lib/generated/application-config";
@@ -10,8 +10,16 @@ import { cn } from "@/lib/utils";
  *
  * FROM `lg` UP, TWO PANES. On the left, the steps as a list with the one on screen marked, then
  * the step's heading and sentence, then Continue and Back. On the right, filling the rest of the
- * screen and held in view while the left scrolls, the step's picture. Steps already reached can be
- * picked from the list; the ones ahead cannot.
+ * screen, the step's picture. Steps already reached can be picked from the list; the ones ahead
+ * cannot.
+ *
+ * ONE SCREEN TALL ON A DESKTOP, AND THE LIST IS WHAT GIVES. Nine steps, a heading, a few lines and
+ * the buttons are taller than a laptop's window on the longer steps, which used to cut Continue and
+ * Back off at the bottom. So the frame is the window's height, the step's words and its buttons
+ * keep their full size, and the step list takes what is left: on a short screen it scrolls within
+ * itself, with the step on screen kept in view. Its rows are spaced so that every step still fits
+ * whole in a 1280 by 800 window; the list scrolls only below that, and only a window too short for
+ * the words and the buttons themselves scrolls the page.
  *
  * BELOW `lg`, ONE COLUMN, for a phone: a round back chevron at the top left, the steps as dashes
  * across the top, the heading and its picture, and the buttons pinned to the bottom, full width,
@@ -79,10 +87,14 @@ export function OnboardingFrame({
     "h-[52px] w-full rounded-full px-5 type-sub font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg";
   return (
     <div
-      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:grid-cols-[minmax(22rem,30rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_auto_1fr]"
+      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(22rem,30rem)_minmax(0,1fr)] lg:grid-rows-[minmax(10rem,auto)_auto_auto_1fr]"
       data-onboarding-frame=""
     >
-      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background pt-[env(safe-area-inset-top)] lg:static lg:bg-transparent lg:px-10 lg:pt-10">
+      {/*
+       * On a desktop the list's row is the one that shrinks (`minmax(10rem,auto)` above, against
+       * the words' and the buttons' `auto`), down to room for the product's name and a step or two.
+       */}
+      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background pt-[env(safe-area-inset-top)] lg:static lg:flex lg:min-h-0 lg:flex-col lg:bg-transparent lg:px-10 lg:pt-10">
         {/*
          * The phone's chrome. Back is not drawn on the first step, rather than drawn disabled: there
          * is nowhere behind it, and a control that does nothing is one more thing a screen reader
@@ -112,7 +124,7 @@ export function OnboardingFrame({
 
       <div
         className={cn(
-          "col-start-1 min-w-0 px-4 lg:row-start-2 lg:px-10 lg:pt-12",
+          "col-start-1 min-w-0 px-4 lg:row-start-2 lg:px-10 lg:pt-8",
           demoFirst ? "row-start-3" : "row-start-2 pt-1.5",
         )}
         data-onboarding-intro=""
@@ -120,10 +132,16 @@ export function OnboardingFrame({
         {intro}
       </div>
 
+      {/*
+       * On a desktop the picture fills its column by stretching, at most a screen tall, rather than
+       * being set to the screen's height: a set height spanning every row would hand its height to
+       * the empty last row before the step list got its own. No margin there either, which would
+       * stop it short of the bottom.
+       */}
       {demo ? (
         <div
           className={cn(
-            "col-start-1 flex min-w-0 flex-col px-4 lg:sticky lg:top-0 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:mt-0 lg:h-svh lg:overflow-y-auto lg:border-l lg:border-border lg:bg-muted/40 lg:px-10 lg:py-10",
+            "col-start-1 flex min-w-0 flex-col px-4 lg:sticky lg:top-0 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:my-0 lg:max-h-svh lg:overflow-y-auto lg:border-l lg:border-border lg:bg-muted/40 lg:px-10 lg:py-10",
             demoFirst ? "row-start-2 mb-6" : "row-start-3 mt-8",
           )}
           data-onboarding-demo=""
@@ -231,13 +249,31 @@ function StepList({
   reached: number;
   onPick: (index: number) => void;
 }) {
+  // On a screen too short for every step, the list scrolls: keep the one on screen in it, before
+  // the first paint, so arriving on a late step never shows the list's top for a frame.
+  const list = useRef<HTMLOListElement>(null);
+  useLayoutEffect(() => {
+    list.current?.children[index]?.scrollIntoView?.({ block: "nearest" });
+  }, [index]);
   return (
-    <nav aria-label="Onboarding steps" className="hidden lg:block">
-      <p className="type-sub flex items-center gap-2 font-semibold">
+    <nav
+      aria-label="Onboarding steps"
+      className="hidden lg:flex lg:min-h-0 lg:flex-col"
+    >
+      <p className="type-sub flex shrink-0 items-center gap-2 font-semibold">
         <AgentOrb size="24px" />
         {appConfig.brand.productName}
       </p>
-      <ol className="mt-8 flex flex-col gap-0.5">
+      {/*
+       * The part that scrolls when the screen is short. Its padding, taken back by the negative
+       * margins so nothing moves, is room for a focused row's ring and for the fade at either end:
+       * the fade falls only on the empty padding while every step fits, and on a row only once the
+       * list is scrolling under that edge. `scroll-py-3` keeps the step on screen clear of it.
+       */}
+      <ol
+        className="-mx-1 mt-3 -mb-3 flex min-h-0 scroll-py-3 flex-col overflow-y-auto px-1 py-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]"
+        ref={list}
+      >
         {titles.map((title, at) => {
           const current = at === index;
           const done = at < index;
@@ -265,7 +301,7 @@ function StepList({
             </>
           );
           const row =
-            "type-sub flex min-h-9 w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left";
+            "type-sub flex min-h-8 w-full items-center gap-3 rounded-lg px-2 py-1 text-left";
           return (
             <li key={title}>
               {pickable ? (

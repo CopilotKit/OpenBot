@@ -150,6 +150,8 @@ test("a step with its picture first puts it above the heading on a phone", () =>
   // On a desktop it is still the right-hand pane, and the words still head the left.
   expect(intro?.className).toContain("lg:row-start-2");
   expect(demo?.className).toContain("lg:col-start-2");
+  // Without the phone's margin under it, which would stop the stretched pane short of the bottom.
+  expect(demo?.className).toContain("lg:my-0");
 });
 
 test("Continue moves on, the dashes follow, and focus lands on the new heading", async () => {
@@ -415,8 +417,69 @@ test("on a desktop, the step list names every step and marks the one on screen",
   const current = stepList(view).querySelector('[aria-current="step"]');
   expect(current?.textContent).toContain("Two");
   // The list is the desktop's, the dashes the phone's.
-  expect(stepList(view).className).toContain("hidden lg:block");
+  expect(stepList(view).className).toContain("hidden lg:flex");
   expect(progress(view).parentElement?.className).toContain("lg:hidden");
+});
+
+/*
+ * A SHORT SCREEN. Nine steps, a heading, a few lines and the buttons used to run past the bottom of
+ * a laptop's window on the longer steps, cutting Continue and Back in half.
+ *
+ * WHAT THIS CAN'T PROVE. happy-dom lays nothing out, so no test here can show that the buttons fit
+ * on any given screen. It pins the structure that makes them fit: on a desktop the frame is one
+ * screen tall, the step list's row is the only one that can shrink, the list is what scrolls, and
+ * the step on screen is scrolled into it. That this adds up to every step's buttons on screen at
+ * 1280 by 800 and 1280 by 700 was checked in a browser, step by step.
+ */
+test("on a desktop, a short screen scrolls the step list, never the step's words or its buttons", () => {
+  const scrolled: Array<{ row: Element; options: unknown }> = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (
+    this: Element,
+    options?: boolean | ScrollIntoViewOptions,
+  ) {
+    scrolled.push({ row: this, options });
+  };
+  try {
+    const view = draw({ initialStepId: "two" });
+
+    // One screen tall, and of the left's rows only the list's can shrink.
+    const frame = view.container.querySelector("[data-onboarding-frame]");
+    expect(frame?.className).toContain("lg:h-svh");
+    expect(frame?.className).toContain(
+      "lg:grid-rows-[minmax(10rem,auto)_auto_auto_1fr]",
+    );
+    // The picture stretches to the screen rather than being set to its height, which would give
+    // that height to the empty last row before the list got its own.
+    const demo = view.container.querySelector("[data-onboarding-demo]");
+    expect(demo?.className).toContain("lg:max-h-svh");
+    expect(demo?.className).not.toContain("lg:h-svh");
+
+    // The list is what scrolls, inside a header and a nav that let it shrink.
+    const list = stepList(view).querySelector("ol");
+    expect(list?.className).toContain("overflow-y-auto");
+    expect(list?.className).toContain("min-h-0");
+    expect(stepList(view).className).toContain("lg:min-h-0");
+    expect(view.container.querySelector("header")?.className).toContain(
+      "lg:min-h-0",
+    );
+    // The step's words and its buttons neither scroll nor shrink.
+    const intro = view.container.querySelector("[data-onboarding-intro]");
+    for (const part of [intro, footer(view)]) {
+      expect(part?.className).not.toMatch(/overflow|min-h-0|max-h-/);
+    }
+
+    // The step on screen is kept in the list's view, and the next one once Continue is pressed.
+    expect(scrolled.at(-1)?.row.textContent).toContain("Two");
+    expect(
+      scrolled.at(-1)?.row.querySelector('[aria-current="step"]'),
+    ).not.toBeNull();
+    expect(scrolled.at(-1)?.options).toEqual({ block: "nearest" });
+    fireEvent.click(primary(view));
+    expect(scrolled.at(-1)?.row.textContent).toContain("Three");
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
 });
 
 test("a step already reached can be picked from the list; one ahead cannot", async () => {
