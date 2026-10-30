@@ -78,6 +78,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Choose how a Bot looks
+
+A Bot's Setup page has a Look section for whoever may edit the Bot: its face, large, the eight
+colours to pick from, and New face, which keeps the colour and draws a different face. A choice
+saves at once and shows wherever the Bot appears, the conversation list and a conversation's header
+included. The choice is the Bot's avatar seed, so nothing is migrated: `PATCH /api/agents/:agentId`
+takes an optional `avatarSeed`, and a seed may start with a colour, as `moss:knowledge`. A seed that
+names no colour, which is every Bot's until somebody chooses, draws exactly as before. Violet stays
+OpenBot's own, and a `violet:` seed or a colour no Bot has is refused. A tenant package's
+`avatar_seed` may name a colour the same way. A new look is named on the Bot's `bot.updated` audit
+row.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half

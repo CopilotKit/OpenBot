@@ -1118,6 +1118,14 @@ agents:
 
 Each agent requires `id`, `name`, `title`, `role_description`, and `type`.
 
+`avatar_seed` is optional and picks the Bot's face; without one the seed is the agent's `id`. A
+seed may start with one of the eight Bot colours and a colon to draw in that colour: `ember`,
+`moss`, `sun`, `berry`, `ocean`, `sky`, `coral` or `slate`, as in `avatar_seed: moss:knowledge`. The
+rest of the face still comes from the whole seed, so two Bots in one colour still look different.
+Any other seed takes its colour from a hash of the seed, as before. `violet:` names no colour,
+because violet is OpenBot's own mark. A package's Bots keep the look the package gives them; their
+owners choose a look for the Bots they make on each Bot's Setup page.
+
 | Type            | Required field  |
 | --------------- | --------------- |
 | `built-in`      | `system_prompt` |
