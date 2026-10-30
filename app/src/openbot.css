@@ -132,3 +132,17 @@
 :root:not([data-skin]).dark .bot-orb-live .agent-orb::before {
   filter: blur(var(--blur-amount)) contrast(1) saturate(0.95) brightness(1.18);
 }
+
+/*
+ * The composer shares the transcript's centered 720px column, set by padding so the composer's
+ * own width rules stay as they are.
+ */
+:root:not([data-skin]) [data-slot="composer-column"] {
+  max-width: none;
+  padding-inline: 16px;
+}
+@media (min-width: 48rem) {
+  :root:not([data-skin]) [data-slot="composer-column"] {
+    padding-inline: max(32px, calc((100% - 720px) / 2));
+  }
+}

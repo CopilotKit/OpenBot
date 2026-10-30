@@ -447,16 +447,9 @@ export function ConversationView({
           working={working}
         />
       </div>
+      {/* In OpenBot's own look, openbot.css widens this column to the transcript's centered 720px. */}
       <div
-        /*
-         * In OpenBot's own look the composer shares the transcript's centered 720px column, set by
-         * the padding here rather than by the composer.
-         */
-        className={
-          openbot
-            ? "w-full px-4 pb-4 shrink-0 md:px-[max(32px,calc((100%-720px)/2))]"
-            : "max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
-        }
+        className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
         data-slot="composer-column"
       >
         {notice}
