@@ -72,8 +72,9 @@ at `agent-langgraph` on a laptop.
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
-in a sandboxed iframe, and A2UI 1.0 interfaces built from its 18 basic components. Their buttons send
-their named action and the values entered back to the current conversation's Bot.
+in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
+standard component except Map, Favicon, LinkCard and Citation). Their buttons send their named action
+and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.

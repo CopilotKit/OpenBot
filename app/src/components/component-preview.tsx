@@ -36,7 +36,7 @@ function PreviewNotice({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full w-full items-center justify-center p-4">
       {/* The artwork stays pale in both themes, so this text must stay dark. */}
-      <p className="text-center text-neutral-700 text-xs">{children}</p>
+      <p className="text-center text-slate-700 text-xs">{children}</p>
     </div>
   );
 }

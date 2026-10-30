@@ -36,7 +36,7 @@ export function ChannelItemContent({
   /** An approval or a question in this conversation waits on the person. */
   waiting?: boolean;
 }) {
-  const primaryText = `text-[0.9rem] leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
+  const primaryText = `text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
   const secondaryText = "text-[12px] leading-4 text-muted-foreground";
 
   return (

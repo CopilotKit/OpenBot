@@ -84,7 +84,7 @@ export function SettingsSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
   return (
-    <Sidebar {...props}>
+    <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>

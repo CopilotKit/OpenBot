@@ -156,3 +156,31 @@
     opacity: 0;
   }
 }
+
+/*
+ * The pattern behind an empty state. One rule, read entirely from the `--empty-pattern*` tokens in
+ * theme.css, so changing the pattern never means changing a component: the tile is a mask over a
+ * flat fill of `--empty-pattern-color`, faded out from the top-right corner by a second mask so it
+ * sits behind the empty state rather than across its text.
+ */
+.empty-pattern {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--empty-pattern-color);
+  opacity: var(--empty-pattern-opacity);
+  mask-image:
+    var(--empty-pattern),
+    radial-gradient(
+      circle at 85% 15%,
+      #000 0,
+      rgb(0 0 0 / 0.4) 30%,
+      transparent 60%
+    );
+  mask-repeat: repeat, no-repeat;
+  mask-size:
+    auto,
+    100% 100%;
+  mask-composite: intersect;
+}

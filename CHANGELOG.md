@@ -78,6 +78,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### The default look: an inset page, slate greys and quieter headings
+
+Each page now sits in a panel inset from the window, on a darker frame shared with the sidebar,
+with white cards on a light grey page; admin and settings scroll inside it like the rest of the
+app. The greys are Tailwind's slate rather than neutral, and page and section headings are lighter.
+Rows show an app's logo or initial instead of the same plug; Home shows Bots as compact cards; a
+Bot's page leads with its own one-liner; Connections tiles no longer cut their text off; and the
+Composio directory shows its rows loading. Empty states carry a faint dot pattern whose file,
+colour and strength are theme tokens (`--empty-pattern*` in `theme.css`), so a deployment can
+replace it or turn it off. Skins are unchanged.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
@@ -135,12 +146,17 @@ changes for a deployment.
 
 ### Generated interfaces use A2UI 1.0
 
-With generative UI on, a Bot builds an interface from the A2UI 1.0 basic components instead of the
-A2UI 0.9 ones. It's the same set of 18: text, images, icons, video, audio, rows, columns, lists,
-cards, tabs, dividers, dialogs, buttons, checkboxes, text fields, date pickers, choice pickers and
-sliders. They now take OpenBot's colours, radii and font, in light and dark. The gallery components a
-Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=false` still switches it all off, on the server
-as well as in the browser.
+With generative UI on, a Bot builds an interface from CopilotKit's standard catalog on A2UI 1.0
+instead of the 18 A2UI 0.9 basic components. That's 65 components for layout, text, inputs, tables,
+charts, media and composites such as entity cards and image grids, including the A2UI 1.0 basic
+components under their A2UI names. They take OpenBot's colours, radii and font, in light and dark.
+
+Four are left out. Map needs a map library OpenBot does not ship. Favicon, LinkCard and Citation load
+site icons from Google's favicon service, which would send every linked domain to Google.
+
+None of these is listed in the components gallery, and an admin can't turn one off for a Bot. The
+gallery components a Bot is granted are unchanged. `OPENBOT_GENERATIVE_UI=false` still switches it
+all off, on the server as well as in the browser.
 
 ### CopilotKit 1.83
 

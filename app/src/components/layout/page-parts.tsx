@@ -41,20 +41,13 @@ export function PageColumn({
   return (
     <>
       {/*
-       * The scroller, and it has to live here rather than in either shell, because the two shells
-       * this frame is used under disagree about who scrolls.
-       *
-       * Under `_authed` — admin, settings — the document scrolls, so a page taller than the window
-       * has always just worked. Under `_authed/_app` it does not: that shell is `h-svh
-       * overflow-hidden` on purpose ("one viewport, never scrolls: panes scroll inside it") and its
-       * `main` is `overflow-hidden` too, so a PageShell taller than the window was silently CLIPPED
-       * — 246px of Skills sat below the fold with no way to reach it, by keyboard or otherwise.
+       * The scroller. Every shell — app, admin, settings — is exactly the window's height and holds
+       * the page in an inset panel that never grows past it, so a page taller than the window
+       * scrolls here, inside the panel, and the panel's rounded corners stay on screen.
        *
        * `min-h-0` is the load-bearing half of `min-h-0 flex-1`: a flex item's default `min-height:
-       * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the pane
-       * and clip exactly as before. Under `_authed` both are inert — the parent is not a flex
-       * container — and `overflow-y-auto` on an auto-height element shows no scrollbar, so those
-       * eighteen screens are unaffected.
+       * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the panel
+       * and the overflow would be clipped instead of scrolled.
        *
        * Separate from the centred column below so the scrollbar rides the pane's edge instead of
        * appearing inside the measure with content either side of it.
@@ -99,7 +92,10 @@ export function PageHeader({
   return (
     <header className="flex flex-col gap-2" data-slot="page-header">
       <div className="flex flex-row items-center justify-between gap-4">
-        <h1 className="font-bold text-2xl" data-slot="page-title">
+        <h1
+          className="font-semibold text-2xl tracking-tight"
+          data-slot="page-title"
+        >
           {title}
         </h1>
         {action}
@@ -137,7 +133,11 @@ export function PageSection({
     <section className={cn("mt-12", className)}>
       {title ? (
         <div className="flex min-h-8 flex-row items-center justify-between gap-4">
-          <h2 className="font-bold text-lg">{title}</h2>
+          {/*
+           * Close to body size and lighter than the page title, so the sections read as parts of
+           * the page rather than as a second row of titles competing with it.
+           */}
+          <h2 className="font-semibold text-base">{title}</h2>
           {action}
         </div>
       ) : null}
@@ -262,26 +262,10 @@ export function PageEmpty({
 }) {
   const openbot = useSkinId() === DEFAULT_SKIN;
   return (
-    <Empty
-      className={cn(
-        "mt-4 rounded-lg border",
-        openbot
-          ? "relative isolate overflow-hidden border-[var(--line-strong,var(--border))] bg-[var(--wash,transparent)]"
-          : "border-border",
-      )}
-    >
-      {openbot ? (
-        /*
-         * A corner of CopilotKit's dot matrix, faded out towards the middle so it never sits under
-         * the words. Decoration only, so a screen reader never meets it. Without the default skin's
-         * tokens (the extension) it draws nothing.
-         */
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-10 -right-10 -z-10 size-[220px] bg-[image:var(--dot-tile,none)] opacity-[var(--accent-dot-opacity,0)] [mask-image:radial-gradient(circle_at_70%_30%,#000_0,rgb(0_0_0/0.4)_35%,transparent_65%)]"
-          data-slot="empty-dots"
-        />
-      ) : null}
+    // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
+    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-border">
+      {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
+      <div aria-hidden className="empty-pattern" />
       <EmptyHeader>
         {Icon ? (
           <EmptyMedia variant="icon">

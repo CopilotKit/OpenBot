@@ -228,7 +228,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const navigation = navigationFor(currentUser?.role);
 
   return (
-    <Sidebar {...props}>
+    <Sidebar variant="inset" {...props}>
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
