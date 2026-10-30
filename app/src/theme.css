@@ -33,6 +33,7 @@
   --ring: #7480f1;
   /* The firmer edge and soft lift that set rows and cards off the page. */
   --card-border: #c4c6d8;
+  --empty-border: #c4c6d8;
   --card-shadow: 0 1px 2px rgb(1 5 7 / 5%), 0 6px 16px -10px rgb(1 5 7 / 16%);
   --card-shadow-hover:
     0 2px 4px rgb(1 5 7 / 6%), 0 14px 28px -14px rgb(1 5 7 / 24%);
@@ -89,6 +90,7 @@
   --input: #3a3452;
   --ring: #8d97ff;
   --card-border: #4d4670;
+  --empty-border: #4d4670;
   --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 8px 18px -12px rgb(0 0 0 / 60%);
   --card-shadow-hover:
     0 2px 6px rgb(0 0 0 / 40%), 0 16px 30px -14px rgb(0 0 0 / 70%);

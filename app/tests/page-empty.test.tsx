@@ -6,7 +6,7 @@ import { settleReactWork } from "./settle-react-work";
 
 /*
  * An empty state carries the empty-state pattern (`.empty-pattern`), which is decoration, so a
- * screen reader never meets it. Its edge is the `--card-border` token; a skin turns the pattern off
+ * screen reader never meets it. Its edge is the `--empty-border` token; a skin turns the pattern off
  * and sets the edge back to its hairline through its tokens, which `design-tokens.test.ts` pins.
  */
 
@@ -39,6 +39,6 @@ test("draws the pattern, hidden from assistive technology", () => {
 test("takes the card edge from its token, with no fill of its own", () => {
   const box =
     renderEmpty().container.querySelector("[data-slot=empty]")?.className ?? "";
-  expect(box).toContain("border-card-border");
+  expect(box).toContain("border-(--empty-border)");
   expect(box).not.toContain("bg-");
 });

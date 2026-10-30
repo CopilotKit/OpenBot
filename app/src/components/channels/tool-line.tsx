@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /**
  * One line for one thing a Bot did.
@@ -41,16 +42,17 @@ export function ToolLine({
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
 }) {
+  const openbot = useSkinId() === DEFAULT_SKIN;
   const tone = refused
     ? "text-destructive"
     : failed
       ? "text-amber-600 dark:text-amber-500"
       : "text-muted-foreground";
   /*
-   * A line that opens is a card, its label in the text color, so what the Bot
+   * In OpenBot's own look a line that opens is a card, its label in the text color, so what the Bot
    * did reads first and what it did it to second. A line that does not open stays a line.
    */
-  const card = Boolean(children);
+  const card = openbot && Boolean(children);
 
   const text = (
     <span

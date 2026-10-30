@@ -89,6 +89,7 @@ describe("default look tokens", () => {
         "--card-border",
         "--card-shadow",
         "--card-shadow-hover",
+        "--empty-border",
         "--warning",
         "--warning-foreground",
       ]) {
@@ -110,6 +111,7 @@ describe("default look tokens", () => {
     const light = declared(skins, ":root[data-skin]");
     expect(light.get("--card-border")).toBe("var(--border)");
     expect(light.get("--card-shadow")).toBe("0 0 #0000");
+    expect(light.get("--empty-border")).toBe("var(--border)");
     expect(declared(skins, ":root[data-skin].dark").get("--card-border")).toBe(
       "transparent",
     );

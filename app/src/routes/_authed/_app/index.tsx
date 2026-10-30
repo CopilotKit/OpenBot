@@ -19,6 +19,7 @@ import {
 import { useStartChannel } from "@/lib/channels/start";
 import { appConfig } from "@/lib/generated/application-config";
 import { homeExamples } from "@/lib/home-examples";
+import { cn } from "@/lib/utils";
 import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
@@ -90,7 +91,12 @@ function RouteComponent() {
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center">
-          <h1 className="text-3xl font-bold tracking-tight text-center">
+          <h1
+            className={cn(
+              "tracking-tight text-center",
+              openbot ? "text-3xl font-bold" : "text-2xl font-semibold",
+            )}
+          >
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
@@ -153,7 +159,7 @@ function RouteComponent() {
             }}
             pending={pending}
             placeholder={placeholder}
-            variant="raised"
+            variant={openbot ? "raised" : "default"}
           />
           {/* On OpenBot's own home the subheader says this, so the hint is only a skin's. */}
           {fallback && !openbot ? (

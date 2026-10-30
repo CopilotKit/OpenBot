@@ -1,5 +1,6 @@
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /** One row as the API returns it. */
 export type AuditEvent = {
@@ -315,7 +316,8 @@ export function StartedByCell({
 
 export function DecisionCell({ event }: { event: AuditEvent }) {
   const outcome = outcomeOf(event.eventType);
-  // Orange means only "waits for you", so "Did not happen" is not orange.
+  // In OpenBot's own look orange means only "waits for you", so "Did not happen" is not orange.
+  const openbot = useSkinId() === DEFAULT_SKIN;
   return (
     <>
       <span
@@ -323,7 +325,9 @@ export function DecisionCell({ event }: { event: AuditEvent }) {
           outcome === "refused"
             ? "font-medium text-destructive"
             : outcome === "did-not-happen"
-              ? "font-medium text-foreground"
+              ? openbot
+                ? "font-medium text-foreground"
+                : "font-medium text-amber-600 dark:text-amber-500"
               : "text-muted-foreground"
         }
       >
@@ -347,37 +351,51 @@ export function DecisionCell({ event }: { event: AuditEvent }) {
   );
 }
 
-/*
- * The square at the start of each row: what happened, at a glance down the log. Orange means only
- * "waits for you", and a row that did not happen waits on nobody, so its square is hollow.
- */
-const OUTCOME_MARK: Record<AuditOutcome, string> = {
+/** The square at the start of each row: what happened, at a glance down the log. */
+export const OUTCOME_MARK: Record<AuditOutcome, string> = {
   refused: "bg-destructive",
-  "did-not-happen":
-    "bg-transparent ring-[1.5px] ring-muted-foreground ring-inset",
+  "did-not-happen": "bg-amber-500",
   allowed: "bg-muted-foreground/20",
 };
 
-/** The faint tint on rows worth stopping at: refused ones. The rest stay plain. */
-const OUTCOME_ROW: Record<AuditOutcome, string> = {
+/** The faint tint on rows worth stopping at. Allowed rows stay plain. */
+export const OUTCOME_ROW: Record<AuditOutcome, string> = {
   refused: "bg-destructive/5 hover:bg-destructive/10",
-  "did-not-happen": "",
+  "did-not-happen": "bg-amber-500/5 hover:bg-amber-500/10",
   allowed: "",
 };
 
-/** The square at the start of a row. */
+/*
+ * OpenBot's own look keeps orange for "waits for you" and nothing else. A row that did not happen
+ * is not waiting on anyone, so it loses the amber: its square is drawn hollow and its row stays
+ * plain. A skin keeps the amber it had.
+ */
+const OPENBOT_OUTCOME_MARK: Record<AuditOutcome, string> = {
+  ...OUTCOME_MARK,
+  "did-not-happen":
+    "bg-transparent ring-[1.5px] ring-muted-foreground ring-inset",
+};
+
+const OPENBOT_OUTCOME_ROW: Record<AuditOutcome, string> = {
+  ...OUTCOME_ROW,
+  "did-not-happen": "",
+};
+
+/** The square at the start of a row, in the look that is drawn right now. */
 export function OutcomeMark({ outcome }: { outcome: AuditOutcome }) {
+  const marks =
+    useSkinId() === DEFAULT_SKIN ? OPENBOT_OUTCOME_MARK : OUTCOME_MARK;
   return (
     <span
       aria-hidden
-      className={`mt-1 block size-2.5 rounded-[3px] ${OUTCOME_MARK[outcome]}`}
+      className={`mt-1 block size-2.5 rounded-[3px] ${marks[outcome]}`}
     />
   );
 }
 
-/** The row tints. */
+/** The row tints for the look that is drawn right now. */
 export function useOutcomeRow(): Record<AuditOutcome, string> {
-  return OUTCOME_ROW;
+  return useSkinId() === DEFAULT_SKIN ? OPENBOT_OUTCOME_ROW : OUTCOME_ROW;
 }
 
 /**
