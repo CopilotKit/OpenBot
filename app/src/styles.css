@@ -184,3 +184,25 @@
     100% 100%;
   mask-composite: intersect;
 }
+
+/*
+ * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
+ * so swapping or turning off the empty-state pattern does the same here. It fades out from the
+ * center instead of a corner.
+ */
+.orb-pattern {
+  position: absolute;
+  inset: -40px;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--empty-pattern-color);
+  opacity: var(--empty-pattern-opacity);
+  mask-image:
+    var(--empty-pattern),
+    radial-gradient(circle, #000 30%, rgb(0 0 0 / 0.35) 55%, transparent 72%);
+  mask-repeat: repeat, no-repeat;
+  mask-size:
+    auto,
+    100% 100%;
+  mask-composite: intersect;
+}
