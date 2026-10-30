@@ -379,6 +379,20 @@ address and a `.local` name are what this flag is mostly used for, and anybody o
 the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
 it.
 
+**A single-user deployment has its own identity at Composio.** Composio keeps accounts apart by a
+user id OpenBot sends, and the one person of every single-user deployment is `dev-local-user`, so
+two of them on the same `COMPOSIO_API_KEY` used to share one set of connected accounts. Now each is
+given its own Composio user id, `dev-local-user:` and a random part, at its first start with a
+Composio key, and keeps it in its database (the `brokered_identities` table), so it is the same
+after a restart and on every replica. Only the name at Composio changes: threads, memory and
+everything else stay with `dev-local-user`. A deployment that already has Composio connections
+under `dev-local-user` (any `brokered_connections` row for Composio whose `vendor_user_id` is
+`dev-local-user`) keeps using that id, so nothing is disconnected and nobody reconnects; it gets its
+own id at the first start after its last such connection is disconnected. A deployment that signs
+people in is unchanged, and so is Arcade. To see the id in use, run
+`select vendor_user_id from brokered_identities where provider = 'composio'`; no row means
+`dev-local-user`. That is also the `--user` to give `bun run composio:smoke`.
+
 **`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an
 administrator once in. Matching is exact with no wildcards, so `example.com` admits neither
 `sub.example.com` nor `evil-example.com`, and both sides go through the same IDNA normalisation, so

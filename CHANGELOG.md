@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Sixteen things change for an existing deployment:
+**Before upgrading.** Twenty-five things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -77,6 +77,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+- Migration `0070_single_user_identity` adds one table, `brokered_identities`. A single-user
+  deployment with a Composio key and no Composio connections gets its own Composio user id at its
+  next start (below), so it stops seeing and using connections another single-user OpenBot made on
+  the same key. One that already has Composio connections keeps `dev-local-user` until it has none.
+  Deployments that sign people in are unchanged.
+
+### Each single-user OpenBot has its own Composio identity
+
+Every single-user OpenBot signs its person in as `dev-local-user`, and that was also the user id
+Composio filed their connected accounts under. So two single-user OpenBots on one
+`COMPOSIO_API_KEY` were one Composio user: each listed and used the other's Gmail, a disconnect in
+one ended the account in both, and a call that named no account could run in whichever Gmail was
+connected last. Each single-user deployment now has its own Composio user id, `dev-local-user:` and
+a random part, kept in its database so a restart or a second replica uses the same one. Threads and
+memory stay with `dev-local-user`. A deployment that already has Composio connections under
+`dev-local-user` keeps that id, so nobody reconnects. See
+[configuration.md](docs/configuration.md#authentication).
 
 ### A computer closes browsers nobody is using when its memory runs high
 
