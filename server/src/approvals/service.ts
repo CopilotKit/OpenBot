@@ -45,6 +45,9 @@ export const WITHDRAWN_APPROVALS_OFF =
   "Not done: this request was withdrawn because the person switched off asking before changes. Try the action again if it is still needed.";
 export const WITHDRAWN_RULE_ALLOWS =
   "Not done: this request was withdrawn because a rule the person saved now allows it without asking. Try the action again if it is still needed.";
+/** Why a change in a check-in task waits for the person, on its card where they decide it. */
+export const TASK_ASKS =
+  "Tasks started from a check-in ask before every change.";
 
 /** Snapshot ids and element refs change on every page read; the action they point at does not. */
 const VOLATILE = new Set(["snapshotId", "ref", "toolCallId", "signal"]);
@@ -310,7 +313,29 @@ export function createApprovalService(
           throw new ApprovalRefusedError(DECLINED_BY_PERSON);
         }
       }
-      const outcome = await evaluate(candidate);
+      const evaluated = await evaluate(candidate);
+      /*
+       * A task started from a check-in asks before every change, whatever the person's own switch
+       * or rules would allow: the work came from something a Bot noticed, not something the person
+       * wrote out, so they see each send or change before it happens. Reads still run freely, and a
+       * stricter answer (a hand-off, a refusal) stands.
+       */
+      const task =
+        candidate.effect !== "read" &&
+        continuation?.threadId !== undefined &&
+        (await store.asksEveryChange?.(
+          candidate.actorId,
+          continuation.threadId,
+        )) === true;
+      const outcome: ApprovalPolicyOutcome | undefined =
+        task && (!evaluated || evaluated.behaviour === "allow")
+          ? {
+              behaviour: "ask",
+              source: "task",
+              reason: TASK_ASKS,
+              ...(evaluated?.review ? { review: evaluated.review } : {}),
+            }
+          : evaluated;
       if (outcome) {
         if (outcome.behaviour === "allow") return;
       } else if (

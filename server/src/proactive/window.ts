@@ -17,6 +17,7 @@
  * Ported from OpenDuet's check-in window and instruction, with the window read from the ledger and
  * the open items carrying ids.
  */
+import type { ProactiveRunTrigger } from "./contracts";
 import {
   HIDDEN_DAYS,
   MAX_MEMORIES_PER_RUN,
@@ -84,15 +85,38 @@ export const EMPTY_CONTEXT: CheckInContext = {
  */
 const quoted = (text: string) => JSON.stringify(text);
 
-/** The check-in turn's instruction. */
+/**
+ * How a check-in's message opens: what started it, and that the work is this turn's.
+ *
+ * Its own words, never a routine's. A check-in reaches the model as the whole of its message (the
+ * engine hands the runner a `userMessage`, which the runner sends as it is), because the runner's
+ * default is the routine frame, "one of your routines is firing right now, on its schedule", and a
+ * check-in is neither a routine nor, when the person pressed Run now, on any schedule. Like
+ * OpenDuet's check-in frame (`shared/check-in.ts` there), it says the Bot started it and nobody
+ * asked anything, or, for Run now, that the person did; and like the routine frame, that the work
+ * belongs in this turn. The person's focus is in their own words and often reads like a standing
+ * order ("each check-in, look for..."), which a model can take for a request to set one up.
+ */
+export const CHECK_IN_OPENING: Record<ProactiveRunTrigger, string> = {
+  schedule:
+    "This is a check-in you started yourself, on its schedule. Nobody asked you anything, and your person is not watching this conversation.",
+  run_now:
+    "Your person asked you to check in now, from your check-in settings. They are not watching this conversation: they see only what you record.",
+};
+const DO_IT_NOW =
+  "Do the check-in now, in this turn. It is not a request to set up, list or change a routine or a schedule, even where their focus below is worded like one.";
+
+/** The check-in turn's instruction, the whole of its message. */
 export function researchInstruction(
   setting: Pick<ProactiveSetting, "focus">,
   window: CheckInWindow,
   context: CheckInContext = EMPTY_CONTEXT,
+  trigger: ProactiveRunTrigger = "schedule",
 ) {
   const after = Math.floor(window.since.getTime() / 1000);
   return [
-    "Background check-in. Your person is not watching this conversation.",
+    CHECK_IN_OPENING[trigger],
+    DO_IT_NOW,
     `It is ${window.now.toISOString()}. Look only at what is new since ${window.since.toISOString()}, ${window.firstRun ? "the last day, because no earlier check-in finished" : "when you last checked in"}.`,
     `For mail, put after:${after} in every search, for example "in:inbox after:${after}", so you read only messages newer than that. For the calendar, read today's and tomorrow's events.`,
     setting.focus

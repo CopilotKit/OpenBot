@@ -1,12 +1,18 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppVariables } from "../auth/guards";
+import { plainFailure } from "../tasks/state";
 import type { ProactiveEngine } from "./engine";
-import type { ProactiveStore } from "./store";
+import {
+  type ProactiveRunRow,
+  type ProactiveStore,
+  STOPPED_BEFORE_FINISHING,
+} from "./store";
 import {
   ProactiveNotFoundError,
   ProactiveRefusedError,
   type ProactiveSuggestion,
+  SKIPPED_BECAUSE,
 } from "./types";
 
 /**
@@ -15,6 +21,30 @@ import {
  */
 function payloadOf({ dedupeKey: _, ...item }: ProactiveSuggestion) {
   return item;
+}
+
+/**
+ * A setting's newest check-in as the person reads it (`LastCheckInPayload`): how it ended and, for
+ * one that was skipped or couldn't finish, why, in one plain sentence. Never the error itself, which
+ * is an operator's and can be a status code or a stack: the same plain words a task uses.
+ */
+function lastRunOf(run: ProactiveRunRow | undefined) {
+  if (!run) return null;
+  const why =
+    run.outcome === "skipped" && run.skipReason
+      ? SKIPPED_BECAUSE[run.skipReason]
+      : run.outcome === "failed"
+        ? `Couldn't finish: ${plainFailure(run.error === STOPPED_BEFORE_FINISHING ? null : run.error)}.`
+        : null;
+  return {
+    outcome: run.outcome,
+    trigger: run.trigger,
+    skipReason: run.skipReason,
+    why,
+    itemsRaised: run.itemsRaised,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+  };
 }
 
 /** `/api/proactive`: a person's check-in settings and the items their Bots raised. */
@@ -44,11 +74,18 @@ export function createProactiveRoutes(
     );
   });
   routes.get("/settings", async (context) => {
-    const [settings, allowed] = await Promise.all([
+    const [settings, runs, allowed] = await Promise.all([
       store.list(context.var.actor.id),
+      store.latestRuns(context.var.actor.id),
       engine.allowed(context.var.actor.id),
     ]);
-    return context.json({ settings, allowed });
+    return context.json({
+      settings: settings.map((setting) => ({
+        ...setting,
+        lastRun: lastRunOf(runs.get(setting.id)),
+      })),
+      allowed,
+    });
   });
   routes.post("/settings", async (context) =>
     context.json(

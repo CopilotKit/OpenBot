@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ProactiveSkipReason } from "./contracts";
 
 export type ProactiveRunStatus = "idle" | "running" | "succeeded" | "error";
 /**
@@ -53,24 +54,52 @@ export function linkKey(link: string | null | undefined): string | null {
   }
 }
 
+const focusSchema = z.string().trim().max(1000);
+const intervalSchema = z
+  .number()
+  .int()
+  .min(MIN_INTERVAL_MINUTES)
+  .max(MAX_INTERVAL_MINUTES);
+
 export const proactiveSettingInputSchema = z
   .object({
     agentId: z.string().trim().min(1).max(128),
     channelId: z.string().trim().min(1).max(128),
-    focus: z.string().trim().max(1000).default(""),
-    intervalMinutes: z
-      .number()
-      .int()
-      .min(MIN_INTERVAL_MINUTES)
-      .max(MAX_INTERVAL_MINUTES)
-      .default(DEFAULT_INTERVAL_MINUTES),
+    focus: focusSchema.default(""),
+    intervalMinutes: intervalSchema.default(DEFAULT_INTERVAL_MINUTES),
     enabled: z.boolean().default(true),
   })
   .strict();
-export const proactiveSettingPatchSchema = proactiveSettingInputSchema
-  .pick({ focus: true, intervalMinutes: true, enabled: true })
+/**
+ * A change to a setting: only the fields sent, and nothing filled in for the rest.
+ *
+ * Built from the bare fields, never from the input schema above. Zod keeps a field's default through
+ * `.partial()`, on purpose, so a patch picked from that schema filled every field it was not sent: a
+ * person turning check-ins off was also put back to hourly with no focus, and one changing how often
+ * had them turned back on and run at once.
+ */
+export const proactiveSettingPatchSchema = z
+  .object({
+    focus: focusSchema,
+    intervalMinutes: intervalSchema,
+    enabled: z.boolean(),
+  })
   .partial()
   .strict();
+
+/**
+ * Why a check-in was skipped, as the person reads it on the Bot's check-ins and in Run now's answer.
+ * One plain sentence each, saying what to do where there is something to do.
+ */
+export const SKIPPED_BECAUSE: Record<ProactiveSkipReason, string> = {
+  off_admin: "Your admin turned off check-ins for you.",
+  off_person: "You turned off check-ins for all your Bots.",
+  paused: "You paused this Bot.",
+  capped: "This Bot used all its check-ins for today.",
+  unreachable: "This Bot or its conversation is no longer available to you.",
+  no_sources: "Nothing to check: connect an app this Bot can read.",
+  busy: "Another check-in was still running.",
+};
 
 export const suggestionInputSchema = z
   .object({

@@ -38,7 +38,13 @@ export type ApprovalPolicyOutcome = {
     | "auto_review"
     | "default"
     /** The person already declined this action, or an equivalent, earlier in this conversation. */
-    | "person_declined";
+    | "person_declined"
+    /**
+     * A task started from a check-in item: every change it makes asks first, whatever the person's
+     * "Ask before making changes" says (tasks/turn.ts). Kept apart from `default` so turning that
+     * switch off, or saving an allow rule, never withdraws what a task is waiting on.
+     */
+    | "task";
   reason: string;
   ruleId?: string;
   review?: {
@@ -215,6 +221,11 @@ export type ApprovalStore = {
   finish(ownerUserId: string, id: string): Promise<void>;
   rules(ownerUserId: string): Promise<ApprovalRule[]>;
   revoke(ownerUserId: string, id: string): Promise<void>;
+  /**
+   * Whether this thread is the conversation of a task the person started from a check-in item,
+   * where every change asks first. Absent where there are no tasks.
+   */
+  asksEveryChange?(ownerUserId: string, threadId: string): Promise<boolean>;
   policy?: ApprovalPolicyStore;
 };
 export class ApprovalRefusedError extends Error {

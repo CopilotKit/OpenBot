@@ -48,12 +48,15 @@ import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   changeProactiveSettingMutationOptions,
   createProactiveSettingMutationOptions,
+  type LastCheckIn,
   type ProactiveSetting,
   proactiveAllowedQueryOptions,
   proactiveSettingsQueryOptions,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
+import { relativeTime } from "@/lib/relative-time";
 import { useUserPreferences } from "@/lib/settings/message-list";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { SuggestionRow } from "./suggestion-row";
 
@@ -165,7 +168,9 @@ function useCheckInsBlocked(): string | null {
  * something needs them. Read-only.
  *
  * Each Bot's check-ins are a row stating its current answer; it opens a dialog to change how often,
- * run one now, turn it off or remove it. Turning it on is a dialog behind the section's action.
+ * run one now, turn it off or remove it. Turning it on is a dialog behind the section's action,
+ * offered only for a Bot with none: one that has them turns them on and off from its own row, and a
+ * second would only be refused.
  *
  * When an admin or the person turned check-ins off for all their Bots, each row says so in place of
  * when it runs next, since none will run whatever the row's own switch says.
@@ -183,13 +188,17 @@ export function ProactiveResearchSettings({
   const shown = (settings.data ?? []).filter(
     (setting) => fixedBot === undefined || setting.agentId === fixedBot,
   );
+  const canAdd =
+    settings.isSuccess && (fixedBot === undefined || shown.length === 0);
   return (
     <PageSection
       action={
-        <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
-          <IconPlus />
-          Turn on check-ins
-        </Button>
+        canAdd ? (
+          <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
+            <IconPlus />
+            Turn on check-ins
+          </Button>
+        ) : null
       }
       description="On by default once you message just this Bot. It reads the apps it can use and tells you when something needs you, at most once an hour. It also forms memories for you to review. It can only read: it can't send messages, change anything in an app, or use a browser or computer. If you turn it off or remove it, it stays that way."
       title="Check-ins"
@@ -254,7 +263,11 @@ export function ProactiveResearchSettings({
   );
 }
 
-/** Which Bot, which conversation it checks from, how often, and what to look for. */
+/**
+ * Which Bot, which conversation it checks from, how often, and what to look for. Only Bots without
+ * check-ins, and only the person's own conversations with the Bot: a task's conversation holds one
+ * piece of work, and is no place for check-ins to reach them.
+ */
 function TurnOnResearchDialog({
   fixedBot,
   onClose,
@@ -262,7 +275,13 @@ function TurnOnResearchDialog({
   fixedBot?: string;
   onClose: () => void;
 }) {
-  const bots = useQuery(agentListQueryOptions());
+  const settings = useQuery(proactiveSettingsQueryOptions());
+  const allBots = useQuery(agentListQueryOptions());
+  const bots = {
+    data: allBots.data?.filter(
+      (bot) => !settings.data?.some((setting) => setting.agentId === bot.id),
+    ),
+  };
   const channels = useInfiniteQuery(channelListQueryOptions());
   const [pickedBot, setAgentId] = useState("");
   const agentId = fixedBot ?? pickedBot;
@@ -272,7 +291,8 @@ function TurnOnResearchDialog({
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const id = useId();
   const eligibleChannels = (channels.data ?? []).filter(
-    (channel) => channel.active && channel.agentIds.includes(agentId),
+    (channel) =>
+      channel.active && !channel.task && channel.agentIds.includes(agentId),
   );
   const add = useMutation(createProactiveSettingMutationOptions(queryClient));
   return (
@@ -426,10 +446,40 @@ function checkInStatus(setting: ProactiveSetting, blocked: string | null) {
         : `Next ${new Date(setting.nextRunAt).toLocaleString()}`;
 }
 
+/** When a check-in happened, as its line says it: "just now" for the moment after a Run now. */
+const sinceThen = (iso: string) =>
+  Date.now() - Date.parse(iso) < 60_000 ? "just now" : relativeTime(iso);
+
+/**
+ * What the Bot's last check-in did, in a sentence: found nothing, found something, was skipped and
+ * why, or couldn't finish and why. The why is the server's, written for the person. Null before the
+ * first one.
+ */
+export function lastCheckInLine(run: LastCheckIn | null | undefined) {
+  if (!run) return null;
+  const when = sinceThen(run.startedAt);
+  switch (run.outcome) {
+    case "running":
+      return `Started ${when}.`;
+    case "quiet":
+      return `Checked ${when}. Nothing needed you.`;
+    case "raised":
+      return `Checked ${when}. Found ${run.itemsRaised === 1 ? "1 thing" : `${run.itemsRaised} things`} for you.`;
+    case "failed":
+      return `Checked ${when}. ${run.why ?? "Couldn't finish."}`;
+    case "skipped":
+      return run.why ? `Skipped ${when}. ${run.why}` : `Skipped ${when}.`;
+  }
+}
+
 /**
  * One Bot's check-ins: a summary of its current answer and a chevron, opening a dialog that changes
  * it. The dialog is the row's sibling, not its child, so a click inside it does not bubble back to
  * the row and reopen it.
+ *
+ * The summary leads with how often and when it runs next, which always fits. A last check-in that
+ * was skipped or couldn't finish says why on a line of its own, since that is something to act on,
+ * and the focus, in the person's own words and often long, comes last on one line.
  */
 function SettingRow({
   setting,
@@ -445,13 +495,18 @@ function SettingRow({
   const change = useMutation(
     changeProactiveSettingMutationOptions(queryClient),
   );
-  const summary = [
-    setting.focus,
-    intervalLabel(setting.intervalMinutes),
-    checkInStatus(setting, blocked),
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const summary = `${intervalLabel(setting.intervalMinutes)} · ${checkInStatus(setting, blocked)}`;
+  const last = lastCheckInLine(setting.lastRun);
+  const outcome = setting.lastRun?.outcome;
+  /*
+   * Run now was queued and nothing has started since: say it is on its way until the check-in it
+   * queued shows up as the last one, so the press is never followed by nothing.
+   */
+  const queuedAt =
+    change.isSuccess && change.data?.queued ? change.submittedAt : null;
+  const onItsWay =
+    queuedAt !== null &&
+    !(setting.lastRun && Date.parse(setting.lastRun.startedAt) >= queuedAt);
   return (
     <>
       <Item
@@ -473,9 +528,16 @@ function SettingRow({
         <ItemContent>
           <ItemTitle>{botName}</ItemTitle>
           <ItemDescription>{summary}</ItemDescription>
-          {setting.lastError ? (
-            <ItemDescription className="text-destructive">
-              {setting.lastError}
+          {last && (outcome === "skipped" || outcome === "failed") ? (
+            <ItemDescription
+              className={outcome === "failed" ? "text-destructive" : undefined}
+            >
+              {last}
+            </ItemDescription>
+          ) : null}
+          {setting.focus ? (
+            <ItemDescription className="line-clamp-1">
+              Looks for: {setting.focus}
             </ItemDescription>
           ) : null}
         </ItemContent>
@@ -498,21 +560,22 @@ function SettingRow({
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{checkInStatus(setting, blocked)}</ItemTitle>
-                {setting.lastRunAt && (
+                {onItsWay ? (
                   <ItemDescription>
-                    Last ran {new Date(setting.lastRunAt).toLocaleString()}
-                    {setting.lastStatus === "succeeded"
-                      ? ""
-                      : ` (${setting.lastStatus})`}
+                    Queued. It checks in within a minute.
                   </ItemDescription>
-                )}
+                ) : last ? (
+                  <ItemDescription
+                    className={cn(
+                      "line-clamp-none",
+                      outcome === "failed" && "text-destructive",
+                    )}
+                  >
+                    {last}
+                  </ItemDescription>
+                ) : null}
               </ItemContent>
             </Item>
-            {setting.lastError && (
-              <p role="alert" className="text-destructive text-sm">
-                {setting.lastError}
-              </p>
-            )}
             <Field>
               <FieldLabel htmlFor={`${id}-interval`}>How often</FieldLabel>
               {/* Writes on pick: one value, no draft worth holding. */}
@@ -577,7 +640,9 @@ function SettingRow({
                 change.mutate({ setting, change: { kind: "run" } })
               }
             >
-              Run now
+              {change.isPending && change.variables.change.kind === "run"
+                ? "Starting…"
+                : "Run now"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -12,6 +12,7 @@ import {
 import {
   type ProactiveSuggestion,
   resolveSuggestionMutationOptions,
+  sourceSite,
 } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
@@ -22,7 +23,8 @@ import { queryClient } from "@/query-client";
  *
  * Start makes it a task in a conversation of its own; Hide takes it off the list and the Bot is told
  * not to raise it, or things like it, for 30 days. Either takes it off every list at once. Open goes
- * to the record the Bot read, when it gave a link.
+ * to the record the Bot read, when it gave a link, and names the site it opens: "From" already
+ * names the app it was read with.
  *
  * Each row has its own request, so hiding one leaves the others' buttons alone.
  */
@@ -36,6 +38,7 @@ export function SuggestionRow({
 }) {
   const act = useMutation(resolveSuggestionMutationOptions(queryClient));
   const pressed = act.isPending ? act.variables.action : null;
+  const site = suggestion.sourceLink ? sourceSite(suggestion.sourceLink) : null;
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -86,9 +89,7 @@ export function SuggestionRow({
               size="sm"
               variant="ghost"
             >
-              {suggestion.sourceApp
-                ? `Open in ${suggestion.sourceApp}`
-                : "Open"}
+              {site ? `Open ${site}` : "Open"}
               <IconExternalLink data-icon="inline-end" />
             </Button>
           ) : null}

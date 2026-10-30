@@ -10,6 +10,7 @@ import {
   proactiveSuggestions,
 } from "../db/schema/proactive";
 import { botTasks } from "../db/schema/tasks";
+import { workItems } from "../db/schema/work";
 import { lockDefaults, recordOptOut } from "../memory/defaults";
 import type {
   ProactiveRunOutcome,
@@ -31,6 +32,13 @@ import {
   titleKey,
 } from "./types";
 import type { LastCheckIn } from "./window";
+
+/** The work queue kind a check-in is queued as, by the sweep and by Run now. */
+export const PROACTIVE_RUN_KIND = "proactive.run";
+
+/** The error a check-in left running past its lease is closed with: its replica stopped. */
+export const STOPPED_BEFORE_FINISHING =
+  "This check-in stopped before it finished.";
 
 /** What a proactive run read, as the audit trail recorded it. The source of truth for provenance. */
 export type ProactiveRead = { ref: string; at: Date };
@@ -148,6 +156,10 @@ export function createProactiveStore(database: Database) {
         .where(eq(proactiveSettings.ownerUserId, owner))
         .orderBy(desc(proactiveSettings.createdAt));
     },
+    /**
+     * Check-ins turned on for a Bot. The first one runs an interval from now, as the default a first
+     * conversation writes does: turning them on is not asking for one now, which is Run now's job.
+     */
     async create(
       owner: string,
       input: unknown,
@@ -161,6 +173,7 @@ export function createProactiveStore(database: Database) {
           ownerUserId: owner,
           threadId,
           ...parsed,
+          nextRunAt: sql`now() + make_interval(mins => ${parsed.intervalMinutes}::int)`,
         })
         .onConflictDoNothing()
         .returning();
@@ -170,13 +183,32 @@ export function createProactiveStore(database: Database) {
         );
       return row;
     },
+    /**
+     * Change only what was sent. Off stays off until the person turns it on, whatever else they
+     * change, and nothing here starts a check-in: Run now does that, behind its own gap.
+     *
+     * When the next check-in is due follows from the change, decided in the statement against the
+     * row as it stands: turned on from off, one interval out (the interval sent, or the one it has);
+     * a new interval while on, no later than one new interval out, so going from daily to hourly is
+     * felt within the hour; anything else, as it was.
+     */
     async update(owner: string, id: string, input: unknown) {
       const patch = parseWith(proactiveSettingPatchSchema, input);
+      const minutes =
+        patch.intervalMinutes ?? sql`${proactiveSettings.intervalMinutes}`;
+      const oneIntervalOut = sql`now() + make_interval(mins => ${minutes}::int)`;
+      const kept =
+        patch.intervalMinutes === undefined
+          ? sql`${proactiveSettings.nextRunAt}`
+          : sql`least(${proactiveSettings.nextRunAt}, ${oneIntervalOut})`;
       const [row] = await database
         .update(proactiveSettings)
         .set({
           ...patch,
-          ...(patch.enabled ? { nextRunAt: new Date() } : {}),
+          nextRunAt:
+            patch.enabled === true
+              ? sql`case when ${proactiveSettings.enabled} then ${kept} else ${oneIntervalOut} end`
+              : kept,
           updatedAt: new Date(),
         })
         .where(owned(owner, id))
@@ -446,7 +478,7 @@ export function createProactiveStore(database: Database) {
         .update(proactiveRuns)
         .set({
           outcome: "failed",
-          error: "This check-in stopped before it finished.",
+          error: STOPPED_BEFORE_FINISHING,
           finishedAt: sql`now()`,
         })
         .where(
@@ -544,6 +576,43 @@ export function createProactiveStore(database: Database) {
         .orderBy(desc(proactiveRuns.startedAt))
         .limit(1);
       return row ? (row as LastCheckIn) : null;
+    },
+    /** The setting's newest check-in of any outcome, skipped and running ones included. */
+    async latestRun(settingId: string): Promise<ProactiveRunRow | null> {
+      const [row] = await database
+        .select()
+        .from(proactiveRuns)
+        .where(eq(proactiveRuns.settingId, settingId))
+        .orderBy(desc(proactiveRuns.startedAt))
+        .limit(1);
+      return row ?? null;
+    },
+    /**
+     * Each of this person's settings' newest check-in, by setting: what their Bots' check-ins say
+     * happened last, a skip and its reason included.
+     */
+    async latestRuns(owner: string): Promise<Map<string, ProactiveRunRow>> {
+      const rows = await database
+        .selectDistinctOn([proactiveRuns.settingId])
+        .from(proactiveRuns)
+        .where(eq(proactiveRuns.ownerUserId, owner))
+        .orderBy(proactiveRuns.settingId, desc(proactiveRuns.startedAt));
+      return new Map(rows.map((row) => [row.settingId, row]));
+    },
+    /** Whether a check-in for this setting is on the queue and has not been run yet. */
+    async runQueued(settingId: string): Promise<boolean> {
+      const [row] = await database
+        .select({ key: workItems.key })
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, PROACTIVE_RUN_KIND),
+            isNull(workItems.finishedAt),
+            sql`${workItems.payload}->>'settingId' = ${settingId}`,
+          ),
+        )
+        .limit(1);
+      return Boolean(row);
     },
     /** Check-ins this setting ran in the last day, for the daily cap. Skipped ones cost nothing. */
     async runsToday(settingId: string): Promise<number> {

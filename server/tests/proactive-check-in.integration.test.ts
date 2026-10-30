@@ -13,15 +13,18 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { FIRING_FRAME } from "@openbot/shared/routine-firing";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { Observable } from "rxjs";
 import { createActivityStore } from "../src/activity/activity";
+import { installEnterpriseControls } from "../src/admin/controls";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { modelUsage } from "../src/db/schema/admin";
 import { agents, channels, users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
 import { botLifecycle } from "../src/db/schema/lifecycle";
@@ -51,6 +54,7 @@ import {
   ProactiveRefusedError,
   type ProactiveSetting,
 } from "../src/proactive/types";
+import { CHECK_IN_OPENING } from "../src/proactive/window";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -208,6 +212,8 @@ async function reset() {
     .update(proactiveSettings)
     .set({
       enabled: true,
+      intervalMinutes: 60,
+      focus: "",
       nextRunAt: FAR,
       lastRunAt: null,
       lastStatus: "idle",
@@ -529,6 +535,26 @@ async function seedRuns(
 const afterOf = (instruction: string | undefined) =>
   Number(instruction?.match(/after:(\d+)/)?.[1] ?? Number.NaN);
 
+/** `/api/proactive` over one replica's engine, signed in as the owner. */
+function routes(engine: ProactiveEngine) {
+  const requireUser = async (
+    context: { set: (key: string, value: unknown) => void },
+    next: () => Promise<void>,
+  ) => {
+    context.set("actor", { id: owner, email: `${owner}@example.test` });
+    await next();
+  };
+  return new Hono().route(
+    "/api/proactive",
+    createProactiveRoutes(store, engine, requireUser as never),
+  );
+}
+/** The model's own message in a check-in's first request: what the turn was asked. */
+const askedOf = (request: RunAgentInput | undefined) =>
+  String(
+    request?.messages.find((message) => message.role === "user")?.content ?? "",
+  );
+
 /* ------------------------------------------------------------------------------------------------
  * The tests.
  * ---------------------------------------------------------------------------------------------- */
@@ -677,7 +703,12 @@ describe("the gates, before any model call", () => {
     expect((await store.get(owner, inbox.id)).nextRunAt.getTime()).toBeLessThan(
       Date.now(),
     );
-    expect((await engine.runNow(owner, inbox.id)).queued).toBe(true);
+    // Run now is skipped at once and says why, rather than queueing a check-in that would be.
+    expect(await engine.runNow(owner, inbox.id)).toEqual({
+      queued: false,
+      skipped: "off_person",
+      why: "You turned off check-ins for all your Bots.",
+    });
     await engine.sweep();
     expect(await runsOf(inbox)).toMatchObject([
       { outcome: "skipped", skipReason: "off_person", trigger: "run_now" },
@@ -1320,20 +1351,6 @@ describe("what needs the person", () => {
 });
 
 describe("the item routes", () => {
-  function routes(engine: ProactiveEngine) {
-    const requireUser = async (
-      context: { set: (key: string, value: unknown) => void },
-      next: () => Promise<void>,
-    ) => {
-      context.set("actor", { id: owner, email: `${owner}@example.test` });
-      await next();
-    };
-    return new Hono().route(
-      "/api/proactive",
-      createProactiveRoutes(store, engine, requireUser as never),
-    );
-  }
-
   test("settings say whether an admin left check-ins on; items carry their source and ping; Start answers with the task", async () => {
     const admin = (allowed: boolean): ProactiveAdmin => ({
       proactiveAllowed: async () => allowed,
@@ -1396,5 +1413,291 @@ describe("the item routes", () => {
       { method: "POST" },
     );
     expect(again.status).toBe(400);
+  });
+});
+
+describe("changing a Bot's check-ins", () => {
+  const app = () => routes(replica().engine);
+  const patch = (body: Record<string, unknown>) =>
+    app().request(`http://t/api/proactive/settings/${inbox.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const minutesOut = async () =>
+    ((await store.get(owner, inbox.id)).nextRunAt.getTime() - Date.now()) /
+    60_000;
+
+  test("a change changes only what was sent: off stays off until turned on, and nothing runs at once", async () => {
+    expect(
+      (await patch({ intervalMinutes: 240, focus: "Supplier invoices" }))
+        .status,
+    ).toBe(200);
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: true,
+      intervalMinutes: 240,
+      focus: "Supplier invoices",
+    });
+    // A new interval while on brings the next check-in no later than one new interval out.
+    expect(await minutesOut()).toBeGreaterThan(239);
+    expect(await minutesOut()).toBeLessThanOrEqual(240);
+
+    // Turned off: how often and what to look for are kept.
+    await patch({ enabled: false });
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: false,
+      intervalMinutes: 240,
+      focus: "Supplier invoices",
+    });
+    // How often, changed while off: still off, the focus still there, and nothing runs.
+    await patch({ intervalMinutes: 720 });
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: false,
+      intervalMinutes: 720,
+      focus: "Supplier invoices",
+    });
+    const idle = replica();
+    await idle.engine.sweep();
+    expect(idle.requests).toEqual([]);
+    expect(await runsOf(inbox)).toEqual([]);
+
+    // Turned on: the first check-in is one interval out, never at once.
+    await patch({ enabled: true });
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: true,
+      intervalMinutes: 720,
+      focus: "Supplier invoices",
+    });
+    expect(await minutesOut()).toBeGreaterThan(719);
+    await idle.engine.sweep();
+    expect(idle.requests).toEqual([]);
+    // Turning on again while on moves nothing.
+    const due = (await store.get(owner, inbox.id)).nextRunAt.getTime();
+    await patch({ enabled: true });
+    expect((await store.get(owner, inbox.id)).nextRunAt.getTime()).toBe(due);
+
+    // Run now is how a check-in runs at once.
+    expect(await idle.engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    await idle.engine.sweep();
+    expect(idle.requests).toHaveLength(1);
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "quiet", trigger: "run_now" },
+    ]);
+  });
+
+  test("turning check-ins on for a Bot schedules its first check-in an interval out", async () => {
+    const third = `check-in-third-${suite}`;
+    await database.insert(agents).values({
+      id: third,
+      name: "Third Bot",
+      type: "built_in",
+      configuration: {},
+    });
+    try {
+      const created = await app().request("http://t/api/proactive/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agentId: third,
+          channelId: inboxChannel,
+          intervalMinutes: 240,
+        }),
+      });
+      expect(created.status).toBe(201);
+      const { setting } = (await created.json()) as {
+        setting: { id: string; nextRunAt: string; enabled: boolean };
+      };
+      expect(setting.enabled).toBe(true);
+      const out = (Date.parse(setting.nextRunAt) - Date.now()) / 60_000;
+      expect(out).toBeGreaterThan(239);
+      expect(out).toBeLessThanOrEqual(240);
+    } finally {
+      await database.delete(agents).where(eq(agents.id, third));
+    }
+  });
+});
+
+describe("Run now", () => {
+  const press = (engine: ProactiveEngine) =>
+    routes(engine).request(`http://t/api/proactive/settings/${inbox.id}/run`, {
+      method: "POST",
+    });
+  const lastRunOf = async (engine: ProactiveEngine) => {
+    const { settings } = (await (
+      await routes(engine).request("http://t/api/proactive/settings")
+    ).json()) as {
+      settings: { id: string; lastRun: Record<string, unknown> | null }[];
+    };
+    return settings.find((setting) => setting.id === inbox.id)?.lastRun;
+  };
+  const nothingToRead = "Nothing to check: connect an app this Bot can read.";
+
+  test("after a skip it is tried again, saying plainly why it can't, and the Bot's check-ins show the last one and why", async () => {
+    let readable: string[] = [];
+    const { engine, requests } = replica({
+      readableApps: async () => readable,
+    });
+    expect(await lastRunOf(engine)).toBeNull();
+
+    // Nothing this Bot can read: skipped at once, and said.
+    for (const _ of [1, 2]) {
+      const answer = await press(engine);
+      expect(answer.status).toBe(200);
+      expect(await answer.json()).toEqual({
+        queued: false,
+        skipped: "no_sources",
+        why: nothingToRead,
+      });
+    }
+    // Pressed again straight after the skip, it was tried again, not silently nothing.
+    expect(
+      (await runsOf(inbox)).map((run) => [
+        run.outcome,
+        run.skipReason,
+        run.trigger,
+      ]),
+    ).toEqual([
+      ["skipped", "no_sources", "run_now"],
+      ["skipped", "no_sources", "run_now"],
+    ]);
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "skipped",
+      skipReason: "no_sources",
+      trigger: "run_now",
+      why: nothingToRead,
+    });
+    expect(requests).toEqual([]);
+
+    // Once it can read an app, the next Run now runs.
+    readable = [listMessages];
+    expect(await (await press(engine)).json()).toEqual({ queued: true });
+    await engine.sweep();
+    expect(requests).toHaveLength(1);
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "quiet",
+      trigger: "run_now",
+      why: null,
+    });
+
+    // Within ten minutes of a check-in that ran, it is refused, and says when to try again.
+    const refused = await press(engine);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({
+      error:
+        "This Bot checked in less than ten minutes ago. Try again in 10 minutes.",
+    });
+  });
+
+  test("a Run now skipped when it came up can be pressed again at once, and runs", async () => {
+    let readable = [listMessages];
+    const { engine, requests } = replica({
+      readableApps: async () => readable,
+    });
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    // Nothing to read by the time the sweep takes it: skipped there.
+    readable = [];
+    await engine.sweep();
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "skipped",
+      skipReason: "no_sources",
+      trigger: "run_now",
+    });
+    expect(requests).toEqual([]);
+    // Pressed again within the ten minutes: queued and run, never a silent nothing.
+    readable = [listMessages];
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    await engine.sweep();
+    expect(requests).toHaveLength(1);
+    expect(await lastRunOf(engine)).toMatchObject({ outcome: "quiet" });
+  });
+
+  test("pressed twice before it runs, it runs once; a check-in that failed says so plainly", async () => {
+    const { engine, requests } = replica({
+      model: async () => {
+        throw new Error("upstream 503 from the provider");
+      },
+    });
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    const queued = await database
+      .select()
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, "proactive.run"),
+          sql`${workItems.payload}->>'settingId' = ${inbox.id}`,
+        ),
+      );
+    expect(queued).toHaveLength(1);
+    await engine.sweep();
+    await engine.sweep();
+    expect(requests).toHaveLength(1);
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "failed",
+      why: "Couldn't finish: a service didn't answer.",
+    });
+  });
+});
+
+describe("what a check-in costs and how it is asked", () => {
+  test("a check-in is put to the model as a check-in, never as a routine firing: on its schedule, or because the person asked", async () => {
+    await due(inbox);
+    const scheduled = replica();
+    await scheduled.engine.sweep();
+    const asked = askedOf(scheduled.requests[0]);
+    expect(asked).toStartWith(CHECK_IN_OPENING.schedule);
+    expect(asked).not.toContain(FIRING_FRAME[0]);
+    expect(asked).toContain(
+      "It is not a request to set up, list or change a routine or a schedule",
+    );
+
+    await database
+      .update(proactiveRuns)
+      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(proactiveRuns.settingId, inbox.id));
+    const pressed = replica();
+    await pressed.engine.runNow(owner, inbox.id);
+    await pressed.engine.sweep();
+    const askedNow = askedOf(pressed.requests[0]);
+    expect(askedNow).toStartWith(CHECK_IN_OPENING.run_now);
+    expect(askedNow).not.toContain(FIRING_FRAME[0]);
+  });
+
+  test("a check-in that reached the model leaves one model usage row; one skipped before it leaves none", async () => {
+    const controls = await installEnterpriseControls({
+      database,
+      databaseUrl: testDatabaseUrl(),
+      auditStore,
+      builtInModel: "openai/gpt-check-in",
+      env: {},
+    });
+    const usage = () =>
+      database.select().from(modelUsage).where(eq(modelUsage.userId, owner));
+    try {
+      await due(inbox);
+      const nothing = replica({ readableApps: async () => [] });
+      await nothing.engine.sweep();
+      expect(await usage()).toEqual([]);
+
+      await due(inbox);
+      const { engine } = replica();
+      await engine.sweep();
+      const [run] = (await runsOf(inbox)).filter(
+        (row) => row.outcome === "quiet",
+      );
+      expect(await usage()).toMatchObject([
+        {
+          agentId: inboxBot,
+          threadId: run?.threadId,
+          runId: run?.id,
+          model: "openai/gpt-check-in",
+          source: "configured",
+          allowed: true,
+        },
+      ]);
+    } finally {
+      await database.delete(modelUsage).where(eq(modelUsage.userId, owner));
+      await controls.stop();
+    }
   });
 });

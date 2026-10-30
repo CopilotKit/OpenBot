@@ -921,6 +921,53 @@ export function auditRoutineStore<T extends RoutineLike>(
 /* ------------------------------ headless turns ------------------------------ */
 
 /**
+ * One usage row for a headless turn that reached the model, as the gate writes one for each browser
+ * run (`gate.ts`): the configured model for a built-in Bot, `unknown` for a remote one, which chooses
+ * its own and was not watched here.
+ *
+ * Without it a turn nobody started from the browser served a model and left no row, so an admin
+ * reading usage never saw what background check-ins cost. Called only once the turn was admitted, so
+ * a turn the allowlist refused keeps the one refused row `headlessTurnRefusal` wrote for it. A failed
+ * write is logged and never fails the turn, as the gate's is.
+ */
+export async function recordHeadlessUsage(input: {
+  ownerUserId: string;
+  agentId: string;
+  threadId: string;
+  runId: string;
+}): Promise<void> {
+  const controls = installed;
+  if (!controls) return;
+  try {
+    const [row] = await controls.deps.database
+      .select({ type: agents.type })
+      .from(agents)
+      .where(eq(agents.id, input.agentId))
+      .limit(1);
+    const model =
+      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+    // A model nobody named is allowed only while there is no list, as the gate records it.
+    const listed = controls.snapshot()?.settings.modelAllowlist?.enabled;
+    await controls.store.recordModelUsage({
+      userId: input.ownerUserId,
+      agentId: input.agentId,
+      threadId: input.threadId,
+      runId: input.runId,
+      model: model ?? `remote:${input.agentId}`,
+      source: model ? "configured" : "unknown",
+      allowed: model !== undefined || !listed,
+    });
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "model-usage-write-failed",
+        error: String(error),
+      }),
+    );
+  }
+}
+
+/**
  * Whether a turn nobody started from the browser may run, and the sentence to refuse it with.
  *
  * The HTTP gate (`gate.ts`) applies "Use Bots" and the model allowlist to a browser run. Routines,

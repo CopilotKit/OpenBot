@@ -196,6 +196,27 @@ export function nextStepOf(
   return `“${words.length > QUOTE_MAX ? `${words.slice(0, QUOTE_MAX - 1).join("")}…` : text}”`;
 }
 
+/**
+ * What a task waiting on the person waits for, as its next step: the action its Bot asked to take,
+ * in the words its approval card uses in the conversation, or the question it asked. Never the last
+ * line said there, which while it waits is as often the person's own message as anything the Bot
+ * wrote, and says nothing about what they are being asked for.
+ */
+export function waitingLine(
+  waiting:
+    | { kind: "approval"; toolRef: string; scope: string; handOff: boolean }
+    | { kind: "question"; question: string },
+): string {
+  if (waiting.kind === "question") {
+    const words = Array.from(waiting.question.trim());
+    return `Waiting for your answer: ${words.length > QUOTE_MAX ? `${words.slice(0, QUOTE_MAX - 1).join("")}…` : words.join("")}`;
+  }
+  const action = waiting.toolRef
+    .replace(/^computer_|^host\//, "")
+    .replaceAll("_", " ");
+  return `${waiting.handOff ? "This needs you" : "Waiting for your approval"}: ${action} on ${waiting.scope}`;
+}
+
 /** The suffix of the line a task's turn records when it fails on its last run. */
 export const FAILED_LINE = ":failed";
 /** The suffix of the person's ask, recorded as their line when a task's turn starts. */
@@ -302,12 +323,31 @@ export async function readTaskStates(
     const entry = entryOfChannel(channelId);
     if (entry) entry[field] = true;
   };
+  /** What each task waits on the person for, the newest if more than one: its next step. */
+  const waitingFor = new Map<TaskState, { at: Date; line: string }>();
+  const waitsFor = (
+    channelId: string | null | undefined,
+    at: Date,
+    line: string,
+  ) => {
+    const entry = entryOfChannel(channelId);
+    if (!entry) return;
+    entry.needsInput = true;
+    const known = waitingFor.get(entry);
+    if (!known || at > known.at) waitingFor.set(entry, { at, line });
+  };
 
   const taskIds = rows.map((row) => row.id);
   const [approvals, questions, turns, carriedOn] = await Promise.all([
     // Waiting on the person: an action its turn paused on for Allow once.
     database
-      .select({ threadId: approvalThread })
+      .select({
+        threadId: approvalThread,
+        toolRef: sql<string>`${approvalRequests.action}->>'toolRef'`,
+        scope: sql<string>`${approvalRequests.action}->>'scope'`,
+        handOff: sql<boolean>`coalesce(${approvalRequests.action}->'policy'->>'behaviour' = 'hand_off', false)`,
+        createdAt: approvalRequests.createdAt,
+      })
       .from(approvalRequests)
       .where(
         and(
@@ -321,6 +361,8 @@ export async function readTaskStates(
       .select({
         channelId: payload("channelId"),
         threadId: payload("threadId"),
+        question: payload("question"),
+        createdAt: workItems.createdAt,
       })
       .from(workItems)
       .where(
@@ -409,11 +451,21 @@ export async function readTaskStates(
     ]).then(([resuming, answering]) => [...resuming, ...answering]),
   ]);
   for (const row of approvals)
-    mark(channelOfThread.get(row.threadId), "needsInput");
+    waitsFor(
+      channelOfThread.get(row.threadId),
+      row.createdAt,
+      waitingLine({
+        kind: "approval",
+        toolRef: row.toolRef ?? "",
+        scope: row.scope ?? "",
+        handOff: row.handOff,
+      }),
+    );
   for (const question of questions)
-    mark(
+    waitsFor(
       question.channelId ?? channelOfThread.get(question.threadId ?? ""),
-      "needsInput",
+      question.createdAt,
+      waitingLine({ kind: "question", question: question.question ?? "" }),
     );
 
   const latestOutcome = new Map<string, (typeof turns)[number]>();
@@ -502,5 +554,6 @@ export async function readTaskStates(
   }
   for (const row of carriedOn)
     mark(channelOfThread.get(row.threadId), "working");
+  for (const [entry, waiting] of waitingFor) entry.next = waiting.line;
   return state;
 }

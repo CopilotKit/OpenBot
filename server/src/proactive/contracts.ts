@@ -54,7 +54,22 @@ export type ProactiveSkipReason =
  * `/api/proactive` (proactive engine).
  * ---------------------------------------------------------------------------------------------- */
 
-/** One background-check setting as `GET /api/proactive/settings` lists it. Unchanged. */
+/**
+ * A setting's newest check-in, from the run ledger, so the Bot's check-ins say what happened last,
+ * a skip included. `why` is one plain sentence for a skipped check-in (its reason) or a failed one
+ * (what stopped it), and null otherwise.
+ */
+export type LastCheckInPayload = {
+  outcome: ProactiveRunOutcome;
+  trigger: ProactiveRunTrigger;
+  skipReason: ProactiveSkipReason | null;
+  why: string | null;
+  itemsRaised: number;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+/** One background-check setting as `GET /api/proactive/settings` lists it, with its last check-in. */
 export type ProactiveSettingPayload = {
   id: string;
   ownerUserId: string;
@@ -70,7 +85,19 @@ export type ProactiveSettingPayload = {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Null before its first check-in. */
+  lastRun: LastCheckInPayload | null;
 };
+
+/**
+ * `POST /api/proactive/settings/:id/run`. Queued, or skipped at once because a gate would stop it
+ * anyway, with the reason and its sentence; the skip is in the ledger like any other. A Run now that
+ * can't be tried at all (one is running, or one ran in the last ten minutes) is refused with a 400
+ * saying so.
+ */
+export type RunNowResponse =
+  | { queued: true }
+  | { queued: false; skipped: ProactiveSkipReason; why: string };
 
 /**
  * `GET /api/proactive/settings`. `allowed` is false when an admin turned check-ins off for this

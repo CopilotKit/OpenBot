@@ -290,9 +290,29 @@ test("an item says what it is, why, which Bot found it and where, with Start and
   expect(bots.getByText(/^Inbox Bot · From Gmail · /)).toBeTruthy();
   expect(bots.getByRole("button", { name: "Start" })).toBeTruthy();
   expect(bots.getByRole("button", { name: "Hide" })).toBeTruthy();
-  const open = bots.getByRole("button", { name: "Open in Gmail" });
+  const open = bots.getByRole("button", { name: "Open mail.example.com" });
   expect(open.getAttribute("href")).toBe("https://mail.example.com/1");
   expect(open.getAttribute("target")).toBe("_blank");
+});
+
+test("Open names the site its link goes to, never the app the Bot read it with", async () => {
+  items = [
+    item({
+      id: "s1",
+      title: "Review Bun 1.4.4 release notes",
+      sourceApp: "Exa Search",
+      sourceRef: "exa/search",
+      sourceLink: "https://www.bun.com/blog/bun-v1.4.4",
+    }),
+  ];
+  serving();
+  const { view, region } = await drawAll();
+  await view.findAllByText("Review Bun 1.4.4 release notes");
+  const bots = region("Bots page");
+  expect(bots.getByText(/^Inbox Bot · From Exa Search · /)).toBeTruthy();
+  expect(bots.queryByRole("button", { name: /Exa Search/ })).toBeNull();
+  const open = bots.getByRole("button", { name: "Open bun.com" });
+  expect(open.getAttribute("href")).toBe("https://www.bun.com/blog/bun-v1.4.4");
 });
 
 test("Hide takes an item off the Bots page, the Bot's page and OpenDuet at once", async () => {

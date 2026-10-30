@@ -21,6 +21,7 @@ import { createApprovalResumeTick } from "../src/approvals/resume-sweep";
 import { createApprovalService } from "../src/approvals/service";
 import { createApprovalStore } from "../src/approvals/store";
 import { currentApprovalContext } from "../src/approvals/types";
+import { PERSON_INITIATOR } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
@@ -108,20 +109,25 @@ const reply = (input: RunAgentInput, text: string) =>
     { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "reply", delta: text },
     { type: EventType.TEXT_MESSAGE_END, messageId: "reply" },
   ] as BaseEvent[]);
-const callTool = (input: RunAgentInput, name: string, args: unknown) =>
+const callTool = (
+  input: RunAgentInput,
+  name: string,
+  args: unknown,
+  id = "call",
+) =>
   lifecycle(input, [
     {
       type: EventType.TOOL_CALL_START,
-      toolCallId: "call",
+      toolCallId: id,
       toolCallName: name,
-      parentMessageId: "call-message",
+      parentMessageId: `${id}-message`,
     },
     {
       type: EventType.TOOL_CALL_ARGS,
-      toolCallId: "call",
+      toolCallId: id,
       delta: JSON.stringify(args),
     },
-    { type: EventType.TOOL_CALL_END, toolCallId: "call" },
+    { type: EventType.TOOL_CALL_END, toolCallId: id },
   ] as BaseEvent[]);
 /** A provider that is down, as the runner hears it: the run starts and errors. */
 const providerDown = (input: RunAgentInput) =>
@@ -163,6 +169,21 @@ const runner: RunnerLike = {
  * ---------------------------------------------------------------------------------------------- */
 
 const sent: unknown[] = [];
+const read: unknown[] = [];
+/** A read meets the same gate, as every granted app's call does, and runs without asking. */
+async function readInbox(args: unknown, actorId: string, botId: string) {
+  await approvalService.gate({
+    actorId,
+    botId,
+    toolRef: "mail/list_messages",
+    effect: "read",
+    scope: "mail",
+    args,
+    continuation: currentApprovalContext(),
+  });
+  read.push(args);
+  return "Sam: can you send the spec by Friday?";
+}
 async function sendMessage(args: unknown, actorId: string, botId: string) {
   const approval = await approvalService.gate({
     actorId,
@@ -219,6 +240,18 @@ const runTurn = createTurnRunner({
         },
       },
       execute: (args) => sendMessage(args, ownerUserId, agentId),
+    },
+    {
+      definition: {
+        name: "read_inbox",
+        description: "Search the inbox.",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+      execute: (args) => readInbox(args, ownerUserId, agentId),
     },
   ],
 });
@@ -456,6 +489,13 @@ describe("Start on an item", () => {
     // The person's own conversation with the Bot is still the one anything else finds, though the
     // task's is newer.
     expect((await channelStore.direct(owner, botId)).id).toBe(own.id);
+    // And their list says which is the task's, so choosing where check-ins reach them leaves it out.
+    const { channels: listedChannels } = await channelStore.list(owner);
+    expect(
+      Object.fromEntries(
+        listedChannels.map((channel) => [channel.id, channel.task]),
+      ),
+    ).toEqual({ [own.id]: false, [task.channelId]: true });
   });
 
   test("started twice at once, an item opens one task and one conversation, and runs its turn once", async () => {
@@ -533,6 +573,20 @@ describe("where a task stands", () => {
       );
     if (!request) throw new Error("No approval was asked for.");
     expect(request.action.threadId).toBe(waiting.threadId ?? "");
+    // Its next step is what it waits for, in the words of the approval card in its conversation.
+    expect(waiting.next).toBe(
+      "Waiting for your approval: mail/send message on mail",
+    );
+    // Still that, once the person has said something there, never their own words back to them.
+    await channelStore.recordActivity(owner, task.channelId, {
+      text: "Also copy Ana on it.",
+      agentId: null,
+      at: new Date(),
+    });
+    expect(await taskStore.get(owner.id, task.id)).toMatchObject({
+      status: "needs_input",
+      next: "Waiting for your approval: mail/send message on mail",
+    });
 
     await approvalService.decide(owner.id, request.id, "allow_once");
     // Decided, and being carried out: nothing waits on the person now.
@@ -550,6 +604,80 @@ describe("where a task stands", () => {
       status: "ready_for_review",
       next: "I sent your reply to Sam.",
     });
+  });
+
+  test("a task asks before every change though Ask before making changes is off, its reads run freely, and the person's own conversation is unchanged", async () => {
+    const { owner, botId, own, item } = await seed();
+    // The deployment's default: off, and the person never turned it on.
+    expect(await approvalStore.enabled(owner.id)).toBe(false);
+    const toSam = {
+      to: "sam@example.test",
+      body: "Friday works for the spec.",
+    };
+    script = (input) => {
+      const answered = input.messages.filter(
+        (message) => message.role === "tool",
+      ).length;
+      return answered === 0
+        ? callTool(input, "read_inbox", { query: "from:sam" }, "read")
+        : answered === 1
+          ? callTool(input, "send_message", toSam, "send")
+          : reply(input, "I sent your reply to Sam.");
+    };
+    const [readBefore, sentBefore] = [read.length, sent.length];
+
+    const task = await start(owner, item.id);
+    await tasks.idle();
+    // The read ran without asking; the send did not run, and waits for the person.
+    expect(read.length).toBe(readBefore + 1);
+    expect(sent.length).toBe(sentBefore);
+    const waiting = await database
+      .select()
+      .from(approvalRequests)
+      .where(
+        and(
+          eq(approvalRequests.ownerUserId, owner.id),
+          eq(approvalRequests.status, "pending"),
+        ),
+      );
+    expect(waiting.map((request) => request.action.policy)).toEqual([
+      {
+        behaviour: "ask",
+        source: "task",
+        reason: "Tasks started from a check-in ask before every change.",
+      },
+    ]);
+    expect(waiting[0]?.action).toMatchObject({
+      toolRef: "mail/send_message",
+      args: toSam,
+    });
+    expect(await taskStore.get(owner.id, task.id)).toMatchObject({
+      status: "needs_input",
+      next: "Waiting for your approval: mail/send message on mail",
+    });
+
+    // The same send in the person's own conversation with the Bot goes, as their switch says.
+    await runTurn({
+      ownerUserId: owner.id,
+      routineId: `${prefix}-own-${randomUUID()}`,
+      agentId: botId,
+      threadId: own.threadId,
+      instruction: "Reply to Sam.",
+      userMessage: { id: randomUUID(), role: "user", content: "Reply to Sam." },
+      initiator: PERSON_INITIATOR,
+    });
+    expect(sent.length).toBe(sentBefore + 1);
+    expect(
+      await database
+        .select()
+        .from(approvalRequests)
+        .where(
+          and(
+            eq(approvalRequests.ownerUserId, owner.id),
+            eq(approvalRequests.status, "pending"),
+          ),
+        ),
+    ).toHaveLength(1);
   });
 
   test("a turn that fails twice reads failed, says so in its conversation, and Try again runs once however often it is pressed", async () => {
@@ -832,6 +960,10 @@ describe("what needs the person", () => {
         question: "Which date works?",
       },
     });
+    // Asked after the approval, the question is what it now waits for.
+    expect((await taskStore.get(owner.id, task.id)).next).toBe(
+      "Waiting for your answer: Which date works?",
+    );
     // ...and an approval waits in the person's own conversation with it, which is no task's.
     await database.insert(approvalRequests).values({
       ...request,

@@ -68,6 +68,11 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** When the caller last had this channel open, or null for never. The caller's, only. */
   lastReadAt: Date | null;
+  /**
+   * Whether this is a task's own conversation (tasks/*), which holds one piece of work. Choosers of
+   * "a conversation with this Bot", such as where its check-ins reach the person, leave these out.
+   */
+  task: boolean;
 };
 
 /** What a client that ran an agent reports back about the message it just saw. */
@@ -614,6 +619,7 @@ export function createChannelStore(
           createdAt: channels.createdAt,
           pinnedAt: channelMemberships.pinnedAt,
           lastReadAt: channelMemberships.lastReadAt,
+          task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
         })
         .from(channels)
         .innerJoin(
@@ -673,6 +679,7 @@ export function createChannelStore(
           createdAt: row.createdAt,
           pinned: row.pinnedAt !== null,
           lastReadAt: row.lastReadAt,
+          task: row.task,
         });
       }
       return { channels: [...summaries.values()], nextCursor };
@@ -1398,6 +1405,7 @@ function channelSummaryDto(
     pinned: channel.pinned,
     // Serialised as ISO-8601 like lastMessageAt, so the browser can compare the two as strings.
     lastReadAt: channel.lastReadAt?.toISOString() ?? null,
+    task: channel.task,
     work: work.map(channelWorkDto),
     /*
      * Only ever true from here. A person's own run is not on any row this can read, so a roster

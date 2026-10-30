@@ -27,6 +27,7 @@
 import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { z } from "zod";
+import { recordHeadlessUsage } from "../admin/controls";
 import type { AuditInitiator } from "../audit";
 import type { MemoryStore } from "../memory/store";
 import { REFUSAL_MARKER } from "../plugins/tools";
@@ -37,6 +38,7 @@ import type {
   ProactiveAdmin,
   ProactiveRunTrigger,
   ProactiveSkipReason,
+  RunNowResponse,
   TaskService,
 } from "./contracts";
 import {
@@ -45,7 +47,12 @@ import {
   proactiveRunIdOf,
   refusalsFor,
 } from "./restriction";
-import type { PriorItems, ProactiveRead, ProactiveStore } from "./store";
+import {
+  PROACTIVE_RUN_KIND,
+  type PriorItems,
+  type ProactiveRead,
+  type ProactiveStore,
+} from "./store";
 import {
   clearInputSchema,
   linkKey,
@@ -54,6 +61,7 @@ import {
   ProactiveRefusedError,
   type ProactiveSetting,
   proactiveMemoryInputSchema,
+  SKIPPED_BECAUSE,
   suggestionInputSchema,
   titleKey,
 } from "./types";
@@ -63,7 +71,7 @@ import {
   researchInstruction,
 } from "./window";
 
-export const PROACTIVE_RUN_KIND = "proactive.run";
+export { PROACTIVE_RUN_KIND };
 /**
  * How long a check-in may hold its queue item and its `running` row. A turn is cut off at three
  * minutes, so anything still running at ten belongs to a replica that stopped.
@@ -201,8 +209,14 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     deps.admin
       ? deps.admin.proactiveDailyRuns(agentId)
       : Promise.resolve(DEFAULT_DAILY_RUNS);
-  /** Which setting a run belongs to, for the run's own tools. Local: the turn runs in this process. */
-  const running = new Map<string, ProactiveSetting>();
+  /**
+   * Which setting a run belongs to, for the run's own tools, and whether its turn got as far as
+   * asking for them. Local: the turn runs in this process.
+   */
+  const running = new Map<
+    string,
+    { setting: ProactiveSetting; reached: boolean }
+  >();
 
   async function serverFor(ref: string) {
     const servers = await deps.catalogue.listServers();
@@ -397,6 +411,56 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       await tryPing(ownerUserId).catch(logged("proactive-ping-error"));
   }
 
+  /**
+   * Why a check-in for this setting would find nothing, or null when it may go to the model. The
+   * gates, cheapest first, none of them a model call. Asked by the run itself, and by Run now before
+   * it queues one, so the person hears at once why it can't.
+   */
+  async function gateOf(
+    setting: ProactiveSetting,
+  ): Promise<ProactiveSkipReason | null> {
+    if (await deps.store.personOff(setting.ownerUserId)) return "off_person";
+    if (await deps.store.paused(setting.ownerUserId, setting.agentId))
+      return "paused";
+    if (!(await allowed(setting.ownerUserId))) return "off_admin";
+    if (
+      (await deps.store.runsToday(setting.id)) >=
+      (await dailyRuns(setting.agentId))
+    )
+      return "capped";
+    if (
+      !(await deps.resolveScope(
+        setting.ownerUserId,
+        setting.channelId,
+        setting.agentId,
+      ))
+    )
+      return "unreachable";
+    if (
+      deps.readableApps &&
+      (await deps.readableApps(setting.ownerUserId, setting.agentId)).length ===
+        0
+    )
+      return "no_sources";
+    return null;
+  }
+
+  /** A check-in a gate stopped, in the ledger with its reason, where the Bot's check-ins read it. */
+  async function skip(
+    setting: ProactiveSetting,
+    runId: string,
+    trigger: ProactiveRunTrigger,
+    reason: ProactiveSkipReason,
+  ) {
+    if (reason === "unreachable")
+      await deps.store.recordRun(
+        setting.id,
+        "error",
+        "This Bot or its conversation is no longer available to you, so it didn't check in.",
+      );
+    await deps.store.skipRun({ id: runId, setting, trigger, reason });
+  }
+
   async function run(
     settingId: string,
     runId: string,
@@ -405,49 +469,26 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
   ) {
     const setting = await deps.store.byId(settingId);
     if (!setting?.enabled) return;
-    const skip = (reason: ProactiveSkipReason) =>
-      deps.store.skipRun({ id: runId, setting, trigger, reason });
-    // The gates, cheapest first, none of them a model call.
-    if (await deps.store.personOff(setting.ownerUserId))
-      return skip("off_person");
-    if (await deps.store.paused(setting.ownerUserId, setting.agentId))
-      return skip("paused");
-    if (!(await allowed(setting.ownerUserId))) return skip("off_admin");
-    if (
-      (await deps.store.runsToday(setting.id)) >=
-      (await dailyRuns(setting.agentId))
-    )
-      return skip("capped");
-    const scope = await deps.resolveScope(
-      setting.ownerUserId,
-      setting.channelId,
-      setting.agentId,
-    );
-    if (!scope) {
-      await deps.store.recordRun(
-        setting.id,
-        "error",
-        "This Bot or its conversation is no longer available to you, so it didn't check in.",
-      );
-      return skip("unreachable");
-    }
-    if (
-      deps.readableApps &&
-      (await deps.readableApps(setting.ownerUserId, setting.agentId)).length ===
-        0
-    )
-      return skip("no_sources");
+    const reason = await gateOf(setting);
+    if (reason) return skip(setting, runId, trigger, reason);
     // Read before this run is in the ledger, so the window opens at the check-in before it.
     const last = await deps.store.lastCheckIn(setting.id);
     const threadId = deps.mintThreadId();
     if (!(await deps.store.beginRun({ id: runId, setting, trigger, threadId })))
-      return skip("busy");
+      return skip(setting, runId, trigger, "busy");
     await deps.store.recordRun(setting.id, "running");
     const prior = await deps.store.priorItems(
       setting.ownerUserId,
       setting.agentId,
     );
-    running.set(runId, setting);
+    const turn = { setting, reached: false };
+    running.set(runId, turn);
+    const instruction = researchInstruction(
+      setting,
+      checkInWindow(last, now()),
+      contextOf(prior),
+      trigger,
+    );
     let failure: string | null = null;
     try {
       await deps.runTurn({
@@ -456,11 +497,17 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         agentId: setting.agentId,
         // A fresh thread: an hourly check-in must not carry every earlier one, and their mail.
         threadId,
-        instruction: researchInstruction(
-          setting,
-          checkInWindow(last, now()),
-          contextOf(prior),
-        ),
+        instruction,
+        /*
+         * Its own message, as it is: a check-in is not a routine, and the runner puts a routine's
+         * frame ("one of your routines is firing right now, on its schedule") around any instruction
+         * that arrives without one. The instruction opens by saying what started it.
+         */
+        userMessage: {
+          id: `check-in:${runId}`,
+          role: "user",
+          content: instruction,
+        },
         initiator: proactiveInitiator(runId),
         runId,
         signal,
@@ -470,6 +517,14 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     } finally {
       running.delete(runId);
     }
+    // Metered once its turn was admitted and went to the model, whether or not it then finished.
+    if (turn.reached)
+      await recordHeadlessUsage({
+        ownerUserId: setting.ownerUserId,
+        agentId: setting.agentId,
+        threadId,
+        runId,
+      });
     const [raised, reads] = await Promise.all([
       deps.store.countSuggestions(runId),
       deps.store.readsFor(runId),
@@ -558,14 +613,18 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       initiator: AuditInitiator;
     }): Promise<HeadlessTool[]> {
       const runId = proactiveRunIdOf(input.initiator);
-      const setting = runId ? running.get(runId) : undefined;
+      const turn = runId ? running.get(runId) : undefined;
+      const setting = turn?.setting;
       if (
         !runId ||
+        !turn ||
         !setting ||
         setting.ownerUserId !== input.ownerUserId ||
         setting.agentId !== input.agentId
       )
         return [];
+      // The runner asks for a turn's tools once it admitted the turn, just before the model.
+      turn.reached = true;
       const own = toolsForRun(setting, runId);
       const ownNames = new Set(own.map((tool) => tool.definition.name));
       const denied = (
@@ -589,28 +648,60 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         );
       return deps.store.create(ownerUserId, input, deps.mintThreadId());
     },
-    /** Queue a run now, unless one ran or was queued in the last ten minutes. */
-    async runNow(ownerUserId: string, id: string) {
+    /**
+     * Check in now, because the person asked. Either it is queued, or they are told plainly why it
+     * isn't, never a silent nothing:
+     * - refused while one is running, or within ten minutes of one that reached the model;
+     * - skipped at once, with its reason in the ledger and in the answer, when a gate would stop it
+     *   anyway (nothing it can read, paused, turned off). A skip costs nothing, so it never starts
+     *   the ten minutes and the next Run now is tried again.
+     *
+     * Pressed twice before it runs, it is queued once: the queue key names the setting's newest
+     * check-in, so both presses offer the same key, and the next press after any check-in, skipped
+     * or not, offers a new one.
+     */
+    async runNow(ownerUserId: string, id: string): Promise<RunNowResponse> {
       const setting = await deps.store.get(ownerUserId, id);
       if (!setting.enabled)
         throw new ProactiveRefusedError(
           "Turn on check-ins for this Bot first.",
         );
-      if (
-        setting.lastRunAt &&
-        now().getTime() - setting.lastRunAt.getTime() < RUN_NOW_GAP_MS
-      )
+      const latest = await deps.store.latestRun(setting.id);
+      if (latest?.outcome === "running")
+        throw new ProactiveRefusedError("This Bot is checking in now.");
+      const last = await deps.store.lastCheckIn(setting.id);
+      const wait = last
+        ? RUN_NOW_GAP_MS - (now().getTime() - last.startedAt.getTime())
+        : 0;
+      if (wait > 0) {
+        const minutes = Math.ceil(wait / 60_000);
         throw new ProactiveRefusedError(
-          "This Bot checked in less than ten minutes ago. Try again later.",
+          `This Bot checked in less than ten minutes ago. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
         );
+      }
       const runId = crypto.randomUUID();
-      const bucket = Math.floor(now().getTime() / RUN_NOW_GAP_MS);
-      const outcome = await deps.queue.offer({
+      const reason = await gateOf(setting);
+      if (reason) {
+        await skip(setting, runId, "run_now", reason);
+        return { queued: false, skipped: reason, why: SKIPPED_BECAUSE[reason] };
+      }
+      const payload = { settingId: setting.id, runId, trigger: "run_now" };
+      const offered = await deps.queue.offer({
         kind: PROACTIVE_RUN_KIND,
-        key: `${setting.id}:now:${bucket}`,
-        payload: { settingId: setting.id, runId, trigger: "run_now" },
+        key: `${setting.id}:now:${latest?.id ?? "first"}`,
+        payload,
       });
-      return { queued: outcome === "queued" };
+      /*
+       * Already offered and already done: that Run now came up after check-ins were turned off and
+       * ran nothing, so no newer check-in moved the key on. This one is new work under its own key.
+       */
+      if (offered === "already" && !(await deps.store.runQueued(setting.id)))
+        await deps.queue.offer({
+          kind: PROACTIVE_RUN_KIND,
+          key: `${setting.id}:now:${runId}`,
+          payload,
+        });
+      return { queued: true };
     },
     /** Hide: remembered for thirty days and told to every later check-in. */
     async dismiss(ownerUserId: string, suggestionId: string) {

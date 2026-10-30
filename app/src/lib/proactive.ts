@@ -7,6 +7,20 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { client } from "@/lib/client";
 import { taskKeys } from "@/lib/tasks/queries";
 
+/**
+ * A Bot's newest check-in, from the run ledger: how it ended, and for one that was skipped or
+ * couldn't finish, why, in one sentence the server wrote for the person. Null before the first.
+ */
+export type LastCheckIn = {
+  outcome: "running" | "quiet" | "raised" | "failed" | "skipped";
+  trigger: "schedule" | "run_now";
+  skipReason: string | null;
+  why: string | null;
+  itemsRaised: number;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
 export type ProactiveSetting = {
   id: string;
   agentId: string;
@@ -18,7 +32,18 @@ export type ProactiveSetting = {
   lastRunAt: string | null;
   lastStatus: "idle" | "running" | "succeeded" | "error";
   lastError: string | null;
+  /** Absent from a server that predates it, which reads as no check-in yet. */
+  lastRun?: LastCheckIn | null;
 };
+
+/**
+ * What Run now answered: queued, or skipped at once with the reason a check-in would have been
+ * skipped anyway. A Run now that can't be tried (one is running, or one ran in the last ten
+ * minutes) is refused, and the client raises the server's sentence.
+ */
+export type RunNowAnswer =
+  | { queued: true }
+  | { queued: false; skipped: string; why: string };
 
 /**
  * `GET /api/proactive/settings`. `allowed` is false when an admin turned check-ins off for this
@@ -48,6 +73,20 @@ export type ProactiveSuggestion = {
   pingId: string | null;
   createdAt: string;
 };
+
+/**
+ * The site an item's link opens, as its Open button names it: the link's own host, without "www.".
+ * Never the app the Bot read it with, which is often not where the link goes: a web search finds a
+ * page on another site, and "Open in Exa Search" over a link to bun.com sent people somewhere else.
+ * Null for a link that won't parse.
+ */
+export function sourceSite(link: string): string | null {
+  try {
+    return new URL(link).hostname.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}
 
 export const proactiveKeys = {
   settings: ["proactive", "settings"] as const,
@@ -113,11 +152,13 @@ export const updateProactiveSetting = (
     body: input,
     fallback: "Couldn't change check-ins",
   });
-export const runProactiveNow = (id: string) =>
-  client(`/api/proactive/settings/${encodeURIComponent(id)}/run`, {
-    method: "POST",
-    fallback: "Couldn't start a check-in",
-  });
+export const runProactiveNow = async (id: string): Promise<RunNowAnswer> =>
+  (
+    await client(`/api/proactive/settings/${encodeURIComponent(id)}/run`, {
+      method: "POST",
+      fallback: "Couldn't start a check-in",
+    })
+  ).json();
 export const removeProactiveSetting = (id: string) =>
   client(`/api/proactive/settings/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -183,22 +224,24 @@ export const changeProactiveSettingMutationOptions = (
   queryClient: QueryClient,
 ) =>
   mutationOptions({
-    mutationFn: ({
+    /** Run now's answer, for the row to say what became of it; nothing for any other change. */
+    mutationFn: async ({
       setting,
       change,
     }: {
       setting: Pick<ProactiveSetting, "id" | "enabled">;
       change: ProactiveChange;
-    }) =>
-      change.kind === "run"
-        ? runProactiveNow(setting.id)
-        : change.kind === "remove"
-          ? removeProactiveSetting(setting.id)
-          : updateProactiveSetting(
-              setting.id,
-              change.kind === "toggle"
-                ? { enabled: !setting.enabled }
-                : { intervalMinutes: change.minutes },
-            ),
+    }): Promise<RunNowAnswer | null> => {
+      if (change.kind === "run") return runProactiveNow(setting.id);
+      if (change.kind === "remove") await removeProactiveSetting(setting.id);
+      else
+        await updateProactiveSetting(
+          setting.id,
+          change.kind === "toggle"
+            ? { enabled: !setting.enabled }
+            : { intervalMinutes: change.minutes },
+        );
+      return null;
+    },
     onSuccess: settleProactive(queryClient),
   });
