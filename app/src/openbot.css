@@ -1,9 +1,17 @@
 /*
- * What the default skin adds beyond theme.css: its typeface, the edge and tone of a Bot's orb, and
- * the composer's column. Its colors are theme.css's own shadcn tokens. Every rule is scoped to
+ * What the default skin adds beyond theme.css: its typeface, the firmer edge and soft lift of its
+ * rows and cards, the edge and tone of a Bot's orb, and the composer's column. Its palette is
+ * theme.css's own shadcn tokens. Every rule is scoped to
  * `:root:not([data-skin])`, so OpenDuet, OpenDots and OpenMuse keep their own face and frame.
  */
 :root:not([data-skin]) {
+  /* A firmer edge for rows, cards and tiles. */
+  --line-strong: #c4c6d8;
+  /* The faint fill behind an empty state. */
+  --wash: #f4f4fa;
+  --card-shadow: 0 1px 2px rgb(1 5 7 / 5%), 0 6px 16px -10px rgb(1 5 7 / 16%);
+  --card-shadow-hover:
+    0 2px 4px rgb(1 5 7 / 6%), 0 14px 28px -14px rgb(1 5 7 / 24%);
   /* The hairline and drop that lift a Bot's orb off the surface. */
   --orb-edge: 0 0 0 1px rgb(1 5 7 / 7%), 0 1px 3px -1px rgb(1 5 7 / 20%);
   --font-sans:
@@ -12,6 +20,11 @@
   --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
 }
 :root:not([data-skin]).dark {
+  --line-strong: #4d4670;
+  --wash: #211d30;
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 8px 18px -12px rgb(0 0 0 / 60%);
+  --card-shadow-hover:
+    0 2px 6px rgb(0 0 0 / 40%), 0 16px 30px -14px rgb(0 0 0 / 70%);
   --orb-edge: 0 0 0 1px rgb(255 255 255 / 8%);
 }
 

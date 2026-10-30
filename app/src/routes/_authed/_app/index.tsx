@@ -19,6 +19,7 @@ import {
 import { useStartChannel } from "@/lib/channels/start";
 import { appConfig } from "@/lib/generated/application-config";
 import { homeExamples } from "@/lib/home-examples";
+import { cn } from "@/lib/utils";
 import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
@@ -90,7 +91,14 @@ function RouteComponent() {
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-center">
+          <h1
+            className={cn(
+              "tracking-tight text-center",
+              openbot
+                ? "text-[32px] font-bold leading-tight"
+                : "text-2xl font-semibold",
+            )}
+          >
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
@@ -98,7 +106,7 @@ function RouteComponent() {
           </h1>
           {/* In OpenBot's own look the hint moves up here, ahead of the composer it explains. */}
           {openbot ? (
-            <p className="mt-2 max-w-[60ch] text-center text-muted-foreground">
+            <p className="mt-2 max-w-[60ch] text-center text-base text-muted-foreground">
               Ask for an answer, a draft, or a job done on a Bot's own computer.
               {/* The routing sentence is the old hint, shown only while there is a Bot to route to. */}
               {fallback ? (
@@ -117,7 +125,14 @@ function RouteComponent() {
         >
           <Composer
             agents={toAgentOptions(agents)}
-            className="w-full max-w-2xl"
+            className={cn(
+              "w-full max-w-2xl",
+              // The frame is the composer's own form; it is reached from here through its slot.
+              openbot &&
+                "[&_[data-slot=composer]]:rounded-[18px] [&_[data-slot=composer]]:border-(--line-strong) [&_[data-slot=composer]]:shadow-(--card-shadow) [&_[data-slot=composer]]:focus-within:border-ring [&_[data-slot=composer]]:focus-within:ring-3 [&_[data-slot=composer]]:focus-within:ring-ring/50",
+            )}
+            editorClassName={openbot ? "text-base" : undefined}
+            editorMinHeight={openbot ? 72 : undefined}
             disabled={!fallback}
             onSubmit={async (draft) => {
               // A channel is pinned to one coworker for the life of its thread, so the coworker is
@@ -219,7 +234,15 @@ function RouteComponent() {
               <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
                 {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
                   <li className="min-w-0" key={agent.id}>
-                    <Link search={{ agent: agent.id }} to="/channel/new">
+                    <Link
+                      className={cn(
+                        // The card is AgentCard's own; its edge and lift are set from here.
+                        openbot &&
+                          "block rounded-lg shadow-(--card-shadow) transition-shadow hover:shadow-(--card-shadow-hover) [&>div]:border-(--line-strong) dark:[&>div]:border-(--line-strong) dark:[&>div:hover]:border-ring",
+                      )}
+                      search={{ agent: agent.id }}
+                      to="/channel/new"
+                    >
                       <AgentCard agent={agent} appearance="row" />
                     </Link>
                   </li>
@@ -237,7 +260,7 @@ function RouteComponent() {
             // working off that same, successfully loaded `agents`) proves.
             <>
               <h2 className="font-bold text-lg">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
+              <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
                     Couldn't load the Bots shared with you.
@@ -251,7 +274,7 @@ function RouteComponent() {
             // plain copy for both: an empty roster is a fact, not an error.
             <>
               <h2 className="font-bold text-lg">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
+              <Empty className="mt-4 h-[140px] border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
                     Nobody has shared a Bot with you yet.

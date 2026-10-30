@@ -101,9 +101,15 @@ describe("default skin extras", () => {
     expect(light.get("--font-mono")).toContain("Atkinson Hyperlegible Mono");
   });
 
-  test("the orb's edge is set for light and dark", () => {
-    expect(light.has("--orb-edge")).toBe(true);
-    expect(dark.has("--orb-edge")).toBe(true);
+  test.each([
+    "--line-strong",
+    "--wash",
+    "--card-shadow",
+    "--card-shadow-hover",
+    "--orb-edge",
+  ])("%s is set for light and dark", (token) => {
+    expect(light.has(token)).toBe(true);
+    expect(dark.has(token)).toBe(true);
   });
 
   test("it sets no colors of its own", () => {

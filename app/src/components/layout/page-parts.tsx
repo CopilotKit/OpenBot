@@ -1,5 +1,6 @@
 import type * as React from "react";
 import { cn } from "@/lib/utils";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 import {
   Empty,
   EmptyContent,
@@ -150,6 +151,25 @@ export function PageSection({
  * them. Rendering nothing when there is nothing is deliberate — an empty bordered box reads as a
  * thing that failed to load, where absence reads as nothing to see yet.
  */
+/*
+ * OpenBot's own look gives rows and cards a firmer edge and a soft shadow, so a surface reads as one
+ * on the white ground. A skin keeps the hairline it had, and its dark mode keeps no edge at all.
+ *
+ * Each token falls back to what the skin draws, because the extension renders these parts with
+ * `theme.css` alone: it never loads `openbot.css`, so the default skin's tokens do not exist there.
+ */
+const SURFACE_EDGE = {
+  openbot:
+    "border-[var(--line-strong,var(--border))] shadow-[var(--card-shadow,0_0_#0000)] dark:border-[var(--line-strong,transparent)]",
+  skin: "border-border dark:border-transparent",
+};
+
+function useSurfaceEdge() {
+  return useSkinId() === DEFAULT_SKIN
+    ? SURFACE_EDGE.openbot
+    : SURFACE_EDGE.skin;
+}
+
 export function PageRows({
   children,
   className,
@@ -157,6 +177,7 @@ export function PageRows({
   children: React.ReactNode;
   className?: string;
 }) {
+  const edge = useSurfaceEdge();
   return (
     /*
      * The rows are squared off and the card clips them. `Item` carries `rounded-lg` of its own, which
@@ -169,7 +190,8 @@ export function PageRows({
      */
     <div
       className={cn(
-        "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
+        "mt-4 overflow-hidden rounded-lg border bg-card",
+        edge,
         "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
         // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
         // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
@@ -199,13 +221,9 @@ export function PageCard({
   /** The form's buttons, Cancel then the primary action. */
   footer?: React.ReactNode;
 }) {
+  const edge = useSurfaceEdge();
   return (
-    <div
-      className={cn(
-        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
-        className,
-      )}
-    >
+    <div className={cn("rounded-lg border bg-card p-4", edge, className)}>
       {children}
       {footer ? (
         <div className="mt-6 flex justify-end gap-2">{footer}</div>
@@ -235,9 +253,18 @@ export function PageEmpty({
   icon?: React.ComponentType<{ className?: string }>;
   title?: string;
 }) {
+  const openbot = useSkinId() === DEFAULT_SKIN;
   return (
     // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
-    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-border">
+    <Empty
+      className={cn(
+        "relative isolate mt-4 overflow-hidden rounded-lg border",
+        // OpenBot's own look gives it the firmer edge and faint wash; a skin keeps the hairline.
+        openbot
+          ? "border-[var(--line-strong,var(--border))] bg-[var(--wash,transparent)]"
+          : "border-border",
+      )}
+    >
       {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
       <div aria-hidden className="empty-pattern" />
       <EmptyHeader>

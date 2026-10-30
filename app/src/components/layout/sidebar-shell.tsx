@@ -6,6 +6,15 @@ import {
   parseStoredSidebarOpen,
   SIDEBAR_STORAGE_KEY,
 } from "@/lib/sidebar";
+import { cn } from "@/lib/utils";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
+
+/**
+ * OpenBot's own sidebar gutters: the header, content and footer already sit 8px in from the edge;
+ * every item inside them starts 10px further in, so the search icon, the orbs, the nav icons and the
+ * avatar share one left edge. A skin keeps the spacing it was designed with.
+ */
+const OPENBOT_FRAME = "[&_[data-sidebar=menu-button]]:px-2.5";
 
 /**
  * The frame the three shells — app, admin, settings — hang their sidebar in.
@@ -28,6 +37,7 @@ export function SidebarShell({
   width: string;
 }) {
   // Read before the first paint, so a shell somebody left collapsed never flashes open.
+  const openbot = useSkinId() === DEFAULT_SKIN;
   const [open, setOpen] = useState(() =>
     parseStoredSidebarOpen(window.localStorage.getItem(SIDEBAR_STORAGE_KEY)),
   );
@@ -40,7 +50,7 @@ export function SidebarShell({
 
   return (
     <SidebarProvider
-      className={className}
+      className={cn(openbot && OPENBOT_FRAME, className)}
       onOpenChange={setOpen}
       open={open}
       /*

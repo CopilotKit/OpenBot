@@ -10,7 +10,7 @@ export const NOTICE_TAG = "openbot-recorder-notice";
 
 export const NOTICE_TOKENS = {
   light: {
-    "--background": "#f8f8fb",
+    "--background": "#f9f9fb",
     "--foreground": "#010507",
     "--card": "#ffffff",
     "--card-foreground": "#010507",
@@ -30,14 +30,14 @@ export const NOTICE_TOKENS = {
     "--border": "#3a3452",
     "--primary": "#f0f0f4",
     "--primary-foreground": "#010507",
-    "--secondary": "#332e4a",
-    "--muted-foreground": "#a3a3b0",
+    "--secondary": "#1f1c2c",
+    "--muted-foreground": "#9a9aa6",
     "--destructive": "#ff9aa0",
     "--ring": "#8d97ff",
   },
 } as const;
 
-export const RADIUS = "0.5rem";
+export const RADIUS = "0.625rem";
 
 type Choice = "stop" | "restart" | "continue";
 
