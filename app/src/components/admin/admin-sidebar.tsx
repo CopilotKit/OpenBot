@@ -1,15 +1,16 @@
 import {
   IconArrowLeft,
   IconBuildingBank,
+  IconBulb,
   IconChecks,
   IconCode,
   IconDeviceDesktop,
-  IconFileText,
   IconKey,
   IconLayoutGrid,
   IconListDetails,
   IconPuzzle,
   IconShieldCheck,
+  IconSlash,
   IconUsers,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
@@ -79,12 +80,12 @@ const GROUPS: {
       },
       {
         title: "Skills",
-        icon: IconFileText,
+        icon: IconSlash,
         linkOptions: { to: "/admin/skills" },
       },
       {
         title: "Automatic learning",
-        icon: IconFileText,
+        icon: IconBulb,
         linkOptions: { to: "/admin/learning" },
       },
       {

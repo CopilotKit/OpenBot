@@ -7,6 +7,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { AppInitial } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -178,13 +179,13 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                   {/* The test id names the screen, not the vendor: this module draws whichever
                       broker is active, and the id is not user-visible. */}
                   <Item data-testid={`directory-${entry.slug}`} size="sm">
-                    {/* The vendor's own mark where the broker supplies one, and a plug where it does
-                        not, so a list of third parties still has a fixed left edge. */}
+                    {/* The vendor's own mark where the broker supplies one, and its initial where it
+                        does not, so a list of third parties still has a fixed left edge. */}
                     <ItemMedia variant={entry.logo ? "image" : "icon"}>
                       {entry.logo ? (
                         <img alt="" src={entry.logo} />
                       ) : (
-                        <IconPlug />
+                        <AppInitial name={entry.name} />
                       )}
                     </ItemMedia>
                     <ItemContent>
