@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A store connection is checked against the store itself
+
+After connecting a key, OpenBot checks it with one argument-free read, preferring an identity read
+and otherwise taking the first safe read alphabetically. For Shopify that was `SHOPIFY_COUNT_BLOGS`,
+which needs the `read_content` scope a store app with only order and product scopes does not have,
+so a working key was reported as rejected. A store's own details now count as an identity read, so
+the check calls `SHOPIFY_GET_SHOP_DETAILS` instead.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
