@@ -90,3 +90,22 @@ describe("the extension keeps today's palette", () => {
     expect(read("../src/styles.css")).toContain('@import "./openbot.css";');
   });
 });
+
+/*
+ * Menus, pickers and comboboxes mark the highlighted row with `--accent` on `--popover`, and some
+ * rows sit straight on `--background`. When the accent equals either surface the highlight vanishes,
+ * which is how dark mode's menus first shipped.
+ */
+describe("a highlighted row can be seen", () => {
+  const css = read("../src/openbot.css");
+  test.each([
+    ["light", LIGHT],
+    ["dark", DARK],
+  ])("%s: --accent differs from --popover and --background", (_, selector) => {
+    const tokens = declared(css, selector);
+    const accent = tokens.get("--accent");
+    expect(accent).toBeDefined();
+    expect(accent).not.toBe(tokens.get("--popover"));
+    expect(accent).not.toBe(tokens.get("--background"));
+  });
+});
