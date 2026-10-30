@@ -23,7 +23,6 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
-import { appConfig } from "@/lib/generated/application-config";
 
 export const Route = createFileRoute("/_authed/_app/")({
   component: RouteComponent,
@@ -51,11 +50,10 @@ function RouteComponent() {
     <>
       <SidebarToggleBar />
       <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
+        {/* No product-name label above the greeting: the sidebar already names the product, and a
+            second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center">
-          <h2 className="text-sm uppercase text-muted-foreground font-medium tracking-tight text-center">
-            {appConfig.brand.productName}
-          </h2>
-          <h1 className="text-2xl font-bold tracking-tight mt-1.5 text-center">
+          <h1 className="text-2xl font-semibold tracking-tight text-center">
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
