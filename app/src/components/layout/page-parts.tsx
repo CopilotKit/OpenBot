@@ -243,7 +243,10 @@ export function PageEmpty({
   title?: string;
 }) {
   return (
-    <Empty className="mt-4 rounded-lg border border-border">
+    // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
+    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-border">
+      {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
+      <div aria-hidden className="empty-pattern" />
       <EmptyHeader>
         {Icon ? (
           <EmptyMedia variant="icon">
