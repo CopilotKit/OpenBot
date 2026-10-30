@@ -154,7 +154,7 @@ function RouteComponent() {
            */}
           {loading ? (
             <>
-              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
               <Skeleton className="mt-4 h-[180px]" />
             </>
           ) : explore?.length ? (
@@ -166,7 +166,10 @@ function RouteComponent() {
               aria-labelledby="explore-agents-heading"
             >
               <div className="flex flex-row items-center justify-between gap-4">
-                <h2 id="explore-agents-heading" className="font-bold text-lg">
+                <h2
+                  id="explore-agents-heading"
+                  className="font-semibold text-base"
+                >
                   Explore Bots
                 </h2>
                 {/*
@@ -201,7 +204,7 @@ function RouteComponent() {
             // card there would say the opposite of what a populated composer beside it (still
             // working off that same, successfully loaded `agents`) proves.
             <>
-              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
               <Empty className="mt-4 h-[180px] border border-dashed border-destructive">
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
@@ -215,7 +218,7 @@ function RouteComponent() {
             // when it failed but `agents` is defined — a loaded, empty slice either way. Same
             // plain copy for both: an empty roster is a fact, not an error.
             <>
-              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
               <Empty className="mt-4 h-[180px] border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">

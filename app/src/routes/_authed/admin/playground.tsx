@@ -205,7 +205,9 @@ function PlaygroundPage() {
         <div className="flex items-start gap-2">
           <SidebarToggle className="-ml-2 shrink-0" />
           <div>
-            <h1 className="font-bold text-2xl">Playground</h1>
+            <h1 className="font-semibold text-2xl tracking-tight">
+              Playground
+            </h1>
             <p className="mt-1 max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
               Write a component and publish it without redeploying. Your edits
               are a draft. Conversations only show what is published.
