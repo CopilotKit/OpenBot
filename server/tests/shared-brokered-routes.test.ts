@@ -1,5 +1,5 @@
 // server/tests/shared-brokered-routes.test.ts
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -572,4 +572,8 @@ describe("removing a Shared app", () => {
     expect(line).toBeDefined();
     expect(line).toContain(app);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

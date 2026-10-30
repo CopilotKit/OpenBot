@@ -1673,3 +1673,7 @@ describe("a teammate on somebody else's Team Bot", () => {
     });
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

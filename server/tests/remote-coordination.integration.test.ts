@@ -75,3 +75,7 @@ describe("remote coordination delivery ownership in PostgreSQL", () => {
     );
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

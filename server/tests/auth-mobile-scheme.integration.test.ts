@@ -45,3 +45,7 @@ test("a deployment that runs the native app still lets it sign in", async () => 
   process.env.EXPO_PROJECT_ID = "0b6c3a0e-2a5e-4a4c-9d5a-2f3b8f0c1d2e";
   expect(await sendsSessionTo(createAuth(config, database))).toBe(true);
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

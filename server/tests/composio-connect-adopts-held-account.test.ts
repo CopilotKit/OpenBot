@@ -451,3 +451,7 @@ describe("Connect on a Shared app whose team account Composio already holds", ()
     });
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

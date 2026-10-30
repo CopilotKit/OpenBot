@@ -649,3 +649,7 @@ describe("retiring the credentials a person owns", () => {
     ).toBe(0);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

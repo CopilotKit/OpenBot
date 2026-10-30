@@ -252,3 +252,7 @@ describe("a hop, from the tool call to the delivery", () => {
     ).toBe(true);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

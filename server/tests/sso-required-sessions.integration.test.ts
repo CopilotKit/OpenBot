@@ -109,3 +109,7 @@ test("SSO-required keeps the people already signed in through SSO, and the admin
       .where(inArray(users.id, [ssoUser, acting, googleUser]));
   }
 });
+
+afterAll(async () => {
+  await db.$client.close();
+});

@@ -244,3 +244,7 @@ describe("a skill name written again after the skill was uninstalled", () => {
     expect(held).toEqual([{ ref: keptSlug, agentId: aliceBot }]);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

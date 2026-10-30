@@ -357,3 +357,7 @@ describe("suspending computers nobody is using", () => {
     expect(stopped).toEqual([person]);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

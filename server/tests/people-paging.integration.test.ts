@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { sessions, users } from "../src/db/schema";
@@ -213,4 +213,8 @@ describe("reading the people in a deployment", () => {
   test("finding somebody who is not there answers undefined", async () => {
     expect(await store.find("nobody-by-that-id")).toBeUndefined();
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

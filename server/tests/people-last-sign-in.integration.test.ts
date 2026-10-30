@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import { stampSignIn } from "../src/auth";
 import { createDatabase } from "../src/db/client";
@@ -128,4 +128,8 @@ describe("when somebody was last here", () => {
       stampSignIn(broken, "anybody", SIGNED_IN_AT),
     ).resolves.toBeUndefined();
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

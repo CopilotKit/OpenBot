@@ -431,3 +431,7 @@ describe("offering at most so many under one prefix", () => {
     expect(results.every((result) => result === "queued")).toBe(true);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

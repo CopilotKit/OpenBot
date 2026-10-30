@@ -706,3 +706,7 @@ describe("reset", () => {
     ).toEqual([]);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});
