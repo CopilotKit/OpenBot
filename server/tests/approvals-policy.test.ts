@@ -288,6 +288,34 @@ describe("built-in safety requirements", () => {
     expect(clicking("Send a wire")).toBe("payments");
     expect(clicking("Start a wire transfer")).toBe("payments");
   });
+
+  test("refunds move money; writing an order note does not", () => {
+    const shopify = (toolName: string, args: Record<string, unknown>) =>
+      safetyRequirement(
+        candidate({
+          toolRef: `composio-shopify/${toolName}`,
+          scope: "composio-shopify",
+          args,
+          target: {
+            serverId: "composio-shopify",
+            toolName,
+            url: "https://mcp.composio.dev/shopify",
+            effect: "write",
+          },
+        }),
+      )?.id;
+    // A refund moves money, whatever surrounds it in the action name.
+    expect(
+      shopify("SHOPIFY_CREATE_REFUND", {
+        id: 123,
+        refund_line_items: [{ line_item_id: 1 }],
+      }),
+    ).toBe("payments");
+    // Writing only a note on an order moves no money.
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", { id: 123, note: "gift wrap" }),
+    ).toBeUndefined();
+  });
 });
 
 describe("the reviewer's safety classification", () => {
