@@ -78,6 +78,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### An approval cuts a long value between characters
+
+An approval shows what a Bot is about to type, write or send, cut to 2,000 characters, and each field
+on the OpenTag card is cut to 300. When the cut landed inside an emoji, the approval showed a "�"
+before the "…". The cut now drops the half character instead.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half

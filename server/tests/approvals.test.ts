@@ -565,6 +565,26 @@ test("an approval preview shows what will be typed, written or sent, and still h
   });
 });
 
+test("an approval preview cuts a long value between characters, not inside an emoji", async () => {
+  const { approvalPreview } = await import("../src/approvals/types");
+  const { approvalFields } = await import("../src/delivery/opentag");
+  const hasLoneSurrogate = (text: string) =>
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+      text,
+    );
+  // Each cut lands between the two halves of the emoji that follows the letters.
+  const long = `${"a".repeat(1998)}😀${"b".repeat(100)}`;
+  const preview = approvalPreview(long) as string;
+  expect(hasLoneSurrogate(preview)).toBe(false);
+  expect(preview).toBe(`${"a".repeat(1998)}…`);
+
+  const field = approvalFields({
+    text: `${"a".repeat(298)}😀${"b".repeat(10)}`,
+  });
+  expect(hasLoneSurrogate(field[0]?.value ?? "")).toBe(false);
+  expect(field[0]?.value).toBe(`${"a".repeat(298)}…`);
+});
+
 test("an approved action interrupted before its result was saved continues the conversation once, without repeating", async () => {
   const store = storeFixture();
   const service = serviceModule.createApprovalService(store);
