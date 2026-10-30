@@ -1,7 +1,7 @@
 import {
   IconAlertTriangle,
+  IconBolt,
   IconDeviceDesktop,
-  IconRobot,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -445,7 +445,7 @@ function HostFoldersSection({
       ) : null}
 
       {loading ? null : botIds.length === 0 ? (
-        <PageEmpty icon={IconRobot} title="No Bots yet">
+        <PageEmpty icon={IconBolt} title="No Bots yet">
           Create one, then choose its folders.
         </PageEmpty>
       ) : (

@@ -1,4 +1,4 @@
-import { IconPlugOff, IconRobot, IconTool } from "@tabler/icons-react";
+import { IconBolt, IconPlugOff, IconTool } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -192,7 +192,7 @@ function RouteComponent() {
         title="Bots"
       >
         {bots.length === 0 ? (
-          <PageEmpty icon={IconRobot} title="No Bots yet">
+          <PageEmpty icon={IconBolt} title="No Bots yet">
             Create one to give it this tool.
           </PageEmpty>
         ) : (
