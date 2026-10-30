@@ -64,7 +64,14 @@ const startParameters = z
       .min(1)
       .max(600)
       .optional()
-      .describe("Why it matters or by when, in a sentence, when they said."),
+      /*
+       * Shown on the task's report as its why, so it is the person's, never the Bot's: a Bot told
+       * only "why it matters" filled it with its own reason for making a task ("a multi-step planning
+       * request that benefits from a dedicated task").
+       */
+      .describe(
+        "Why it matters to the person or by when, only as they said it and in their words; leave it out when they said neither. Never your own reason for making this a task, such as that it has several steps.",
+      ),
     source: z
       .string()
       .trim()
@@ -72,7 +79,7 @@ const startParameters = z
       .max(80)
       .optional()
       .describe(
-        "Where it came from, as the person would say it: 'Gmail', 'Google Calendar'. Leave out when it came from the conversation itself.",
+        "The app it came from, as the person would say it: 'Gmail', 'Google Calendar'. Leave out when it came from the conversation itself; never what kind of request it is or why it is a task.",
       ),
     link: z
       .string()
@@ -84,7 +91,7 @@ const startParameters = z
       )
       .optional()
       .describe(
-        "A link to the email or event it came from, when you have one.",
+        "The link to the email or event it came from, exactly as you read it. Leave out when you have none; never a page to use for the work, and never one you made up.",
       ),
   })
   .strict();
