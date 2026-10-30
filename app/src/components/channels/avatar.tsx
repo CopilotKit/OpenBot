@@ -1,15 +1,17 @@
 import { memo } from "react";
 import { BotOrb } from "@/components/agents/orb/bot-orb";
+import { useBotSeeds } from "@/lib/agents/bot-seeds";
 import { cn } from "@/lib/utils";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
  * `use-channel-events` preserves participant id arrays for unchanged rows.
  *
- * Each face is the Bot's orb, with the look its id picks: the same face `AbstractAvatar` draws from
- * the seed, which is the id unless a tenant package set one or the Bot was copied from another
- * (a copy keeps its source's seed). Clipped to its circle, so its glow
- * never spills into the row.
+ * Each face is the Bot's orb, drawn from the seed the Bots list holds for its id: the same face
+ * `AbstractAvatar` draws, whether a tenant package set the seed, the Bot was copied from another (a
+ * copy keeps its source's seed) or its owner chose a new look. Until the list arrives the circle
+ * holds no face, rather than one that is about to change. Clipped to its circle, so its glow never
+ * spills into the row.
  *
  * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
  * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
@@ -23,13 +25,16 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
+  const seedOf = useBotSeeds();
   const avatar =
     participantIds.length === 1 ? (
       <span className="block size-full overflow-hidden rounded-full">
-        <BotOrb seed={participantIds[0]} size={size} />
+        {seedOf ? (
+          <BotOrb seed={seedOf(participantIds[0] as string)} size={size} />
+        ) : null}
       </span>
     ) : (
-      <GroupFaces participantIds={participantIds} size={size} />
+      <GroupFaces participantIds={participantIds} seedOf={seedOf} size={size} />
     );
 
   return (
@@ -66,9 +71,11 @@ const LAYOUTS = {
  */
 function GroupFaces({
   participantIds,
+  seedOf,
   size,
 }: {
   participantIds: string[];
+  seedOf: ((botId: string) => string) | null;
   size: number;
 }) {
   const shown = participantIds.slice(0, 3);
@@ -101,7 +108,7 @@ function GroupFaces({
               WebkitMaskComposite: "source-in",
             }}
           >
-            <BotOrb seed={id} size={diameter} />
+            {seedOf ? <BotOrb seed={seedOf(id)} size={diameter} /> : null}
           </div>
         );
       })}

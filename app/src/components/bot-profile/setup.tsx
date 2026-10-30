@@ -63,6 +63,7 @@ import {
 import { isComposing } from "@/lib/composing";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { queryClient } from "@/query-client";
+import { LookSection } from "./look";
 
 type TextField = "name" | "title" | "roleDescription";
 
@@ -84,7 +85,10 @@ const TEXT_FIELDS: {
   },
 ];
 
-/** Who a Bot is and where it runs. Editable by whoever may manage it; read-only for everyone else. */
+/**
+ * Who a Bot is, how it looks and where it runs. Editable by whoever may manage it; read-only for
+ * everyone else, who don't see the Look section at all.
+ */
 export function SetupSections({ agent }: { agent: AgentProfile }) {
   const update = useMutation(updateAgentMutationOptions(queryClient));
   const [editing, setEditing] = useState<TextField | null>(null);
@@ -153,6 +157,8 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
           ) : null}
         </PageRows>
       </PageSection>
+      {/* Beside who it is, since its face is part of that. Only for whoever may change it. */}
+      {agent.canManage ? <LookSection agent={agent} /> : null}
       <ConnectionSection agent={agent} />
       {open ? (
         <EditTextDialog
