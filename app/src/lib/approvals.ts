@@ -25,6 +25,17 @@ export const BEHAVIOUR_LABELS: Record<RuleBehaviour, string> = {
   ask: "Ask before taking action",
   hand_off: "Hand off to you",
 };
+/**
+ * Whether an approval offers "Always allow here". Not one a task started from a check-in raised:
+ * those ask before every change whatever the person's rules say, so the rule would be ignored the
+ * next time. Allow once and Deny stay. The server refuses such a rule too.
+ */
+export function offersAlwaysAllow(request: {
+  action: { policy?: { source: string } };
+}) {
+  return request.action.policy?.source !== "task";
+}
+
 export type ApprovalInboxData = {
   enabled: boolean;
   requests: {

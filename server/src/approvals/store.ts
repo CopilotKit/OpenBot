@@ -20,6 +20,7 @@ import {
   ApprovalRefusedError,
   type ApprovalStore,
   type ApprovalTeamSettings,
+  offersStandingRule,
 } from "./types";
 
 const TEAM = "team";
@@ -144,6 +145,10 @@ export function createApprovalStore(database: Database): ApprovalStore {
         if (!handOff && decision === "handled")
           throw new ApprovalRefusedError(
             "Only an action handed to you can be marked done by you.",
+          );
+        if (decision === "allow_always" && !offersStandingRule(request.action))
+          throw new ApprovalRefusedError(
+            "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
           );
         if (decision === "allow_always")
           await tx.insert(approvalRules).values({

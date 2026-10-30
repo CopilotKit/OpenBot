@@ -20,6 +20,7 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   decideApprovalMutationOptions,
+  offersAlwaysAllow,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
 
@@ -168,19 +169,21 @@ function RequestRow({
           >
             Allow once
           </Button>
-          <Button
-            disabled={decision.isPending}
-            onClick={() =>
-              decision.mutate({
-                id: request.id,
-                choice: "allow_always",
-              })
-            }
-            size="sm"
-            variant="outline"
-          >
-            Always allow here
-          </Button>
+          {offersAlwaysAllow(request) ? (
+            <Button
+              disabled={decision.isPending}
+              onClick={() =>
+                decision.mutate({
+                  id: request.id,
+                  choice: "allow_always",
+                })
+              }
+              size="sm"
+              variant="outline"
+            >
+              Always allow here
+            </Button>
+          ) : null}
           <Button
             disabled={decision.isPending}
             onClick={() => decision.mutate({ id: request.id, choice: "deny" })}

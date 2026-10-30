@@ -9,7 +9,12 @@
 import { randomUUID } from "node:crypto";
 import type { DrawnComponent } from "@openbot/toolkit/run-turn";
 import { z } from "zod";
-import { type ApprovalDecision, approvalPreview } from "../approvals/types";
+import {
+  type ApprovalDecision,
+  type ApprovalPolicyOutcome,
+  approvalPreview,
+  offersStandingRule,
+} from "../approvals/types";
 import {
   ingestSlackEvent,
   type SlackTriggerEvent,
@@ -56,6 +61,8 @@ export type PairedApprovals = {
         effect: string;
         threadId: string;
         args: unknown;
+        /** Why the gate asked; a check-in task's approval offers no "Always allow". */
+        policy?: ApprovalPolicyOutcome;
       };
     }>;
   };
@@ -498,6 +505,7 @@ async function approvalCard(
     effect: record.action.effect,
     // The approvals preview already redacts secrets and private content.
     fields: approvalFields(approvalPreview(record.action.args)),
+    allowAlways: offersStandingRule(record.action),
   });
 }
 
@@ -544,9 +552,10 @@ async function decideFromCard(
     return {
       text: "That approval was already decided. Check its result in OpenBot.",
     };
+  // An older card may still offer "Always allow" on a check-in task's approval: that is once.
   const decision: ApprovalDecision = !resume.confirmed
     ? "deny"
-    : resume.always
+    : resume.always && offersStandingRule(record.action)
       ? "allow_always"
       : "allow_once";
   await deps.approvals.decide(binding.ownerUserId, resume.approvalId, decision);

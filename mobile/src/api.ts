@@ -58,6 +58,8 @@ export type ApprovalInbox = {
       scope: string;
       args: unknown;
       target?: unknown;
+      /** Why it asked. A check-in task's approval (`source` "task") offers no standing rule. */
+      policy?: { source: string; reason: string };
     };
   }[];
   questions?: {

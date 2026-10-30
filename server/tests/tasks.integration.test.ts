@@ -655,6 +655,16 @@ describe("where a task stands", () => {
       status: "needs_input",
       next: "Waiting for your approval: mail/send message on mail",
     });
+    // A standing rule would be ignored by the next task, so none is saved from one: once, or no.
+    await expect(
+      approvalService.decide(owner.id, waiting[0]?.id ?? "", "allow_always"),
+    ).rejects.toThrow(
+      "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
+    );
+    expect(await approvalStore.rules(owner.id)).toEqual([]);
+    expect(
+      (await approvalStore.get(owner.id, waiting[0]?.id ?? "")).status,
+    ).toBe("pending");
 
     // The same send in the person's own conversation with the Bot goes, as their switch says.
     await runTurn({

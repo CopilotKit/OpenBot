@@ -5,6 +5,7 @@ import {
   type ApprovalDecision,
   approvalInboxOptions,
   decideApproval,
+  offersAlwaysAllow,
 } from "@/lib/approvals";
 
 /**
@@ -42,7 +43,14 @@ export function InlineApproval({
       ]
     : [
         ["allow_once", "Allow once"],
-        ["allow_always", "Always allow here"],
+        ...(offersAlwaysAllow(request)
+          ? [
+              ["allow_always", "Always allow here"] as [
+                ApprovalDecision,
+                string,
+              ],
+            ]
+          : []),
         ["deny", "Deny"],
       ];
   return (
