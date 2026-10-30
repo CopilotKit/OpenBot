@@ -431,12 +431,14 @@ function ConnectionItem({ row }: { row: ConnectionRow }) {
       </RowMark>
       <ItemContent className="min-w-0 gap-0.5">
         <ItemTitle className="block w-auto truncate">{row.title}</ItemTitle>
-        <ItemDescription
-          className="line-clamp-1 break-all text-xs"
-          title={row.summary}
-        >
-          {row.summary}
-        </ItemDescription>
+        {row.summary ? (
+          <ItemDescription
+            className="line-clamp-1 break-all text-xs"
+            title={row.summary}
+          >
+            {row.summary}
+          </ItemDescription>
+        ) : null}
       </ItemContent>
       <ItemActions className="shrink-0">
         <ConnectionStateLabel state={row.state} />
