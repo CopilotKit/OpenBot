@@ -74,7 +74,7 @@ server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matche
 server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
 server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
 server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"key" | "none" | "consent" | "unreadable", Cell>'.
-server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"nothing" | "answered" | "unreachable" | "complained", Cell>'.
+server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"unreachable" | "nothing" | "answered" | "complained", Cell>'.
 server/tests/composio-connections.test.ts: error TS2345: Argument of type '{ url: string; provenance: string; vendor: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
 server/tests/composio-connections.test.ts: error TS2769: No overload matches this call.
 server/tests/computer-client.test.ts: error TS2769: No overload matches this call.

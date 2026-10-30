@@ -76,6 +76,7 @@ function preferences(skin: UserPreferences["skin"]): UserPreferences {
     selfHostBannerDismissed: true,
     narration: null,
     skin,
+    proactive: "on",
   };
 }
 

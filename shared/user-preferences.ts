@@ -1,6 +1,8 @@
 export type MessageListEmphasis = "agent" | "thread";
 
 export type NarrationPreference = "on" | "off";
+/** Whether this person's Bots check in on their behalf at all. */
+export type ProactivePreference = "on" | "off";
 /**
  * Every skin OpenBot ships. `openbot` is the default and is OpenBot exactly as it is without a
  * skin: no frame of its own, no tokens of its own.
@@ -37,6 +39,12 @@ export type UserPreferences = {
   narration: NarrationPreference | null;
   /** How OpenBot looks for this person, on every device they sign in from. */
   skin: SkinId;
+  /**
+   * Check-ins for all of this person's Bots. On by default; `off` stops every Bot's background
+   * checks for them before any model call, whatever each Bot's own setting says. Each Bot's own
+   * on, off and interval stay as they were, so turning this back on restores them.
+   */
+  proactive: ProactivePreference;
 };
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -44,4 +52,5 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   selfHostBannerDismissed: false,
   narration: null,
   skin: DEFAULT_SKIN,
+  proactive: "on",
 };

@@ -101,6 +101,7 @@ test("successful writes update only the current account cache; failures preserve
     selfHostBannerDismissed: false,
     narration: null,
     skin: "opendots",
+    proactive: "on",
   });
   const mutation = client
     .getMutationCache()
@@ -112,6 +113,7 @@ test("successful writes update only the current account cache; failures preserve
         selfHostBannerDismissed: false,
         narration: null,
         skin: "openbot",
+        proactive: "on",
       },
     });
   await mutation.execute({ messageListEmphasis: "thread" });
@@ -130,6 +132,7 @@ test("successful writes update only the current account cache; failures preserve
     selfHostBannerDismissed: false,
     narration: null,
     skin: "opendots",
+    proactive: "on",
   });
   response = async () =>
     Response.json({ error: "Could not save" }, { status: 500 });
@@ -145,5 +148,6 @@ test("successful writes update only the current account cache; failures preserve
     selfHostBannerDismissed: false,
     narration: null,
     skin: "openbot",
+    proactive: "on",
   });
 });
