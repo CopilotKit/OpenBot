@@ -311,6 +311,14 @@ function hashSeed(seed: string): number {
   return h >>> 0;
 }
 
+/** The colour a Bot's seed is drawn in: the one it names, or else the one its hash picks. */
+export function botColourFor(seed: string): BotColour {
+  return (
+    namedColour(seed) ??
+    (BOT_COLOURS[(hashSeed(seed) >>> 24) % BOT_COLOURS.length] as BotColour)
+  );
+}
+
 /**
  * The look for a Bot's seed. Eight colours repeat soon in a team, so the same hash also turns the
  * colour masses, nudges the hue and spaces the eyes, and two Bots in one colour still look apart.
@@ -324,9 +332,7 @@ export function orbLookFor(seed: string): OrbLook {
   // two catalog Bots in one colour well apart.
   const share = (from: number) => ((h >>> from) & 0xff) / 256;
   return {
-    palette:
-      namedColour(seed) ??
-      (BOT_COLOURS[(h >>> 24) % BOT_COLOURS.length] as BotColour),
+    palette: botColourFor(seed),
     turn: share(16) * TAU,
     hue: Math.round((share(0) * 2 - 1) * HUE_NUDGE),
     eyes: 1 + (share(8) * 2 - 1) * EYE_NUDGE,

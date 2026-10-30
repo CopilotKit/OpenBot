@@ -21,6 +21,11 @@ export type AgentInput = {
    * Bot between computers; only the Isolated control sends it.
    */
   isolated?: boolean;
+  /**
+   * A new look, as a seed (`@openbot/shared/bot-look`). Only an edit sends it, and only the Look
+   * section; omitted leaves the Bot's face as it is.
+   */
+  avatarSeed?: string;
 };
 
 /** The sentence for every write here, since they all fail the same way to a reader. */

@@ -160,6 +160,9 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     return Response.json({
       user: { id: ME, email: "me@example.com", role: "user", onboarding: null },
     });
+  // The screen's header face looks its Bot up here. Answered, so a refused lookup is not left
+  // retrying in the app's query client after this file, where the next file's Bots list would wait on it.
+  if (path === "/api/agents") return Response.json({ agents: [] });
   if (path === "/api/settings/preferences") {
     // As the server's own route takes it: one preference at a time, merged into the rest.
     if (method === "PATCH" && body && "narration" in body)
