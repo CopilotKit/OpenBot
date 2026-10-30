@@ -3,9 +3,21 @@ import { bodyLimit } from "hono/body-limit";
 import type { AppVariables } from "../auth/guards";
 import type { ProactiveEngine } from "./engine";
 import type { ProactiveStore } from "./store";
-import { ProactiveNotFoundError, ProactiveRefusedError } from "./types";
+import {
+  ProactiveNotFoundError,
+  ProactiveRefusedError,
+  type ProactiveSuggestion,
+} from "./types";
 
-/** `/api/proactive`: a person's background-research settings and the suggestions they produced. */
+/**
+ * An item as the person's app reads it (`SuggestionPayload` once it is JSON). Its normalized title
+ * is the repeat check's business, not theirs.
+ */
+function payloadOf({ dedupeKey: _, ...item }: ProactiveSuggestion) {
+  return item;
+}
+
+/** `/api/proactive`: a person's check-in settings and the items their Bots raised. */
 export function createProactiveRoutes(
   store: ProactiveStore,
   engine: ProactiveEngine,
@@ -31,9 +43,13 @@ export function createProactiveRoutes(
       503,
     );
   });
-  routes.get("/settings", async (context) =>
-    context.json({ settings: await store.list(context.var.actor.id) }),
-  );
+  routes.get("/settings", async (context) => {
+    const [settings, allowed] = await Promise.all([
+      store.list(context.var.actor.id),
+      engine.allowed(context.var.actor.id),
+    ]);
+    return context.json({ settings, allowed });
+  });
   routes.post("/settings", async (context) =>
     context.json(
       {
@@ -65,22 +81,22 @@ export function createProactiveRoutes(
   });
   routes.get("/suggestions", async (context) =>
     context.json({
-      suggestions: await store.suggestions(context.var.actor.id),
-    }),
-  );
-  routes.post("/suggestions/:id/start", async (context) =>
-    context.json({
-      suggestion: await engine.start(
-        context.var.actor.id,
-        context.req.param("id"),
+      suggestions: (await store.suggestions(context.var.actor.id)).map(
+        payloadOf,
       ),
     }),
   );
+  routes.post("/suggestions/:id/start", async (context) => {
+    const { suggestion, task } = await engine.start(
+      context.var.actor.id,
+      context.req.param("id"),
+    );
+    return context.json({ suggestion: payloadOf(suggestion), task });
+  });
   routes.post("/suggestions/:id/dismiss", async (context) =>
     context.json({
-      suggestion: await engine.dismiss(
-        context.var.actor.id,
-        context.req.param("id"),
+      suggestion: payloadOf(
+        await engine.dismiss(context.var.actor.id, context.req.param("id")),
       ),
     }),
   );
