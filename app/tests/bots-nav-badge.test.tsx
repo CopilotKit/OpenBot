@@ -156,19 +156,47 @@ test("a Bot that starts needing the person sends a browser notification", async 
   );
 });
 
+test("a task that starts waiting on the person sends a browser notification, though no approval count rose", async () => {
+  const notices = notifications();
+  serving([attention("expenses", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  // The server counts a task's approval as the task needing input, never as an approval too.
+  served = [
+    attention("expenses", { tasks: { needsInput: 1, ready: 0, failed: 0 } }),
+  ];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() =>
+    expect(notices).toEqual([
+      {
+        title: "Expenses needs you",
+        body: "1 task waiting on you",
+        tag: "openbot-attention-expenses",
+      },
+    ]),
+  );
+});
+
 test("the badge counts check-in items and the tasks waiting on the person, each once", async () => {
   serving([
     attention("expenses", {
       items: 2,
+      // An approval in the person's own conversation. The server counts one a task waits on as the
+      // task needing input instead, never as both, so every number here is added once.
       approvals: 1,
-      // The task waiting on input is waiting on that approval: counted once, as the approval.
       tasks: { needsInput: 1, ready: 1, failed: 1 },
     }),
     attention("knowledge", { items: 1 }),
   ]);
   const { view } = draw();
-  const badge = await view.findByText("6");
-  expect(badge.getAttribute("aria-label")).toBe("6 things need you");
+  const badge = await view.findByText("7");
+  expect(badge.getAttribute("aria-label")).toBe("7 things need you");
 });
 
 test("a ping of three items sends one browser notification, and nothing more until the next ping", async () => {

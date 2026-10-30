@@ -585,7 +585,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         ))
       )
         throw new ProactiveRefusedError(
-          "Choose one of your Bots and a channel it is in.",
+          "Choose one of your Bots and a conversation it's in.",
         );
       return deps.store.create(ownerUserId, input, deps.mintThreadId());
     },
@@ -593,13 +593,15 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     async runNow(ownerUserId: string, id: string) {
       const setting = await deps.store.get(ownerUserId, id);
       if (!setting.enabled)
-        throw new ProactiveRefusedError("Turn background research on first.");
+        throw new ProactiveRefusedError(
+          "Turn on check-ins for this Bot first.",
+        );
       if (
         setting.lastRunAt &&
         now().getTime() - setting.lastRunAt.getTime() < RUN_NOW_GAP_MS
       )
         throw new ProactiveRefusedError(
-          "This Bot researched in the last ten minutes. Try again later.",
+          "This Bot checked in less than ten minutes ago. Try again later.",
         );
       const runId = crypto.randomUUID();
       const bucket = Math.floor(now().getTime() / RUN_NOW_GAP_MS);
@@ -635,7 +637,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         ))
       )
         throw new ProactiveRefusedError(
-          "This Bot or its channel is no longer available to you.",
+          "This Bot or its conversation is no longer available to you.",
         );
       const started = await deps.store.resolveSuggestion(
         ownerUserId,

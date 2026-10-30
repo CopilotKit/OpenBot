@@ -166,7 +166,7 @@ export function createProactiveStore(database: Database) {
         .returning();
       if (!row)
         throw new ProactiveRefusedError(
-          "Background research is already set up for this Bot.",
+          "Check-ins are already set up for this Bot.",
         );
       return row;
     },

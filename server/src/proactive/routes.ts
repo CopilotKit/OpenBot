@@ -39,7 +39,7 @@ export function createProactiveRoutes(
       }),
     );
     return context.json(
-      { error: "Background research is unavailable. Try again." },
+      { error: "Check-ins aren't available right now. Try again." },
       503,
     );
   });

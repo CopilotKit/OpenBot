@@ -12,21 +12,31 @@ import {
 
 /**
  * Questions, approvals and stalled hand-offs: the things only the person can move forward, answered
- * on the Bot's own page. A Bot with any of these is listed under Needs you itself.
+ * on the Bot's own page. A Bot with any of these is listed under Needs you itself. A task waiting on
+ * them is listed as the task, so it is not counted here.
  */
 export function needsInput(bot: BotAttention): number {
   return bot.questions + bot.approvals + bot.handoffs;
 }
 
 /**
- * Everything from this Bot that waits on the person: what `needsInput` counts, the items its
- * check-ins found, and its tasks with a reply to read or a failure to try again.
+ * What this Bot needs the person to answer or decide: what `needsInput` counts, and its tasks
+ * waiting on an approval or a question. What a browser notification is about.
  *
- * A task waiting on input is not added. What it waits on is an approval or a question in its
- * conversation, and that is already counted, once, as an approval or a question.
+ * Every number is added as it comes. The server counts what a task waits on once, as the task
+ * needing input, and leaves that approval or question out of `approvals` and `questions`
+ * (server/src/activity/activity.ts), so nothing here is counted twice.
+ */
+export function asksOf(bot: BotAttention): number {
+  return needsInput(bot) + bot.tasks.needsInput;
+}
+
+/**
+ * Everything from this Bot that waits on the person: what `asksOf` counts, the items its check-ins
+ * found, and its tasks with a reply to read or a failure to try again.
  */
 export function waitingOnYou(bot: BotAttention): number {
-  return needsInput(bot) + bot.items + bot.tasks.ready + bot.tasks.failed;
+  return asksOf(bot) + bot.items + bot.tasks.ready + bot.tasks.failed;
 }
 
 const count = (total: number, one: string, many: string) =>
@@ -39,6 +49,14 @@ export function attentionSummary(bot: BotAttention): string {
   if (bot.approvals) parts.push(count(bot.approvals, "approval", "approvals"));
   if (bot.handoffs)
     parts.push(count(bot.handoffs, "stalled hand-off", "stalled hand-offs"));
+  if (bot.tasks.needsInput)
+    parts.push(
+      count(
+        bot.tasks.needsInput,
+        "task waiting on you",
+        "tasks waiting on you",
+      ),
+    );
   if (bot.items) parts.push(count(bot.items, "suggestion", "suggestions"));
   if (bot.tasks.ready)
     parts.push(count(bot.tasks.ready, "task to review", "tasks to review"));
@@ -91,9 +109,9 @@ export function pingNotice(
 }
 
 /**
- * A browser notification when a Bot starts needing this person for a question, an approval or a
- * stalled hand-off, if they allowed notifications and did not mute this Bot. Badges show either way;
- * this is the interruption, and it is opt-in.
+ * A browser notification when a Bot starts needing this person for a question, an approval, a
+ * stalled hand-off or a task waiting on them, if they allowed notifications and did not mute this
+ * Bot. Badges show either way; this is the interruption, and it is opt-in.
  *
  * Check-in items are left to the ping: a Bot's items count rising is not news on its own, because
  * the person hears about items at most once an hour, folded across their Bots.
@@ -103,12 +121,12 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
   useEffect(() => {
     if (!bots) return;
     const previous = seen.current;
-    seen.current = new Map(bots.map((bot) => [bot.agentId, needsInput(bot)]));
+    seen.current = new Map(bots.map((bot) => [bot.agentId, asksOf(bot)]));
     // The first answer is the state on arrival, not news.
     if (!previous) return;
     if (!notificationsAllowed()) return;
     for (const bot of bots) {
-      const now = needsInput(bot);
+      const now = asksOf(bot);
       if (bot.notify === "none" || now <= (previous.get(bot.agentId) ?? 0))
         continue;
       try {
