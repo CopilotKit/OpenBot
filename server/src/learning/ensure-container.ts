@@ -139,6 +139,8 @@ export const runCli: RunCli = (args, directory) =>
       {
         cwd: directory,
         env: cliEnvironment(),
+        // Node refuses to spawn .cmd files without a shell on Windows (EINVAL).
+        shell: process.platform === "win32",
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

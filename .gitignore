@@ -56,3 +56,9 @@ venv/
 
 # The Recorder extension's signing key never enters the repository (Decision 9).
 extension/**/*.pem
+
+# Added by CopilotKit CLI: browser snapshots a coding agent writes.
+.playwright-mcp/
+
+# The CopilotKit CLI's project selection for this checkout belongs to one machine and login.
+.copilotkit/
