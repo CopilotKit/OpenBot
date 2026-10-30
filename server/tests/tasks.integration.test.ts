@@ -11,6 +11,9 @@ import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { Observable } from "rxjs";
+import { createActivityStore } from "../src/activity/activity";
+import { createBotLifecycleStore } from "../src/agents/lifecycle";
+import { createBotLifecycleRoutes } from "../src/agents/lifecycle-routes";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
@@ -35,6 +38,7 @@ import {
   users,
   workItems,
 } from "../src/db/schema";
+import type { AttentionResponse } from "../src/proactive/contracts";
 import { createProactiveStore } from "../src/proactive/store";
 import type { ResponsibilityStore } from "../src/responsibilities/types";
 import { createTaskRoutes } from "../src/tasks/routes";
@@ -787,5 +791,101 @@ describe("a turn queued by a Start from before tasks", () => {
       finishedAt: null,
       lastError: "This turn failed before it could be tried again.",
     });
+  });
+});
+
+describe("what needs the person", () => {
+  test("a task waiting on an approval and a question is counted once, as the task, never again as an approval or a question", async () => {
+    const { owner, botId, own, item } = await seed();
+    await approvalStore.setEnabled(owner.id, true);
+    script = (input) =>
+      input.messages.at(-1)?.role === "tool"
+        ? reply(input, "I sent your reply to Sam.")
+        : callTool(input, "send_message", {
+            to: "sam@example.test",
+            body: "Friday works for the spec.",
+          });
+    const task = await start(owner, item.id);
+    await tasks.idle();
+    const waiting = await taskStore.get(owner.id, task.id);
+    expect(waiting.status).toBe("needs_input");
+    const [request] = await database
+      .select()
+      .from(approvalRequests)
+      .where(
+        and(
+          eq(approvalRequests.ownerUserId, owner.id),
+          eq(approvalRequests.status, "pending"),
+        ),
+      );
+    if (!request) throw new Error("No approval was asked for.");
+    // The Bot also asked a question in the task's conversation...
+    const questionKey = `${prefix}-question-${randomUUID()}`;
+    await queue.offer({
+      kind: "person.question",
+      key: questionKey,
+      payload: {
+        actorId: owner.id,
+        botId,
+        channelId: task.channelId,
+        threadId: waiting.threadId,
+        question: "Which date works?",
+      },
+    });
+    // ...and an approval waits in the person's own conversation with it, which is no task's.
+    await database.insert(approvalRequests).values({
+      ...request,
+      id: randomUUID(),
+      runId: randomUUID(),
+      action: { ...request.action, threadId: own.threadId },
+    });
+
+    const lifecycleRoutes = new Hono<{ Variables: AppVariables }>();
+    lifecycleRoutes.route(
+      "/api/bots",
+      createBotLifecycleRoutes(
+        {
+          lifecycle: createBotLifecycleStore(database),
+          reset: {} as never,
+          activity: createActivityStore(database),
+          wakeUps: {} as never,
+          profiles: profileStore,
+          tasks,
+        },
+        async (context, next) => {
+          context.set("actor", {
+            id: owner.id,
+            email: `${owner.id}@example.test`,
+            role: "user",
+          });
+          await next();
+        },
+      ),
+    );
+    try {
+      const response = await lifecycleRoutes.request("/api/bots/attention");
+      const { bots: rows } = (await response.json()) as AttentionResponse;
+      const bot = rows.find((row) => row.agentId === botId);
+      expect(bot).toMatchObject({
+        approvals: 1,
+        questions: 0,
+        tasks: { needsInput: 1, ready: 0, failed: 0 },
+      });
+      // What a badge adds up: the task, and the approval in their own conversation.
+      expect(
+        (bot?.approvals ?? 0) +
+          (bot?.questions ?? 0) +
+          (bot?.tasks.needsInput ?? 0),
+      ).toBe(2);
+    } finally {
+      await database
+        .delete(workItems)
+        .where(
+          and(
+            eq(workItems.kind, "person.question"),
+            eq(workItems.key, questionKey),
+          ),
+        );
+    }
   });
 });

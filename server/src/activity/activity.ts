@@ -9,12 +9,23 @@
  * EVERY QUERY IS NARROWED TO THE PERSON FIRST. A public Bot works for many people; this screen shows
  * the work done in the caller's name and nothing of anybody else's.
  */
-import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
+  botTasks,
   channelAgents,
   channelMemberships,
   channels,
@@ -28,6 +39,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
+import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
 export type ActivityKind =
@@ -75,6 +87,25 @@ export type BotAttention = {
 };
 
 const COMPLETED_LIMIT = 25;
+
+/**
+ * Raised in the conversation or thread of one of the person's tasks that their task list shows.
+ *
+ * What waits on the person there is counted once, as that task needing input (`tasks.counts`, which
+ * reads the same approvals and questions by the same rule, tasks/state.ts), so the attention counts
+ * leave it out of `approvals` and `questions`: a task waiting on one approval is one thing that needs
+ * the person, not two.
+ */
+const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
+  sql`exists (
+    select 1 from ${botTasks}
+    left join ${intelligenceChannelMappings}
+      on ${intelligenceChannelMappings.channelId} = ${botTasks.channelId}
+      and ${intelligenceChannelMappings.userId} = ${ownerUserId}
+    where ${botTasks.ownerUserId} = ${ownerUserId}
+      and ${listedTask}
+      and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
+  )`;
 const clip = (text: string | null | undefined, max = 200) =>
   text ? Array.from(text).slice(0, max).join("") : null;
 const iso = (value: Date | string | null | undefined) =>
@@ -488,6 +519,11 @@ export function createActivityStore(database: Database) {
             eq(workItems.kind, "person.question"),
             isNull(workItems.finishedAt),
             sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
+            sql`not ${inListedTask(
+              ownerUserId,
+              sql`${workItems.payload}->>'channelId'`,
+              sql`${workItems.payload}->>'threadId'`,
+            )}`,
           ),
         )
         .groupBy(
@@ -506,6 +542,11 @@ export function createActivityStore(database: Database) {
           and(
             eq(approvalRequests.ownerUserId, ownerUserId),
             eq(approvalRequests.status, "pending"),
+            sql`not ${inListedTask(
+              ownerUserId,
+              sql`null`,
+              sql`${approvalRequests.action}->>'threadId'`,
+            )}`,
           ),
         )
         .groupBy(sql`${approvalRequests.action}->>'botId'`);

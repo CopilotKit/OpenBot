@@ -124,6 +124,9 @@ import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
 import type { ProactiveEngine } from "./proactive/engine";
 import { createProactiveRoutes } from "./proactive/routes";
 import type { ProactiveStore } from "./proactive/store";
+import { createTaskRoutes } from "./tasks/routes";
+import type { TaskRunner } from "./tasks/runner";
+import type { TaskStore } from "./tasks/store";
 import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
@@ -445,6 +448,8 @@ export function createApp(
     };
     memory?: { store: MemoryStore; ingestion: MemoryIngestion };
     proactive?: { store: ProactiveStore; engine: ProactiveEngine };
+    /** Started items, each run as a task in a conversation of its own. See tasks/runner.ts. */
+    tasks?: { store: TaskStore; runner: TaskRunner };
     responsibilities?: {
       store: ResponsibilityStore;
       engine: ResponsibilityEngine;
@@ -1716,6 +1721,15 @@ export function createApp(
       createProactiveRoutes(
         coworker.proactive.store,
         coworker.proactive.engine,
+        requireUser,
+      ),
+    );
+  if (coworker?.tasks)
+    app.route(
+      "/api/tasks",
+      createTaskRoutes(
+        coworker.tasks.store,
+        coworker.tasks.runner,
         requireUser,
       ),
     );

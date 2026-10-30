@@ -117,14 +117,6 @@ export type ProactiveEngineDeps = {
    * a check-in could find nothing, so none is run. Without it, every check-in goes to the model.
    */
   readableApps?(ownerUserId: string, agentId: string): Promise<string[]>;
-  /**
-   * Unused: started items open a task through `tasks`, which runs the turn. Accepted until the
-   * server's wiring stops passing it.
-   */
-  startTask?(
-    scope: ProactiveScope,
-    input: { runId: string; text: string; signal: AbortSignal },
-  ): Promise<void>;
   catalogue: {
     listServers(): Promise<
       { id: string; title: string; tools: { ref: string }[] }[]

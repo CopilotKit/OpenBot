@@ -4,6 +4,7 @@ import type { Database } from "../db/client";
 import { auditEvents, users } from "../db/schema/core";
 import { botLifecycle } from "../db/schema/lifecycle";
 import {
+  proactivePings,
   proactiveRuns,
   proactiveSettings,
   proactiveSuggestions,
@@ -50,6 +51,17 @@ export type PriorItems = {
 };
 
 /** A setting's run as the ledger keeps it. */
+/**
+ * How long the run ledger and old pings are kept: the admin's longest window of numbers, and as long
+ * as Hide holds. Nothing reads further back: the daily cap reads a day and the window reads the last
+ * check-in, which after a month away is the last day anyway.
+ */
+export const PROACTIVE_LEDGER_DAYS = 30;
+/** How many rows one prune statement removes, so a deployment that never pruned stays writable. */
+const PRUNE_BATCH = 5_000;
+/** How many batches one prune runs before leaving the rest for the next. */
+const PRUNE_BATCHES = 20;
+
 export type ProactiveRunRow = {
   id: string;
   settingId: string;
@@ -546,6 +558,68 @@ export function createProactiveStore(database: Database) {
           ),
         );
       return row?.count ?? 0;
+    },
+    /**
+     * Drop what the ledger no longer needs, older than `days`, in batches: finished check-ins, and
+     * pings no open item still names. An open item's ping is what keeps it from being pinged again,
+     * so that ping stays as long as the item does, and so does each person's newest ping, which the
+     * app notifies on. Returns how many of each went.
+     */
+    async prune(
+      days = PROACTIVE_LEDGER_DAYS,
+    ): Promise<{ runs: number; pings: number }> {
+      const cutoff = sql`now() - make_interval(days => ${days})`;
+      const batches = async (remove: () => Promise<{ id: string }[]>) => {
+        let removed = 0;
+        for (let batch = 0; batch < PRUNE_BATCHES; batch += 1) {
+          const rows = await remove();
+          removed += rows.length;
+          if (rows.length < PRUNE_BATCH) break;
+        }
+        return removed;
+      };
+      const runs = await batches(() =>
+        database
+          .delete(proactiveRuns)
+          .where(
+            inArray(
+              proactiveRuns.id,
+              database
+                .select({ id: proactiveRuns.id })
+                .from(proactiveRuns)
+                .where(
+                  and(
+                    ne(proactiveRuns.outcome, "running"),
+                    lte(proactiveRuns.startedAt, cutoff),
+                  ),
+                )
+                .limit(PRUNE_BATCH),
+            ),
+          )
+          .returning({ id: proactiveRuns.id }),
+      );
+      const pings = await batches(() =>
+        database
+          .delete(proactivePings)
+          .where(
+            inArray(
+              proactivePings.id,
+              database
+                .select({ id: proactivePings.id })
+                .from(proactivePings)
+                .where(
+                  and(
+                    lte(proactivePings.createdAt, cutoff),
+                    sql`not exists (select 1 from ${proactiveSuggestions} where ${proactiveSuggestions.pingId} = ${proactivePings.id} and ${proactiveSuggestions.status} = 'open')`,
+                    sql`exists (select 1 from ${proactivePings} as newer where newer.owner_user_id = ${proactivePings.ownerUserId} and newer.created_at > ${proactivePings.createdAt})`,
+                  ),
+                )
+                .limit(PRUNE_BATCH),
+            ),
+          )
+          .returning({ id: proactivePings.id }),
+      );
+      return { runs, pings };
     },
     /** A setting's recent check-ins, newest first, skipped ones included. */
     async runs(settingId: string): Promise<ProactiveRunRow[]> {

@@ -73,6 +73,28 @@ export function itemAsk(item: {
 const askIn = (input: Record<string, unknown> | null) =>
   typeof input?.text === "string" && input.text.trim() ? input.text : null;
 
+/*
+ * Listed: every task not marked done, those marked done in the last week, and any marked done
+ * longer ago that something reopened since (a turn queued, or the person speaking there). Exported
+ * for the attention counts, which must count exactly the tasks this list shows.
+ */
+export const listedTask = sql`(
+    ${botTasks.resolvedAt} is null
+    or ${botTasks.resolvedAt} > now() - make_interval(days => ${RESOLVED_FOR_DAYS})
+    or exists (
+      select 1 from ${workItems}
+      where ${workItems.kind} = ${PROACTIVE_TASK_KIND}
+        and ${workItems.payload}->>'taskId' = ${botTasks.id}
+        and ${workItems.createdAt} > ${botTasks.resolvedAt}
+    )
+    or exists (
+      select 1 from ${channels}
+      where ${channels.id} = ${botTasks.channelId}
+        and ${channels.lastMessageSourceId} is null
+        and ${channels.lastMessageAt} > ${botTasks.resolvedAt}
+    )
+  )`;
+
 export type TaskStore = ReturnType<typeof createTaskStore>;
 
 export function createTaskStore(
@@ -155,33 +177,12 @@ export function createTaskStore(
     return one(owner, id);
   }
 
-  /*
-   * Listed: every task not marked done, those marked done in the last week, and any marked done
-   * longer ago that something reopened since (a turn queued, or the person speaking there).
-   */
-  const listed = sql`(
-    ${botTasks.resolvedAt} is null
-    or ${botTasks.resolvedAt} > now() - make_interval(days => ${RESOLVED_FOR_DAYS})
-    or exists (
-      select 1 from ${workItems}
-      where ${workItems.kind} = ${PROACTIVE_TASK_KIND}
-        and ${workItems.payload}->>'taskId' = ${botTasks.id}
-        and ${workItems.createdAt} > ${botTasks.resolvedAt}
-    )
-    or exists (
-      select 1 from ${channels}
-      where ${channels.id} = ${botTasks.channelId}
-        and ${channels.lastMessageSourceId} is null
-        and ${channels.lastMessageAt} > ${botTasks.resolvedAt}
-    )
-  )`;
-
   /** The owner's tasks, newest first: open ones, and those marked done for a week after. */
   async function list(owner: string): Promise<TaskPayload[]> {
     const rows = await database
       .select()
       .from(botTasks)
-      .where(and(eq(botTasks.ownerUserId, owner), listed))
+      .where(and(eq(botTasks.ownerUserId, owner), listedTask))
       .orderBy(desc(botTasks.createdAt), desc(botTasks.id))
       .limit(LIST_LIMIT);
     return withState(owner, rows);

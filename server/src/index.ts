@@ -242,7 +242,7 @@ import {
   REFUSAL_MARKER,
   vendorAnswer,
 } from "./plugins/tools";
-import { createProactiveEngine } from "./proactive/engine";
+import { appReads, createProactiveEngine } from "./proactive/engine";
 import {
   createPrivateShareCheck,
   PRIVATE_SHARE_TOOL_REF,
@@ -282,6 +282,9 @@ import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
+import { createTaskRunner } from "./tasks/runner";
+import { createTaskStore } from "./tasks/store";
+import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -793,11 +796,15 @@ const approvalService = createServerApprovalService({
   // Assigned further down, once delivery is wired.
   notify: (scope, input) => deliveryNotifications(scope, input),
 });
-// Housekeeping on a schedule: audit rows when asked for, screenshots always, one timer. See audit-retention.ts.
+// Check-ins' settings, items, run ledger and pings. See proactive/store.ts.
+const proactiveStore = createProactiveStore(database);
+// Housekeeping on a schedule: audit rows when asked for, screenshots and the check-in ledger always,
+// one timer. See audit-retention.ts.
 const retentionSweeps = startRetentionSweeps(
   config.databaseUrl,
   config.auditRetentionDays,
   pageFrameStore,
+  { proactive: proactiveStore },
 );
 /**
  * Whose computer a Bot runs on: the person it acts for, unless the Bot is isolated and its owner
@@ -2155,11 +2162,46 @@ const deliveryRouter = createDeliveryRouter({
 deliveryNotifications = (scope, input) => deliveryRouter.notify(scope, input);
 
 /*
- * Proactive research: an opted-in Bot reading its owner's apps in the background, restricted to
- * reads by its initiator (see proactive/restriction.ts), through the same headless turn runner and
- * work queue as routines. Suggestions go to the web inbox and the owner's delivery routing.
+ * Started work: an item a check-in raised, started by the person, runs as a task in a conversation
+ * of its own with the item's Bot, as the person's own turn through the approval continuation runner,
+ * so every send or change meets the approval gate. See tasks/runner.ts.
  */
-const proactiveStore = createProactiveStore(database);
+const taskStore = createTaskStore(database);
+const taskRunner = createTaskRunner({
+  database,
+  store: taskStore,
+  channels: channelStore,
+  actorFor,
+  queue: createWorkQueue(database),
+  owner: workOwner("tasks"),
+  scopeFor: deliveryScopeFor,
+  runTask: createTaskTurn({
+    channels: channelStore,
+    actorFor,
+    runTurn: approvalContinuationRunner,
+  }),
+});
+// The backstop for a task's turn a crash or a restart left behind; Start runs one at once.
+const taskSweep = repeatAfterEach(async () => {
+  try {
+    await taskRunner.sweep();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "task-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
+}, 60_000);
+
+/*
+ * Check-ins: a Bot reading its owner's apps quietly in the background, restricted to reads by its
+ * initiator (see proactive/restriction.ts), through the same headless turn runner and work queue as
+ * routines. What one raises is listed in the app at once and reaches the person in a ping, at most
+ * one an hour, folding every Bot's items (proactive/ping.ts). Started items run as tasks (above).
+ */
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
   memory: personalMemoryStore,
@@ -2170,7 +2212,7 @@ const proactiveEngine = createProactiveEngine({
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     buildAgentFor,
-    // Only the run's own two tools and refusals: no computer, no components.
+    // Only the run's own tools and refusals: no computer, no components.
     toolsForTurn: (input) => proactiveEngine.toolsForTurn(input),
     turnTimeoutMs: 3 * 60_000,
     learningContainerForThread: (input) =>
@@ -2179,30 +2221,13 @@ const proactiveEngine = createProactiveEngine({
   }),
   resolveScope: deliveryScopeFor,
   notify: (scope, input) => deliveryNotifications(scope, input),
-  startTask: async (scope, input) => {
-    const actor = await actorFor(scope.ownerUserId);
-    await channelStore.recordActivity(
-      actor,
-      scope.channelId,
-      { text: input.text, agentId: null, at: new Date() },
-      { id: `${input.runId}:input` },
-    );
-    const result = await approvalContinuationRunner({
-      ...scope,
-      routineId: input.runId,
-      instruction: input.text,
-      userMessage: { id: input.runId, role: "user", content: input.text },
-      initiator: PERSON_INITIATOR,
-      signal: input.signal,
-    });
-    if (result.replyText)
-      await channelStore.recordActivity(
-        actor,
-        scope.channelId,
-        { text: result.replyText, agentId: scope.agentId, at: new Date() },
-        { id: `${input.runId}:reply` },
-      );
-  },
+  tasks: taskRunner,
+  // None of the person's apps to read means a check-in could find nothing: it never reaches the model.
+  readableApps: async (ownerUserId, agentId) =>
+    appReads(
+      await loadToolsForActor(ownerUserId)(agentId),
+      await proactiveReadOnlyRefs(),
+    ),
   catalogue: pluginStore,
   deniedToolNames: async (ownerUserId, agentId) => {
     const [tools, allowed] = await Promise.all([
@@ -2749,6 +2774,7 @@ const app = createApp(
     },
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
     proactive: { store: proactiveStore, engine: proactiveEngine },
+    tasks: { store: taskStore, runner: taskRunner },
     responsibilities: {
       store: responsibilityStore,
       engine: responsibilityEngine,
@@ -2767,6 +2793,7 @@ const app = createApp(
       activity: createActivityStore(database),
       wakeUps: wakeUpStore,
       profiles: agentProfileStore,
+      tasks: taskRunner,
       auditStore: bootAuditStore,
     },
   },
@@ -2807,6 +2834,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     wakeUpReaper.stop();
     memorySweep.stop();
     proactiveSweep.stop();
+    taskSweep.stop();
     approvalSweep.stop();
     personResponseSweep.stop();
     groupSweep.stop();
