@@ -1,24 +1,19 @@
 import { useForm } from "@tanstack/react-form";
 import { Fragment, useRef, useState } from "react";
 import {
+  PageCard,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
+import {
   SkillToolApps,
   SkillToolStep,
   scrollParent,
   TOOLS_EXPLAINED,
   type ToolSource,
 } from "@/components/skills/skill-tools";
-import {
-  PageCard,
-  PageRows,
-  PageSection,
-} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   InputGroup,
@@ -41,7 +36,8 @@ import { type SkillFormValues, skillFormSchema } from "@/lib/skills/form";
  * for, and what the Bot is actually told.
  *
  * Written as its own component rather than inline in a screen because creating and editing a skill
- * are the same four fields, and the demonstration recorder asks them too.
+ * are the same four fields. Laid out a section per part of the skill, each in its own container, the
+ * way Linear lays out a settings screen, with the buttons under the last.
  */
 export function SkillFields({
   defaultValues,
@@ -52,18 +48,17 @@ export function SkillFields({
   beforeActions,
   afterForm,
   slugLocked = false,
-  layout = "inline",
 }: {
   defaultValues: SkillFormValues;
   submitLabel: string;
   onSubmit: (values: SkillFormValues) => Promise<unknown>;
   error?: Error | null;
   onCancel?: () => void;
-  /** Sections that belong to the form and come before its buttons. `page` only. */
+  /** Sections that belong to the form and come before its buttons. */
   beforeActions?: React.ReactNode;
   /**
    * Sections after the form and its buttons, for anything that saves on its own — granting, deleting.
-   * Outside the form on purpose: what sits after Save is visibly not waiting for it. `page` only.
+   * Outside the form on purpose: what sits after Save is visibly not waiting for it.
    */
   afterForm?: React.ReactNode;
   /**
@@ -75,12 +70,6 @@ export function SkillFields({
    * field is read-only here and the form says why.
    */
   slugLocked?: boolean;
-  /**
-   * `page` when the form is a screen of its own: a section per part of the skill, each in its own
-   * container, the way Linear lays out a settings screen, with the buttons under the last. `inline`
-   * is one stack of labelled fields with the buttons under them, for a form inside something else.
-   */
-  layout?: "inline" | "page";
 }) {
   const form = useForm({
     defaultValues,
@@ -115,7 +104,7 @@ export function SkillFields({
   };
 
   /*
-   * The page layout's Details card: one settings row each for what you type, what it is called and
+   * The Details card: one settings row each for what you type, what it is called and
    * what it is for, the label and its hint on the left and the control on the right, as Linear draws
    * a settings screen. A field's error takes the hint's place, so a row never grows a third line.
    */
@@ -231,151 +220,6 @@ export function SkillFields({
     },
   ];
 
-  const fields = (
-    <>
-      <FieldGroup>
-        <form.Field name="slug">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>Command</FieldLabel>
-                <Input
-                  aria-invalid={isInvalid}
-                  disabled={slugLocked}
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  /*
-                   * Lower-cased as they type rather than refused afterwards. The server's pattern
-                   * has no capitals in it, and "Standup" is a reasonable thing to type and a
-                   * pointless thing to be told off for.
-                   */
-                  onChange={(event) =>
-                    field.handleChange(event.target.value.toLowerCase())
-                  }
-                  placeholder="standup"
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : (
-                  <p className="text-muted-foreground text-xs">
-                    {slugLocked ? (
-                      "You can't change a command. To rename this skill, write a new one and delete this one."
-                    ) : (
-                      <>
-                        What you type after a slash.{" "}
-                        <code>
-                          /{"{"}command{"}"}
-                        </code>
-                      </>
-                    )}
-                  </p>
-                )}
-              </Field>
-            );
-          }}
-        </form.Field>
-
-        <form.Field name="title">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>Title</FieldLabel>
-                <Input
-                  aria-invalid={isInvalid}
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="My standup skill"
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : null}
-              </Field>
-            );
-          }}
-        </form.Field>
-
-        <form.Field name="summary">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>One-liner</FieldLabel>
-                <Input
-                  aria-invalid={isInvalid}
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="Turns yesterday's work into a standup update"
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : (
-                  <p className="text-muted-foreground text-xs">
-                    Shown beside the command in this list and in the{" "}
-                    <code>/</code> menu. Optional.
-                  </p>
-                )}
-              </Field>
-            );
-          }}
-        </form.Field>
-
-        <form.Field name="instructions">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>Instructions</FieldLabel>
-                <Textarea
-                  aria-invalid={isInvalid}
-                  className="min-h-40"
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="Summarise what I did yesterday in this conversation, then list what is left."
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : (
-                  <p className="text-muted-foreground text-xs">
-                    What the Bot is told when you use the command. Write it as
-                    instructions to the Bot.
-                  </p>
-                )}
-              </Field>
-            );
-          }}
-        </form.Field>
-        <form.Field name="tools">
-          {(field) => (
-            <SkillToolApps onOpen={goTo} selected={field.state.value} />
-          )}
-        </form.Field>
-      </FieldGroup>
-
-      {error ? (
-        <p className="mt-4 text-sm text-destructive" role="alert">
-          {error.message}
-        </p>
-      ) : null}
-    </>
-  );
-
   const submit = (
     <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
       {([canSubmit, isSubmitting]) => (
@@ -401,7 +245,6 @@ export function SkillFields({
       <form.Field name="tools">
         {(field) => (
           <SkillToolStep
-            fit={layout === "page"}
             key={toolStep}
             onChange={field.handleChange}
             selected={field.state.value}
@@ -417,144 +260,103 @@ export function SkillFields({
    */
   const leaveStep = () => goTo(null);
 
-  /*
-   * Hidden rather than unmounted while a step shows, so every field comes back exactly as it was
-   * left: what was typed, what was touched, which error was showing.
-   */
-  const body = (
+  const stepping = toolStep !== null;
+  return (
     <>
-      {step}
-      <div hidden={toolStep !== null}>{fields}</div>
-    </>
-  );
+      <form noValidate onSubmit={handleSubmit} ref={formRef}>
+        {stepping ? (
+          <PageCard
+            footer={
+              <>
+                <Button onClick={leaveStep} type="button" variant="outline">
+                  Back
+                </Button>
+                <Button onClick={leaveStep} type="button">
+                  Done
+                </Button>
+              </>
+            }
+          >
+            {step}
+          </PageCard>
+        ) : null}
 
-  if (layout === "page") {
-    const stepping = toolStep !== null;
-    return (
-      <>
-        <form noValidate onSubmit={handleSubmit} ref={formRef}>
-          {stepping ? (
-            <PageCard
-              footer={
-                <>
-                  <Button onClick={leaveStep} type="button" variant="outline">
-                    Back
-                  </Button>
-                  <Button onClick={leaveStep} type="button">
-                    Done
-                  </Button>
-                </>
-              }
-            >
-              {step}
-            </PageCard>
+        {/*
+         * Hidden rather than unmounted while a step shows, so every field comes back exactly as
+         * it was left: what was typed, what was touched, which error was showing.
+         */}
+        <div hidden={stepping}>
+          {/* No gap above the first: the page title already stands 32px over it. */}
+          <PageSection className="mt-0" title="Details">
+            <PageRows>
+              {settingsRows.map((row, index) => (
+                <Fragment key={row.key}>
+                  {index > 0 ? <Separator /> : null}
+                  {row.node}
+                </Fragment>
+              ))}
+            </PageRows>
+          </PageSection>
+
+          <form.Field name="instructions">
+            {(field) => {
+              const isInvalid =
+                field.state.meta.isTouched && !field.state.meta.isValid;
+              return (
+                <PageSection
+                  description="What the Bot is told when you use the command. Write it as instructions to the Bot."
+                  title="Instructions"
+                >
+                  <Textarea
+                    aria-invalid={isInvalid}
+                    aria-label="Instructions"
+                    className="mt-4 min-h-48 bg-card"
+                    id={field.name}
+                    name={field.name}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder="Summarise what I did yesterday in this conversation, then list what is left."
+                    value={field.state.value}
+                  />
+                  {isInvalid ? (
+                    <FieldError
+                      className="mt-2"
+                      errors={field.state.meta.errors}
+                    />
+                  ) : null}
+                </PageSection>
+              );
+            }}
+          </form.Field>
+
+          <PageSection description={TOOLS_EXPLAINED} title="Tools">
+            <form.Field name="tools">
+              {(field) => (
+                <SkillToolApps onOpen={goTo} selected={field.state.value} />
+              )}
+            </form.Field>
+          </PageSection>
+
+          {beforeActions}
+
+          {error ? (
+            <p className="mt-6 text-destructive text-sm" role="alert">
+              {error.message}
+            </p>
           ) : null}
 
-          {/*
-           * Hidden rather than unmounted while a step shows, so every field comes back exactly as
-           * it was left: what was typed, what was touched, which error was showing.
-           */}
-          <div hidden={stepping}>
-            {/* No gap above the first: the page title already stands 32px over it. */}
-            <PageSection className="mt-0" title="Details">
-              <PageRows>
-                {settingsRows.map((row, index) => (
-                  <Fragment key={row.key}>
-                    {index > 0 ? <Separator /> : null}
-                    {row.node}
-                  </Fragment>
-                ))}
-              </PageRows>
-            </PageSection>
-
-            <form.Field name="instructions">
-              {(field) => {
-                const isInvalid =
-                  field.state.meta.isTouched && !field.state.meta.isValid;
-                return (
-                  <PageSection
-                    description="What the Bot is told when you use the command. Write it as instructions to the Bot."
-                    title="Instructions"
-                  >
-                    <Textarea
-                      aria-invalid={isInvalid}
-                      aria-label="Instructions"
-                      className="mt-4 min-h-48 bg-card"
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(event) =>
-                        field.handleChange(event.target.value)
-                      }
-                      placeholder="Summarise what I did yesterday in this conversation, then list what is left."
-                      value={field.state.value}
-                    />
-                    {isInvalid ? (
-                      <FieldError
-                        className="mt-2"
-                        errors={field.state.meta.errors}
-                      />
-                    ) : null}
-                  </PageSection>
-                );
-              }}
-            </form.Field>
-
-            <PageSection description={TOOLS_EXPLAINED} title="Tools">
-              <form.Field name="tools">
-                {(field) => (
-                  <SkillToolApps
-                    framed
-                    onOpen={goTo}
-                    selected={field.state.value}
-                  />
-                )}
-              </form.Field>
-            </PageSection>
-
-            {beforeActions}
-
-            {error ? (
-              <p className="mt-6 text-destructive text-sm" role="alert">
-                {error.message}
-              </p>
-            ) : null}
-
-            <div className="mt-8 flex justify-end gap-2">
-              {onCancel ? (
-                <Button onClick={onCancel} type="button" variant="outline">
-                  Cancel
-                </Button>
-              ) : null}
-              {submit}
-            </div>
-          </div>
-        </form>
-        {afterForm ? <div hidden={stepping}>{afterForm}</div> : null}
-      </>
-    );
-  }
-
-  return (
-    <form noValidate onSubmit={handleSubmit} ref={formRef}>
-      {body}
-      <div className="mt-4 flex gap-2">
-        {toolStep === null ? (
-          <>
-            {submit}
+          <div className="mt-8 flex justify-end gap-2">
             {onCancel ? (
               <Button onClick={onCancel} type="button" variant="outline">
                 Cancel
               </Button>
             ) : null}
-          </>
-        ) : (
-          <Button onClick={leaveStep} type="button">
-            Done
-          </Button>
-        )}
-      </div>
-    </form>
+            {submit}
+          </div>
+        </div>
+      </form>
+      {afterForm ? <div hidden={stepping}>{afterForm}</div> : null}
+    </>
   );
 }
 

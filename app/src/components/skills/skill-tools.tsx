@@ -10,7 +10,6 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import {
   InputGroup,
   InputGroupAddon,
@@ -30,7 +29,6 @@ import {
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 import { undeclaredElsewhere } from "@/lib/skills/form";
-import { cn } from "@/lib/utils";
 
 /*
  * Which tools this skill says it needs: a list of apps first, then one app's tools on a step of its
@@ -191,33 +189,29 @@ function summaryOf(group: Group, held: Set<string>): string {
   return `${picked.length} of ${group.choices.length}: ${picked.map((choice) => choice.name).join(", ")}`;
 }
 
-/** The apps a skill can take tools from, each opening a step with that app's tools. */
+/**
+ * The apps a skill can take tools from, each opening a step with that app's tools. One card of
+ * divided rows, like every other list of settings, with no label of its own: the section around it
+ * has the heading and the description.
+ */
 export function SkillToolApps({
   selected,
   onOpen,
-  framed = false,
 }: {
   selected: string[];
   onOpen: (source: ToolSource) => void;
-  /**
-   * Drawn as a section of a screen: no label of its own, because the section's heading and
-   * description say it, and the apps as one card of divided rows, like every other list of settings.
-   * Unframed, it is a labelled field among others and the apps are filled rows.
-   */
-  framed?: boolean;
 }) {
   const { plugins, groups } = useToolGroups(selected);
   const held = new Set(selected);
 
   const rows = groups.map((group, index) => (
     <Fragment key={group.key}>
-      {framed && index > 0 ? <Separator /> : null}
+      {index > 0 ? <Separator /> : null}
       <Item
         className="hover:bg-muted"
         onClick={() => onOpen(group.key)}
         render={<button type="button" />}
         size="sm"
-        variant={framed ? "default" : "muted"}
       >
         <ItemMedia variant="icon">{group.media}</ItemMedia>
         <ItemContent>
@@ -233,25 +227,15 @@ export function SkillToolApps({
     </Fragment>
   ));
 
-  const list = plugins.isPending ? null : plugins.error ? (
-    <p className="text-destructive text-xs" role="alert">
-      Couldn't load the tools. Reload the page.
-    </p>
-  ) : framed ? (
-    <PageRows>{rows}</PageRows>
-  ) : (
-    <div className="flex flex-col gap-2">{rows}</div>
-  );
-
-  if (framed) return list;
-
-  return (
-    <Field>
-      <FieldLabel>Tools it needs</FieldLabel>
-      <FieldDescription>{TOOLS_EXPLAINED}</FieldDescription>
-      {list}
-    </Field>
-  );
+  if (plugins.isPending) return null;
+  if (plugins.error) {
+    return (
+      <p className="mt-4 text-destructive text-xs" role="alert">
+        Couldn't load the tools. Reload the page.
+      </p>
+    );
+  }
+  return <PageRows>{rows}</PageRows>;
 }
 
 /** What declaring a tool does and does not do, said wherever the tools are picked. */
@@ -291,13 +275,10 @@ const FIT_MINIMUM = 240;
  * read from the drawn elements, and read again whenever the scroller or the form changes size, so a
  * wrapped description or a resized window is accounted for rather than guessed at.
  */
-function useFitToWindow(
-  ref: React.RefObject<HTMLElement | null>,
-  enabled: boolean,
-) {
+function useFitToWindow(ref: React.RefObject<HTMLElement | null>) {
   useLayoutEffect(() => {
     const element = ref.current;
-    if (!enabled || !element) return;
+    if (!element) return;
     const scroller = scrollParent(element);
     const form = element.closest("form");
     if (!scroller || !form) return;
@@ -342,23 +323,21 @@ export function SkillToolStep({
   source,
   selected,
   onChange,
-  fit = false,
 }: {
   source: ToolSource;
   selected: string[];
   onChange: (refs: string[]) => void;
-  /**
-   * Size the list to the room left in the window and scroll it inside itself, so the form's own
-   * buttons stay under it. For a form that is a screen of its own; inline, the list just grows.
-   */
-  fit?: boolean;
 }) {
   const { plugins, groups } = useToolGroups(selected);
   const [search, setSearch] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => heading.current?.focus(), []);
-  useFitToWindow(list, fit);
+  /*
+   * The list is sized to the room left in the window and scrolls inside itself, so the step's own
+   * buttons stay under it rather than past eighty tools.
+   */
+  useFitToWindow(list);
 
   /*
    * Held for the life of the step. Unticking the last leftover in "Not available here" takes it out
@@ -431,10 +410,7 @@ export function SkillToolStep({
         </p>
       ) : (
         <div
-          className={cn(
-            "flex flex-col gap-2",
-            fit && "-mx-1 overflow-y-auto overscroll-contain px-1",
-          )}
+          className="-mx-1 flex flex-col gap-2 overflow-y-auto overscroll-contain px-1"
           ref={list}
         >
           {shown.map((choice) => {

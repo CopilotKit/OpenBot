@@ -52,7 +52,6 @@ function NewSkillPage() {
         beforeActions={<SkillBotPicks onChange={setBots} picked={bots} />}
         defaultValues={emptySkillForm}
         error={createSkill.error}
-        layout="page"
         onCancel={() => navigate({ to: "/capabilities/skills" })}
         onSubmit={async (values) => {
           await createSkill.mutateAsync(values);

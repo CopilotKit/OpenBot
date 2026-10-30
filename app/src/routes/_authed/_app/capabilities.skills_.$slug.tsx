@@ -142,7 +142,6 @@ function EditSkillPage() {
         }
         error={saveSkill.error}
         key={skill.slug}
-        layout="page"
         onCancel={toList}
         onSubmit={async (values) => {
           await saveSkill.mutateAsync(values);

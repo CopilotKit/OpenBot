@@ -78,6 +78,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Writing a skill is a screen of its own, and lists keep their place
+
+New skill and each skill's page open as screens instead of dialogs, laid out a section at a time:
+details, instructions, tools, the Bots it is on, and on an existing skill, Delete. Tools are picked
+one app at a time, and a new skill can be put on Bots before it is created. Each skill in the list
+is a card that opens it and shows how many Bots it is on and how many tools it needs. Coming back
+from any detail screen returns a list to where it was scrolled, and the back button no longer
+covers the top of the page.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
