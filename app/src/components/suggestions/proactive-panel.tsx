@@ -7,6 +7,7 @@ import {
   IconRadar,
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import {
   PageEmpty,
@@ -30,7 +31,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
@@ -49,11 +49,13 @@ import {
   changeProactiveSettingMutationOptions,
   createProactiveSettingMutationOptions,
   type ProactiveSetting,
+  proactiveAllowedQueryOptions,
   proactiveSettingsQueryOptions,
   proactiveSuggestionsQueryOptions,
-  resolveSuggestionMutationOptions,
 } from "@/lib/proactive";
+import { useUserPreferences } from "@/lib/settings/message-list";
 import { queryClient } from "@/query-client";
+import { SuggestionRow } from "./suggestion-row";
 
 const intervals = [
   { minutes: 60, label: "Every hour" },
@@ -69,10 +71,14 @@ const intervalItems = intervals.map((interval) => ({
 const intervalLabel = (minutes: number) =>
   intervals.find((interval) => interval.minutes === minutes)?.label ??
   `Every ${minutes} minutes`;
-/** Next steps a Bot proposed from background research: start one as a task, or dismiss it. */
 /** How many suggestions show before the rest fold behind "Show more". */
 const SUGGESTIONS_SHOWN = 3;
 
+/**
+ * What the person's Bots found in their check-ins, each with why, its source and its Bot, to Start
+ * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenMuse's Ideas); OpenBot's
+ * own pages list the same rows under Needs you.
+ */
 export function SuggestionsInbox({
   agentId,
 }: {
@@ -84,7 +90,6 @@ export function SuggestionsInbox({
     (suggestion) => agentId === undefined || suggestion.agentId === agentId,
   );
   const bots = useQuery(agentListQueryOptions());
-  const act = useMutation(resolveSuggestionMutationOptions(queryClient));
   const [expanded, setExpanded] = useState(false);
   const botName = (id: string) =>
     bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
@@ -107,66 +112,10 @@ export function SuggestionsInbox({
           {visible.map((suggestion, index) => (
             <Fragment key={suggestion.id}>
               {index > 0 ? <Separator /> : null}
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <IconBulb />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle className="line-clamp-none">
-                    {suggestion.title}
-                  </ItemTitle>
-                  {suggestion.detail ? (
-                    <ItemDescription className="line-clamp-none whitespace-pre-wrap text-foreground">
-                      {suggestion.detail}
-                    </ItemDescription>
-                  ) : null}
-                  <ItemDescription className="line-clamp-none">
-                    {botName(suggestion.agentId)} ·{" "}
-                    {new Date(suggestion.createdAt).toLocaleString()}
-                    {suggestion.sourceApp || suggestion.sourceLink ? (
-                      <>
-                        {" · "}From {suggestion.sourceApp ?? "a connected app"}
-                        {suggestion.sourceLink && (
-                          <>
-                            {" · "}
-                            <a
-                              href={suggestion.sourceLink}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open record
-                            </a>
-                          </>
-                        )}
-                      </>
-                    ) : null}
-                  </ItemDescription>
-                  {/* A set, so it wraps onto its own line rather than crowding the title. */}
-                  <ItemFooter>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        disabled={act.isPending}
-                        onClick={() =>
-                          act.mutate({ id: suggestion.id, action: "start" })
-                        }
-                      >
-                        Start as task
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={act.isPending}
-                        onClick={() =>
-                          act.mutate({ id: suggestion.id, action: "dismiss" })
-                        }
-                      >
-                        Dismiss
-                      </Button>
-                    </div>
-                  </ItemFooter>
-                </ItemContent>
-              </Item>
+              <SuggestionRow
+                botName={botName(suggestion.agentId)}
+                suggestion={suggestion}
+              />
             </Fragment>
           ))}
           {hidden ? (
@@ -190,33 +139,46 @@ export function SuggestionsInbox({
           ) : null}
         </PageRows>
       ) : (
-        <PageEmpty icon={IconBulb} title="No suggestions right now">
-          Bots with background research on will suggest next steps here.
+        <PageEmpty icon={IconBulb} title="Nothing needs you right now">
+          When a Bot's check-in finds something that needs you, it shows up
+          here.
         </PageEmpty>
-      )}
-      {act.error && (
-        <p role="alert" className="mt-4 text-destructive text-sm">
-          {act.error.message}
-        </p>
       )}
     </PageSection>
   );
 }
 
 /**
- * Opt a Bot in to read-only background research of the apps it can already read.
+ * Why no Bot checks in for this person whatever its own setting says, or null when they do: an
+ * admin turned check-ins off for them, or they turned them off for all their Bots.
+ */
+function useCheckInsBlocked(): string | null {
+  const allowed = useQuery(proactiveAllowedQueryOptions());
+  const preferences = useUserPreferences();
+  if (allowed.data === false) return "Turned off by your admin";
+  if (preferences.data?.proactive === "off") return "Off for all your Bots";
+  return null;
+}
+
+/**
+ * A Bot's check-ins: it reads the apps it can already read, quietly, and tells the person when
+ * something needs them. Read-only.
  *
- * Each opt-in is a row stating its current answer; it opens a dialog to change how often, run it,
- * turn it off or remove it. Opting in is a dialog behind the section's action.
+ * Each Bot's check-ins are a row stating its current answer; it opens a dialog to change how often,
+ * run one now, turn it off or remove it. Turning it on is a dialog behind the section's action.
+ *
+ * When an admin or the person turned check-ins off for all their Bots, each row says so in place of
+ * when it runs next, since none will run whatever the row's own switch says.
  */
 export function ProactiveResearchSettings({
   agentId: fixedBot,
 }: {
-  /** Only this Bot's research, and a new one is this Bot's without asking. */
+  /** Only this Bot's check-ins, and a new one is this Bot's without asking. */
   agentId?: string;
 } = {}) {
   const settings = useQuery(proactiveSettingsQueryOptions());
   const bots = useQuery(agentListQueryOptions());
+  const blocked = useCheckInsBlocked();
   const [adding, setAdding] = useState(false);
   const shown = (settings.data ?? []).filter(
     (setting) => fixedBot === undefined || setting.agentId === fixedBot,
@@ -226,12 +188,30 @@ export function ProactiveResearchSettings({
       action={
         <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
           <IconPlus />
-          Turn on research
+          Turn on check-ins
         </Button>
       }
-      description="On by default once you start a conversation with just this Bot: it looks through the apps it can already read every four hours, forms memories for you to review and suggests next steps. It can only read: it cannot send messages, change anything in an app, or use a browser or computer. Turn it off or remove it and it stays that way."
-      title="Background research"
+      description="On by default once you message just this Bot. It reads the apps it can use and tells you when something needs you, at most once an hour. It also forms memories for you to review. It can only read: it can't send messages, change anything in an app, or use a browser or computer. If you turn it off or remove it, it stays that way."
+      title="Check-ins"
     >
+      {blocked ? (
+        <p className="mt-1 max-w-prose text-muted-foreground text-sm">
+          {blocked === "Off for all your Bots" ? (
+            <>
+              You turned off check-ins for all your Bots in{" "}
+              <Link
+                className="underline underline-offset-4"
+                to="/settings/notifications"
+              >
+                Notifications
+              </Link>
+              .
+            </>
+          ) : (
+            "Your admin turned off check-ins for you."
+          )}
+        </p>
+      ) : null}
       {settings.isPending ? null : settings.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
           {settings.error.message}
@@ -241,11 +221,11 @@ export function ProactiveResearchSettings({
           action={
             <Button onClick={() => setAdding(true)} size="sm" variant="outline">
               <IconPlus />
-              Turn on research
+              Turn on check-ins
             </Button>
           }
           icon={IconRadar}
-          title="Background research is off"
+          title="Check-ins are off"
         />
       ) : (
         <PageRows>
@@ -253,6 +233,7 @@ export function ProactiveResearchSettings({
             <Fragment key={setting.id}>
               {index > 0 ? <Separator /> : null}
               <SettingRow
+                blocked={blocked}
                 setting={setting}
                 botName={
                   bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
@@ -273,7 +254,7 @@ export function ProactiveResearchSettings({
   );
 }
 
-/** Which Bot, where its suggestions go, how often, and what to look for. */
+/** Which Bot, which conversation it checks from, how often, and what to look for. */
 function TurnOnResearchDialog({
   fixedBot,
   onClose,
@@ -287,7 +268,8 @@ function TurnOnResearchDialog({
   const agentId = fixedBot ?? pickedBot;
   const [channelId, setChannelId] = useState("");
   const [focus, setFocus] = useState("");
-  const [intervalMinutes, setIntervalMinutes] = useState(240);
+  // Hourly, the most often a Bot checks and the default for a new Bot.
+  const [intervalMinutes, setIntervalMinutes] = useState(60);
   const id = useId();
   const eligibleChannels = (channels.data ?? []).filter(
     (channel) => channel.active && channel.agentIds.includes(agentId),
@@ -297,10 +279,10 @@ function TurnOnResearchDialog({
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Turn on background research</DialogTitle>
+          <DialogTitle>Turn on check-ins</DialogTitle>
           <DialogDescription>
-            It reads on a schedule and delivers what it suggests to a channel it
-            is in.
+            It reads the apps it can use in this conversation and tells you when
+            something needs you.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -346,9 +328,7 @@ function TurnOnResearchDialog({
                 </Field>
               ) : null}
               <Field>
-                <FieldLabel htmlFor={`${id}-channel`}>
-                  Deliver suggestions to
-                </FieldLabel>
+                <FieldLabel htmlFor={`${id}-channel`}>Conversation</FieldLabel>
                 <Select
                   items={eligibleChannels.map((channel) => ({
                     value: channel.id,
@@ -359,7 +339,7 @@ function TurnOnResearchDialog({
                   value={channelId || null}
                 >
                   <SelectTrigger className="w-full" id={`${id}-channel`}>
-                    <SelectValue placeholder="Choose a channel" />
+                    <SelectValue placeholder="Choose a conversation" />
                   </SelectTrigger>
                   <SelectContent>
                     {eligibleChannels.map((channel) => (
@@ -424,7 +404,7 @@ function TurnOnResearchDialog({
             size="sm"
             type="submit"
           >
-            Turn on background research
+            Turn on check-ins
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -432,26 +412,33 @@ function TurnOnResearchDialog({
   );
 }
 
-/** Whether it is on, and when it runs next. Stated rather than captured, so it follows the query. */
-function researchStatus(setting: ProactiveSetting) {
+/**
+ * Whether it is on, and when it runs next. Stated rather than captured, so it follows the query.
+ * While check-ins are off for all the person's Bots, that is the answer, whatever this one says.
+ */
+function checkInStatus(setting: ProactiveSetting, blocked: string | null) {
   return !setting.enabled
     ? "Off"
-    : setting.lastStatus === "running"
-      ? "Researching now"
-      : `Next ${new Date(setting.nextRunAt).toLocaleString()}`;
+    : blocked
+      ? blocked
+      : setting.lastStatus === "running"
+        ? "Checking now"
+        : `Next ${new Date(setting.nextRunAt).toLocaleString()}`;
 }
 
 /**
- * One Bot's research: a summary of its current answer and a chevron, opening a dialog that changes
+ * One Bot's check-ins: a summary of its current answer and a chevron, opening a dialog that changes
  * it. The dialog is the row's sibling, not its child, so a click inside it does not bubble back to
  * the row and reopen it.
  */
 function SettingRow({
   setting,
   botName,
+  blocked,
 }: {
   setting: ProactiveSetting;
   botName: string;
+  blocked: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -461,7 +448,7 @@ function SettingRow({
   const summary = [
     setting.focus,
     intervalLabel(setting.intervalMinutes),
-    researchStatus(setting),
+    checkInStatus(setting, blocked),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -499,7 +486,7 @@ function SettingRow({
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Background research</DialogTitle>
+            <DialogTitle>Check-ins</DialogTitle>
             <DialogDescription>
               {setting.focus ? `${botName} · ${setting.focus}` : botName}
             </DialogDescription>
@@ -510,7 +497,7 @@ function SettingRow({
                 <IconClock />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>{researchStatus(setting)}</ItemTitle>
+                <ItemTitle>{checkInStatus(setting, blocked)}</ItemTitle>
                 {setting.lastRunAt && (
                   <ItemDescription>
                     Last ran {new Date(setting.lastRunAt).toLocaleString()}
@@ -585,7 +572,7 @@ function SettingRow({
             </Button>
             <Button
               size="sm"
-              disabled={!setting.enabled || change.isPending}
+              disabled={!setting.enabled || !!blocked || change.isPending}
               onClick={() =>
                 change.mutate({ setting, change: { kind: "run" } })
               }

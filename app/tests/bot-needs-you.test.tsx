@@ -8,8 +8,8 @@ import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The top of a Bot's page: what that Bot is waiting on the person for, decided right there, and the
- * next steps its background research suggested.
+ * The top of a Bot's page: what that Bot is waiting on the person for, decided right there, and what
+ * its check-ins found.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -48,7 +48,29 @@ const request = (
   },
 });
 
+const suggestion = (id: string, agentId: string, title: string) => ({
+  id,
+  agentId,
+  title,
+  detail: "",
+  sourceApp: null,
+  sourceRef: null,
+  sourceLink: null,
+  pingId: null,
+  createdAt: "2026-10-09T10:00:00Z",
+});
+
 let inbox: Record<string, unknown> = {};
+let found = [
+  suggestion("s1", "expenses", "Chase the March invoice"),
+  suggestion("s2", "knowledge", "Archive old pages"),
+];
+afterEach(() => {
+  found = [
+    suggestion("s1", "expenses", "Chase the March invoice"),
+    suggestion("s2", "knowledge", "Archive old pages"),
+  ];
+});
 const sent: { path: string; method: string; body: unknown }[] = [];
 function serving() {
   sent.length = 0;
@@ -63,30 +85,11 @@ function serving() {
       return Response.json({ ok: true });
     }
     if (url === "/api/approvals") return Response.json(inbox);
-    if (url === "/api/proactive/suggestions") {
-      return Response.json({
-        suggestions: [
-          {
-            id: "s1",
-            agentId: "expenses",
-            title: "Chase the March invoice",
-            detail: "",
-            sourceApp: null,
-            sourceLink: null,
-            createdAt: "2026-10-09T10:00:00Z",
-          },
-          {
-            id: "s2",
-            agentId: "knowledge",
-            title: "Archive old pages",
-            detail: "",
-            sourceApp: null,
-            sourceLink: null,
-            createdAt: "2026-10-09T10:00:00Z",
-          },
-        ],
-      });
-    }
+    if (url === "/api/proactive/suggestions")
+      return Response.json({ suggestions: found });
+    if (url === "/api/tasks") return Response.json({ tasks: [] });
+    if (url.startsWith("/api/channels"))
+      return Response.json({ channels: [], nextCursor: null });
     return Response.json({
       agents: [
         { id: "expenses", name: "Expenses" },
@@ -185,6 +188,7 @@ test("a hand-off is marked done by the person, never allowed on their behalf", a
 
 test("with nothing waiting on the person, the section is not drawn", async () => {
   inbox = { ...base, requests: [request("r2", "knowledge")], questions: [] };
+  found = [suggestion("s2", "knowledge", "Archive old pages")];
   serving();
   const view = draw(<BotNeedsYou agentId="expenses" />);
   await new Promise((resolve) => setTimeout(resolve, 100));

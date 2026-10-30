@@ -23,6 +23,14 @@ afterEach(() => {
 });
 
 const writes: { request: string; body: unknown }[] = [];
+let routing: Record<string, unknown> = {
+  progress: ["push"],
+  decision: "all",
+  question: "all",
+};
+afterEach(() => {
+  routing = { progress: ["push"], decision: "all", question: "all" };
+});
 function serving() {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -43,9 +51,7 @@ function serving() {
         available: { slack: true, teams: true, sms: true, push: true },
       });
     }
-    return Response.json({
-      routing: { progress: ["push"], decision: "all", question: "all" },
-    });
+    return Response.json({ routing });
   }) as unknown as typeof fetch;
 }
 
@@ -65,4 +71,45 @@ test("switching a transport on for one kind of update saves that kind's transpor
     request: "PUT /api/bots/routing/progress",
     body: { transports: ["push", "sms"] },
   });
+});
+
+test("pings get their own row, Something needs you, once the server routes them", async () => {
+  routing = {
+    progress: ["push"],
+    decision: "all",
+    question: "all",
+    attention: ["push", "slack"],
+  };
+  serving();
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <UpdateRoutingSection />
+    </QueryClientProvider>,
+  );
+  expect(await view.findByText("Something needs you")).toBeTruthy();
+  const sms = view.getByRole("switch", { name: "Something needs you by SMS" });
+  expect(sms.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(sms);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({
+    request: "PUT /api/bots/routing/attention",
+    body: { transports: ["push", "slack", "sms"] },
+  });
+});
+
+test("with no ping routing from the server there is no row for it to promise", async () => {
+  serving();
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <UpdateRoutingSection />
+    </QueryClientProvider>,
+  );
+  expect(await view.findByText("Questions")).toBeTruthy();
+  expect(view.queryByText("Something needs you")).toBeNull();
 });

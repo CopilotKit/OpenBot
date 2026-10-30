@@ -61,7 +61,10 @@ function bot(overrides: Partial<AgentProfile> & { id: string }): AgentProfile {
   };
 }
 
-/** Serves the visible roster, the hidden roster, and an empty attention list. */
+/**
+ * Serves the visible roster, the hidden roster, and an empty attention list, with nothing found by
+ * check-ins and no tasks.
+ */
 function serving(
   visible: AgentProfile[],
   hidden: AgentProfile[],
@@ -70,7 +73,12 @@ function serving(
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("/api/bots/attention"))
-      return Response.json({ bots: attention });
+      return Response.json({ bots: attention, lastPingId: null });
+    if (url === "/api/proactive/suggestions")
+      return Response.json({ suggestions: [] });
+    if (url === "/api/tasks") return Response.json({ tasks: [] });
+    if (url.startsWith("/api/channels"))
+      return Response.json({ channels: [], nextCursor: null });
     return Response.json({
       agents: url.includes("hidden=true") ? hidden : visible,
     });
@@ -211,6 +219,8 @@ test("a Bot with something waiting comes first, under Needs you, with its count"
         unread: 0,
         paused: false,
         notify: "all",
+        items: 0,
+        tasks: { needsInput: 0, ready: 0, failed: 0 },
       },
     ],
   );

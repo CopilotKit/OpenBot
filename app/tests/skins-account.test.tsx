@@ -353,7 +353,7 @@ test("a skin switched while on a screen only the old skin has lands on home, dra
   );
   serve("GET /api/agents", { agents: [] });
   serve("GET /api/channels", { channels: [], nextCursor: null });
-  serve("GET /api/bots/attention", { bots: [] });
+  serve("GET /api/bots/attention", { bots: [], lastPingId: null });
   const { view, router } = renderApp(`/s/${key}`);
   await waitFor(() =>
     expect(document.querySelector("[data-openduet-frame]")).not.toBeNull(),

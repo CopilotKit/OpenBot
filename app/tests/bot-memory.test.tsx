@@ -92,6 +92,7 @@ function serving() {
           research("p1", "expenses", "Unpaid invoices"),
           research("p2", "knowledge", "Stale pages"),
         ],
+        allowed: true,
       });
     }
     if (url.startsWith("/api/channels")) {
