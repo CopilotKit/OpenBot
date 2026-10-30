@@ -91,10 +91,7 @@ export function PageHeader({
   return (
     <header className="flex flex-col gap-2" data-slot="page-header">
       <div className="flex flex-row items-center justify-between gap-4">
-        <h1
-          className="font-semibold text-2xl tracking-tight"
-          data-slot="page-title"
-        >
+        <h1 className="font-bold text-2xl" data-slot="page-title">
           {title}
         </h1>
         {action}
@@ -132,11 +129,7 @@ export function PageSection({
     <section className={cn("mt-12", className)}>
       {title ? (
         <div className="flex min-h-8 flex-row items-center justify-between gap-4">
-          {/*
-           * Close to body size and lighter than the page title, so the sections read as parts of
-           * the page rather than as a second row of titles competing with it.
-           */}
-          <h2 className="font-semibold text-base">{title}</h2>
+          <h2 className="font-bold text-lg">{title}</h2>
           {action}
         </div>
       ) : null}

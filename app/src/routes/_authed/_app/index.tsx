@@ -195,7 +195,7 @@ function RouteComponent() {
         <div className="mt-10 w-full max-w-2xl">
           {loading ? (
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <h2 className="font-bold text-lg">Explore Bots</h2>
               <Skeleton className="mt-4 h-[140px]" />
             </>
           ) : explore?.length ? (
@@ -204,10 +204,7 @@ function RouteComponent() {
             // nothing to explore, which would be false while this list is still populated.
             <section aria-labelledby="explore-agents-heading">
               <div className="flex flex-row items-center justify-between gap-4">
-                <h2
-                  id="explore-agents-heading"
-                  className="font-semibold text-base"
-                >
+                <h2 id="explore-agents-heading" className="font-bold text-lg">
                   Explore Bots
                 </h2>
                 {explore.length > EXPLORE_SHOWN ? (
@@ -239,8 +236,8 @@ function RouteComponent() {
             // card there would say the opposite of what a populated composer beside it (still
             // working off that same, successfully loaded `agents`) proves.
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
+              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <Skeleton className="mt-4 h-[140px]" />
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
                     Couldn't load the Bots shared with you.
@@ -253,8 +250,8 @@ function RouteComponent() {
             // when it failed but `agents` is defined — a loaded, empty slice either way. Same
             // plain copy for both: an empty roster is a fact, not an error.
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed">
+              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <Skeleton className="mt-4 h-[140px]" />
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
                     Nobody has shared a Bot with you yet.
