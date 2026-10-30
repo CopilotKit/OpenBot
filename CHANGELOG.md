@@ -183,7 +183,8 @@ changes for a deployment.
   screen, every step the Bot took in its browser, approved clicks included, sits among the commands
   it ran, newest last, marked done, waiting for you or didn't work. The pane opens by itself only
   when it fits beside the conversation; on a narrow screen the computer button lights up instead.
-  The box for a password or a code names the site it goes to.
+  The box for a password or a code says the value goes straight to the page and the Bot never sees
+  it.
 - When a Bot asks before acting, its card says in plain words what it will do, in which app or
   where, to whom, and what it will send, with everything else under Details. Decline and Allow once
   answer it, and a quieter Always allow here saves a rule for that Bot, action and place; a step
