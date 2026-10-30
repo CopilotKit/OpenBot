@@ -88,7 +88,8 @@ takes an optional `avatarSeed`, and a seed may start with a colour, as `moss:kno
 names no colour, which is every Bot's until somebody chooses, draws exactly as before. Violet stays
 OpenBot's own, and a `violet:` seed or a colour no Bot has is refused. A tenant package's
 `avatar_seed` may name a colour the same way. A new look is named on the Bot's `bot.updated` audit
-row.
+row. `GET /api/agents` now lists Bots in the order they were made, so restyling or renaming a Bot no
+longer moves it to the end of the list.
 
 ### A computer closes browsers nobody is using when its memory runs high
 

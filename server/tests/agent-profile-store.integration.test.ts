@@ -574,6 +574,43 @@ describe("agent profile store integration", () => {
     );
   });
 
+  /*
+   * The list had no order of its own, so Postgres answered in whatever order its rows lay in, and an
+   * edit writes a new row: a Bot somebody restyled or renamed jumped from first to last in Yours.
+   * The app shows Bots in the order the server sends them and takes the first as the default, so
+   * the order is the store's to keep: the order they were made in.
+   */
+  test("lists Bots in the order they were made, and an edit moves none of them", async () => {
+    const owner = await createUser();
+    const made: string[] = [];
+    for (const label of ["First", "Second", "Third"]) {
+      const created = await store.create(owner, {
+        name: `${label} ${randomUUID()}`,
+        title: "In order",
+        roleDescription: "Keeps its place.",
+        visibility: "private",
+      });
+      createdAgentIds.push(created.id);
+      made.push(created.id);
+    }
+    const listed = async () =>
+      (await store.list(owner))
+        .map((profile) => profile.id)
+        .filter((agentId) => made.includes(agentId));
+    expect(await listed()).toEqual(made);
+
+    // A new look and a new name for the first, which writes both of its rows again.
+    const first = await profileById(owner, made[0] as string);
+    await store.update(owner, first.id, {
+      name: `Renamed ${randomUUID()}`,
+      title: first.title,
+      roleDescription: first.roleDescription,
+      visibility: first.visibility,
+      avatarSeed: "moss:k2p9x7aq",
+    });
+    expect(await listed()).toEqual(made);
+  });
+
   test("rejects public non-owner mutation as unmanageable and inaccessible private mutation as absent", async () => {
     const owner = await createUser();
     const other = await createUser();

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { capabilityRefusal } from "../admin/capabilities";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
@@ -487,15 +487,23 @@ export function createAgentProfileStore(
 
   return {
     async list(actor, hidden = false) {
-      const rows = await joinedProfiles(database, actor).where(
-        and(
-          isNull(agentProfiles.deletedAt),
-          accessFilter(actor),
-          hidden
-            ? isNotNull(agentPreferences.hiddenAt)
-            : isNull(agentPreferences.hiddenAt),
-        ),
-      );
+      /*
+       * In the order the Bots were made, the id breaking a tie (a tenant package writes its Bots in
+       * one transaction, so they share a moment). Without an order Postgres answers in whatever
+       * order the rows lie in, and an edit writes a new row: a Bot that was restyled or renamed
+       * moved to the end. The app lists Bots in this order and takes the first as the default.
+       */
+      const rows = await joinedProfiles(database, actor)
+        .where(
+          and(
+            isNull(agentProfiles.deletedAt),
+            accessFilter(actor),
+            hidden
+              ? isNotNull(agentPreferences.hiddenAt)
+              : isNull(agentPreferences.hiddenAt),
+          ),
+        )
+        .orderBy(asc(agents.createdAt), asc(agents.id));
       return rows.map(mapProfile);
     },
 
