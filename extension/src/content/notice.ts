@@ -30,7 +30,7 @@ export const NOTICE_TOKENS = {
     "--border": "#3a3452",
     "--primary": "#f0f0f4",
     "--primary-foreground": "#010507",
-    "--secondary": "#1f1c2c",
+    "--secondary": "#332e4a",
     "--muted-foreground": "#9a9aa6",
     "--destructive": "#ff9aa0",
     "--ring": "#8d97ff",

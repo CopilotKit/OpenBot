@@ -25,9 +25,17 @@
   --accent-foreground: #010507;
   --destructive: #b42530;
   --success: #12795b;
+  /* Orange means one thing in OpenBot: waits for you. The fill, and the text that reads on it and on the page. */
+  --warning: #ffac4d;
+  --warning-foreground: #9a5200;
   --border: #dbdbe5;
   --input: #dbdbe5;
   --ring: #7480f1;
+  /* The firmer edge and soft lift that set rows and cards off the page. */
+  --card-border: #c4c6d8;
+  --card-shadow: 0 1px 2px rgb(1 5 7 / 5%), 0 6px 16px -10px rgb(1 5 7 / 16%);
+  --card-shadow-hover:
+    0 2px 4px rgb(1 5 7 / 6%), 0 14px 28px -14px rgb(1 5 7 / 24%);
   --chart-1: oklch(0.869 0.022 252.894);
   --chart-2: oklch(0.554 0.046 257.417);
   --chart-3: oklch(0.446 0.043 257.281);
@@ -66,17 +74,24 @@
   --popover-foreground: #f0f0f4;
   --primary: #f0f0f4;
   --primary-foreground: #010507;
-  --secondary: #1f1c2c;
+  /* Lighter than the cards, as shadcn's dark fills are, so a button or badge never reads as a hole. */
+  --secondary: #332e4a;
   --secondary-foreground: #f0f0f4;
-  --muted: #1f1c2c;
+  --muted: #332e4a;
   --muted-foreground: #9a9aa6;
   --accent: #3a3458;
   --accent-foreground: #f0f0f4;
   --destructive: #ff9aa0;
   --success: #5fe3bb;
+  --warning: #ffac4d;
+  --warning-foreground: #ffc27a;
   --border: #3a3452;
   --input: #3a3452;
   --ring: #8d97ff;
+  --card-border: #4d4670;
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 8px 18px -12px rgb(0 0 0 / 60%);
+  --card-shadow-hover:
+    0 2px 6px rgb(0 0 0 / 40%), 0 16px 30px -14px rgb(0 0 0 / 70%);
   --chart-1: oklch(0.869 0.022 252.894);
   --chart-2: oklch(0.554 0.046 257.417);
   --chart-3: oklch(0.446 0.043 257.281);
@@ -158,6 +173,11 @@ body {
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-card-border: var(--card-border);
+  --shadow-card: var(--card-shadow);
+  --shadow-card-hover: var(--card-shadow-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);

@@ -72,7 +72,6 @@ import {
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
-import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 import { AppAccessCard } from "./app-access-card";
 import { isBrowserStep } from "./browser-activity";
 import {
@@ -1828,13 +1827,10 @@ export function ChatTranscript({
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
   /*
-   * OpenBot's own look reads as one centered column, 720px wide, whatever the width of the main area.
-   * A skin keeps the `max-w-2xl` column it was designed with.
+   * The transcript's column. OpenBot's own look widens it to a centered 720px in openbot.css,
+   * through its `transcript-column` slot.
    */
-  const column =
-    useSkinId() === DEFAULT_SKIN
-      ? "w-full px-4 md:px-[max(32px,calc((100%-720px)/2))]"
-      : "mx-auto w-full max-w-2xl px-4";
+  const column = "mx-auto w-full max-w-2xl px-4";
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
    * silently broke the transcript: the agent hands back the SAME array and mutates it, so the
@@ -2115,7 +2111,10 @@ export function ChatTranscript({
   if (restoring) {
     return (
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
-        <div className={cn("flex flex-col gap-6 py-6", column)}>
+        <div
+          className={cn("flex flex-col gap-6 py-6", column)}
+          data-slot="transcript-column"
+        >
           <RestoringTranscript />
           {/*
            * A message typed while history loads is parked, not lost, and must be seen to be: a
@@ -2220,6 +2219,7 @@ export function ChatTranscript({
               <MessageScrollerContent
                 aria-busy={busy}
                 className={cn("py-6", column)}
+                data-slot="transcript-column"
                 spacerClassName="order-2"
               >
                 {/*

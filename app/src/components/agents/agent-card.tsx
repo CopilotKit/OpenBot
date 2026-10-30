@@ -17,7 +17,7 @@ export function AgentCard({
        * The avatar beside the name rather than above it: a tall card left most of its height empty
        * between the two, and a row reads the name and what the Bot is for in one glance.
        */
-      <div className="flex h-16 min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-3 transition-colors hover:border-ring dark:border-transparent">
+      <div className="flex h-16 min-w-0 items-center gap-3 rounded-xl border border-card-border bg-card px-3 shadow-card transition-[border-color,box-shadow] hover:border-ring hover:shadow-card-hover">
         <div aria-hidden="true" className="flex shrink-0">
           <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={32} />
         </div>

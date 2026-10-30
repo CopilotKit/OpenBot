@@ -82,6 +82,39 @@ describe("default look tokens", () => {
     },
   );
 
+  test.each(THEMES)(
+    "%s: the card edge, shadow and warning colors are tokens",
+    (_, tokens) => {
+      for (const token of [
+        "--card-border",
+        "--card-shadow",
+        "--card-shadow-hover",
+        "--warning",
+        "--warning-foreground",
+      ]) {
+        expect(tokens.has(token)).toBe(true);
+      }
+    },
+  );
+
+  // A button or badge on a card is lighter than the card, never a hole through to the frame.
+  test("dark: secondary and muted fills are lighter than cards", () => {
+    const [, dark] = THEMES[1];
+    const card = luminance(dark.get("--card"));
+    expect(luminance(dark.get("--secondary"))).toBeGreaterThan(card);
+    expect(luminance(dark.get("--muted"))).toBeGreaterThan(card);
+  });
+
+  test("skins keep their plain card edge and no lift", () => {
+    const skins = read("../src/skins/skins.css");
+    const light = declared(skins, ":root[data-skin]");
+    expect(light.get("--card-border")).toBe("var(--border)");
+    expect(light.get("--card-shadow")).toBe("0 0 #0000");
+    expect(declared(skins, ":root[data-skin].dark").get("--card-border")).toBe(
+      "transparent",
+    );
+  });
+
   test("skins start with the empty-state pattern off", () => {
     expect(
       declared(read("../src/skins/skins.css"), ":root[data-skin]").get(
@@ -101,15 +134,9 @@ describe("default skin extras", () => {
     expect(light.get("--font-mono")).toContain("Atkinson Hyperlegible Mono");
   });
 
-  test.each([
-    "--line-strong",
-    "--wash",
-    "--card-shadow",
-    "--card-shadow-hover",
-    "--orb-edge",
-  ])("%s is set for light and dark", (token) => {
-    expect(light.has(token)).toBe(true);
-    expect(dark.has(token)).toBe(true);
+  test("the orb's edge is set for light and dark", () => {
+    expect(light.has("--orb-edge")).toBe(true);
+    expect(dark.has("--orb-edge")).toBe(true);
   });
 
   test("it sets no colors of its own", () => {

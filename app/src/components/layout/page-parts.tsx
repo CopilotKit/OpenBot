@@ -1,6 +1,5 @@
 import type * as React from "react";
 import { cn } from "@/lib/utils";
-import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 import {
   Empty,
   EmptyContent,
@@ -18,7 +17,7 @@ import {
  *
  * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
  * would wrap every row. The page is exactly the window's height and does not scroll: the title sits
- * at the pane's left edge, lined up with the table's first column rather than centred above a table
+ * at the pane's left SURFACE_EDGE, lined up with the table's first column rather than centred above a table
  * that is not, and the children fill what is left, so the table can be the one thing that scrolls.
  * It is not a licence for anything else to be wide. It is no column, so `PageShell` draws it itself.
  */
@@ -152,23 +151,10 @@ export function PageSection({
  * thing that failed to load, where absence reads as nothing to see yet.
  */
 /*
- * OpenBot's own look gives rows and cards a firmer edge and a soft shadow, so a surface reads as one
- * on the white ground. A skin keeps the hairline it had, and its dark mode keeps no edge at all.
- *
- * Each token falls back to what the skin draws, because the extension renders these parts with
- * `theme.css` alone: it never loads `openbot.css`, so the default skin's tokens do not exist there.
+ * Rows and cards take the firmer edge and soft lift from the `--card-*` tokens in theme.css; a skin
+ * sets them back to its plain hairline in skins.css.
  */
-const SURFACE_EDGE = {
-  openbot:
-    "border-[var(--line-strong,var(--border))] shadow-[var(--card-shadow,0_0_#0000)] dark:border-[var(--line-strong,transparent)]",
-  skin: "border-border dark:border-transparent",
-};
-
-function useSurfaceEdge() {
-  return useSkinId() === DEFAULT_SKIN
-    ? SURFACE_EDGE.openbot
-    : SURFACE_EDGE.skin;
-}
+const SURFACE_EDGE = "border-card-border shadow-card";
 
 export function PageRows({
   children,
@@ -177,7 +163,6 @@ export function PageRows({
   children: React.ReactNode;
   className?: string;
 }) {
-  const edge = useSurfaceEdge();
   return (
     /*
      * The rows are squared off and the card clips them. `Item` carries `rounded-lg` of its own, which
@@ -191,9 +176,9 @@ export function PageRows({
     <div
       className={cn(
         "mt-4 overflow-hidden rounded-lg border bg-card",
-        edge,
+        SURFACE_EDGE,
         "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
-        // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
+        // Dividers stop 16px short of each SURFACE_EDGE, lined up with the rows' text, as Linear draws them.
         // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
         "[&_[data-slot=separator][data-orientation=horizontal]]:mx-4 [&_[data-slot=separator][data-orientation=horizontal]]:w-auto",
         className,
@@ -221,9 +206,10 @@ export function PageCard({
   /** The form's buttons, Cancel then the primary action. */
   footer?: React.ReactNode;
 }) {
-  const edge = useSurfaceEdge();
   return (
-    <div className={cn("rounded-lg border bg-card p-4", edge, className)}>
+    <div
+      className={cn("rounded-lg border bg-card p-4", SURFACE_EDGE, className)}
+    >
       {children}
       {footer ? (
         <div className="mt-6 flex justify-end gap-2">{footer}</div>
@@ -253,18 +239,9 @@ export function PageEmpty({
   icon?: React.ComponentType<{ className?: string }>;
   title?: string;
 }) {
-  const openbot = useSkinId() === DEFAULT_SKIN;
   return (
     // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
-    <Empty
-      className={cn(
-        "relative isolate mt-4 overflow-hidden rounded-lg border",
-        // OpenBot's own look gives it the firmer edge and faint wash; a skin keeps the hairline.
-        openbot
-          ? "border-[var(--line-strong,var(--border))] bg-[var(--wash,transparent)]"
-          : "border-border",
-      )}
-    >
+    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-card-border">
       {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
       <div aria-hidden className="empty-pattern" />
       <EmptyHeader>

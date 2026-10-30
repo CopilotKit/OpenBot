@@ -19,7 +19,6 @@ import {
 import { useStartChannel } from "@/lib/channels/start";
 import { appConfig } from "@/lib/generated/application-config";
 import { homeExamples } from "@/lib/home-examples";
-import { cn } from "@/lib/utils";
 import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
@@ -91,14 +90,7 @@ function RouteComponent() {
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center">
-          <h1
-            className={cn(
-              "tracking-tight text-center",
-              openbot
-                ? "text-[32px] font-bold leading-tight"
-                : "text-2xl font-semibold",
-            )}
-          >
+          <h1 className="text-3xl font-bold tracking-tight text-center">
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
@@ -125,14 +117,7 @@ function RouteComponent() {
         >
           <Composer
             agents={toAgentOptions(agents)}
-            className={cn(
-              "w-full max-w-2xl",
-              // The frame is the composer's own form; it is reached from here through its slot.
-              openbot &&
-                "[&_[data-slot=composer]]:rounded-[18px] [&_[data-slot=composer]]:border-(--line-strong) [&_[data-slot=composer]]:shadow-(--card-shadow) [&_[data-slot=composer]]:focus-within:border-ring [&_[data-slot=composer]]:focus-within:ring-3 [&_[data-slot=composer]]:focus-within:ring-ring/50",
-            )}
-            editorClassName={openbot ? "text-base" : undefined}
-            editorMinHeight={openbot ? 72 : undefined}
+            className="w-full max-w-2xl"
             disabled={!fallback}
             onSubmit={async (draft) => {
               // A channel is pinned to one coworker for the life of its thread, so the coworker is
@@ -168,6 +153,7 @@ function RouteComponent() {
             }}
             pending={pending}
             placeholder={placeholder}
+            variant="raised"
           />
           {/* On OpenBot's own home the subheader says this, so the hint is only a skin's. */}
           {fallback && !openbot ? (
@@ -234,15 +220,7 @@ function RouteComponent() {
               <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
                 {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
                   <li className="min-w-0" key={agent.id}>
-                    <Link
-                      className={cn(
-                        // The card is AgentCard's own; its edge and lift are set from here.
-                        openbot &&
-                          "block rounded-lg shadow-(--card-shadow) transition-shadow hover:shadow-(--card-shadow-hover) [&>div]:border-(--line-strong) dark:[&>div]:border-(--line-strong) dark:[&>div:hover]:border-ring",
-                      )}
-                      search={{ agent: agent.id }}
-                      to="/channel/new"
-                    >
+                    <Link search={{ agent: agent.id }} to="/channel/new">
                       <AgentCard agent={agent} appearance="row" />
                     </Link>
                   </li>

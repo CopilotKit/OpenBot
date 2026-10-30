@@ -63,7 +63,7 @@ export function ChannelItemContent({
           ) : null}
         </div>
         {waiting ? (
-          <div className="mt-px flex items-center gap-1 text-[12px] font-medium leading-4 text-[#9a5200] dark:text-[#ffc27a]">
+          <div className="mt-px flex items-center gap-1 text-xs font-medium leading-4 text-warning-foreground">
             <IconHandStop aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="truncate">Waiting for you</span>
           </div>
