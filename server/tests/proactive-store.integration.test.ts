@@ -208,7 +208,7 @@ test("a run's reads come from its own successful audit rows only", async () => {
   expect(reads[0]?.at).toBeInstanceOf(Date);
 });
 
-test("suggestions are delivered once, listed to their owner, and resolved once", async () => {
+test("items carry their normalized title, are listed to their owner, and are resolved once", async () => {
   const [setting] = await proactive.list(owner);
   if (!setting) throw new Error("setting missing");
   const runId = randomUUID();
@@ -235,11 +235,11 @@ test("suggestions are delivered once, listed to their owner, and resolved once",
     sourceLink: null,
   });
   expect(await proactive.countSuggestions(runId)).toBe(2);
-  expect(await proactive.undelivered(runId)).toHaveLength(2);
-  await proactive.markDelivered(suggestion.id);
-  expect((await proactive.undelivered(runId)).map((row) => row.title)).toEqual([
-    "Second",
-  ]);
+  expect(suggestion).toMatchObject({
+    dedupeKey: "reply to sam",
+    pingId: null,
+    status: "open",
+  });
   expect(
     (await proactive.suggestions(owner)).some(
       (row) => row.id === suggestion.id,
@@ -266,7 +266,7 @@ test("suggestions are delivered once, listed to their owner, and resolved once",
   ).toBe(false);
 });
 
-test("a run's history is its open and recently dismissed titles, and a finished run supersedes the rest", async () => {
+test("open items stay open across check-ins until the person starts or hides one, or a check-in clears it", async () => {
   const setting = await proactive.create(
     owner,
     { ...settingInput, agentId: secondBot },
@@ -280,32 +280,55 @@ test("a run's history is its open and recently dismissed titles, and a finished 
       runId,
       title,
       detail: `${title}.`,
-      sourceApp: null,
-      sourceRef: null,
+      sourceApp: "Issue tracker",
+      sourceRef: ref,
       sourceLink: null,
     });
   const earlier = randomUUID();
-  await add(earlier, "Reply to Sam");
-  await add(earlier, "Reply to Sam");
-  const dropped = await add(earlier, "Archive old tickets");
-  await proactive.resolveSuggestion(owner, dropped.id, "dismissed");
-  expect(await proactive.history(setting.id)).toEqual({
-    open: ["Reply to Sam"],
-    dismissed: ["Archive old tickets"],
-  });
-
+  const kept = await add(earlier, "Reply to Sam");
+  const hidden = await add(earlier, "Archive old tickets");
+  const started = await add(earlier, "Book the venue");
+  const cleared = await add(earlier, "Answer the supplier");
+  await proactive.resolveSuggestion(owner, hidden.id, "dismissed");
+  await proactive.resolveSuggestion(owner, started.id, "started");
+  expect(
+    (await proactive.clearSuggestion(setting.id, cleared.id))?.status,
+  ).toBe("superseded");
+  // A later check-in's items sit beside the earlier ones: nothing is replaced wholesale.
   const latest = randomUUID();
-  const kept = await add(latest, "Reply to Sam");
-  await proactive.supersede(setting.id, latest);
+  const fresh = await add(latest, "Send the invoice");
   const open = (await proactive.suggestions(owner)).filter(
     (row) => row.settingId === setting.id,
   );
-  expect(open.map((row) => row.id)).toEqual([kept.id]);
-  // The person's dismissal is untouched; only what was still open is superseded.
-  expect(await proactive.history(setting.id)).toEqual({
-    open: ["Reply to Sam"],
-    dismissed: ["Archive old tickets"],
+  expect(open.map((row) => row.id).sort()).toEqual([kept.id, fresh.id].sort());
+  // What the next check-in is told and refuses against: this Bot's, the person's own decisions.
+  const prior = await proactive.priorItems(owner, secondBot);
+  expect(prior.open.map((row) => row.title).sort()).toEqual([
+    "Reply to Sam",
+    "Send the invoice",
+  ]);
+  expect(prior.hidden).toEqual([
+    {
+      title: "Archive old tickets",
+      sourceLink: null,
+      sourceApp: "Issue tracker",
+    },
+  ]);
+  expect(prior.started).toEqual([{ title: "Book the venue" }]);
+  expect(await proactive.priorItems(other, secondBot)).toEqual({
+    open: [],
+    tasks: [],
+    hidden: [],
+    started: [],
   });
+  // Cleared once; a second clear, or one of another setting's, finds nothing.
+  expect(await proactive.clearSuggestion(setting.id, cleared.id)).toBeNull();
+  const [first] = await proactive
+    .list(owner)
+    .then((rows) => rows.filter((row) => row.agentId === bot));
+  expect(
+    await proactive.clearSuggestion(first?.id as string, kept.id),
+  ).toBeNull();
 });
 
 test("Bot-formed memories carry provenance, await review, and never come back once forgotten", async () => {

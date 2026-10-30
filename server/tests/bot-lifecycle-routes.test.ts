@@ -57,6 +57,7 @@ function app() {
           approvals: 0,
           handoffs: 0,
           unread: 2,
+          items: 3,
         },
         {
           agentId: "hidden-bot",
@@ -64,7 +65,16 @@ function app() {
           approvals: 0,
           handoffs: 0,
           unread: 0,
+          items: 1,
         },
+      ],
+      lastPing: async () => "ping-7",
+    },
+    tasks: {
+      counts: async () => [
+        { agentId: "bot-1", needsInput: 1, ready: 2, failed: 0 },
+        { agentId: "bot-2", needsInput: 0, ready: 0, failed: 0 },
+        { agentId: "hidden-bot", needsInput: 1, ready: 0, failed: 0 },
       ],
     },
     wakeUps: { cancel: async () => true },
@@ -166,6 +176,28 @@ describe("Bot lifecycle routes", () => {
     const response = await hono.request("http://t/api/bots/attention");
     const { bots } = (await response.json()) as { bots: { agentId: string }[] };
     expect(bots.map((row) => row.agentId)).toEqual(["bot-1"]);
+  });
+
+  test("attention carries each Bot's open items and the tasks that need the person, and the newest ping", async () => {
+    const { hono } = app();
+    const response = await hono.request("http://t/api/bots/attention");
+    expect(await response.json()).toEqual({
+      bots: [
+        {
+          agentId: "bot-1",
+          name: "Sales",
+          questions: 1,
+          approvals: 0,
+          handoffs: 0,
+          unread: 2,
+          paused: false,
+          notify: "all",
+          items: 3,
+          tasks: { needsInput: 1, ready: 2, failed: 0 },
+        },
+      ],
+      lastPingId: "ping-7",
+    });
   });
 
   test("stopping a delegated task is audited; an unknown one is a 404", async () => {

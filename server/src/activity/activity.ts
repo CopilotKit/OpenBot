@@ -19,6 +19,8 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  proactivePings,
+  proactiveSuggestions,
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
@@ -68,6 +70,8 @@ export type BotAttention = {
   approvals: number;
   handoffs: number;
   unread: number;
+  /** Open items this Bot's check-ins raised, waiting for the person to start or hide. */
+  items: number;
 };
 
 const COMPLETED_LIMIT = 25;
@@ -466,6 +470,7 @@ export function createActivityStore(database: Database) {
             approvals: 0,
             handoffs: 0,
             unread: 0,
+            items: 0,
           };
           byBot.set(agentId, found);
         }
@@ -555,7 +560,40 @@ export function createActivityStore(database: Database) {
         .groupBy(channelAgents.agentId);
       for (const row of unread) entry(row.agentId).unread += row.total;
 
+      /*
+       * What check-ins raised and the person has not decided: listed in the app the moment it is
+       * raised, pinged or not, and whatever the Bot may notify them of. Badges always show.
+       */
+      const items = await database
+        .select({
+          agentId: proactiveSuggestions.agentId,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(proactiveSuggestions)
+        .where(
+          and(
+            eq(proactiveSuggestions.ownerUserId, ownerUserId),
+            eq(proactiveSuggestions.status, "open"),
+          ),
+        )
+        .groupBy(proactiveSuggestions.agentId);
+      for (const row of items) entry(row.agentId).items += row.total;
+
       return [...byBot.values()];
+    },
+
+    /**
+     * The person's newest ping, across all their Bots, or null. The app fires one browser
+     * notification each time this changes, never one per item.
+     */
+    async lastPing(ownerUserId: string): Promise<string | null> {
+      const [row] = await database
+        .select({ id: proactivePings.id })
+        .from(proactivePings)
+        .where(eq(proactivePings.ownerUserId, ownerUserId))
+        .orderBy(desc(proactivePings.createdAt), desc(proactivePings.id))
+        .limit(1);
+      return row?.id ?? null;
     },
   };
 }

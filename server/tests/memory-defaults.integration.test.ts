@@ -355,19 +355,23 @@ describe("memory sources, on by default", () => {
 describe("background research, on by default", () => {
   const channel = `channel-${suite}`;
 
-  test("a fresh person gets research from the Bot they talk to, read-only and a full interval out", async () => {
+  test("a fresh person gets hourly check-ins from the Bot they talk to, the first an hour out", async () => {
     await reset();
     const before = Date.now();
     expect(await defaults().adoptResearch(owner, bot, channel)).toBe(true);
     const [setting] = await researchOf(owner, bot);
+    expect(DEFAULT_RESEARCH_INTERVAL_MINUTES).toBe(60);
     expect(setting).toMatchObject({
       channelId: channel,
       enabled: true,
-      intervalMinutes: DEFAULT_RESEARCH_INTERVAL_MINUTES,
+      intervalMinutes: 60,
       lastStatus: "idle",
     });
     expect(setting?.nextRunAt.getTime()).toBeGreaterThanOrEqual(
-      before + DEFAULT_RESEARCH_INTERVAL_MINUTES * 60_000 - 1_000,
+      before + 60 * 60_000 - 1_000,
+    );
+    expect(setting?.nextRunAt.getTime()).toBeLessThanOrEqual(
+      Date.now() + 60 * 60_000 + 1_000,
     );
     // Not due, so the sweep does not take it.
     expect(

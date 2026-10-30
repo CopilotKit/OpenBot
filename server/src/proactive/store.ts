@@ -1,14 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { auditEvents } from "../db/schema/core";
+import { auditEvents, users } from "../db/schema/core";
+import { botLifecycle } from "../db/schema/lifecycle";
 import {
+  proactiveRuns,
   proactiveSettings,
   proactiveSuggestions,
 } from "../db/schema/proactive";
+import { botTasks } from "../db/schema/tasks";
 import { lockDefaults, recordOptOut } from "../memory/defaults";
+import type {
+  ProactiveRunOutcome,
+  ProactiveRunTrigger,
+  ProactiveSkipReason,
+} from "./contracts";
+import { createPingStore } from "./ping";
 import { PROACTIVE_INITIATOR_PREFIX } from "./restriction";
 import {
+  HIDDEN_DAYS,
   ProactiveNotFoundError,
   ProactiveRefusedError,
   type ProactiveRunStatus,
@@ -17,10 +27,66 @@ import {
   parseWith,
   proactiveSettingInputSchema,
   proactiveSettingPatchSchema,
+  titleKey,
 } from "./types";
+import type { LastCheckIn } from "./window";
 
 /** What a proactive run read, as the audit trail recorded it. The source of truth for provenance. */
 export type ProactiveRead = { ref: string; at: Date };
+
+/**
+ * What this person had from this Bot before a check-in: what the repeat check refuses against, and
+ * what the check-in is told (`window.ts`). Titles and links, never the mail they came from.
+ */
+export type PriorItems = {
+  open: { id: string; title: string; sourceLink: string | null }[];
+  tasks: { title: string; sourceLink: string | null }[];
+  hidden: {
+    title: string;
+    sourceLink: string | null;
+    sourceApp: string | null;
+  }[];
+  started: { title: string }[];
+};
+
+/** A setting's run as the ledger keeps it. */
+export type ProactiveRunRow = {
+  id: string;
+  settingId: string;
+  outcome: ProactiveRunOutcome;
+  skipReason: ProactiveSkipReason | null;
+  trigger: ProactiveRunTrigger;
+  threadId: string | null;
+  itemsRaised: number;
+  reads: number;
+  error: string | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+};
+
+/** Whether `error` is a Postgres unique_violation on `constraint`. Bun's driver; drizzle wraps it as `cause`. */
+function violates(error: unknown, constraint: string): boolean {
+  type Driver = { errno?: unknown; constraint?: unknown };
+  return [
+    error as Driver | null | undefined,
+    (error as { cause?: Driver } | null | undefined)?.cause,
+  ].some(
+    (candidate) =>
+      candidate?.errno === "23505" && candidate.constraint === constraint,
+  );
+}
+
+/**
+ * A setting the sweep may claim: on, and its person has not turned check-ins off for all their Bots
+ * or paused this Bot. The run checks both again before the model (a switch flipped after the claim,
+ * or a Run now), where it records why it stopped; here they keep a turned-off person's settings from
+ * being claimed, and so from costing even a ledger row, every hour.
+ */
+const claimable = and(
+  eq(proactiveSettings.enabled, true),
+  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
+  sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
+);
 
 export function createProactiveStore(database: Database) {
   const owned = (owner: string, id: string) =>
@@ -36,6 +102,25 @@ export function createProactiveStore(database: Database) {
   }
   return {
     get,
+    /** The person's hourly ping slot and the pings it lets through (`ping.ts`). */
+    pings: createPingStore(database),
+    /** This person's setting for this Bot, if they have one: there is at most one. */
+    async forBot(
+      owner: string,
+      agentId: string,
+    ): Promise<ProactiveSetting | null> {
+      const [row] = await database
+        .select()
+        .from(proactiveSettings)
+        .where(
+          and(
+            eq(proactiveSettings.ownerUserId, owner),
+            eq(proactiveSettings.agentId, agentId),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    },
     async byId(id: string): Promise<ProactiveSetting | null> {
       const [row] = await database
         .select()
@@ -112,12 +197,7 @@ export function createProactiveStore(database: Database) {
       const due = await database
         .select({ id: proactiveSettings.id })
         .from(proactiveSettings)
-        .where(
-          and(
-            eq(proactiveSettings.enabled, true),
-            lte(proactiveSettings.nextRunAt, new Date()),
-          ),
-        )
+        .where(and(claimable, lte(proactiveSettings.nextRunAt, new Date())))
         .limit(Math.min(limit, 10));
       const claimed: ProactiveSetting[] = [];
       for (const { id } of due) {
@@ -181,84 +261,300 @@ export function createProactiveStore(database: Database) {
         .where(eq(proactiveSuggestions.runId, runId));
       return row?.count ?? 0;
     },
+    /**
+     * Open a new item. Its normalized title goes in `dedupe_key`, so when two check-ins race to open
+     * the same thing for one person and Bot, the partial unique index lets one in and the other is
+     * refused here as the repeat it is.
+     */
     async addSuggestion(
       input: Omit<
         ProactiveSuggestion,
-        "id" | "status" | "deliveredAt" | "resolvedAt" | "createdAt"
+        | "id"
+        | "status"
+        | "dedupeKey"
+        | "pingId"
+        | "deliveredAt"
+        | "resolvedAt"
+        | "createdAt"
       >,
     ): Promise<ProactiveSuggestion> {
-      const [row] = await database
-        .insert(proactiveSuggestions)
-        .values({ id: randomUUID(), ...input })
-        .returning();
-      if (!row) throw new Error("Suggestion insert returned no row.");
-      return row;
+      try {
+        const [row] = await database
+          .insert(proactiveSuggestions)
+          .values({
+            id: randomUUID(),
+            ...input,
+            dedupeKey: titleKey(input.title),
+          })
+          .returning();
+        if (!row) throw new Error("Suggestion insert returned no row.");
+        return row;
+      } catch (error) {
+        if (violates(error, "proactive_suggestions_open_dedupe_idx"))
+          throw new ProactiveRefusedError(
+            "This is already raised and still open. Do not raise it again.",
+          );
+        throw error;
+      }
     },
     /**
-     * What a setting already suggested, for the next run to build on: the titles still open, and the
-     * ones the person dismissed in the last 30 days, newest first.
+     * What this person had from this Bot: items still open, unfinished tasks, and what they hid or
+     * started in the last thirty days, newest first. Read fresh for each item a check-in raises, so
+     * an item another check-in opened a moment ago counts too.
      */
-    async history(
-      settingId: string,
-    ): Promise<{ open: string[]; dismissed: string[] }> {
-      const titles = (status: "open" | "dismissed") =>
+    async priorItems(owner: string, agentId: string): Promise<PriorItems> {
+      const since = new Date(Date.now() - HIDDEN_DAYS * 86_400_000);
+      const mine = and(
+        eq(proactiveSuggestions.ownerUserId, owner),
+        eq(proactiveSuggestions.agentId, agentId),
+      );
+      const columns = {
+        id: proactiveSuggestions.id,
+        title: proactiveSuggestions.title,
+        sourceLink: proactiveSuggestions.sourceLink,
+        sourceApp: proactiveSuggestions.sourceApp,
+      };
+      const [open, hidden, started, tasks] = await Promise.all([
         database
-          .select({ title: proactiveSuggestions.title })
+          .select(columns)
+          .from(proactiveSuggestions)
+          .where(and(mine, eq(proactiveSuggestions.status, "open")))
+          .orderBy(desc(proactiveSuggestions.createdAt))
+          .limit(50),
+        database
+          .select(columns)
           .from(proactiveSuggestions)
           .where(
             and(
-              eq(proactiveSuggestions.settingId, settingId),
-              eq(proactiveSuggestions.status, status),
-              ...(status === "dismissed"
-                ? [
-                    gte(
-                      proactiveSuggestions.resolvedAt,
-                      new Date(Date.now() - 30 * 86_400_000),
-                    ),
-                  ]
-                : []),
+              mine,
+              eq(proactiveSuggestions.status, "dismissed"),
+              gte(proactiveSuggestions.resolvedAt, since),
             ),
           )
-          .orderBy(desc(proactiveSuggestions.createdAt))
-          .limit(20);
-      const [open, dismissed] = await Promise.all([
-        titles("open"),
-        titles("dismissed"),
+          .orderBy(desc(proactiveSuggestions.resolvedAt))
+          .limit(50),
+        database
+          .select(columns)
+          .from(proactiveSuggestions)
+          .where(
+            and(
+              mine,
+              eq(proactiveSuggestions.status, "started"),
+              gte(proactiveSuggestions.resolvedAt, since),
+            ),
+          )
+          .orderBy(desc(proactiveSuggestions.resolvedAt))
+          .limit(20),
+        database
+          .select({ title: botTasks.title, sourceLink: botTasks.sourceLink })
+          .from(botTasks)
+          .where(
+            and(
+              eq(botTasks.ownerUserId, owner),
+              eq(botTasks.agentId, agentId),
+              isNull(botTasks.resolvedAt),
+            ),
+          )
+          .orderBy(desc(botTasks.createdAt))
+          .limit(50),
       ]);
       return {
-        open: [...new Set(open.map((row) => row.title))],
-        dismissed: [...new Set(dismissed.map((row) => row.title))],
+        open: open.map(({ id, title, sourceLink }) => ({
+          id,
+          title,
+          sourceLink,
+        })),
+        tasks,
+        hidden: hidden.map(({ title, sourceLink, sourceApp }) => ({
+          title,
+          sourceLink,
+          sourceApp,
+        })),
+        started: started.map(({ title }) => ({ title })),
       };
     },
-    /** A finished run's suggestions replace whatever earlier runs left open. */
-    async supersede(settingId: string, runId: string) {
-      await database
+    /**
+     * A check-in clearing one of its Bot's open items as no longer needed. Only an open item of this
+     * setting: a Bot cannot clear another Bot's, another person's, or one the person already decided.
+     */
+    async clearSuggestion(
+      settingId: string,
+      id: string,
+    ): Promise<ProactiveSuggestion | null> {
+      const [row] = await database
         .update(proactiveSuggestions)
         .set({ status: "superseded", resolvedAt: new Date() })
         .where(
           and(
             eq(proactiveSuggestions.settingId, settingId),
+            eq(proactiveSuggestions.id, id),
             eq(proactiveSuggestions.status, "open"),
-            ne(proactiveSuggestions.runId, runId),
           ),
-        );
+        )
+        .returning();
+      return row ?? null;
     },
-    async undelivered(runId: string): Promise<ProactiveSuggestion[]> {
-      return database
-        .select()
-        .from(proactiveSuggestions)
+    /** Whether this person turned check-ins off for all their Bots. */
+    async personOff(owner: string): Promise<boolean> {
+      const [row] = await database
+        .select({
+          off: sql<boolean>`${users.preferences}->>'proactive' = 'off'`,
+        })
+        .from(users)
+        .where(eq(users.id, owner))
+        .limit(1);
+      return row?.off === true;
+    },
+    /** Whether this person paused this Bot. */
+    async paused(owner: string, agentId: string): Promise<boolean> {
+      const [row] = await database
+        .select({ pausedAt: botLifecycle.pausedAt })
+        .from(botLifecycle)
         .where(
           and(
-            eq(proactiveSuggestions.runId, runId),
-            isNull(proactiveSuggestions.deliveredAt),
+            eq(botLifecycle.ownerUserId, owner),
+            eq(botLifecycle.agentId, agentId),
           ),
+        )
+        .limit(1);
+      return Boolean(row?.pausedAt);
+    },
+
+    /* --------------------------------------------------------------------------------------------
+     * The run ledger (`proactive_runs`).
+     * ------------------------------------------------------------------------------------------ */
+
+    /**
+     * Close check-ins left running past their lease as failed: the replica running them stopped. A
+     * turn is cut off at three minutes, so a row still running at ten belongs to nobody, and the one
+     * running row a setting may have must not block it for ever.
+     */
+    async closeStaleRuns(leaseMs: number): Promise<number> {
+      const closed = await database
+        .update(proactiveRuns)
+        .set({
+          outcome: "failed",
+          error: "This check-in stopped before it finished.",
+          finishedAt: sql`now()`,
+        })
+        .where(
+          and(
+            eq(proactiveRuns.outcome, "running"),
+            lte(
+              proactiveRuns.startedAt,
+              sql`now() - make_interval(secs => ${leaseMs / 1000})`,
+            ),
+          ),
+        )
+        .returning({ id: proactiveRuns.id });
+      return closed.length;
+    },
+    /** A check-in a gate stopped before the model, and why. */
+    async skipRun(input: {
+      id: string;
+      setting: Pick<ProactiveSetting, "id" | "ownerUserId" | "agentId">;
+      trigger: ProactiveRunTrigger;
+      reason: ProactiveSkipReason;
+    }) {
+      await database.insert(proactiveRuns).values({
+        id: input.id,
+        settingId: input.setting.id,
+        ownerUserId: input.setting.ownerUserId,
+        agentId: input.setting.agentId,
+        trigger: input.trigger,
+        outcome: "skipped",
+        skipReason: input.reason,
+        finishedAt: sql`now()`,
+      });
+    },
+    /**
+     * Start a check-in: its `running` row. False when another is already running for this setting,
+     * on any replica, which the partial unique index decides.
+     */
+    async beginRun(input: {
+      id: string;
+      setting: Pick<ProactiveSetting, "id" | "ownerUserId" | "agentId">;
+      trigger: ProactiveRunTrigger;
+      threadId: string;
+    }): Promise<boolean> {
+      try {
+        await database.insert(proactiveRuns).values({
+          id: input.id,
+          settingId: input.setting.id,
+          ownerUserId: input.setting.ownerUserId,
+          agentId: input.setting.agentId,
+          trigger: input.trigger,
+          threadId: input.threadId,
+        });
+        return true;
+      } catch (error) {
+        if (violates(error, "proactive_runs_one_running_idx")) return false;
+        throw error;
+      }
+    },
+    /** End a running check-in. A row the lease sweep already closed stays as it was closed. */
+    async finishRun(
+      id: string,
+      result: {
+        outcome: "quiet" | "raised" | "failed";
+        itemsRaised: number;
+        reads: number;
+        error?: string | null;
+      },
+    ) {
+      await database
+        .update(proactiveRuns)
+        .set({
+          outcome: result.outcome,
+          itemsRaised: result.itemsRaised,
+          reads: result.reads,
+          error: result.error?.slice(0, 500) ?? null,
+          finishedAt: sql`now()`,
+        })
+        .where(
+          and(eq(proactiveRuns.id, id), eq(proactiveRuns.outcome, "running")),
         );
     },
-    async markDelivered(id: string) {
-      await database
-        .update(proactiveSuggestions)
-        .set({ deliveredAt: new Date() })
-        .where(eq(proactiveSuggestions.id, id));
+    /** The setting's last check-in that reached the model and ended: where the next one's window opens. */
+    async lastCheckIn(settingId: string): Promise<LastCheckIn | null> {
+      const [row] = await database
+        .select({
+          outcome: proactiveRuns.outcome,
+          startedAt: proactiveRuns.startedAt,
+        })
+        .from(proactiveRuns)
+        .where(
+          and(
+            eq(proactiveRuns.settingId, settingId),
+            inArray(proactiveRuns.outcome, ["quiet", "raised", "failed"]),
+          ),
+        )
+        .orderBy(desc(proactiveRuns.startedAt))
+        .limit(1);
+      return row ? (row as LastCheckIn) : null;
+    },
+    /** Check-ins this setting ran in the last day, for the daily cap. Skipped ones cost nothing. */
+    async runsToday(settingId: string): Promise<number> {
+      const [row] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(proactiveRuns)
+        .where(
+          and(
+            eq(proactiveRuns.settingId, settingId),
+            ne(proactiveRuns.outcome, "skipped"),
+            gte(proactiveRuns.startedAt, sql`now() - interval '24 hours'`),
+          ),
+        );
+      return row?.count ?? 0;
+    },
+    /** A setting's recent check-ins, newest first, skipped ones included. */
+    async runs(settingId: string): Promise<ProactiveRunRow[]> {
+      return database
+        .select()
+        .from(proactiveRuns)
+        .where(eq(proactiveRuns.settingId, settingId))
+        .orderBy(desc(proactiveRuns.startedAt))
+        .limit(50);
     },
     async suggestions(owner: string): Promise<ProactiveSuggestion[]> {
       return database
@@ -309,6 +605,27 @@ export function createProactiveStore(database: Database) {
           "This suggestion was already started or dismissed.",
         );
       return row;
+    },
+    /**
+     * Back to open, after a Start whose task could not be opened, so the person can press it again.
+     * Left started when the Bot raised the same thing again meanwhile: that new item is the open one.
+     */
+    async reopenSuggestion(owner: string, id: string) {
+      try {
+        await database
+          .update(proactiveSuggestions)
+          .set({ status: "open", resolvedAt: null })
+          .where(
+            and(
+              eq(proactiveSuggestions.ownerUserId, owner),
+              eq(proactiveSuggestions.id, id),
+              eq(proactiveSuggestions.status, "started"),
+            ),
+          );
+      } catch (error) {
+        if (!violates(error, "proactive_suggestions_open_dedupe_idx"))
+          throw error;
+      }
     },
   };
 }
