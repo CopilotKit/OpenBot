@@ -30,6 +30,7 @@ import type {
   AgentActor,
   AgentProfile,
   CreateAgentInput,
+  UpdateAgentInput,
 } from "./profile-types";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -75,7 +76,7 @@ export type AgentProfileStore = {
   update(
     actor: AgentActor,
     id: string,
-    input: CreateAgentInput,
+    input: UpdateAgentInput,
   ): Promise<AgentProfile>;
   duplicate(actor: AgentActor, id: string): Promise<AgentProfile>;
   setHidden(actor: AgentActor, id: string, hidden: boolean): Promise<void>;
@@ -689,6 +690,10 @@ export function createAgentProfileStore(
               ...(input.isolated === undefined
                 ? {}
                 : { isolated: input.isolated }),
+              // The same: absent keeps its face. The route has checked the spelling.
+              ...(input.avatarSeed === undefined
+                ? {}
+                : { avatarSeed: input.avatarSeed }),
               updatedAt,
             })
             .where(eq(agentProfiles.agentId, id));

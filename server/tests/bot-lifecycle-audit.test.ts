@@ -134,6 +134,23 @@ describe("what a Bot is, on the trail", () => {
     expect(rows[0]?.payload.visibility).toBe("private");
   });
 
+  test("a new look is recorded, and an edit without one says nothing about it", async () => {
+    const { rows, hono } = app();
+
+    await hono.request("http://t/api/agents/bot-1", {
+      ...json({ avatarSeed: "coral:k2p9x7aq" }),
+      method: "PATCH",
+    });
+    await hono.request("http://t/api/agents/bot-1", {
+      ...json({ title: "Sales assistant, revised" }),
+      method: "PATCH",
+    });
+
+    expect(rows[0]?.eventType).toBe("bot.updated");
+    expect(rows[0]?.payload.avatarSeed).toBe("coral:k2p9x7aq");
+    expect(rows[1]?.payload).not.toHaveProperty("avatarSeed");
+  });
+
   test("a replaced key is noted and never recorded", async () => {
     const { rows, hono } = app();
 

@@ -509,11 +509,12 @@ describe("agent lifecycle routes", () => {
       visibility: " private ",
       id: "forged-agent",
       ownerUserId: "attacker",
-      avatarSeed: "forged-avatar",
       deletedAt: "now",
       systemOwned: true,
       // A real field now, not a forged one; the rest of this list still is.
       endpoint: "https://agents.example.com/ag-ui",
+      // Real on an edit, which may change how the Bot looks, and forged on a create, which may not.
+      avatarSeed: "moss:k2p9x7aq",
     };
 
     for (const [path, method] of [
@@ -535,8 +536,80 @@ describe("agent lifecycle routes", () => {
     };
     expect(store.calls).toEqual([
       ["create", actor, expected],
-      ["update", actor, "agent-1", expected],
+      [
+        "update",
+        actor,
+        "agent-1",
+        { ...expected, avatarSeed: "moss:k2p9x7aq" },
+      ],
     ]);
+  });
+
+  test("an edit may bring a new look, and one that leaves it out keeps the Bot's face", async () => {
+    const store = fakeStore();
+    const app = appFor(store);
+    const patch = (body: Record<string, unknown>) =>
+      app.request("http://openbot.test/agent-1", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...validInput, ...body }),
+      });
+
+    const recoloured = await patch({ avatarSeed: "ember:k2p9x7aq" });
+    expect(recoloured.status).toBe(200);
+    expect((await json(recoloured)).agent.avatarSeed).toBe("ember:k2p9x7aq");
+    // A seed that names no colour is still a look, as every Bot's own id is.
+    expect((await patch({ avatarSeed: "agent_3f6c-91" })).status).toBe(200);
+    expect((await patch({ title: "Finance" })).status).toBe(200);
+
+    expect(store.calls.map((call) => call[3])).toEqual([
+      { ...validInput, avatarSeed: "ember:k2p9x7aq" },
+      { ...validInput, avatarSeed: "agent_3f6c-91" },
+      { ...validInput, title: "Finance" },
+    ]);
+  });
+
+  test.each([
+    ["violet:k2p9x7aq", "Violet is kept for OpenBot. Pick another colour."],
+    [
+      "purple:k2p9x7aq",
+      "That isn't a colour a Bot can have. Pick one of the eight.",
+    ],
+    [
+      "moss:<img src=x>",
+      "A Bot's look is 1 to 64 letters, numbers, hyphens, underscores or colons.",
+    ],
+    [
+      `moss:${"x".repeat(60)}`,
+      "A Bot's look is 1 to 64 letters, numbers, hyphens, underscores or colons.",
+    ],
+    [
+      "",
+      "A Bot's look is 1 to 64 letters, numbers, hyphens, underscores or colons.",
+    ],
+    [
+      null,
+      "A Bot's look is 1 to 64 letters, numbers, hyphens, underscores or colons.",
+    ],
+    [
+      42,
+      "A Bot's look is 1 to 64 letters, numbers, hyphens, underscores or colons.",
+    ],
+  ])("refuses the look %p and changes nothing", async (avatarSeed, error) => {
+    const store = fakeStore();
+
+    const response = await appFor(store).request(
+      "http://openbot.test/agent-1",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...validInput, avatarSeed }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual({ error });
+    expect(store.calls).toEqual([]);
   });
 
   test.each([
