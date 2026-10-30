@@ -130,7 +130,7 @@ export function AdminSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
   return (
-    <Sidebar {...props}>
+    <Sidebar variant="inset" {...props}>
       {/*
        * Pinned to the same height as the app sidebar's header. Left to itself this one is 60px
        * against the app's 45px — `p-2` around a `size="lg"` button rather than a fixed height — so

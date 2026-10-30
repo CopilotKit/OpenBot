@@ -2,6 +2,10 @@
 
 :root {
   color-scheme: light;
+  /*
+   * Three surfaces, darkest to lightest, the way Linear draws them: the frame (the sidebar's tint,
+   * which the window edge shares), the panel the page sits in, and the white cards on it.
+   */
   --background: oklch(0.984 0.003 247.858);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);
@@ -27,11 +31,11 @@
   --chart-4: oklch(0.372 0.044 257.287);
   --chart-5: oklch(0.279 0.041 260.031);
   --radius: 0.5rem;
-  --sidebar: oklch(0.968 0.007 247.896);
+  --sidebar: oklch(0.952 0.01 252);
   --sidebar-foreground: oklch(0.129 0.042 264.695);
   --sidebar-primary: oklch(0.208 0.042 265.755);
   --sidebar-primary-foreground: oklch(0.5 0.045 257.35);
-  --sidebar-accent: oklch(0.95 0.01 252);
+  --sidebar-accent: oklch(0.915 0.015 255.5);
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
@@ -39,7 +43,7 @@
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.129 0.042 264.695);
+  --background: oklch(0.168 0.042 265.2);
   --foreground: oklch(0.984 0.003 247.858);
   --card: oklch(0.208 0.042 265.755);
   --card-foreground: oklch(0.984 0.003 247.858);
@@ -63,7 +67,7 @@
   --chart-3: oklch(0.446 0.043 257.281);
   --chart-4: oklch(0.372 0.044 257.287);
   --chart-5: oklch(0.279 0.041 260.031);
-  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar: oklch(0.129 0.042 264.695);
   --sidebar-foreground: oklch(0.984 0.003 247.858);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.984 0.003 247.858);

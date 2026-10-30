@@ -90,7 +90,7 @@ const itemMediaVariants = cva(
       variant: {
         default: "bg-transparent",
         // A 32px tile behind a 16px glyph, so a column of rows reads as a column of marks.
-        icon: "size-8 rounded-md bg-muted text-muted-foreground group-data-[size=xs]/item:size-6 [&_svg:not([class*='size-'])]:size-4",
+        icon: "size-8 rounded-md bg-background text-muted-foreground ring-1 ring-border group-data-[size=xs]/item:size-6 [&_svg:not([class*='size-'])]:size-4",
         image:
           "size-10 overflow-hidden rounded-sm group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 [&_img]:size-full [&_img]:object-cover",
       },
