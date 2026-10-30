@@ -57,3 +57,15 @@ test("the orb is the large one, named once", () => {
   expect(orb.getAttribute("aria-label")).toBe("Expense Review");
   expect(orb.dataset.variant).toBe("live");
 });
+
+test("a paragraph-long role is held to two lines, with the whole text on hover", () => {
+  const role =
+    "Check one expense claim at a time against the policy as it is written. "
+      .repeat(6)
+      .trim();
+  const view = render(
+    <ConversationIntro agent={{ ...expenseReview, roleDescription: role }} />,
+  );
+  const line = view.getByTitle(`Finance Operations · ${role}`);
+  expect(line.className).toContain("line-clamp-2");
+});

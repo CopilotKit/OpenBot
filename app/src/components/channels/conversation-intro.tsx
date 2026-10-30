@@ -35,7 +35,16 @@ export function ConversationIntro({
       </div>
       <div className="min-w-0">
         <h1 className="font-bold text-3xl tracking-tight">{agent.name}</h1>
-        {about ? <p className="mt-1 text-muted-foreground">{about}</p> : null}
+        {/* Two lines at most: a role can run to a paragraph, and the intro introduces, it doesn't brief.
+            The whole role is on the Bot's page and in the detail pane. */}
+        {about ? (
+          <p
+            className="mt-1 line-clamp-2 max-w-[60ch] text-muted-foreground"
+            title={about}
+          >
+            {about}
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="inline-flex h-6.5 items-center rounded-lg bg-muted px-2.5 font-semibold text-[13px] text-muted-foreground">
             {agent.visibility === "public" ? "Public" : "Private"}
