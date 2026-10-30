@@ -1,9 +1,16 @@
+import {
+  BOT_COLOURS,
+  type BotColour,
+  namedColour,
+} from "@openbot/shared/bot-look";
+
 /**
  * The orb, every Bot's face and OpenBot's own mark, drawn on a 2D canvas: a glass sphere of
  * drifting colour with two eye-lights that look, blink and smile. It comes in nine colours. A Bot's
  * look, its colour and the few small ways two Bots in one colour still differ, is picked from its
- * seed; OpenBot's own is violet, which no Bot is given. It also plays a finish: the check and the
- * burst of rays the orb shows when something the person allowed is done.
+ * seed, unless the seed names its colour; OpenBot's own is violet, which no Bot is given. It also
+ * plays a finish: the check and the burst of rays the orb shows when something the person allowed
+ * is done.
  *
  * Every frame is a pure function of an `OrbPose`, so the component that animates it owns time and
  * this file owns only the picture.
@@ -175,11 +182,11 @@ type PaletteSpec = {
 };
 
 /**
- * The nine colours: violet, OpenBot's own, and the eight a Bot's look is picked from by position.
- * Adding, removing or reordering one changes the colour of most Bots. Each reads as one plain colour
- * even at 28px, where only its average shows (`orbSwatch`): purple, orange, green, yellow, pink,
- * blue, cyan, red and grey. Where two sit close on the wheel, lightness keeps them apart, and a
- * test holds every pair at least 0.08 apart in OKLab.
+ * The nine colours: violet, OpenBot's own, and the eight a Bot can be, which are `BOT_COLOURS`. A
+ * Bot's look is picked from those by their order there, not by their order here. Each reads as one
+ * plain colour even at 28px, where only its average shows (`orbSwatch`): purple, orange, green,
+ * yellow, pink, blue, cyan, red and grey. Where two sit close on the wheel, lightness keeps them
+ * apart, and a test holds every pair at least 0.08 apart in OKLab.
  */
 const PALETTES = {
   violet: {
@@ -257,15 +264,12 @@ const PALETTES = {
     base: [0.91, 0.008, 258],
     shade: [30, 34, 44],
   },
-} as const satisfies Record<string, PaletteSpec>;
+} as const satisfies Record<"violet" | BotColour, PaletteSpec>;
 
 export type OrbPaletteName = keyof typeof PALETTES;
 
 /** Every colour, OpenBot's violet first. */
 export const ORB_PALETTES = Object.keys(PALETTES) as readonly OrbPaletteName[];
-
-/** The eight colours a Bot can be: all but violet, so a Bot is never mistaken for OpenBot. */
-const BOT_PALETTES = ORB_PALETTES.filter((name) => name !== "violet");
 
 /**
  * How one orb is drawn apart from its motion: its colour, how far round its colour masses are
@@ -310,7 +314,8 @@ function hashSeed(seed: string): number {
 /**
  * The look for a Bot's seed. Eight colours repeat soon in a team, so the same hash also turns the
  * colour masses, nudges the hue and spaces the eyes, and two Bots in one colour still look apart.
- * Stable across reloads and releases, so a Bot keeps its face.
+ * A seed that names its colour, as `moss:k2p9x7aq`, is drawn in it, and the hash of the whole seed
+ * still draws the rest. Stable across reloads and releases, so a Bot keeps its face.
  */
 export function orbLookFor(seed: string): OrbLook {
   const h = hashSeed(seed);
@@ -319,7 +324,9 @@ export function orbLookFor(seed: string): OrbLook {
   // two catalog Bots in one colour well apart.
   const share = (from: number) => ((h >>> from) & 0xff) / 256;
   return {
-    palette: BOT_PALETTES[(h >>> 24) % BOT_PALETTES.length] as OrbPaletteName,
+    palette:
+      namedColour(seed) ??
+      (BOT_COLOURS[(h >>> 24) % BOT_COLOURS.length] as BotColour),
     turn: share(16) * TAU,
     hue: Math.round((share(0) * 2 - 1) * HUE_NUDGE),
     eyes: 1 + (share(8) * 2 - 1) * EYE_NUDGE,
