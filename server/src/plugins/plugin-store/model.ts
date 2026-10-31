@@ -1114,7 +1114,7 @@ export const CLIENT_REREGISTRATION_BACKOFF_MS = 5 * 60_000;
  * `LINEAR_GET_ME` — and an unanchored match would take `SLACK_PROFILE_SET` for an identity read.
  */
 export const IDENTITY_ACTION =
-  /(_GET_ME|_PROFILE|_CURRENT_USER|_USER_INFO|_WHOAMI)$/;
+  /(_GET_ME|_PROFILE|_CURRENT_USER|_USER_INFO|_WHOAMI|_GET_SHOP_DETAILS)$/;
 
 /**
  * Every broker's id namespace, reserved together. See {@link BROKERED_PROFILE} in `./access` for
