@@ -205,6 +205,13 @@ The newest come first, and a press on When turns the order round. A search box a
 Started by buttons narrow the events already loaded, and the count says how many of them match. A
 row about a Bot (a message routed to it, say) now names it under Bot.
 
+### The desktop app starts OpenBot when it is opened from Finder
+
+Opened from Finder or the Dock, the desktop app stopped at Start with "OpenBot did not start", and
+the app's log said `bun: command not found`. The app part of OpenBot runs as a package script that
+starts `bun` again by name, and an app opened that way has no `bun` on its `PATH`. The desktop now
+hands every process it starts the directory of the Bun it installed.
+
 ### The desktop setup page does not freeze when it loads during an install
 
 If the setup page loaded again while the desktop app downloaded local software, the window showed a

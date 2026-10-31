@@ -376,7 +376,7 @@ fn command_at(engine: Engine, binary: &Path) -> Command {
 ///
 /// In front, so the provider OpenBot placed is the one found; appended, a broken `docker-compose`
 /// earlier on PATH would still win.
-fn path_with(first: &Path) -> OsString {
+pub(crate) fn path_with(first: &Path) -> OsString {
     let mut joined = OsString::from(first);
     if let Some(existing) = std::env::var_os("PATH") {
         if !existing.is_empty() {
