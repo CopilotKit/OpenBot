@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A computer run on a laptop can stay off the local network
+
+A managed computer listens on every network interface, which a container needs. Run straight on a
+laptop with `bun run dev`, that left its token-protected API reachable from the local network.
+`COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
+the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
+Desktop's) still always listens on loopback.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
