@@ -102,6 +102,22 @@ export const approvalInboxOptions = () =>
     refetchInterval: INBOX_POLL_MS,
   });
 /**
+ * The conversations waiting on the person, by thread: an approval pending in them, or a question.
+ * Sorted, so an unchanged answer keeps its identity across polls and no row redraws for nothing.
+ */
+export function threadsNeedingYou(data: ApprovalInboxData): string[] {
+  const threads = new Set<string>();
+  for (const request of data.requests ?? [])
+    if (request.status === "pending") threads.add(request.action.threadId);
+  for (const question of data.questions ?? []) threads.add(question.threadId);
+  return [...threads].sort();
+}
+
+/** The inbox, polled, read down to the threads waiting on the person, for the sidebar's rows. */
+export const threadsNeedingYouOptions = () =>
+  queryOptions({ ...approvalInboxOptions(), select: threadsNeedingYou });
+
+/**
  * The same inbox, for a reader drawn once per tool call, with no poll of its own.
  *
  * TanStack Query polls once per observer, and every tool call in a conversation reads the inbox, so

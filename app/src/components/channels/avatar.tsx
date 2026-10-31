@@ -11,17 +11,22 @@ import { BotOrb, type BotOrbState } from "@/components/agents/orb/bot-orb";
  * never spills into the row.
  *
  * `typing` marks a channel whose Bot is mid-turn: every face works, and a still dot at the
- * bottom-right says so without moving the row's layout. `state` sets what the faces show instead.
+ * bottom-right says so without moving the row's layout. `needsYou` marks one waiting on the person
+ * (an approval or a question), with the same dot in the needs colour; it outranks busy, since the
+ * Bot cannot go on until the person answers. `state` sets what the faces show instead.
  */
 export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
   size = 32,
   typing = false,
+  needsYou = false,
   state = typing ? "thinking" : "idle",
 }: {
   participantIds: string[];
   size?: number;
   typing?: boolean;
+  /** An approval or a question in the conversation waits on the person. */
+  needsYou?: boolean;
   /** What every face shows. Working while `typing`, resting otherwise. */
   state?: BotOrbState;
 }) {
@@ -37,7 +42,11 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   return (
     <div className="relative" style={{ height: size, width: size }}>
       {avatar}
-      {typing ? <BusyDot /> : null}
+      {needsYou ? (
+        <StatusDot label="Needs you" tone="bg-status-needs" />
+      ) : typing ? (
+        <StatusDot label="Working…" tone="bg-status-working" />
+      ) : null}
     </div>
   );
 });
@@ -114,15 +123,18 @@ function GroupFaces({
 }
 
 /**
- * A still dot in the working colour, ringed so it sits on the avatar as a badge rather than floating
- * over it. Still on purpose: an orb this small only blinks, and reduced motion stills it entirely, so
- * the faces working is too slight to read as busy from across the roster. The ring is the ground the
- * avatar sits on, the sidebar's own unless a row lit behind it sets `--avatar-ground`.
+ * A still dot in a status colour, ringed so it sits on the avatar as a badge rather than floating
+ * over it: working, or needs you. Still on purpose: an orb this small only blinks, and reduced
+ * motion stills it entirely, so the faces alone are too slight to read from across the roster. The
+ * ring is the ground the avatar sits on, the sidebar's own unless a row lit behind it sets
+ * `--avatar-ground`.
  */
-function BusyDot() {
+function StatusDot({ label, tone }: { label: string; tone: string }) {
   return (
-    <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-status-working ring-2 ring-(--avatar-ground,var(--sidebar))">
-      <span className="sr-only">Working…</span>
+    <span
+      className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-(--avatar-ground,var(--sidebar)) ${tone}`}
+    >
+      <span className="sr-only">{label}</span>
     </span>
   );
 }

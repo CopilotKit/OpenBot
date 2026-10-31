@@ -11,6 +11,7 @@ export function ChannelItemContent({
   lastMessageAt,
   emphasis,
   busy = false,
+  needsYou = false,
   unread = false,
   pinned = false,
   revealing = false,
@@ -22,6 +23,8 @@ export function ChannelItemContent({
   lastMessageAt?: string;
   emphasis: MessageListEmphasis;
   busy?: boolean;
+  /** An approval or a question in the conversation waits on the person. */
+  needsYou?: boolean;
   unread?: boolean;
   pinned?: boolean;
   revealing?: boolean;
@@ -35,6 +38,7 @@ export function ChannelItemContent({
       <div className="shrink-0">
         <ChannelAvatar
           participantIds={participantIds}
+          needsYou={needsYou}
           size={32}
           typing={busy}
         />
