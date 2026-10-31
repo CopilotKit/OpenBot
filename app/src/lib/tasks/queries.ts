@@ -110,14 +110,19 @@ export function liveStatus(status: TaskStatus, busy: boolean): TaskStatus {
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   needs_input: "Needs you",
   working: "Working",
-  failed: "Failed",
+  failed: "Couldn't finish",
   ready_for_review: "Ready for review",
   resolved: "Done",
 };
 
-/** Why a task couldn't finish, as its row and its page say it. */
-export function couldNotFinish(failure: string | null): string {
-  return failure ? `Couldn't finish: ${failure}.` : "Couldn't finish.";
+/**
+ * Why a task couldn't finish, as a sentence under its status: "A service didn't answer." The status
+ * itself already says it couldn't finish, so this is the reason alone, or what to do without one.
+ */
+export function failureLine(failure: string | null): string {
+  const reason = failure?.trim().replace(/\.$/, "");
+  if (!reason) return "Try again, or mark it done.";
+  return `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`;
 }
 
 /*

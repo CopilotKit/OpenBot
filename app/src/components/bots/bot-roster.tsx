@@ -12,6 +12,7 @@ import {
   attentionSummary,
   needsInput,
 } from "@/components/bot-profile/attention";
+import { NeedsYouCount } from "@/components/layout/needs-you-count";
 import {
   PageEmpty,
   PageRows,
@@ -193,10 +194,8 @@ function RosterRows({
                 <ItemDescription>{summary || agent.title}</ItemDescription>
               </ItemContent>
               <ItemActions>
-                {state && needsInput(state) > 0 ? (
-                  <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
-                    {needsInput(state)}
-                  </span>
+                {state ? (
+                  <NeedsYouCount count={needsInput(state)} decorative />
                 ) : null}
                 <IconChevronRight className="size-4 text-muted-foreground" />
               </ItemActions>

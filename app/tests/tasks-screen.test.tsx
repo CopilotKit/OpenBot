@@ -253,7 +253,7 @@ test("Tasks groups every task by what it needs, Needs you first, with Done folde
   expect(groupNames(view)).toEqual([
     "Needs you1",
     "Working1",
-    "Failed1",
+    "Couldn't finish1",
     "Ready for review1",
     "Done1",
   ]);
@@ -261,9 +261,7 @@ test("Tasks groups every task by what it needs, Needs you first, with Done folde
   // What each one needs next, under its title.
   expect(view.getByText("Should I mention the price change?")).toBeTruthy();
   expect(view.getByText("Just started")).toBeTruthy();
-  expect(
-    view.getByText("Couldn't finish: a service didn't answer."),
-  ).toBeTruthy();
+  expect(view.getByText("A service didn't answer.")).toBeTruthy();
   expect(view.getByText("I grouped it into three themes.")).toBeTruthy();
   // Each row wears its Bot's orb, named for the Bot.
   const rosa = view.getByRole("link", { name: /Reply to Rosa/ });
@@ -567,9 +565,12 @@ test("the sidebar has Tasks above Bots with how many need you, and keeps tasks' 
     .map((link) => link.getAttribute("href"));
   expect(labels.indexOf("/tasks")).toBe(labels.indexOf("/bots") - 1);
   const tasksLink = within(footer).getByRole("link", { name: /Tasks/ });
-  expect(
-    (await within(tasksLink).findByRole("img", { name: "2 things need you" }))
-      .textContent,
-  ).toBe("2");
+  const count = await within(tasksLink).findByRole("img", {
+    name: "2 things need you",
+  });
+  expect(count.textContent).toBe("2");
+  // In the needs colour, as every other "needs you" mark is.
+  expect(count.className).toContain("bg-status-needs-soft");
+  expect(count.className).not.toContain("bg-primary");
   await act(async () => {});
 });

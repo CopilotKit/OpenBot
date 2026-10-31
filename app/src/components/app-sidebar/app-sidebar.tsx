@@ -53,6 +53,7 @@ import {
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
+import { NeedsYouCount } from "../layout/needs-you-count";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel, LIT } from "./channel";
@@ -223,16 +224,7 @@ function ChannelRow({
  * Nothing for zero.
  */
 function NavigationBadge({ count }: { count: number }) {
-  if (count <= 0) return null;
-  return (
-    <span
-      aria-label={`${count} ${count === 1 ? "thing needs" : "things need"} you`}
-      className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums"
-      role="img"
-    >
-      {count}
-    </span>
-  );
+  return <NeedsYouCount className="ml-auto" count={count} />;
 }
 
 /** One destination in the sidebar's footer, from the shared list, with its count when it has one. */
