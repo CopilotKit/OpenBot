@@ -200,6 +200,18 @@ export function taskGroups(input: {
   });
 }
 
+/** The task at the top of Needs you, as the list draws it, or undefined when nothing waits. */
+export function firstNeedingYou(
+  tasks: readonly TaskRecord[] | undefined,
+  inbox: ApprovalInboxData | undefined,
+): TaskRecord | undefined {
+  return taskGroups({
+    tasks: tasks ?? [],
+    requests: inbox?.requests,
+    questions: inbox?.questions,
+  }).find((group) => group.id === "needs_input")?.items[0]?.task;
+}
+
 /** Where one task stands and what it needs next, worked out as its row in the list would be. */
 export function taskItem(
   task: TaskRecord,

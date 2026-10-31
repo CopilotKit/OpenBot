@@ -308,6 +308,39 @@ test("a row opens its task beside the list, and is lit while it is open", async 
   ).toBe("page");
 });
 
+test("arriving on a wide screen opens the first task that needs you, once; a narrow one keeps the list", async () => {
+  serve({ tasks: everyState });
+  // Narrow, as happy-dom lays it out: the pane is folded away, so nothing opens.
+  const narrow = draw();
+  await narrow.view.findByText("Reply to Rosa");
+  expect(await narrow.view.findByText("No task open")).toBeTruthy();
+  expect(narrow.router.state.location.pathname).toBe("/tasks");
+  cleanup();
+
+  const measure = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    return this.dataset.slot === "task-pane"
+      ? ({ width: 600, height: 800 } as DOMRect)
+      : measure.call(this);
+  };
+  try {
+    const { view, router, user } = draw();
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/tasks/ask"),
+    );
+    expect(
+      await view.findByRole("heading", { name: "Open task ask" }),
+    ).toBeTruthy();
+    // Closing it leaves the pane empty, as asked: it does not open again.
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/tasks"));
+    expect(await view.findByText("No task open")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/tasks");
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = measure;
+  }
+});
+
 test("a done task opened from elsewhere keeps Done unfolded, so its row is in view", async () => {
   serve({ tasks: everyState });
   const { view } = draw("/tasks/done");
