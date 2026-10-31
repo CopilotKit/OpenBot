@@ -230,8 +230,8 @@ const COLOURS = [
   "Yellow",
   "Pink",
   "Blue",
-  "Light blue",
-  "Coral",
+  "Cyan",
+  "Red",
   "Grey",
 ];
 
@@ -330,13 +330,13 @@ test("the arrow keys move through the colours, as in any radio group, and the ne
 
   radio("Blue").focus();
   await user.keyboard("{ArrowRight}");
-  expect(document.activeElement).toBe(radio("Light blue"));
-  expect(radio("Light blue").checked).toBe(true);
+  expect(document.activeElement).toBe(radio("Cyan"));
+  expect(radio("Cyan").checked).toBe(true);
 
   // Still live while that one saves, so the next arrow carries on from where focus is.
   await user.keyboard("{ArrowRight}");
-  expect(document.activeElement).toBe(radio("Coral"));
-  expect(radio("Coral").checked).toBe(true);
+  expect(document.activeElement).toBe(radio("Red"));
+  expect(radio("Red").checked).toBe(true);
   expect(seeds(view).preview).toEqual(["coral:expenses"]);
 
   // The first saves and the Bot is refetched with it; the face keeps the newer choice.
@@ -345,7 +345,7 @@ test("the arrow keys move through the colours, as in any radio group, and the ne
     expect(seeds(view).elsewhere).toEqual(["sky:expenses", "sky:expenses"]),
   );
   expect(seeds(view).preview).toEqual(["coral:expenses"]);
-  expect(radio("Coral").checked).toBe(true);
+  expect(radio("Red").checked).toBe(true);
 
   await letOneThrough();
   await waitFor(() =>
@@ -356,7 +356,7 @@ test("the arrow keys move through the colours, as in any radio group, and the ne
     "coral:expenses",
   ]);
   expect(seeds(view).preview).toEqual(["coral:expenses"]);
-  expect(radio("Coral").checked).toBe(true);
+  expect(radio("Red").checked).toBe(true);
 });
 
 test("a look that can't be saved goes back, and says so in one sentence", async () => {

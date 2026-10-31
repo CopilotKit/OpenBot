@@ -32,8 +32,8 @@ const COLOUR_NAMES: Record<BotColour, string> = {
   sun: "Yellow",
   berry: "Pink",
   ocean: "Blue",
-  sky: "Light blue",
-  coral: "Coral",
+  sky: "Cyan",
+  coral: "Red",
   slate: "Grey",
 };
 
