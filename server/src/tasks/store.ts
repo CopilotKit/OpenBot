@@ -111,6 +111,13 @@ export function plainFailure(error: string | null | undefined): string {
   );
 }
 
+/**
+ * A task the person marked done has no next step of the Bot's: what it said last is about the work,
+ * and a closing question there would read as still waiting on them. Tasks shows when from
+ * `resolvedAt`.
+ */
+export const MARKED_DONE = "Marked done by you";
+
 /** How long the person's own words may run as a task's next step. */
 const QUOTE_MAX = 120;
 
@@ -600,7 +607,7 @@ export function createTaskStore(
       // Kept while it is marked done, too: Reopen brings the failure back, and so may a reply.
       failure: failedOrDone ? (state?.failure ?? null) : null,
       failedAt: failedOrDone ? (state?.failedAt?.toISOString() ?? null) : null,
-      next: state?.next ?? null,
+      next: status === "resolved" ? MARKED_DONE : (state?.next ?? null),
       queuedReplies: state?.queuedReplies ?? [],
       answeredQuestionIds: [...(state?.answeredQuestionIds ?? [])],
       resolvedAt: resolvedAt?.toISOString() ?? null,
