@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### An allowed site on a non-default port opens
+
+With a network allowlist, a Bot opening an allowed site on a port that is not the scheme's default,
+such as `http://erp.internal:8080`, was refused in the conversation with "erp.internal:8080:8080 is
+not on this deployment's network allowlist", whatever the rule said. The server compared the host
+with its port still attached against the allowlist's domains. It now compares the host and the port
+separately, as the computer's own filter already did, so the rule's domain and ports decide.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
