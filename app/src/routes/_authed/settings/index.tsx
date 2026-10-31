@@ -7,6 +7,7 @@ import {
 } from "@/components/layout/page-shell";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { ProfileSettings } from "@/components/settings/profile";
+import { SegmentedChoice } from "@/components/settings/segmented-choice";
 import { StandingInstructions } from "@/components/settings/standing-instructions";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -14,16 +15,17 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemTitle,
 } from "@/components/ui/item";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import {
+  BOT_FACES,
+  type BotFaces,
+  setBotFaces,
+  useBotFaces,
+  usePrefersReducedMotion,
+} from "@/lib/bot-faces";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
 import { THEME_PREFERENCES, type ThemePreference } from "@/lib/theme";
 import { SkinPicker } from "@/skins/skin-picker";
@@ -38,8 +40,29 @@ const APPEARANCE: Record<ThemePreference, string> = {
   dark: "Dark",
 };
 
+/** What each choice does, said under the row while it is chosen. */
+const APPEARANCE_DESCRIPTION: Record<ThemePreference, string> = {
+  system: "OpenBot follows your device's light or dark setting.",
+  light: "OpenBot stays light, whatever your device is set to.",
+  dark: "OpenBot stays dark, whatever your device is set to.",
+};
+
+const BOT_FACES_LABEL: Record<BotFaces, string> = {
+  animated: "Animated",
+  working: "Only while working",
+  still: "Still",
+};
+
+const BOT_FACES_DESCRIPTION: Record<BotFaces, string> = {
+  animated: "Bot faces blink, look around and follow your pointer.",
+  working: "Bot faces move only while a Bot is listening or working.",
+  still: "Bot faces never move.",
+};
+
 function RouteComponent() {
   const { preference, setPreference } = useTheme();
+  const faces = useBotFaces();
+  const reducedMotion = usePrefersReducedMotion();
 
   /*
    * The measurements that used to be written out here now live in `PageShell`, which Skills, Admin
@@ -51,39 +74,49 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="Customize OpenBot’s appearance and message display. Your skin and message settings apply to your account; the theme applies only to this browser."
+      description="Customize OpenBot’s appearance and message display. Your skin and message settings apply to your account. The theme and Bot faces apply only to this browser."
       title="Preferences"
     >
       <ProfileSettings />
       <PageSection title="General">
         <PageRows>
-          {/* Three choices, so a select like the message list's below, not a switch. */}
+          {/* A few short choices, all in view at once, so a segmented control. */}
           <Item size="sm">
             <ItemContent>
               <ItemTitle>Appearance</ItemTitle>
               <ItemDescription>
-                System follows your device's light or dark setting.
+                {APPEARANCE_DESCRIPTION[preference]}
               </ItemDescription>
             </ItemContent>
-            <ItemActions>
-              <Select
+            <ItemFooter>
+              <SegmentedChoice
+                label="Appearance"
+                labels={APPEARANCE}
+                onChange={setPreference}
+                options={THEME_PREFERENCES}
                 value={preference}
-                onValueChange={(value) => {
-                  if (value) setPreference(value);
-                }}
-              >
-                <SelectTrigger aria-label="Appearance">
-                  <SelectValue>{APPEARANCE[preference]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {THEME_PREFERENCES.map((choice) => (
-                    <SelectItem key={choice} value={choice}>
-                      {APPEARANCE[choice]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </ItemActions>
+              />
+            </ItemFooter>
+          </Item>
+          <Separator />
+          <Item size="sm">
+            <ItemContent>
+              <ItemTitle>Bot faces</ItemTitle>
+              <ItemDescription>
+                {reducedMotion
+                  ? "Your device asks for less motion, so Bot faces never move."
+                  : BOT_FACES_DESCRIPTION[faces]}
+              </ItemDescription>
+            </ItemContent>
+            <ItemFooter>
+              <SegmentedChoice
+                label="Bot faces"
+                labels={BOT_FACES_LABEL}
+                onChange={setBotFaces}
+                options={BOT_FACES}
+                value={faces}
+              />
+            </ItemFooter>
           </Item>
           <Separator />
           <SkinPicker />
