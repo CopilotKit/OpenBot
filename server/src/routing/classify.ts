@@ -172,16 +172,20 @@ function onlyCoworkerReaching(
     }
   }
 
+  let reachable: { id: string; name: string; system: string } | null = null;
   for (const system of named) {
     const holders = candidates.filter((candidate) =>
       candidate.reaches?.includes(system),
     );
     const only = holders[0];
     if (holders.length === 1 && only) {
-      return { id: only.id, name: only.name, system };
+      // Different systems can point to different Bots. The roster's order is not evidence that
+      // one of them should receive the whole conversation when the model could not decide.
+      if (reachable && reachable.id !== only.id) return null;
+      reachable ??= { id: only.id, name: only.name, system };
     }
   }
-  return null;
+  return reachable;
 }
 
 export function createIntentRouter(deps: {
