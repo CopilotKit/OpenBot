@@ -27,6 +27,9 @@ import type { TaskReplyContextReader } from "./reply-context";
 import { replyEnding } from "./reply-ending";
 import { plainFailure, type TaskStore } from "./store";
 
+/** What the model is told `TASK_ENDING` is, in its context. Never "Selected skill". */
+export const TASK_ENDING_DESCRIPTION = "How to end your reply in this task";
+
 /*
  * The two halves of a task the proactive engine leaves to the server's assembly: making its
  * conversation, and running its turn there.
@@ -224,7 +227,12 @@ export function createTaskTurn(deps: {
         userMessage: { id: input.runId, role: "user", content },
         systemMessages: [
           // One id for every turn of the task, so its conversation holds this once.
-          { id: "task:ending", role: "system" as const, content: TASK_ENDING },
+          {
+            id: "task:ending",
+            role: "system" as const,
+            content: TASK_ENDING,
+            description: TASK_ENDING_DESCRIPTION,
+          },
           ...context.skillInstructions.map((instructions, index) => ({
             id: `${input.runId}:skill:${index}`,
             role: "system" as const,

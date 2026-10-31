@@ -91,8 +91,14 @@ describe("a task's turn", () => {
     });
     await turn.start();
     // One id for every turn of the task, so its conversation holds the guidance once.
+    // Named to the model for what it is, not as a skill the person picked.
     expect(asked[0]?.systemMessages).toEqual([
-      { id: "task:ending", role: "system", content: TASK_ENDING },
+      {
+        id: "task:ending",
+        role: "system",
+        content: TASK_ENDING,
+        description: "How to end your reply in this task",
+      },
     ]);
     expect(TASK_ENDING).toContain("Ask them a question only if");
     expect(TASK_ENDING).toContain('written to the person as "you"');
