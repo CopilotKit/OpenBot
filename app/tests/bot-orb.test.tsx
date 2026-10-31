@@ -933,13 +933,26 @@ describe("a Bot's face and OpenBot's mark", () => {
     expect(orbOf(view.container).style.width).toBe("192px");
   });
 
-  test("OpenBot's mark is drawn at a size in px, and refuses a share of its container", () => {
+  test("OpenBot's mark is drawn at a size in px, and a share of its container draws the default and warns once", () => {
     const view = render(<AgentOrb size="27.5px" />);
     expect(orbOf(view.container).style.width).toBe("27.5px");
-    // Read as a number, "100%" would draw a 100px orb whatever its container is.
-    // @ts-expect-error Only a size in px type-checks.
-    expect(() => AgentOrb({ size: "100%" })).toThrow(
-      `AgentOrb's size is in px, as "64px", not "100%".`,
-    );
+    cleanup();
+
+    const original = console.warn;
+    const warnings: unknown[] = [];
+    console.warn = (...args: unknown[]) => warnings.push(args[0]);
+    try {
+      // Read as a number, "100%" would draw a 100px orb whatever its container is.
+      // @ts-expect-error Only a size in px type-checks.
+      const slipped = render(<AgentOrb size="100%" />);
+      expect(orbOf(slipped.container).style.width).toBe("192px");
+      // @ts-expect-error Only a size in px type-checks.
+      slipped.rerender(<AgentOrb size="100%" state="thinking" />);
+      expect(warnings).toEqual([
+        `AgentOrb's size is in px, as "64px", not "100%". Drawing it at 192px.`,
+      ]);
+    } finally {
+      console.warn = original;
+    }
   });
 });
