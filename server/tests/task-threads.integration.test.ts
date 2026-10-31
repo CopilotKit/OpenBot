@@ -2205,7 +2205,7 @@ describe("a task whose turn fails", () => {
     });
     const report = () =>
       buildTaskReport({
-        task: { ...task, status: "failed" },
+        task: { ...task, status: "failed", origin: "asked", why: null },
         messages,
         approvals: [],
         firstTurnEndedAt: null,
@@ -4099,7 +4099,7 @@ test("a turn that never answers is stopped at its time limit, and fails saying i
     (_run, signal) => {
       signals.push(signal);
       // A step that never answers, and ignores its signal.
-      return new Promise(() => {});
+      return new Promise<void>(() => {});
     },
     createWorkQueue(database),
     undefined,
