@@ -55,7 +55,8 @@ test("connection loss disables input, retries boundedly, then asks for Retry", a
   const r = rig();
   r.sockets[0]?.onopen?.();
   r.sockets[0]?.onclose?.();
-  expect(r.statuses.at(-2)).toBe("blocked");
+  // Blocked, and nothing more: a retry in progress is not a problem (see the reconnecting test).
+  expect(r.statuses.at(-1)).toBe("blocked");
   for (let i = 0; i < 5; i++) {
     r.timers[i]?.run();
     r.sockets[i + 1]?.onclose?.();
@@ -105,6 +106,60 @@ test("a superseded viewer stays stopped until explicit Retry", () => {
   expect(r.timers).toHaveLength(0);
   expect(r.statuses.at(-1)).toContain("watched somewhere else");
   r.control.stop();
+});
+
+/*
+ * A blip is a badge, not an overlay. Every brief drop used to report "Reconnecting to the live
+ * screen…" as a problem, and the view drew problems as a panel over the screen with a Retry button,
+ * so a routine reconnect looked exactly like a dead connection.
+ */
+test("a drop being retried reports reconnecting, and no problem until the retries run out", async () => {
+  const sockets: ScreenSocket[] = [];
+  const timers: (() => void)[] = [];
+  const problems: (string | null)[] = [];
+  const reconnecting: boolean[] = [];
+  connectScreen({
+    open: () => {
+      const socket: ScreenSocket = {
+        onopen: null,
+        onclose: null,
+        onerror: null,
+        onmessage: null,
+        close: () => undefined,
+      };
+      sockets.push(socket);
+      return socket;
+    },
+    schedule: (run) => {
+      timers.push(run);
+      return () => undefined;
+    },
+    verifyOwnership: async () => false,
+    onReady: () => undefined,
+    onProblem: (problem) => problems.push(problem),
+    onReconnecting: (value) => reconnecting.push(value),
+    onDisconnect: () => undefined,
+    onMessage: () => undefined,
+  });
+
+  await sockets[0]?.onopen?.();
+  sockets[0]?.onclose?.();
+  expect(reconnecting.at(-1)).toBe(true);
+  expect(problems.filter(Boolean)).toEqual([]);
+
+  // Back on the first retry: the badge goes, and nothing was ever drawn over the screen.
+  timers[0]?.();
+  await sockets[1]?.onopen?.();
+  expect(reconnecting.at(-1)).toBe(false);
+  expect(problems.filter(Boolean)).toEqual([]);
+
+  // Gone for good: only now is it a problem, and the badge is cleared with it.
+  for (let i = 1; i <= 6; i++) {
+    sockets[i]?.onclose?.();
+    timers[i]?.();
+  }
+  expect(reconnecting.at(-1)).toBe(false);
+  expect(problems.at(-1)).toContain("Retry");
 });
 
 test("unmount cancels a pending reconnect and ignores old socket callbacks", () => {

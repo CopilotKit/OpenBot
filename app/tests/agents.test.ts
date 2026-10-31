@@ -18,6 +18,15 @@ describe("coworker query keys", () => {
 });
 
 describe("coworker form validation", () => {
+  test("blank titles are valid but non-text and overlong titles are refused", () => {
+    const title = agentFormSchema.shape.title;
+    expect(title.parse("")).toBe("");
+    expect(title.parse("   ")).toBe("");
+    expect(title.parse(" Existing title ")).toBe("Existing title");
+    for (const value of [undefined, null, 5, {}, "x".repeat(121)]) {
+      expect(title.safeParse(value).success).toBe(false);
+    }
+  });
   test("accepts the fields a person fills in", () => {
     expect(
       agentFormSchema.parse({

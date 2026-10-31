@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
-import { DatabaseReset } from "./DatabaseReset";
+import { StartFresh } from "./StartFresh";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
@@ -296,6 +296,13 @@ export function App() {
     if (problem.connection === "organization") setRefreshOrganization(true);
   }, []);
   const displayedFailure = failure ?? recoveryFailure;
+  // An older shell offered only the database. The list is exactly what a reset may remove.
+  const leftoverVolumes = displayedFailure?.leftover_reset?.length
+    ? displayedFailure.leftover_reset
+    : displayedFailure?.database_reset
+      ? [displayedFailure.database_reset]
+      : [];
+  const leftoverContainers = displayedFailure?.leftover_containers ?? [];
   const credentialContext = useRef([
     root,
     model,
@@ -602,22 +609,27 @@ export function App() {
     }
   }
 
-  async function resetLeftoverDatabase(volume: string) {
+  /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
+  async function startFresh(volumes: string[], containers: string[]) {
     setBusy(true);
     try {
       await invoke("reset_leftover_database", {
         root: root.trim(),
-        volume,
+        volumes,
+        containers,
         confirmed: true,
       });
-      setFailure(null);
-      setRecoveryFailure(null);
-      setSteps([]);
     } catch (error) {
       setFailure(asProblem(error));
+      return;
     } finally {
+      // `start` sets `busy` itself, and its early return would never clear it.
       setBusy(false);
     }
+    setFailure(null);
+    setRecoveryFailure(null);
+    setSteps([]);
+    await start();
   }
 
   function modelCanStart() {
@@ -982,12 +994,14 @@ export function App() {
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
-        {!running && displayedFailure?.database_reset && (
-          <DatabaseReset
-            key={`${root}:${displayedFailure.database_reset}`}
+        {!running && leftoverVolumes.length > 0 && (
+          <StartFresh
+            key={`${root}:${leftoverVolumes.join(",")}:${leftoverContainers.join(",")}`}
             busy={busy}
-            volume={displayedFailure.database_reset}
-            onReset={resetLeftoverDatabase}
+            containers={leftoverContainers}
+            database={Boolean(displayedFailure?.database_reset)}
+            volumes={leftoverVolumes}
+            onStartFresh={startFresh}
           />
         )}
 
@@ -1260,7 +1274,10 @@ export function App() {
 
         <SetupProgress steps={steps} />
 
-        {displayedFailure && <Failure problem={displayedFailure} />}
+        {/* Leftover data is a choice, offered above, not a failure to report here. */}
+        {displayedFailure && leftoverVolumes.length === 0 && (
+          <Failure problem={displayedFailure} />
+        )}
 
         {!running && !returningToInstallation && (
           <details>
@@ -1458,6 +1475,8 @@ function label(step: string): string {
       return "Ports";
     case "dependencies":
       return "Dependencies";
+    case "recorder":
+      return "Recorder";
     case "images":
       return "Local software";
     case "installation":

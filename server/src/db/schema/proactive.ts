@@ -108,7 +108,7 @@ export const proactiveSuggestions = pgTable(
     index("proactive_suggestions_run_idx").on(table.runId),
     check(
       "proactive_suggestions_status_check",
-      sql`${table.status} IN ('open', 'dismissed', 'started')`,
+      sql`${table.status} IN ('open', 'dismissed', 'started', 'superseded')`,
     ),
   ],
 );

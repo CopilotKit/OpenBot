@@ -1,3 +1,4 @@
+import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   and,
   desc,
@@ -13,7 +14,6 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
-import type { AuditInitiator } from "@openbot/toolkit/initiator";
 
 const sensitiveKeys = new Set([
   "access_token",
@@ -269,6 +269,14 @@ export const auditEventTypes = [
   // An administrator answered a request to use a Shared app through a Bot.
   "shared_use.declined",
   /*
+   * A Bot's owner gave it a Shared app whose rule lets owners decide, and that set who may use the
+   * team account through the Bot (`approved_as = owner`); and that audience withdrawn, because the
+   * owner took the app back or an administrator stopped letting owners decide. Target the app;
+   * payload `bot`, `server`, and the `audience` set or `why` it went.
+   */
+  "shared_use.owner_approved",
+  "shared_use.owner_withdrawn",
+  /*
    * A person asking an administrator to switch a work app on, grant it to a Bot, or connect a
    * Shared app's team account (`app_access_requests`), and what became of it: cancelled by the
    * person, approved or dismissed by an administrator, or refused — a request that could not be
@@ -280,6 +288,14 @@ export const auditEventTypes = [
   "app_access.approved",
   "app_access.dismissed",
   "app_access.refused",
+  /*
+   * A Bot's owner giving one of their own apps to their own Bot, or taking it back, without an
+   * administrator (`plugins/owner-grants.ts`). Target the app key; payload `app`, `bot`, and the
+   * refs given or taken. Each ref also has its own `plugin_granted` / `plugin_revoked` row marked
+   * `grantedAs: owner`.
+   */
+  "app_access.owner_granted",
+  "app_access.owner_revoked",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",
@@ -318,6 +334,9 @@ export const auditEventTypes = [
   // when is exactly the sort of thing an investigator needs and nothing else records.
   "computer.stopped",
   "computer.reset",
+  // A browser's data wiped by the person working it: a Bot's, by whoever held its wheel, or the person's own. Every
+  // login in it goes, as with a reset, so who did it and to which browser is worth a row; the Bot's files stay.
+  "computer.browser_cleared",
   // A computer moved onto the current image. Its files and sign-ins are kept, but a running one is
   // restarted, which interrupts whatever it was doing, so who asked is worth a row.
   "computer.updated",
@@ -459,6 +478,12 @@ export const auditEventTypes = [
   "bot.callback_token_issued",
   "bot.callback_token_revoked",
   /*
+   * A Bot was asked for a computer of its own and refused it: the person does not hold "Isolated
+   * Bots", the Bot belongs to no person, or this deployment cannot make a second computer. The row is
+   * the only trace of the attempt, since nothing about the Bot changed. `payload.reason` says which.
+   */
+  "bot.isolation_refused",
+  /*
    * A Bot's lifecycle as one person runs it: paused, resumed, reset, how loudly it may reach them,
    * a follow-up it scheduled for itself, and a delegated task somebody stopped. See agents/lifecycle.ts.
    */
@@ -589,6 +614,58 @@ export const auditEventTypes = [
   "routine.enabled_changed",
   /* A run refused because its model is not on the team model allowlist. */
   "model.refused",
+  /*
+   * A Recorder extension's bearer turned away: malformed, unknown or revoked, the person removed,
+   * their organization sign-in ended, or no role. Target the first 16 hex digits of the token's
+   * SHA-256, never the token; payload `reason` and `path`. At most one row per digest and reason a
+   * minute per replica, because a browser retrying a dead token would otherwise flood the trail.
+   */
+  "recorder.bearer_refused",
+  /*
+   * A browser connected to OpenBot as the Recorder, by whom and through which extension copy. Never
+   * the token or the code; the label is the person's own name for the browser.
+   */
+  "recorder.connected",
+  /*
+   * A connection refused before it was made; payload `reason`: `origin`, an origin that is not the Recorder's (payload
+   * `origin`, the one offered); `code`, a connect code that is unknown, expired or already used (payload `extensionId`
+   * and `installId`, never the code); or `too_many_codes`, the person already holding ten unused codes (payload `via`).
+   * A row that cannot be written is logged and the refusal stands.
+   */
+  "recorder.connect_refused",
+  /*
+   * A connection ended; payload `via`, how it was made (as on `recorder.connected`), and `reason`: replaced (the same
+   * copy connected again), disconnected, revoked, signed_out (the person's sign-in here ended: payload `ending` says how,
+   * a sign-out, sessions ended another way, the person removed, their organization ending the session it holds a copy
+   * of) or expired (its lifetime ran out: the deployment ended it, payload `owner`); for a Bot's browser's connection,
+   * which lasts one recording, stopped (the person's Stop), ended (the recording ended without one) or not-started (the
+   * start it was for did not happen); for the person's own OpenBot browser's, cleared (they cleared that browser, and its
+   * token went with the profile). Written in the transaction that ends the connection, as `recorder.connected` is in
+   * the one that makes it.
+   */
+  "recorder.revoked",
+  /*
+   * A security row: a person's sign-in here was ending (payload `ending`) and their Recorder connections could not be
+   * ended, after `attempts` tries (payload `error`, the database's complaint, never the query). The sign-in did not end
+   * either, and whoever was ending it was told: the person signing out, the administrator, the directory. Target the
+   * person.
+   */
+  "recorder.sign_out_failed",
+  /*
+   * The capture pass (the runtime's trajectory/connect) turned a caller away: an id that is not a UUID, no
+   * Recorder bearer or one that no longer resolves, no role, the organization unable to answer, or a trajectory
+   * already bound to another person. Target the trajectory id; payload `reason`. At most one row per person,
+   * trajectory and reason a minute per replica.
+   */
+  "recorder.trajectory_refused",
+  /*
+   * A person changed who else's Bots use the Skills learned in their own Learning space (Settings, Learning). Target
+   * the person; payload `from` and `to`, each `closed`, `open` or `choose`.
+   */
+  "learning.sharing_changed",
+  /* A person opened one of their own learned Skills to every Bot, or closed it again. Target and payload `skill`. */
+  "learning.skill_opened",
+  "learning.skill_closed",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

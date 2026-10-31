@@ -131,6 +131,21 @@ fn saved(root: &Path, expected: &str) -> Result<Option<SavedSession>, Problem> {
     Ok(Some(session))
 }
 
+/// Whether Desktop holds a sign-in for this organization, read from this computer alone. The Recorder's native host
+/// asks on every ping, which must stay cheap and never reach the network; whether the organization still accepts the
+/// sign-in is the handoff's question. On Windows the saved sign-in is sealed with DPAPI and opening it starts
+/// PowerShell, so there only its presence is read.
+pub fn signed_in_locally(root: &Path, authority_url: &str) -> Result<bool, Problem> {
+    let expected = authority(authority_url)?;
+    if !crate::vault::stored(root, SAVED_COOKIE) {
+        return Ok(false);
+    }
+    if cfg!(target_os = "windows") {
+        return Ok(true);
+    }
+    Ok(saved(root, &expected)?.is_some())
+}
+
 pub fn status(root: &Path, authority_url: &str) -> Result<Option<OrganizationUser>, Problem> {
     let expected = authority(authority_url)?;
     saved(root, &expected)?
@@ -339,12 +354,13 @@ pub fn finish(root: &Path) -> Result<OrganizationUser, Problem> {
     Ok(user)
 }
 
-/// A one-use navigation sets the local HttpOnly cookie; credentials never enter renderer IPC.
-pub fn session_destination(
+/// Hands the saved organization session to the local OpenBot and returns the one-use
+/// ticket address that turns it into the local HttpOnly cookie.
+fn handoff_destination(
     root: &Path,
     authority_url: &str,
     app_url: &str,
-) -> Result<String, Problem> {
+) -> Result<(Client, Url), Problem> {
     let authority = authority(authority_url)?;
     let session = saved(root, &authority)?
         .ok_or_else(|| auth_problem("Sign in to your organization to open OpenBot."))?;
@@ -394,7 +410,49 @@ pub fn session_destination(
     destination
         .query_pairs_mut()
         .append_pair("ticket", &ticket.ticket);
-    Ok(destination.to_string())
+    Ok((client, destination))
+}
+
+/// A one-use navigation sets the local HttpOnly cookie; credentials never enter renderer IPC.
+pub fn session_destination(
+    root: &Path,
+    authority_url: &str,
+    app_url: &str,
+) -> Result<String, Problem> {
+    handoff_destination(root, authority_url, app_url)
+        .map(|(_, destination)| destination.to_string())
+}
+
+const LOCAL_SESSION_COOKIE: &str = "openbot.organization-session=";
+
+/// The local OpenBot's organization session cookie pair for the saved sign-in, for the
+/// Recorder's native host. Never logged.
+pub fn local_session_cookie(
+    root: &Path,
+    authority_url: &str,
+    app_url: &str,
+) -> Result<String, Problem> {
+    let (client, destination) = handoff_destination(root, authority_url, app_url)?;
+    let response = client.get(destination).send().map_err(|_| {
+        problem("OpenBot could not read your organization sign-in from this installation.")
+    })?;
+    if response.status() == 401 || response.status() == 403 {
+        return Err(auth_problem("Sign in to your organization again."));
+    }
+    if !response.status().is_success() && !response.status().is_redirection() {
+        return Err(problem(
+            "OpenBot could not accept your organization sign-in. Try again.",
+        ));
+    }
+    response
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| value.split(';').next())
+        .find(|value| value.starts_with(LOCAL_SESSION_COOKIE))
+        .map(str::to_string)
+        .ok_or_else(|| problem("OpenBot did not return an organization session."))
 }
 
 #[cfg(test)]
@@ -561,5 +619,141 @@ mod tests {
                 callback_code(&format!("GET {CALLBACK}?{query} HTTP/1.1\r\n"), "expected").is_err()
             );
         }
+    }
+
+    /// A fake local OpenBot: answers the handoff POST, then the ticket GET.
+    fn fake_app(
+        post: &'static str,
+        get: &'static str,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let worker = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for reply in [post, get] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap() == 0 {
+                        break;
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                    request.push_str(&line);
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                seen.push(request);
+                stream.write_all(reply.as_bytes()).unwrap();
+                if reply.starts_with("HTTP/1.1 401") {
+                    break;
+                }
+            }
+            seen
+        });
+        (url, worker)
+    }
+
+    fn authority_with_session(name: &str) -> (PathBuf, String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let authority = format!("http://{}", listener.local_addr().unwrap());
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let body = r#"{"user":{"id":"u1","email":"a@b.c","name":null,"role":"user"}}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let root = std::env::temp_dir().join(format!(
+            "openbot-local-cookie-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        crate::vault::remember(
+            &root,
+            SAVED_COOKIE,
+            &serde_json::to_string(&SavedSession {
+                authority: authority.clone(),
+                cookie: "better-auth.session_token=saved".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        (root, authority, worker)
+    }
+
+    #[test]
+    fn signed_in_locally_reads_the_saved_sign_in_and_creates_nothing() {
+        // Nothing listens at either authority: the check never dials one.
+        let authority = "http://127.0.0.1:9";
+        let root = std::env::temp_dir().join(format!(
+            "openbot-signed-in-locally-{}-{}",
+            std::process::id(),
+            random()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(!signed_in_locally(&root, authority).unwrap());
+        assert!(!root.join(".secrets").exists());
+        crate::vault::remember(
+            &root,
+            SAVED_COOKIE,
+            &serde_json::to_string(&SavedSession {
+                authority: authority.into(),
+                cookie: "better-auth.session_token=saved".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(signed_in_locally(&root, authority).unwrap());
+        // Where the saved sign-in can be read cheaply, one for another organization is not this one's.
+        if !cfg!(target_os = "windows") {
+            assert!(!signed_in_locally(&root, "http://127.0.0.1:8").unwrap());
+        }
+        assert!(signed_in_locally(&root, "not a url").is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_session_cookie_returns_the_set_cookie_pair() {
+        let (root, authority, authority_worker) = authority_with_session("ok");
+        let (app, app_worker) = fake_app(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 14\r\nConnection: close\r\n\r\n{\"ticket\":\"t\"}",
+            "HTTP/1.1 302 Found\r\nLocation: /\r\nSet-Cookie: openbot.organization-session=v; Path=/; HttpOnly\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+        let cookie = local_session_cookie(&root, &authority, &app).unwrap();
+        assert_eq!(cookie, "openbot.organization-session=v");
+        let seen = app_worker.join().unwrap();
+        assert!(seen[0].starts_with("POST /api/auth/organization/session HTTP/1.1"));
+        assert!(seen[0].to_lowercase().contains(&format!("origin: {app}")));
+        assert!(seen[1].starts_with("GET /api/auth/organization/session?ticket=t HTTP/1.1"));
+        authority_worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_session_cookie_maps_a_rejected_handoff_to_the_sign_in_problem() {
+        let (root, authority, authority_worker) = authority_with_session("401");
+        let (app, app_worker) = fake_app(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            "",
+        );
+        let error = local_session_cookie(&root, &authority, &app).unwrap_err();
+        assert_eq!(error.connection, Some(Connection::Organization));
+        app_worker.join().unwrap();
+        authority_worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 }

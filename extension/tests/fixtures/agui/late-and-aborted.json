@@ -1,0 +1,1731 @@
+{
+  "description": "The same agent at /rig/awp over SSE: one answer whose streamResourceContent was asked only at loadingFinished (Chrome refuses: already finished loading), then a run the page aborted mid-stream (HttpAgent.abortRun). Real Chrome over CDP.",
+  "browser": "Chrome/156.0.8078.47",
+  "entries": [
+    {
+      "kind": "mark",
+      "t": 74.545,
+      "wall": 1792538903723,
+      "name": "navigate",
+      "data": { "url": "http://127.0.0.1:7631/rig/page" }
+    },
+    {
+      "kind": "event",
+      "t": 86.581,
+      "session": "page",
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "loaderId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "documentURL": "http://127.0.0.1:7631/rig/page",
+        "request": {
+          "url": "http://127.0.0.1:7631/rig/page",
+          "method": "GET",
+          "headers": {
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"macOS\""
+          }
+        },
+        "timestamp": 1786865.291124,
+        "wallTime": 1792538903.735393,
+        "type": "Document",
+        "frameId": "9E6E1549E89957902A4D399C1F71294E",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "kind": "event",
+      "t": 91.812,
+      "session": "page",
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "loaderId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "timestamp": 1786865.296338,
+        "type": "Document",
+        "response": {
+          "url": "http://127.0.0.1:7631/rig/page",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Content-Length": "533641",
+            "Content-Type": "text/html",
+            "Date": "Tue, 20 Oct 2026 23:28:23 GMT"
+          },
+          "mimeType": "text/html"
+        },
+        "hasExtraInfo": true,
+        "frameId": "9E6E1549E89957902A4D399C1F71294E"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 106.092,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "timestamp": 1786865.298649,
+        "dataLength": 135063,
+        "encodedDataLength": 0
+      }
+    },
+    {
+      "kind": "event",
+      "t": 112.486,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "timestamp": 1786865.312015,
+        "dataLength": 398578,
+        "encodedDataLength": 0
+      }
+    },
+    {
+      "kind": "event",
+      "t": 140.661,
+      "session": "page",
+      "method": "Network.loadingFinished",
+      "params": {
+        "requestId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "timestamp": 1786865.303715,
+        "encodedDataLength": 533746
+      }
+    },
+    {
+      "kind": "mark",
+      "t": 1118.559,
+      "wall": 1792538904767,
+      "name": "click",
+      "data": { "name": "late", "selector": "#late", "text": "Ask, read late" }
+    },
+    {
+      "kind": "event",
+      "t": 1124.576,
+      "session": "page",
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "78382.2",
+        "loaderId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "documentURL": "http://127.0.0.1:7631/rig/page",
+        "request": {
+          "url": "http://127.0.0.1:7631/rig/awp?late=1",
+          "method": "POST",
+          "headers": {
+            "sec-ch-ua-platform": "\"macOS\"",
+            "Referer": "http://127.0.0.1:7631/rig/page",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+            "Accept": "text/event-stream",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
+            "Content-Type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "postData": "{\"threadId\":\"ea18e1f8-8310-4ace-8280-f332ea1a5aa2\",\"runId\":\"92148d4b-61b6-42e2-821f-fc684648f2df\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"f67d5a2c-9000-41c7-82bc-783d621717cf\",\"role\":\"user\",\"content\":\"Should we approve deal-2 at its amount?\"}],\"tools\":[],\"context\":[{\"description\":\"The deal the user is looking at\",\"value\":\"{\\\"dealId\\\":\\\"deal-2\\\",\\\"amount\\\":48000}\"}],\"forwardedProps\":{}}",
+          "hasPostData": true
+        },
+        "timestamp": 1786866.327352,
+        "wallTime": 1792538904.772112,
+        "type": "Fetch",
+        "frameId": "9E6E1549E89957902A4D399C1F71294E",
+        "hasUserGesture": true
+      }
+    },
+    {
+      "kind": "event",
+      "t": 1135.189,
+      "session": "page",
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "78382.2",
+        "loaderId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "timestamp": 1786866.339115,
+        "type": "Fetch",
+        "response": {
+          "url": "http://127.0.0.1:7631/rig/awp?late=1",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Transfer-Encoding": "chunked",
+            "Cache-Control": "no-cache",
+            "Date": "Tue, 20 Oct 2026 23:28:24 GMT",
+            "Content-Type": "text/event-stream"
+          },
+          "mimeType": "text/event-stream"
+        },
+        "hasExtraInfo": true,
+        "frameId": "9E6E1549E89957902A4D399C1F71294E"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 1136.416,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786866.339754,
+        "dataLength": 151,
+        "encodedDataLength": 157
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2194.488,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.397549,
+        "dataLength": 235,
+        "encodedDataLength": 241
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2691.007,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.894936,
+        "dataLength": 212,
+        "encodedDataLength": 218
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2694.534,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.898604,
+        "dataLength": 171,
+        "encodedDataLength": 177
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2698.742,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.902762,
+        "dataLength": 92,
+        "encodedDataLength": 98
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2707.74,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.911966,
+        "dataLength": 93,
+        "encodedDataLength": 99
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2719.882,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.924068,
+        "dataLength": 91,
+        "encodedDataLength": 97
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2751.107,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.955325,
+        "dataLength": 94,
+        "encodedDataLength": 100
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2772.085,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.976248,
+        "dataLength": 93,
+        "encodedDataLength": 99
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2790.036,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786867.994333,
+        "dataLength": 90,
+        "encodedDataLength": 96
+      }
+    },
+    {
+      "kind": "event",
+      "t": 2798.388,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.002153,
+        "dataLength": 636,
+        "encodedDataLength": 650
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3647.097,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.850858,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3674.429,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.878557,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3676.172,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.880515,
+        "dataLength": 143,
+        "encodedDataLength": 149
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3678.824,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.883216,
+        "dataLength": 141,
+        "encodedDataLength": 147
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3714.778,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.919023,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3716.836,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.921134,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3718.874,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.923262,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3725.639,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.929838,
+        "dataLength": 276,
+        "encodedDataLength": 283
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3750.835,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.955024,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3755.688,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.959968,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3758.329,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.962615,
+        "dataLength": 283,
+        "encodedDataLength": 290
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3787.733,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786868.991932,
+        "dataLength": 138,
+        "encodedDataLength": 144
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3796.179,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.000436,
+        "dataLength": 140,
+        "encodedDataLength": 146
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3827.188,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.031432,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3859.191,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.06348,
+        "dataLength": 141,
+        "encodedDataLength": 147
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3872.101,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.076341,
+        "dataLength": 287,
+        "encodedDataLength": 294
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3900.475,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.104711,
+        "dataLength": 141,
+        "encodedDataLength": 147
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3907.389,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.111661,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3913.824,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.118088,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3922.756,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.12698,
+        "dataLength": 282,
+        "encodedDataLength": 289
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3936.959,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.141206,
+        "dataLength": 141,
+        "encodedDataLength": 147
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3942.749,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.147054,
+        "dataLength": 138,
+        "encodedDataLength": 144
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3945.933,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.150298,
+        "dataLength": 142,
+        "encodedDataLength": 148
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3947.95,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.152359,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3950.284,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.154614,
+        "dataLength": 275,
+        "encodedDataLength": 282
+      }
+    },
+    {
+      "kind": "event",
+      "t": 3990.713,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.194836,
+        "dataLength": 426,
+        "encodedDataLength": 439
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4014.329,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.218508,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4057.365,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.261609,
+        "dataLength": 144,
+        "encodedDataLength": 150
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4068.307,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.272562,
+        "dataLength": 140,
+        "encodedDataLength": 146
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4073.755,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.278032,
+        "dataLength": 142,
+        "encodedDataLength": 148
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4077.021,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.281296,
+        "dataLength": 289,
+        "encodedDataLength": 296
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4099.054,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.30333,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4108.053,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.312292,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4111.208,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.315477,
+        "dataLength": 281,
+        "encodedDataLength": 288
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4132.993,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.337244,
+        "dataLength": 140,
+        "encodedDataLength": 146
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4140.737,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.345044,
+        "dataLength": 141,
+        "encodedDataLength": 147
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4142.724,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.347103,
+        "dataLength": 139,
+        "encodedDataLength": 145
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4146.84,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.351177,
+        "dataLength": 144,
+        "encodedDataLength": 150
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4156.229,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.360522,
+        "dataLength": 137,
+        "encodedDataLength": 143
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4387.836,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.591005,
+        "dataLength": 320,
+        "encodedDataLength": 332
+      }
+    },
+    {
+      "kind": "event",
+      "t": 4387.845,
+      "session": "page",
+      "method": "Network.loadingFinished",
+      "params": {
+        "requestId": "78382.2",
+        "timestamp": 1786869.590898,
+        "encodedDataLength": 9477
+      }
+    },
+    {
+      "kind": "command",
+      "t": 4387.867,
+      "session": "page",
+      "method": "Network.streamResourceContent",
+      "params": { "requestId": "78382.2" },
+      "tEnd": 4391.139,
+      "error": "Request with the provided ID has already finished loading"
+    },
+    {
+      "kind": "command",
+      "t": 4387.896,
+      "session": "page",
+      "method": "Network.getResponseBody",
+      "params": { "requestId": "78382.2" },
+      "tEnd": 4391.423,
+      "result": {
+        "body": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"ea18e1f8-8310-4ace-8280-f332ea1a5aa2\",\"runId\":\"92148d4b-61b6-42e2-821f-fc684648f2df\",\"protocolVersion\":\"1.0\"}\n\ndata: {\"type\":\"REASONING_START\",\"messageId\":\"rs_084a0d81249d37b7006ad7f919dbd487d0afda450855257ee8:0\"}\n\ndata: {\"type\":\"REASONING_MESSAGE_START\",\"messageId\":\"rs_084a0d81249d37b7006ad7f919dbd487d0afda450855257ee8:0\",\"role\":\"reasoning\"}\n\ndata: {\"type\":\"REASONING_MESSAGE_END\",\"messageId\":\"rs_084a0d81249d37b7006ad7f919dbd487d0afda450855257ee8:0\"}\n\ndata: {\"type\":\"REASONING_END\",\"messageId\":\"rs_084a0d81249d37b7006ad7f919dbd487d0afda450855257ee8:0\"}\n\ndata: {\"type\":\"TOOL_CALL_START\",\"parentMessageId\":\"829e0499-0cc5-4b3e-bf3c-ca0e32dd4388\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"toolCallName\":\"lookupDealHistory\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"{\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"deal\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"Id\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"\\\":\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"deal\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"-\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"2\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"delta\":\"\\\"}\"}\n\ndata: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\"}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"role\":\"tool\",\"messageId\":\"653c8a23-000e-420a-8042-eb9304216324\",\"toolCallId\":\"call_NBu3TXeSniXTePInyBV8CXRE\",\"content\":\"{\\\"dealId\\\":\\\"deal-2\\\",\\\"name\\\":\\\"Globex expansion\\\",\\\"amount\\\":48000,\\\"stage\\\":\\\"review\\\",\\\"pastDiscounts\\\":[\\\"10% on renewal in 2025\\\"],\\\"paymentRecord\\\":\\\"paid on time for 3 years\\\",\\\"approvals\\\":[\\\"sales manager\\\"]}\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"Yes\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"â€”\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"approve\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" deal\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"-\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"2\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" at\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" $\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"48\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\",\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"000\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" given\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" Glob\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"ex\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"â€™s\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" on\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"-time\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" payment\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" record\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" over\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" \"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"3\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" years\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" and\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" only\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" a\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" prior\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" \"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"10\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\"%\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" renewal\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" discount\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\".\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" It\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" already\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" has\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" sales\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" manager\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" approval\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\",\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" so\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" it\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" looks\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" low\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" risk\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" to\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\" proceed\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"role\":\"assistant\",\"messageId\":\"msg_084a0d81249d37b7006ad7f91b508c87d0bf0661a441c85882\",\"delta\":\".\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"threadId\":\"ea18e1f8-8310-4ace-8280-f332ea1a5aa2\",\"runId\":\"92148d4b-61b6-42e2-821f-fc684648f2df\",\"metadata\":{\"finishReason\":\"stop\"},\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-5.2\",\"inputTokens\":626,\"outputTokens\":93,\"totalTokens\":719,\"reasoningTokens\":17,\"cachedInputTokens\":0}]}\n\n",
+        "base64Encoded": false
+      }
+    },
+    {
+      "kind": "mark",
+      "t": 6397.385,
+      "wall": 1792538910046,
+      "name": "click",
+      "data": {
+        "name": "abort",
+        "selector": "#abort",
+        "text": "Ask, then stop"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 6399.51,
+      "session": "page",
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "78382.3",
+        "loaderId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "documentURL": "http://127.0.0.1:7631/rig/page",
+        "request": {
+          "url": "http://127.0.0.1:7631/rig/awp",
+          "method": "POST",
+          "headers": {
+            "sec-ch-ua-platform": "\"macOS\"",
+            "Referer": "http://127.0.0.1:7631/rig/page",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+            "Accept": "text/event-stream",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
+            "Content-Type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "postData": "{\"threadId\":\"768807a3-5bf4-4e98-8e5b-330e065ea76f\",\"runId\":\"949a34b8-0df9-4f4f-ab91-add0eb5166b9\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"836d64b4-a9dc-4263-a302-f4ae95a9fc1a\",\"role\":\"user\",\"content\":\"Should we approve deal-2 at its amount?\"}],\"tools\":[],\"context\":[{\"description\":\"The deal the user is looking at\",\"value\":\"{\\\"dealId\\\":\\\"deal-2\\\",\\\"amount\\\":48000}\"}],\"forwardedProps\":{}}",
+          "hasPostData": true
+        },
+        "timestamp": 1786871.603053,
+        "wallTime": 1792538910.047391,
+        "type": "Fetch",
+        "frameId": "9E6E1549E89957902A4D399C1F71294E",
+        "hasUserGesture": true
+      }
+    },
+    {
+      "kind": "event",
+      "t": 6406.216,
+      "session": "page",
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "78382.3",
+        "loaderId": "AB541BED352B9ACD09CDCC6E3FC53004",
+        "timestamp": 1786871.610393,
+        "type": "Fetch",
+        "response": {
+          "url": "http://127.0.0.1:7631/rig/awp",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Transfer-Encoding": "chunked",
+            "Cache-Control": "no-cache",
+            "Date": "Tue, 20 Oct 2026 23:28:29 GMT",
+            "Content-Type": "text/event-stream"
+          },
+          "mimeType": "text/event-stream"
+        },
+        "hasExtraInfo": true,
+        "frameId": "9E6E1549E89957902A4D399C1F71294E"
+      }
+    },
+    {
+      "kind": "command",
+      "t": 6406.24,
+      "session": "page",
+      "method": "Network.streamResourceContent",
+      "params": { "requestId": "78382.3" },
+      "tEnd": 6406.576,
+      "result": {
+        "bufferedData": "ZGF0YTogeyJ0eXBlIjoiUlVOX1NUQVJURUQiLCJ0aHJlYWRJZCI6Ijc2ODgwN2EzLTViZjQtNGU5OC04ZTViLTMzMGUwNjVlYTc2ZiIsInJ1bklkIjoiOTQ5YTM0YjgtMGRmOS00ZjRmLWFiOTEtYWRkMGViNTE2NmI5IiwicHJvdG9jb2xWZXJzaW9uIjoiMS4wIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 6406.374,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786871.610659,
+        "dataLength": 151,
+        "encodedDataLength": 157
+      }
+    },
+    {
+      "kind": "event",
+      "t": 7363.131,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786872.567231,
+        "dataLength": 235,
+        "encodedDataLength": 241,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX1NUQVJUIiwibWVzc2FnZUlkIjoicnNfMDQ2ZmEyZjBmYjQ1MjQwODAwNmFkN2Y5MWYwNWRjODdkMGJjYTIxNzFmODNmZDgxMDY6MCJ9CgpkYXRhOiB7InR5cGUiOiJSRUFTT05JTkdfTUVTU0FHRV9TVEFSVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJyb2xlIjoicmVhc29uaW5nIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 7996.925,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.200801,
+        "dataLength": 157,
+        "encodedDataLength": 163,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IioqTG9va2luZyB1cCBkZWFsIGhpc3RvcnkqKlxuXG5JIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8060.278,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.26436,
+        "dataLength": 258,
+        "encodedDataLength": 265,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBuZWVkIn0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIgdG8ifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8085.325,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.289521,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBjYWxsIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8087.301,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.291622,
+        "dataLength": 129,
+        "encodedDataLength": 135,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0aGUifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8090.99,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.29522,
+        "dataLength": 516,
+        "encodedDataLength": 530,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0b29sIn0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIgdG8ifQoKZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBsb29rIn0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIgdXAifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8096.067,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.300395,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBkZWFsIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8097.829,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.302163,
+        "dataLength": 259,
+        "encodedDataLength": 266,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBoaXN0b3J5In0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIuIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8117.294,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.321401,
+        "dataLength": 261,
+        "encodedDataLength": 268,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBBZnRlciJ9CgpkYXRhOiB7InR5cGUiOiJSRUFTT05JTkdfTUVTU0FHRV9DT05URU5UIiwibWVzc2FnZUlkIjoicnNfMDQ2ZmEyZjBmYjQ1MjQwODAwNmFkN2Y5MWYwNWRjODdkMGJjYTIxNzFmODNmZDgxMDY6MCIsImRlbHRhIjoiIHRoYXQifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8122.051,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.326398,
+        "dataLength": 126,
+        "encodedDataLength": 132,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiwifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8124.945,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.329325,
+        "dataLength": 127,
+        "encodedDataLength": 133,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBJIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8127.205,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.331587,
+        "dataLength": 131,
+        "encodedDataLength": 137,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0aGluayJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8130.465,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.334895,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBJJ2xsIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8132.928,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.337052,
+        "dataLength": 656,
+        "encodedDataLength": 676,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBwcm92aWRlIn0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIgdHdvIn0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIgc2hvcnQifQoKZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBzZW50ZW5jZXMifQoKZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBhcyJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8139.016,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.343383,
+        "dataLength": 141,
+        "encodedDataLength": 147,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiByZWNvbW1lbmRhdGlvbnMifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8144.635,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.349003,
+        "dataLength": 126,
+        "encodedDataLength": 132,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6Ii4ifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8151.2,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.355484,
+        "dataLength": 133,
+        "encodedDataLength": 139,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBLZWVwaW5nIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8157.39,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.361716,
+        "dataLength": 128,
+        "encodedDataLength": 134,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBpdCJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8205.69,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.409934,
+        "dataLength": 133,
+        "encodedDataLength": 139,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBjb25jaXNlIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8209.791,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.414101,
+        "dataLength": 257,
+        "encodedDataLength": 264,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBpcyJ9CgpkYXRhOiB7InR5cGUiOiJSRUFTT05JTkdfTUVTU0FHRV9DT05URU5UIiwibWVzc2FnZUlkIjoicnNfMDQ2ZmEyZjBmYjQ1MjQwODAwNmFkN2Y5MWYwNWRjODdkMGJjYTIxNzFmODNmZDgxMDY6MCIsImRlbHRhIjoiIGtleSJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8212.314,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.416573,
+        "dataLength": 255,
+        "encodedDataLength": 261,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiwifQoKZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBhbmQifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8234.061,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.438237,
+        "dataLength": 259,
+        "encodedDataLength": 266,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBJIn0KCmRhdGE6IHsidHlwZSI6IlJFQVNPTklOR19NRVNTQUdFX0NPTlRFTlQiLCJtZXNzYWdlSWQiOiJyc18wNDZmYTJmMGZiNDUyNDA4MDA2YWQ3ZjkxZjA1ZGM4N2QwYmNhMjE3MWY4M2ZkODEwNjowIiwiZGVsdGEiOiIgcmVhbGx5In0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8238.278,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.442526,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB3YW50In0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8248.598,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.452902,
+        "dataLength": 128,
+        "encodedDataLength": 134,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0byJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8255.654,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.459869,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBtYWtlIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8261.589,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.465835,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBzdXJlIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8265.598,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.469901,
+        "dataLength": 259,
+        "encodedDataLength": 266,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0aGUifQoKZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB1c2VyIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8267.63,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.471995,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBnZXRzIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8277.153,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.481425,
+        "dataLength": 132,
+        "encodedDataLength": 138,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB1c2VmdWwifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8283.752,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.488061,
+        "dataLength": 270,
+        "encodedDataLength": 282,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBpbmZvcm1hdGlvbiJ9CgpkYXRhOiB7InR5cGUiOiJSRUFTT05JTkdfTUVTU0FHRV9DT05URU5UIiwibWVzc2FnZUlkIjoicnNfMDQ2ZmEyZjBmYjQ1MjQwODAwNmFkN2Y5MWYwNWRjODdkMGJjYTIxNzFmODNmZDgxMDY6MCIsImRlbHRhIjoiIHF1aWNrbHkifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8286.777,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.49115,
+        "dataLength": 126,
+        "encodedDataLength": 132,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6Ii4ifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8294.31,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.498588,
+        "dataLength": 127,
+        "encodedDataLength": 133,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBJIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8296.616,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.500997,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IuKAmWxsIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8298.862,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.503238,
+        "dataLength": 264,
+        "encodedDataLength": 276,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBzdW1tYXJpemUifQoKZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0aGUifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8300.429,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.504797,
+        "dataLength": 134,
+        "encodedDataLength": 140,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBmaW5kaW5ncyJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8305.879,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.510218,
+        "dataLength": 137,
+        "encodedDataLength": 143,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBlZmZlY3RpdmVseSJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8310.137,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.514471,
+        "dataLength": 128,
+        "encodedDataLength": 134,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBzbyJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8322.638,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.526994,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0aGV5In0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8324.712,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.529041,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBoYXZlIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8332.739,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.537039,
+        "dataLength": 127,
+        "encodedDataLength": 133,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBhIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8336.178,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.540571,
+        "dataLength": 131,
+        "encodedDataLength": 137,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBjbGVhciJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8343.138,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.547465,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB2aWV3In0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8356.159,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.560444,
+        "dataLength": 128,
+        "encodedDataLength": 134,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBvZiJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8365.351,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.569607,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB3aGF0In0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8371.295,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.575582,
+        "dataLength": 128,
+        "encodedDataLength": 134,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0byJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8375.558,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.579875,
+        "dataLength": 134,
+        "encodedDataLength": 140,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBjb25zaWRlciJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8384.009,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.5883,
+        "dataLength": 126,
+        "encodedDataLength": 132,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6Ii4ifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8388.248,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.59259,
+        "dataLength": 128,
+        "encodedDataLength": 134,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBBbCJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8396.556,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.600147,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6InJpZ2h0In0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8401.7,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.605967,
+        "dataLength": 126,
+        "encodedDataLength": 132,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiwifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8410.905,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.615143,
+        "dataLength": 129,
+        "encodedDataLength": 135,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBsZXQifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8415.354,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.619617,
+        "dataLength": 129,
+        "encodedDataLength": 135,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IuKAmXMifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8419.891,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.624116,
+        "dataLength": 129,
+        "encodedDataLength": 135,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBnZXQifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8424.976,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.629227,
+        "dataLength": 130,
+        "encodedDataLength": 136,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiB0aGlzIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8429.322,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.633615,
+        "dataLength": 131,
+        "encodedDataLength": 137,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiBnb2luZyJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8437.322,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.641558,
+        "dataLength": 126,
+        "encodedDataLength": 132,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfQ09OVEVOVCIsIm1lc3NhZ2VJZCI6InJzXzA0NmZhMmYwZmI0NTI0MDgwMDZhZDdmOTFmMDVkYzg3ZDBiY2EyMTcxZjgzZmQ4MTA2OjAiLCJkZWx0YSI6IiEifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8472.031,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.676186,
+        "dataLength": 212,
+        "encodedDataLength": 218,
+        "data": "ZGF0YTogeyJ0eXBlIjoiUkVBU09OSU5HX01FU1NBR0VfRU5EIiwibWVzc2FnZUlkIjoicnNfMDQ2ZmEyZjBmYjQ1MjQwODAwNmFkN2Y5MWYwNWRjODdkMGJjYTIxNzFmODNmZDgxMDY6MCJ9CgpkYXRhOiB7InR5cGUiOiJSRUFTT05JTkdfRU5EIiwibWVzc2FnZUlkIjoicnNfMDQ2ZmEyZjBmYjQ1MjQwODAwNmFkN2Y5MWYwNWRjODdkMGJjYTIxNzFmODNmZDgxMDY6MCJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8479.224,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.683362,
+        "dataLength": 171,
+        "encodedDataLength": 177,
+        "data": "ZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX1NUQVJUIiwicGFyZW50TWVzc2FnZUlkIjoiNDA1N2Q4MDQtMzlmMS00NDM5LTkyZmUtYTFhMDgyY2EyNmY3IiwidG9vbENhbGxJZCI6ImNhbGxfaFR4dGM2WklhZldOQ1dMV2djeG10Y1VEIiwidG9vbENhbGxOYW1lIjoibG9va3VwRGVhbEhpc3RvcnkifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8484.096,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.688322,
+        "dataLength": 92,
+        "encodedDataLength": 98,
+        "data": "ZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6IntcIiJ9Cgo="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8495.53,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.699712,
+        "dataLength": 93,
+        "encodedDataLength": 99,
+        "data": "ZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6ImRlYWwifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8531.401,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.735623,
+        "dataLength": 91,
+        "encodedDataLength": 97,
+        "data": "ZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6IklkIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8566.586,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.770808,
+        "dataLength": 94,
+        "encodedDataLength": 100,
+        "data": "ZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6IlwiOlwiIn0KCg=="
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8592.402,
+      "session": "page",
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786873.796449,
+        "dataLength": 819,
+        "encodedDataLength": 839,
+        "data": "ZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6ImRlYWwifQoKZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6Ii0ifQoKZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6IjIifQoKZGF0YTogeyJ0eXBlIjoiVE9PTF9DQUxMX0FSR1MiLCJ0b29sQ2FsbElkIjoiY2FsbF9oVHh0YzZaSWFmV05DV0xXZ2N4bXRjVUQiLCJkZWx0YSI6IlwifSJ9CgpkYXRhOiB7InR5cGUiOiJUT09MX0NBTExfRU5EIiwidG9vbENhbGxJZCI6ImNhbGxfaFR4dGM2WklhZldOQ1dMV2djeG10Y1VEIn0KCmRhdGE6IHsidHlwZSI6IlRPT0xfQ0FMTF9SRVNVTFQiLCJyb2xlIjoidG9vbCIsIm1lc3NhZ2VJZCI6IjJhZGExNWY3LTdiZTktNGU5Yy1iZTM5LWVkY2RiOTc0MGI3YiIsInRvb2xDYWxsSWQiOiJjYWxsX2hUeHRjNlpJYWZXTkNXTFdnY3htdGNVRCIsImNvbnRlbnQiOiJ7XCJkZWFsSWRcIjpcImRlYWwtMlwiLFwibmFtZVwiOlwiR2xvYmV4IGV4cGFuc2lvblwiLFwiYW1vdW50XCI6NDgwMDAsXCJzdGFnZVwiOlwicmV2aWV3XCIsXCJwYXN0RGlzY291bnRzXCI6W1wiMTAlIG9uIHJlbmV3YWwgaW4gMjAyNVwiXSxcInBheW1lbnRSZWNvcmRcIjpcInBhaWQgb24gdGltZSBmb3IgMyB5ZWFyc1wiLFwiYXBwcm92YWxzXCI6W1wic2FsZXMgbWFuYWdlclwiXX0ifQoK"
+      }
+    },
+    {
+      "kind": "event",
+      "t": 8900.622,
+      "session": "page",
+      "method": "Network.loadingFailed",
+      "params": {
+        "requestId": "78382.3",
+        "timestamp": 1786874.104803,
+        "type": "Fetch",
+        "errorText": "net::ERR_ABORTED",
+        "canceled": true
+      }
+    }
+  ]
+}

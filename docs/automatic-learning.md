@@ -57,6 +57,17 @@ Intelligence creates Learning containers (`POST /api/learning/projects/:projectI
 
 With none of them, the `learning-auto-assign` log line and the Admin page name the exact steps for your Intelligence: for managed, sign in with the CLI and run the helper (or give the chart a CLI login); for self-hosted, run the helper and sign in, or set a service token on a local evaluation install. Creating a container with ID `openbot` in Intelligence by hand works everywhere.
 
+## Each person's own Learning space
+
+Recordings made with the OpenBot Recorder do not belong to a Bot. Every recording a person makes joins their own Learning container, `user-` and the first 32 hex digits of the SHA-256 of their OpenBot user id, whichever Bot they later use. The id is derived, so every replica names the same container for the same person without looking anything up, and two people never share one.
+
+- **Made on first need.** When a person connects a browser, OpenBot makes their container in the background with the same credential it uses for `openbot`: a service token on a local evaluation install, or a CopilotKit CLI login against managed Intelligence (see the table above). A capture pass that finds it still missing makes it on the spot when the credential is a service token, which answers well inside the pass's deadline; the CLI is slower, which is why connecting starts it first. Intelligence's container id is unique per project, so replicas racing to make the same container all end up with it. With no such credential, a missing container cannot be made, and the Recorder's popup says Learning will not see the recording (it still goes to Intelligence). Creating a container with that id in Intelligence by hand works too.
+- **Every Bot the person uses draws on it.** A run gets the Bot's own published Skills (its Learning target, as above), then the person's own, then any Skills another person opened. On a name clash the Bot's own wins, then the person's own; when two people opened Skills with the same name, both are kept, each named `<their container>/<name>`. A person's container that is missing, refusing or slow never fails a run: the run goes on with the Skills it has, and runs leave a refusing container alone for a minute. Learning switched off here, or a Bot excluded here, still means no learned Skills at all for that Bot.
+- **Who else may use them.** In **Settings → Learning** each person chooses: only their own Bots (the default), every Bot in the deployment, or the Skills they open one by one. Runs read what is open from an index held in memory, read again at once on the replica that saved a change and within 30 seconds everywhere else, so no run asks each person's container who shares what. Each change writes a `learning.sharing_changed`, `learning.skill_opened` or `learning.skill_closed` audit row.
+- **Not deleted from here.** Intelligence has no API a server credential can call to delete a recording, or a container that still holds one, so recordings cannot be deleted from OpenBot yet, and a person's recordings stay in their container after they are removed from OpenBot (see [Authentication](configuration.md#authentication)).
+
+Thread assignment is unchanged: a conversation's evidence still goes to its Bot's container.
+
 ## Credentials and permissions
 
 OpenBot reuses its **server-side** `INTELLIGENCE_API_KEY` and `INTELLIGENCE_API_URL`. Setup creates containers using the authenticated account, not the runtime key. Automatic assignment uses the runtime key only to read whether `openbot` exists in its own project. Never put the project key in browser environment variables. The Learning settings and inspection endpoints require an OpenBot administrator; settings writes also require same-origin JSON requests (or an explicitly trusted app origin).
@@ -69,7 +80,7 @@ The admin page reports evidence and published-skill counts, analysis status, and
 
 For managed Intelligence, keep the existing managed API and gateway configuration. Configure the container in its associated project. For an Enterprise self-hosted Intelligence deployment, use its API and gateway endpoints and the same project's key. Install the Intelligence release and migrations that support Automatic Learning, the Inspector Learning endpoint (`GET /api/inspector/learning`), and published skill delivery before assigning a container in OpenBot. Links come from that server's configured web-app origin, so self-hosted administration opens the correct UI.
 
-OpenBot's database migration adds `learning_settings` and `learning_thread_bindings`; run the normal deployment migrations. The settings are read from the database across replicas, and thread assignment is atomic.
+OpenBot's database migrations add `learning_settings` and `learning_thread_bindings`, and for each person's own space `learning_person_spaces`, `learning_skill_sharing` and `learning_open_skills`; run the normal deployment migrations. The settings are read from the database across replicas, and thread assignment is atomic.
 
 Operators may seed an initial default in the API server environment:
 

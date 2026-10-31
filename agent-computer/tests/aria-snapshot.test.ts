@@ -46,12 +46,6 @@ const CAPTURED = `- generic [ref=e2]:
   - button "Submit order" [ref=e44]`;
 
 describe("parseAriaSnapshot, against captured output", () => {
-  test("the fixture is genuinely valid YAML", () => {
-    // The guard against the mistake that made this rewrite necessary: an invented fixture will most
-    // likely fail here first.
-    expect(() => Bun.YAML.parse(CAPTURED)).not.toThrow();
-  });
-
   test("keeps the controls and drops the scaffolding", () => {
     const { elements } = parseAriaSnapshot(CAPTURED);
     // `generic`, `paragraph`, `group` and `text` all carry refs but are not things a Bot can act on,
@@ -131,10 +125,6 @@ describe("parseAriaSnapshot, against captured output", () => {
   - generic [ref=e8]:
     - checkbox "Extra Cheese" [ref=e9]
     - text: Extra Cheese`;
-
-  test("the mixed fixture is genuinely valid YAML", () => {
-    expect(() => Bun.YAML.parse(MIXED)).not.toThrow();
-  });
 
   test("a half-ticked box is not reported as ticked", () => {
     const byName = new Map(

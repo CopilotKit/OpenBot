@@ -1,0 +1,325 @@
+/*
+ * OpenDots tokens: `:root[data-skin="opendots"]` for light and `:root[data-skin="opendots"].dark`
+ * for dark.
+ *
+ * Light is OpenDots' own compact chrome: white canvas, one ink accent (#242424), a pale grey rail
+ * and sidebar, lavender for the row you are on, and teal for unread chats and your own messages.
+ * Dark is what OpenDots' build-time theme makes of the same colours (src/build/dark-theme.ts flips
+ * OKLab lightness, keeps hue, and lifts text to AA), with two departures where the flip loses
+ * hierarchy: cards sit a step above the canvas, and the breadcrumb keeps a dim and a bright half.
+ *
+ * Every text colour meets WCAG AA (4.5:1) on the surface it sits on, and every icon 3:1, in both
+ * themes. Where OpenDots' own grey fell short, it is darkened along its own hue until it passes.
+ */
+:root[data-skin="opendots"] {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #333641;
+  --card: #ffffff;
+  --card-foreground: #333641;
+  --popover: #ffffff;
+  --popover-foreground: #333641;
+  --primary: #242424;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1f1;
+  --secondary-foreground: #242424;
+  --muted: #f5f5f5;
+  --muted-foreground: #6b6b6b;
+  --accent: #f1f1f1;
+  --accent-foreground: #242424;
+  --destructive: #a23d35;
+  --success: #3d7e75;
+  --border: #e7e7e7;
+  --input: #dedede;
+  --ring: #242424;
+  --chart-1: #3d7e75;
+  --chart-2: #7285d5;
+  --chart-3: #c98a4b;
+  --chart-4: #9b82c9;
+  --chart-5: #8cac91;
+  --radius: 0.5625rem;
+  --sidebar: #f9f9f9;
+  --sidebar-foreground: #242424;
+  --sidebar-primary: #242424;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eeeff7;
+  --sidebar-accent-foreground: #596aa9;
+  --sidebar-border: #e7e7e7;
+  --sidebar-ring: #242424;
+
+  --opendots-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --opendots-rail: #f5f5f5;
+  --opendots-sidebar: #f9f9f9;
+  --opendots-topbar: #ffffff;
+  --opendots-pane: #fafafa;
+  --opendots-line: #e7e7e7;
+  --opendots-hover: #f4f4f9;
+  --opendots-active: #eeeff7;
+  --opendots-active-ink: #596aa9;
+  --opendots-tag: #edf1e7;
+  --opendots-tag-ink: #526249;
+  --opendots-nav-ink: #6c6d77;
+  --opendots-dot-ink: #58634f;
+  --opendots-new-chat-ink: #53634d;
+  --opendots-label: #646b61;
+  --opendots-muted: #707070;
+  --opendots-faint: #646d5d;
+  --opendots-icon: #878a99;
+  --opendots-rail-icon: #555555;
+  --opendots-teal: #438c81;
+  --opendots-crumb: #636d5b;
+  --opendots-crumb-ink: #686b76;
+  --opendots-toggle-ink: #575e59;
+  --opendots-pause-ink: #53624d;
+  --opendots-menu-ink: #333333;
+  --opendots-tab: #ededed;
+  --opendots-eyebrow: #71747f;
+  --opendots-scrim: #2f34464d;
+  --opendots-pane-shadow: -8px 0 28px #20263418;
+  --opendots-user-bubble: #3d7e75;
+  --opendots-user-bubble-ink: #ffffff;
+  --opendots-assistant-ink: #373737;
+  --opendots-composer-line: #dedede;
+  --opendots-composer-shadow: 0 3px 14px #00000006;
+  --opendots-composer-focus: #c8c8c8;
+  --opendots-send-off: #ececec;
+  --opendots-send-off-ink: #9a9a9a;
+  --opendots-note: #72737d;
+  --opendots-persona-ink: #747474;
+  --opendots-text-button: #707484;
+  --opendots-avatar: #eeeae1;
+  --opendots-avatar-line: #e2dfd8;
+  --opendots-avatar-ink: #6d675d;
+  --opendots-error-ink: #8b6a61;
+}
+
+:root[data-skin="opendots"].dark {
+  color-scheme: dark;
+  --background: #1b1b1b;
+  --foreground: #b2b5c1;
+  --card: #222222;
+  --card-foreground: #b2b5c1;
+  --popover: #242424;
+  --popover-foreground: #b2b5c1;
+  --primary: #c5c5c5;
+  --primary-foreground: #1b1b1b;
+  --secondary: #242424;
+  --secondary-foreground: #c5c5c5;
+  --muted: #212121;
+  --muted-foreground: #a4a4a4;
+  --accent: #262626;
+  --accent-foreground: #c5c5c5;
+  --destructive: #e4877d;
+  --success: #7bb1a8;
+  --border: #2b2b2b;
+  --input: #313131;
+  --ring: #c5c5c5;
+  --chart-1: #7bb1a8;
+  --chart-2: #91a2db;
+  --chart-3: #d9a06a;
+  --chart-4: #b39ddb;
+  --chart-5: #92ad96;
+  --radius: 0.5625rem;
+  --sidebar: #1e1e1e;
+  --sidebar-foreground: #c5c5c5;
+  --sidebar-primary: #c5c5c5;
+  --sidebar-primary-foreground: #1b1b1b;
+  --sidebar-accent: #242429;
+  --sidebar-accent-foreground: #91a2db;
+  --sidebar-border: #2b2b2b;
+  --sidebar-ring: #c5c5c5;
+
+  --opendots-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --opendots-rail: #212121;
+  --opendots-sidebar: #1e1e1e;
+  --opendots-topbar: #1b1b1b;
+  --opendots-pane: #1e1e1e;
+  --opendots-line: #2b2b2b;
+  --opendots-hover: #212124;
+  --opendots-active: #242429;
+  --opendots-active-ink: #f2f2f2;
+  --opendots-tag: transparent;
+  --opendots-tag-ink: #9caa93;
+  --opendots-nav-ink: #a3a3ad;
+  --opendots-dot-ink: #9ea996;
+  --opendots-new-chat-ink: #9baa96;
+  --opendots-label: #a1a79e;
+  --opendots-muted: #a4a4a4;
+  --opendots-faint: #9fa899;
+  --opendots-icon: #a1a4b1;
+  --opendots-rail-icon: #9c9c9c;
+  --opendots-teal: #76b2a8;
+  --opendots-crumb: #9fa898;
+  --opendots-crumb-ink: #c7c9d1;
+  --opendots-toggle-ink: #a0a6a1;
+  --opendots-pause-ink: #9ca996;
+  --opendots-menu-ink: #b8b8b8;
+  --opendots-tab: #272727;
+  --opendots-eyebrow: #a1a4ae;
+  --opendots-scrim: #00000080;
+  --opendots-pane-shadow: -8px 0 28px #00000026;
+  --opendots-user-bubble: #5c9189;
+  --opendots-user-bubble-ink: #1b1b1b;
+  --opendots-assistant-ink: #b5b5b5;
+  --opendots-composer-line: #313131;
+  --opendots-composer-shadow: 0 3px 14px #0000000a;
+  --opendots-composer-focus: #4a4a4a;
+  --opendots-send-off: #272727;
+  --opendots-send-off-ink: #646464;
+  --opendots-note: #a1a2ab;
+  --opendots-persona-ink: #a4a4a4;
+  --opendots-text-button: #a1a5b4;
+  --opendots-avatar: #2b2823;
+  --opendots-avatar-line: #32302b;
+  --opendots-avatar-ink: #a9a49b;
+  --opendots-error-ink: #bb9d94;
+}
+
+/* OpenDots sets its type in the system face, not Inter, at a 14px base. */
+:root[data-skin="opendots"],
+:root[data-skin="opendots"] body {
+  font-family: var(--opendots-font);
+  font-synthesis: none;
+}
+
+/*
+ * OpenBot's pages inside the frame, drawn the OpenDots way. Each rule reaches only into
+ * `[data-opendots-main]`, the frame's page slot, so Settings and Admin keep OpenBot's own layout in
+ * OpenDots' colours.
+ */
+
+/* Your own message is OpenDots' teal bubble with its one squared corner. */
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="bubble"][data-align="end"]
+  > [data-slot="bubble-content"] {
+  background: var(--opendots-user-bubble);
+  color: var(--opendots-user-bubble-ink);
+  border-radius: 17px 17px 5px 17px;
+  padding: 11px 16px;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/* A Bot's message is plain prose on the canvas, a shade softer than the ink. */
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="bubble"][data-align="start"][data-variant="ghost"]
+  > [data-slot="bubble-content"] {
+  color: var(--opendots-assistant-ink);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/*
+ * OpenBot's pages are reached through the `data-slot` hooks they publish for skins (`composer`,
+ * `composer-send`, `conversation-header`, `composer-column`, `detail-pane*`), never through
+ * their Tailwind classes, so restyling a page cannot quietly break the skin.
+ */
+
+/* The composer is OpenDots' rounded card on the canvas: a 22px radius, a hairline and a breath of shadow. */
+:root[data-skin="opendots"] [data-opendots-main] [data-slot="composer"] {
+  background: var(--background);
+  border-radius: 22px;
+  border-color: var(--opendots-composer-line);
+  box-shadow: var(--opendots-composer-shadow);
+}
+
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="composer"]:focus-within {
+  border-color: var(--opendots-composer-focus);
+  box-shadow: var(--opendots-composer-shadow);
+}
+
+/* Until there is something to send, OpenDots' send disc is a pale grey with a grey arrow, not a dimmed ink. */
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="composer-send"]:disabled {
+  background: var(--opendots-send-off);
+  color: var(--opendots-send-off-ink);
+  opacity: 1;
+}
+
+/*
+ * A conversation's own header row sits directly under the top bar. OpenDots draws no rule under
+ * its chat header, so the two read as one band instead of two stacked bars.
+ */
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="conversation-header"] {
+  border-bottom-color: transparent;
+}
+
+/* The coworker home steps aside as soon as the conversation has a message to show. */
+:root[data-skin="opendots"]
+  [data-opendots-main]:has([data-slot="message"])
+  [data-opendots-persona] {
+  display: none;
+}
+
+/*
+ * Where the conversation column is no wider than its composer, OpenDots still keeps the composer
+ * and its notices off the edges of the pane; OpenBot's runs them flush. 972px is the widest window
+ * at which the 672px column fills the pane beside the rail and sidebar.
+ */
+@media (max-width: 972px) {
+  :root[data-skin="opendots"]
+    [data-opendots-main]
+    [data-slot="composer-column"] {
+    padding-inline: 16px;
+  }
+}
+
+/*
+ * A conversation's own Computer pane, which the top bar's computer toggle opens there, dressed as
+ * OpenDots' right pane: its grey ground, a ruled 56px header and the title as the selected tab.
+ * Only the Computer gives the pane a title; Bot settings leave it empty and keep a plain header.
+ */
+:root[data-skin="opendots"] [data-opendots-main] [data-slot="detail-pane"] {
+  background: var(--opendots-pane);
+  border-left-color: var(--opendots-line);
+}
+
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="detail-pane-header"] {
+  height: 56px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--opendots-line);
+  background: var(--opendots-pane);
+}
+
+:root[data-skin="opendots"]
+  [data-opendots-main]
+  [data-slot="detail-pane-title"]:not(:empty) {
+  width: auto;
+  flex: none;
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: var(--opendots-tab);
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+/*
+ * Reduced motion. The frame's own chrome (rail, sidebar, top bar, computer pane, phone drawer) and
+ * the menus, tooltips, sheets and dialogs it opens stop moving: no transitions, no animations.
+ * OpenBot's orb in the rail already stills itself through `useReducedMotion`. No `!important`:
+ * this rule sits in no cascade layer, so it outranks every Tailwind utility as it is.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-skin="opendots"] [data-opendots-chrome],
+  :root[data-skin="opendots"] [data-opendots-chrome] *,
+  :root[data-skin="opendots"] [data-slot="tooltip-content"],
+  :root[data-skin="opendots"] [data-slot="dropdown-menu-content"],
+  :root[data-skin="opendots"] [data-slot="context-menu-content"],
+  :root[data-skin="opendots"] [data-slot="select-content"],
+  :root[data-skin="opendots"] [data-slot="sheet-content"],
+  :root[data-skin="opendots"] [data-slot="sheet-overlay"],
+  :root[data-skin="opendots"] [data-slot="dialog-content"],
+  :root[data-skin="opendots"] [data-slot="dialog-overlay"] {
+    animation: none;
+    transition: none;
+  }
+}

@@ -32,7 +32,16 @@ export type ActionPolicy = {
   deny: string[];
   /** Any expression true means permitted. Empty means nothing is permitted. */
   allow: string[];
+  /**
+   * What each rule is called and stops, in words, keyed by the rule's own text.
+   *
+   * For the administrator reading the Boundaries page, never for the decision: nothing here is
+   * evaluated, so a rule with no label is enforced exactly like one with a label.
+   */
+  labels?: Record<string, RuleLabel>;
 };
+
+export type RuleLabel = { name: string; description: string };
 
 /**
  * The attributes a rule can be written against.

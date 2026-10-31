@@ -1,0 +1,2 @@
+ALTER TABLE "shared_use_approvals" ADD COLUMN "approved_as" text;--> statement-breakpoint
+ALTER TABLE "shared_use_approvals" ADD CONSTRAINT "shared_use_approvals_approved_as_check" CHECK ("shared_use_approvals"."approved_as" IS NULL OR "shared_use_approvals"."approved_as" IN ('admin', 'owner'));

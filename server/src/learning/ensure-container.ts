@@ -19,13 +19,17 @@
  *   when somebody is there (`scripts/setup-learning.ts`).
  *
  * Shared by `scripts/setup-learning.ts` (run by `scripts/start.sh`), the server (at boot and from
- * Admin → Automatic Learning), and the Helm chart's setup Job, which runs this file directly.
+ * Admin → Automatic Learning), and the Helm chart's setup Job, which runs this file directly. The
+ * server also makes each person's own Learning space with the same credential (`createLearningContainer`,
+ * called by learning/personal-space.ts).
  */
+
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
 import {
   type ContainerProbe,
   type KeyIdentity,
@@ -35,9 +39,15 @@ import {
 } from "./auto-assign";
 
 export const MANAGED_API = "https://api.intelligence.copilotkit.ai";
-const CONTAINER_ID = "openbot";
-const CONTAINER_NAME = "OpenBot";
 const SERVICE_TOKEN_HEADER = "x-copilotkit-ei-service-token";
+
+/** A Learning container to create: its id (Intelligence's 1 to 64 lowercase letters, digits and single hyphens) and name. */
+export type LearningContainerSpec = { id: string; name: string };
+/** The project's shared default, which Automatic Learning assigns. */
+export const OPENBOT_CONTAINER: LearningContainerSpec = {
+  id: "openbot",
+  name: "OpenBot",
+};
 
 export type CliResult = { exitCode: number; stdout: string };
 export type RunCli = (args: string[], directory: string) => Promise<CliResult>;
@@ -187,6 +197,7 @@ export function verifiedContainer(
   result: CliResult,
   projectId: string,
   action: string,
+  containerId: string = OPENBOT_CONTAINER.id,
 ) {
   const value = json(result.stdout);
   if (
@@ -196,11 +207,11 @@ export function verifiedContainer(
     value.status !== "success" ||
     value.projectId !== projectId ||
     !object(value.container) ||
-    value.container.id !== CONTAINER_ID ||
+    value.container.id !== containerId ||
     String(value.container.projectId) !== projectId
   ) {
     throw new Error(
-      "The openbot container could not be verified in the selected project. Check Learning access in Intelligence, then run this helper again.",
+      `The ${containerId} container could not be verified in the selected project. Check Learning access in Intelligence, then run this helper again.`,
     );
   }
 }
@@ -231,12 +242,17 @@ export function learningSetupInstructions(apiUrl: string): string {
     : `Run bun scripts/setup-learning.ts from the OpenBot checkout and sign in to Intelligence in the browser it opens. On a CopilotKit local evaluation install, set INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID instead and OpenBot creates it by itself. ${create}`;
 }
 
-/** Create the container with a service token. Intelligence admits one only on local evaluation. */
+/**
+ * Create the container with a service token. Intelligence admits one only on local evaluation. Idempotent: an id that is
+ * already taken in the project is `present`, so replicas racing to create the same container all end up with it.
+ */
 async function createWithServiceToken(input: {
   apiUrl: string;
   serviceToken: { token: string; projectId: string };
   fetch: typeof fetch;
+  container: LearningContainerSpec;
 }): Promise<"created" | "present"> {
+  const { container } = input;
   const response = await input.fetch(
     `${input.apiUrl}/api/learning/projects/${encodeURIComponent(input.serviceToken.projectId)}/containers`,
     {
@@ -247,7 +263,7 @@ async function createWithServiceToken(input: {
         "content-type": "application/json",
         [SERVICE_TOKEN_HEADER]: input.serviceToken.token,
       },
-      body: JSON.stringify({ id: CONTAINER_ID, name: CONTAINER_NAME }),
+      body: JSON.stringify({ id: container.id, name: container.name }),
       signal: AbortSignal.timeout(15_000),
     },
   );
@@ -256,12 +272,12 @@ async function createWithServiceToken(input: {
     if (
       object(body) &&
       object(body.container) &&
-      body.container.id === CONTAINER_ID &&
+      body.container.id === container.id &&
       String(body.container.projectId) === input.serviceToken.projectId
     )
       return "created";
     throw new Error(
-      "Intelligence answered the service token's container request with something other than the openbot container. Nothing was assigned.",
+      `Intelligence answered the service token's container request with something other than the ${container.id} container. Nothing was assigned.`,
     );
   }
   if (
@@ -276,7 +292,7 @@ async function createWithServiceToken(input: {
       "Intelligence refused the service token for Learning. Service tokens create Learning containers only on a CopilotKit local evaluation install; anywhere else, sign in instead (bun scripts/setup-learning.ts).",
     );
   throw new Error(
-    `Intelligence could not create the openbot Learning container with the service token (HTTP ${response.status}). Nothing was assigned.`,
+    `Intelligence could not create the ${container.id} Learning container with the service token (HTTP ${response.status}). Nothing was assigned.`,
   );
 }
 
@@ -367,45 +383,51 @@ function keysProject(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/** Get the container, or create it when the get says it is missing. True when it was already there. */
 async function getOrCreate(
   run: RunCli,
   directory: string,
   projectId: string,
+  container: LearningContainerSpec,
 ): Promise<boolean> {
-  const get = await run(
-    ["learning", "containers", "get", CONTAINER_ID, "--json"],
-    directory,
-  );
+  const getIt = () =>
+    run(["learning", "containers", "get", container.id, "--json"], directory);
+  const get = await getIt();
   if (containerMissing(json(get.stdout))) {
-    verifiedContainer(
-      await run(
-        [
-          "learning",
-          "containers",
-          "create",
-          "--id",
-          CONTAINER_ID,
-          "--name",
-          CONTAINER_NAME,
-          "--json",
-        ],
-        directory,
-      ),
-      projectId,
-      "create",
-    );
-    return false;
+    try {
+      verifiedContainer(
+        await run(
+          [
+            "learning",
+            "containers",
+            "create",
+            "--id",
+            container.id,
+            "--name",
+            container.name,
+            "--json",
+          ],
+          directory,
+        ),
+        projectId,
+        "create",
+        container.id,
+      );
+      return false;
+    } catch (error) {
+      // Another replica may have created it between the get and the create: if it is there now, it is present.
+      const again = await getIt();
+      if (containerMissing(json(again.stdout))) throw error;
+      verifiedContainer(again, projectId, "get", container.id);
+      return true;
+    }
   }
-  verifiedContainer(get, projectId, "get");
+  verifiedContainer(get, projectId, "get", container.id);
   return true;
 }
 
-/**
- * Make sure the runtime key's project has `openbot`, creating it with whichever credential is here.
- * Never writes `.env` and never replaces the key: the server assigns the container once it exists
- * (learning/auto-assign.ts).
- */
-export async function ensureLearningContainer(input: {
+/** The credentials `createLearningContainer` may use, and where it runs. */
+export type LearningContainerCredentials = {
   directory: string;
   apiUrl: string;
   nonInteractive: boolean;
@@ -417,9 +439,125 @@ export async function ensureLearningContainer(input: {
   setupSelfHosted?: () => Promise<void>;
   /** Whether to try the CLI when nobody is there. Default true; the server passes `cliLoginPresent()`. */
   cliLogin?: boolean;
-}): Promise<EnsureContainerResult> {
+};
+
+/**
+ * Create `container` with whichever credential is here, without asking the runtime key anything first or after:
+ * `created`, `present` (the id was already taken in that project, so a replica that lost a race gets it too), or
+ * `skipped` when nothing here can create it. `ensureLearningContainer` wraps it with the key's checks; a person's own
+ * Learning space (learning/personal-space.ts) calls it directly.
+ */
+export async function createLearningContainer(
+  input: LearningContainerCredentials & { container?: LearningContainerSpec },
+): Promise<"created" | "present" | "skipped"> {
   const run = input.run ?? runCli;
-  const found = await input.key.probe(CONTAINER_ID);
+  const container = input.container ?? OPENBOT_CONTAINER;
+  // The operator's fallback is to create the shared default by hand; it only applies to that container.
+  const orCreateIt =
+    container.id === OPENBOT_CONTAINER.id
+      ? CREATE_IN_INTELLIGENCE
+      : `or create a Learning container with ID "${container.id}" in that project in Intelligence.`;
+  if (input.serviceToken) {
+    return createWithServiceToken({
+      apiUrl: input.apiUrl,
+      serviceToken: input.serviceToken,
+      fetch: input.fetch ?? fetch,
+      container,
+    });
+  }
+  if (input.apiUrl !== MANAGED_API) {
+    // Self-hosted creation needs a browser sign-in, which only a person can complete.
+    if (input.nonInteractive || !input.setupSelfHosted) return "skipped";
+    await input.setupSelfHosted();
+    return "created";
+  }
+  const selectedPath = resolve(input.directory, ".copilotkit/project.json");
+  const text = await readFile(selectedPath, "utf8").catch(() => undefined);
+  if (text === undefined && input.nonInteractive && input.cliLogin === false)
+    return "skipped";
+  const owner = await input.key.project();
+  if (text !== undefined) {
+    const selected = json(text);
+    const projectId = selected.projectId;
+    if (typeof projectId !== "string" || !projectId.trim()) {
+      throw new Error(
+        "The selected project is invalid. Run npx --yes copilotkit@latest project select again.",
+      );
+    }
+    const confirmed =
+      owner &&
+      typeof selected.projectSlug === "string" &&
+      selected.projectSlug === owner.projectSlug
+        ? await (async () => {
+            const listing = listedProjects(
+              await run(["project", "list", "--json"], input.directory),
+            );
+            return listing
+              ? keysProject(
+                  owner,
+                  await loginOrganization(run, input.directory),
+                  listing,
+                  projectId,
+                )
+              : undefined;
+          })()
+        : undefined;
+    if (!confirmed) {
+      throw new Error(
+        `The CopilotKit CLI's selected project could not be confirmed as the one this runtime key belongs to, so nothing was created. Select the key's project in the CLI, ${orCreateIt}`,
+      );
+    }
+    return (await getOrCreate(run, input.directory, projectId, container))
+      ? "present"
+      : "created";
+  }
+  // No project selected here: find the key's among the projects the login can see, and act on it
+  // from a scratch directory so this checkout's selection is never made or changed.
+  const scratch = await mkdtemp(join(tmpdir(), "openbot-learning-"));
+  try {
+    const listing = listedProjects(
+      await run(["project", "list", "--json"], scratch),
+    );
+    if (!listing) {
+      if (input.nonInteractive) return "skipped";
+      throw new Error(
+        `This runtime key's Intelligence project has no ${container.id} Learning container, and no CopilotKit CLI login is here to create one with. Sign in with npx --yes copilotkit@latest login and run this helper again, ${orCreateIt}`,
+      );
+    }
+    const project = owner
+      ? keysProject(owner, await loginOrganization(run, scratch), listing)
+      : undefined;
+    if (!project) {
+      throw new Error(
+        `None of the projects this CopilotKit CLI login can see could be confirmed as the one this runtime key belongs to, so nothing was created. Sign in to the key's organization with npx --yes copilotkit@latest login, ${orCreateIt}`,
+      );
+    }
+    await mkdir(join(scratch, ".copilotkit"));
+    await writeFile(
+      join(scratch, ".copilotkit/project.json"),
+      JSON.stringify({
+        projectId: project.id,
+        projectSlug: project.slug,
+        clerkOrgId: project.organizationId,
+      }),
+    );
+    return (await getOrCreate(run, scratch, project.id, container))
+      ? "present"
+      : "created";
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Make sure the runtime key's project has `openbot`, creating it with whichever credential is here.
+ * Never writes `.env` and never replaces the key: the server assigns the container once it exists
+ * (learning/auto-assign.ts).
+ */
+export async function ensureLearningContainer(
+  input: LearningContainerCredentials,
+): Promise<EnsureContainerResult> {
+  const found = await input.key.probe(OPENBOT_CONTAINER.id);
   if (found === "present") return "present";
   if (found === "not_entitled") {
     throw new Error(
@@ -431,101 +569,18 @@ export async function ensureLearningContainer(input: {
       "Intelligence could not be asked about the openbot Learning container with the configured runtime key. Check INTELLIGENCE_API_URL and INTELLIGENCE_API_KEY, then run this helper again.",
     );
   }
-  let reused = false;
-  if (input.serviceToken) {
-    reused =
-      (await createWithServiceToken({
-        apiUrl: input.apiUrl,
-        serviceToken: input.serviceToken,
-        fetch: input.fetch ?? fetch,
-      })) === "present";
-  } else if (input.apiUrl !== MANAGED_API) {
-    // Self-hosted creation needs a browser sign-in, which only a person can complete.
-    if (input.nonInteractive || !input.setupSelfHosted) return "skipped";
-    await input.setupSelfHosted();
-  } else {
-    const selectedPath = resolve(input.directory, ".copilotkit/project.json");
-    const text = await readFile(selectedPath, "utf8").catch(() => undefined);
-    const owner = await input.key.project();
-    if (text !== undefined) {
-      const selected = json(text);
-      const projectId = selected.projectId;
-      if (typeof projectId !== "string" || !projectId.trim()) {
-        throw new Error(
-          "The selected project is invalid. Run npx --yes copilotkit@latest project select again.",
-        );
-      }
-      const confirmed =
-        owner &&
-        typeof selected.projectSlug === "string" &&
-        selected.projectSlug === owner.projectSlug
-          ? await (async () => {
-              const listing = listedProjects(
-                await run(["project", "list", "--json"], input.directory),
-              );
-              return listing
-                ? keysProject(
-                    owner,
-                    await loginOrganization(run, input.directory),
-                    listing,
-                    projectId,
-                  )
-                : undefined;
-            })()
-          : undefined;
-      if (!confirmed) {
-        throw new Error(
-          `The CopilotKit CLI's selected project could not be confirmed as the one this runtime key belongs to, so nothing was created. Select the key's project in the CLI, ${CREATE_IN_INTELLIGENCE}`,
-        );
-      }
-      reused = await getOrCreate(run, input.directory, projectId);
-    } else {
-      if (input.nonInteractive && input.cliLogin === false) return "skipped";
-      // No project selected here: find the key's among the projects the login can see, and act on it
-      // from a scratch directory so this checkout's selection is never made or changed.
-      const scratch = await mkdtemp(join(tmpdir(), "openbot-learning-"));
-      try {
-        const listing = listedProjects(
-          await run(["project", "list", "--json"], scratch),
-        );
-        if (!listing) {
-          if (input.nonInteractive) return "skipped";
-          throw new Error(
-            `This runtime key's Intelligence project has no openbot Learning container, and no CopilotKit CLI login is here to create one with. Sign in with npx --yes copilotkit@latest login and run this helper again, ${CREATE_IN_INTELLIGENCE}`,
-          );
-        }
-        const project = owner
-          ? keysProject(owner, await loginOrganization(run, scratch), listing)
-          : undefined;
-        if (!project) {
-          throw new Error(
-            `None of the projects this CopilotKit CLI login can see could be confirmed as the one this runtime key belongs to, so nothing was created. Sign in to the key's organization with npx --yes copilotkit@latest login, ${CREATE_IN_INTELLIGENCE}`,
-          );
-        }
-        await mkdir(join(scratch, ".copilotkit"));
-        await writeFile(
-          join(scratch, ".copilotkit/project.json"),
-          JSON.stringify({
-            projectId: project.id,
-            projectSlug: project.slug,
-            clerkOrgId: project.organizationId,
-          }),
-        );
-        reused = await getOrCreate(run, scratch, project.id);
-      } finally {
-        await rm(scratch, { recursive: true, force: true });
-      }
-    }
-  }
+  const created = await createLearningContainer(input);
+  if (created === "skipped") return "skipped";
+  const reused = created === "present";
   // The check that matters, whatever the project match said: can the key see it now?
-  if ((await input.key.probe(CONTAINER_ID)) !== "present") {
+  if ((await input.key.probe(OPENBOT_CONTAINER.id)) !== "present") {
     throw new Error(
       reused
         ? "The openbot container exists in the project that was used, but this runtime key cannot see it, so the key belongs to another project. Nothing was assigned."
         : "Created an openbot container, but this runtime key still cannot see it, so it is in another project. Nothing was assigned; remove that container in Intelligence if it is not wanted.",
     );
   }
-  return reused ? "present" : "created";
+  return created;
 }
 
 /**
@@ -536,8 +591,11 @@ export async function ensureLearningContainer(input: {
 async function jobMain() {
   const environment = process.env;
   const apiUrl = intelligenceApiOrigin(environment.INTELLIGENCE_API_URL ?? "");
-  const apiKey = environment.INTELLIGENCE_API_KEY?.trim();
-  if (!apiKey) throw new Error("INTELLIGENCE_API_KEY is required.");
+  const apiKey = intelligenceApiKey(environment);
+  if (!apiKey)
+    throw new Error(
+      "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY) is required.",
+    );
   const token = environment.INTELLIGENCE_SERVICE_TOKEN?.trim();
   const projectId = environment.INTELLIGENCE_PROJECT_ID?.trim();
   if (Boolean(token) !== Boolean(projectId))

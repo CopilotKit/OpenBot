@@ -21,7 +21,12 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     ownerUserId: creator.id,
     systemOwned: false,
     hidden: false,
+    pinned: false,
     deletedAt: null,
+    endpoint: null,
+    hasAuth: false,
+    hasCallbackToken: false,
+    isolated: false,
     ...overrides,
   };
 }
@@ -82,9 +87,5 @@ describe("agent profile permissions", () => {
       expect(canManageAgent(actor, agent)).toBe(false);
       expect(canRunAgent(actor, agent)).toBe(false);
     }
-  });
-
-  test("exports canRunAgent as the canAccessAgent alias", () => {
-    expect(canRunAgent).toBe(canAccessAgent);
   });
 });

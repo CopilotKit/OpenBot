@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["chrome", "bun"],
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["../app/src/*"] }
+  },
+  "include": ["src", "scripts", "tests", "e2e"]
+}

@@ -1,7 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { AbstractAgent, HttpAgent, type RunAgentInput } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import { EMPTY } from "rxjs";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import type { AuditInitiator } from "../src/audit";
+import { standingRoleMessage } from "../src/copilot";
+import {
+  NameContextMiddleware,
+  PROFILE_CONTEXT,
+} from "../src/people/name-context";
 
 describe("actor-scoped agent resolver", () => {
   test("builds only the addressed coworker and carries the headless initiator and depth", async () => {
@@ -174,3 +181,116 @@ async function rejectionMessage(run: () => Promise<unknown>) {
   }
   throw new Error("Expected the run to reject.");
 }
+
+test("profile context is attached only to built-in agents for web and individual resolution", async () => {
+  const use = spyOn(AbstractAgent.prototype, "use");
+  try {
+    const resolver = createActorAgentResolver({
+      loadAgents: async () => [
+        { id: "local", name: "Local", type: "built_in", systemPrompt: "Help." },
+        {
+          id: "custom",
+          name: "Custom",
+          type: "remote_ag_ui",
+          endpoint: "https://custom.test/ag-ui",
+          standingMessage: standingRoleMessage({
+            id: "custom",
+            name: "Custom",
+            roleDescription: "Help with tasks.",
+            title: "Custom agent",
+          }),
+        },
+      ],
+      model: { provider: "openai", defaultModel: "unused" },
+      resolveModelApiKey: async () => "synthetic-key",
+      loadNameForActor: async () => "Sam",
+    });
+    const actor = { id: "person", role: "user" as const };
+    await resolver.resolveAgentsForActor(actor);
+    expect(
+      use.mock.calls.filter((call) =>
+        call.some((middleware) => middleware instanceof NameContextMiddleware),
+      ),
+    ).toHaveLength(1);
+    use.mockClear();
+    await resolver.resolveAgentForActor(actor, "custom");
+    expect(
+      use.mock.calls
+        .flat()
+        .some((middleware) => middleware instanceof NameContextMiddleware),
+    ).toBe(false);
+    use.mockClear();
+    await resolver.resolveAgentForActor(actor, "local");
+    expect(
+      use.mock.calls
+        .flat()
+        .filter((middleware) => middleware instanceof NameContextMiddleware),
+    ).toHaveLength(1);
+  } finally {
+    use.mockRestore();
+  }
+});
+
+test("runs carry the name only to built-in agents, including cloned agents", async () => {
+  const captured: RunAgentInput[] = [];
+  const capture = (input: RunAgentInput) => {
+    captured.push(input);
+    return EMPTY;
+  };
+  const builtIn = spyOn(BuiltInAgent.prototype, "run").mockImplementation(
+    capture,
+  );
+  const remote = spyOn(HttpAgent.prototype, "run").mockImplementation(capture);
+  const reads: string[] = [];
+  try {
+    const custom = {
+      id: "custom",
+      name: "Custom",
+      type: "remote_ag_ui" as const,
+      roleDescription: "Help with tasks.",
+      title: "Custom agent",
+    };
+    const resolver = createActorAgentResolver({
+      loadAgents: async () => [
+        { id: "local", name: "Local", type: "built_in", systemPrompt: "Help." },
+        {
+          ...custom,
+          endpoint: "https://custom.test/ag-ui",
+          standingMessage: standingRoleMessage(custom),
+        },
+      ],
+      model: { provider: "openai", defaultModel: "unused" },
+      resolveModelApiKey: async () => "synthetic-key",
+      loadNameForActor: async (id) => {
+        reads.push(id);
+        return "Sam";
+      },
+    });
+    const actor = { id: "person", role: "user" as const };
+    for (const agentId of ["local", "custom"]) {
+      const agent = await resolver.resolveAgentForActor(actor, agentId);
+      for (const instance of [agent, agent.clone()]) {
+        instance.messages = [
+          { id: "question", role: "user", content: "Hello" },
+        ];
+        await instance.runAgent();
+      }
+    }
+    expect(captured).toHaveLength(4);
+    for (const input of captured.slice(0, 2)) {
+      expect(input.context).toContainEqual({
+        description: PROFILE_CONTEXT,
+        value: JSON.stringify({ name: "Sam" }),
+      });
+    }
+    for (const input of captured.slice(2)) {
+      expect(
+        input.context.some((entry) => entry.description === PROFILE_CONTEXT),
+      ).toBe(false);
+    }
+    expect(reads).toEqual(["person", "person"]);
+  } finally {
+    builtIn.mockRestore();
+    remote.mockRestore();
+  }
+});

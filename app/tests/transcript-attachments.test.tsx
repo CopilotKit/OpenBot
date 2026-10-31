@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import type { Message, UserMessage } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { frameFiring } from "@openbot/shared/routine-firing";
 import {
   act,
   cleanup,
@@ -17,7 +18,6 @@ import {
 } from "@/components/channels/chat-transcript";
 import type { QueuedMessage } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
-import { frameFiring } from "@openbot/shared/routine-firing";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -758,10 +758,7 @@ test("a rebuilt but unchanged row of files compares equal", () => {
   const rebuilt = ONE_FILE.map((file) => ({ ...file }));
 
   expect(
-    sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: rebuilt, delay: 0 },
-    ),
+    sameAttachmentRow({ attachments: ONE_FILE }, { attachments: rebuilt }),
   ).toBe(true);
 });
 
@@ -777,39 +774,23 @@ test("a row that actually changed does not compare equal", () => {
 
   for (const file of changed) {
     expect(
-      sameAttachmentRow(
-        { attachments: ONE_FILE, delay: 0 },
-        { attachments: [file], delay: 0 },
-      ),
+      sameAttachmentRow({ attachments: ONE_FILE }, { attachments: [file] }),
     ).toBe(false);
   }
 
-  // A file added, a file taken away, and the entrance delay itself — all of them redraw.
+  // A file added or a file taken away — both redraw.
   expect(
-    sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: [], delay: 0 },
-    ),
+    sameAttachmentRow({ attachments: ONE_FILE }, { attachments: [] }),
   ).toBe(false);
   expect(
     sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: [...ONE_FILE, ONE_FILE[0]], delay: 0 },
-    ),
-  ).toBe(false);
-  expect(
-    sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: ONE_FILE, delay: 0.04 },
+      { attachments: ONE_FILE },
+      { attachments: [...ONE_FILE, ONE_FILE[0]] },
     ),
   ).toBe(false);
 });
 
-/*
- * And that it is the comparison the row is actually memoised WITH — a correct function nobody
- * passed to `memo` buys nothing, and that is precisely the state this row was in. `compare` is the
- * field `React.memo` keeps its comparator in.
- */
+// A correct comparator only protects attachment identity if the rendered row uses it.
 test("the row of tiles is memoised with that comparison", () => {
   expect(
     (TranscriptAttachments as unknown as { compare?: unknown }).compare,

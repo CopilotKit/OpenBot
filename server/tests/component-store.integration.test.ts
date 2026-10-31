@@ -1,7 +1,13 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
-import { DATA_FUNCTIONS } from "../src/components/functions";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   ComponentNotFoundError,
   type ComponentStore,
@@ -10,6 +16,7 @@ import {
 import { createDatabase } from "../src/db/client";
 import {
   agents,
+  auditEvents,
   componentExclusions,
   componentFunctions,
   components,
@@ -57,6 +64,173 @@ beforeAll(async () => {
   }
   await makeComponent(componentName, true);
   await makeComponent(otherName, false);
+});
+
+describe("component data functions against PostgreSQL", () => {
+  // One connection keeps this temporary table visible to every query. Copy the migrated table
+  // shape so the production SQL runs unchanged, without depending on other suites' audit rows.
+  const reportsDatabase = createDatabase(testDatabaseUrl(), { max: 1 });
+  const reports = createComponentStore(reportsDatabase);
+  const day = 86_400_000;
+
+  beforeAll(async () => {
+    await reportsDatabase.execute(
+      sql`create temporary table audit_events (like public.audit_events including all)`,
+    );
+  });
+
+  beforeEach(async () => {
+    await reportsDatabase.execute(sql`truncate table pg_temp.audit_events`);
+  });
+
+  afterAll(async () => {
+    await reportsDatabase.$client.close();
+  });
+
+  function event(overrides: Partial<typeof auditEvents.$inferInsert>) {
+    return {
+      eventType: "component.rendered",
+      targetType: "component",
+      payload: { bot: "active-bot" },
+      createdAt: new Date(Date.now() - day),
+      ...overrides,
+    };
+  }
+
+  test("bot activity aggregates recent actions and excludes older and unattributed rows", async () => {
+    await reportsDatabase
+      .insert(auditEvents)
+      .values([
+        event({}),
+        event({}),
+        event({ payload: { bot: "other-bot" } }),
+        event({ createdAt: new Date(Date.now() - 8 * day) }),
+        event({ payload: {} }),
+      ]);
+
+    expect(await reports.callFunction("botActivity", {})).toEqual({
+      days: 7,
+      rows: [
+        { bot: "active-bot", actions: 2 },
+        { bot: "other-bot", actions: 1 },
+      ],
+    });
+  });
+
+  test("bot activity caps the window at 90 days and returns only the 12 busiest bots", async () => {
+    const ranked = Array.from({ length: 13 }, (_, index) => ({
+      bot: `ranked-bot-${index}`,
+      actions: 13 - index,
+    }));
+    await reportsDatabase.insert(auditEvents).values([
+      ...ranked.flatMap(({ bot, actions }) =>
+        Array.from({ length: actions }, () =>
+          event({
+            payload: { bot },
+            createdAt: new Date(Date.now() - 30 * day),
+          }),
+        ),
+      ),
+      // If the time bound is ignored, this changes the highest-ranked bot's count.
+      event({
+        payload: { bot: "ranked-bot-0" },
+        createdAt: new Date(Date.now() - 91 * day),
+      }),
+    ]);
+
+    expect(
+      await reports.callFunction("botActivity", { days: 100_000 }),
+    ).toEqual({
+      days: 90,
+      rows: ranked.slice(0, 12),
+    });
+  });
+
+  test("recent refusals filters event types, orders newest first and reads both reason formats", async () => {
+    const now = Date.now();
+    const fixtures = [
+      {
+        eventType: "computer.action_refused",
+        payload: { bot: "computer-bot", reason: "Permission denied" },
+      },
+      {
+        eventType: "component.refused",
+        payload: {
+          bot: "component-bot",
+          decision: { rule: "Component withheld" },
+        },
+      },
+      {
+        eventType: "component.function_refused",
+        payload: {
+          bot: "function-bot",
+          reason: "Explicit reason",
+          decision: { rule: "Fallback reason" },
+        },
+      },
+      { eventType: "bot.declined", payload: {} },
+    ];
+    await reportsDatabase
+      .insert(auditEvents)
+      .values([
+        ...fixtures.map((fixture, index) =>
+          event({ ...fixture, createdAt: new Date(now - (index + 1) * 1000) }),
+        ),
+        event({ eventType: "component.rendered", createdAt: new Date(now) }),
+      ]);
+
+    expect(await reports.callFunction("recentRefusals", {})).toEqual({
+      rows: [
+        expect.objectContaining({
+          bot: "computer-bot",
+          what: "computer.action_refused",
+          reason: "Permission denied",
+        }),
+        expect.objectContaining({
+          bot: "component-bot",
+          what: "component.refused",
+          reason: "Component withheld",
+        }),
+        expect.objectContaining({
+          bot: "function-bot",
+          what: "component.function_refused",
+          reason: "Explicit reason",
+        }),
+        expect.objectContaining({
+          bot: null,
+          what: "bot.declined",
+          reason: null,
+        }),
+      ],
+    });
+  });
+
+  test("recent refusals defaults to 10 and clamps the requested limit to 1 through 50", async () => {
+    const now = Date.now();
+    const fixtures = Array.from({ length: 51 }, (_, index) =>
+      event({
+        eventType: "bot.declined",
+        payload: { bot: `refusal-bot-${index}`, reason: `Reason ${index}` },
+        createdAt: new Date(now - index * 1000),
+      }),
+    );
+    await reportsDatabase.insert(auditEvents).values(fixtures);
+    for (const { args, count } of [
+      { args: {}, count: 10 },
+      { args: { limit: 100_000 }, count: 50 },
+      { args: { limit: 0 }, count: 1 },
+    ]) {
+      expect(await reports.callFunction("recentRefusals", args)).toEqual({
+        rows: fixtures.slice(0, count).map((_, index) =>
+          expect.objectContaining({
+            bot: `refusal-bot-${index}`,
+            what: "bot.declined",
+            reason: `Reason ${index}`,
+          }),
+        ),
+      });
+    }
+  });
 });
 
 afterAll(async () => {
@@ -386,18 +560,6 @@ describe("what a component may read", () => {
       .from(componentFunctions)
       .where(eq(componentFunctions.componentName, doomed));
     expect(left).toHaveLength(0);
-  });
-
-  test("every shipped function reads real rows and bounds its own arguments", async () => {
-    for (const entry of DATA_FUNCTIONS) {
-      // Run with nothing, which is what a component sends before the model has supplied anything, and
-      // with a hostile number: a value from the browser is a claim, and an unbounded one is a table
-      // scan somebody asked for over the wire.
-      expect(await entry.run(database, {})).toBeDefined();
-      expect(
-        await entry.run(database, { days: 100_000, limit: 100_000 }),
-      ).toBeDefined();
-    }
   });
 
   test("a function this build does not ship cannot be run", async () => {

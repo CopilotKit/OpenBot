@@ -94,6 +94,39 @@ export function failedComputerCall(
   status: number,
   body: Record<string, unknown> | null,
 ): ToolOutcome {
+  /*
+   * A cold start that outlasted the server's wait. Said as what it is: the computer is starting, this
+   * call did nothing, and asking again shortly is the right next step. Kept apart from the failures
+   * below so the line in the transcript reads as a wait, and so the model is not handed something
+   * that looks like a broken computer and gives up on one seconds from ready.
+   */
+  if (body?.starting === true) {
+    return {
+      ok: false,
+      starting: true,
+      notPerformed: true,
+      reason:
+        typeof body.error === "string"
+          ? body.error
+          : "The computer is still starting. This call was not performed. Try it again in a moment.",
+    };
+  }
+  /*
+   * A rule wants to ask about this call, and it went straight to the computer without its
+   * conversation. Nothing was done. `useFrontendTool` in approval-tools sends it again through the
+   * approval route, so this result only reaches the Bot from a surface with no conversation at all.
+   */
+  if (body?.needsConversation === true) {
+    return {
+      ok: false,
+      needsConversation: true,
+      notPerformed: true,
+      reason:
+        typeof body.error === "string"
+          ? body.error
+          : "This action needs your approval in a chat with this Bot.",
+    };
+  }
   return {
     ok: false,
     reason: typeof body?.error === "string" ? body.error : "That did not work.",

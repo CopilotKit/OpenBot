@@ -3,6 +3,7 @@ import * as ReactCoreV2 from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
+import { failedComputerCall } from "@/lib/computers/call";
 import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useFrontendTool } from "@/lib/copilot/approval-tools";
 
@@ -272,4 +273,139 @@ test("a gate that cannot be reached, or answers with no result, is still a resul
   expect(
     await clickAgainstGate(async () => Response.json({}, { status: 200 })),
   ).toEqual({ ok: false, reason: "The computer action returned no result." });
+});
+
+/*
+ * A look at a page a rule asks about.
+ *
+ * A navigation goes straight to the computer, without the conversation the approval card is drawn
+ * in, so a rule like "ask before opening pages" used to leave the gate nowhere to ask. The Bot was
+ * handed the refusal and told the person "this browser action requires an approval flow that isn't
+ * available in this chat". The computer now answers `needsConversation`, and the call goes again
+ * through the gate, where it waits on the card like any change.
+ */
+let lookOutcome: unknown;
+const looked: unknown[] = [];
+function LookTools() {
+  useFrontendTool({
+    name: "computer_navigate",
+    description: "Open a page",
+    handler: async (args: Record<string, unknown>) => {
+      looked.push(args);
+      return lookOutcome;
+    },
+  });
+  return null;
+}
+
+async function navigateWith(
+  answer: (path: string) => Promise<Response>,
+): Promise<{ result: unknown; paths: string[] }> {
+  const paths: string[] = [];
+  const originalFetch = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0]) => {
+      paths.push(String(path));
+      return answer(String(path));
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  try {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <LookTools />
+      </QueryClientProvider>,
+    );
+    const tool = registered.find((entry) => entry.name === "computer_navigate");
+    const toolCall = {
+      id: "navigate-call",
+      type: "function" as const,
+      function: {
+        name: "computer_navigate",
+        arguments: '{"url":"https://example.com"}',
+      },
+    };
+    const subscribers: {
+      onRunInitialized?: (input: { input: unknown }) => void;
+    }[] = [];
+    const agent = {
+      threadId: "thread",
+      state: {},
+      messages: [
+        { id: "u1", role: "user", content: "Open example.com" },
+        { id: "a1", role: "assistant", content: "", toolCalls: [toolCall] },
+      ],
+      subscribe: (subscriber: (typeof subscribers)[number]) => {
+        subscribers.push(subscriber);
+        return { unsubscribe: () => undefined };
+      },
+    };
+    const stop = observeApprovalAgent(agent as never);
+    for (const subscriber of subscribers)
+      subscriber.onRunInitialized?.({
+        input: {
+          runId: "run-1",
+          threadId: "thread",
+          messages: agent.messages,
+          tools: [],
+          context: [],
+          state: {},
+          forwardedProps: {},
+        },
+      });
+    try {
+      const result = await tool?.handler?.({ url: "https://example.com" }, {
+        agent,
+        toolCall,
+      } as never);
+      return { result, paths };
+    } finally {
+      stop();
+    }
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+test("a look a rule asks about goes again through the gate, with its conversation", async () => {
+  looked.length = 0;
+  stopped.length = 0;
+  lookOutcome = failedComputerCall(409, {
+    error: "This action needs your approval.",
+    needsConversation: true,
+    notPerformed: true,
+  });
+  const { result, paths } = await navigateWith(async () =>
+    Response.json({ waiting: true, approvalId: "approval-2" }, { status: 202 }),
+  );
+  expect(looked).toHaveLength(1);
+  expect(paths).toEqual(["/api/approvals/computer/default"]);
+  expect(result).toEqual({ waiting: true });
+  expect(stopped).toHaveLength(1);
+});
+
+test("a look nothing asks about goes straight to the computer and nowhere else", async () => {
+  looked.length = 0;
+  lookOutcome = { ok: true, title: "Example Domain" };
+  const { result, paths } = await navigateWith(async () => {
+    throw new Error("The gate should not be called.");
+  });
+  expect(looked).toHaveLength(1);
+  expect(paths).toEqual([]);
+  expect(result).toEqual({ ok: true, title: "Example Domain" });
+});
+
+test("needing a conversation is not read as stale refs", () => {
+  expect(
+    failedComputerCall(409, {
+      error: "This action needs your approval.",
+      needsConversation: true,
+      notPerformed: true,
+    }),
+  ).toEqual({
+    ok: false,
+    needsConversation: true,
+    notPerformed: true,
+    reason: "This action needs your approval.",
+  });
 });

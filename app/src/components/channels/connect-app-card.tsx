@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
+import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -26,15 +27,19 @@ import { queryClient } from "@/query-client";
  * draws it from the app's live state for this person on that Bot. This one is drawn only where no
  * Bot can be named — a refusal written before refusals carried one, on a surface that declared none
  * — and it can only offer Connect, which is all such a refusal ever meant.
+ *
+ * Once connected it carries the conversation on, as `AppAccessCard` does: see `useCarryOn`.
  */
 export function ConnectAppCard({
   serverId,
   title,
   message,
+  place,
 }: {
   serverId: string;
   title: string;
   message: string;
+  place?: CardPlace | undefined;
 }) {
   const {
     open: openTab,
@@ -59,6 +64,13 @@ export function ConnectAppCard({
   const connected = personalConnections(
     connections.data?.connections ?? [],
   ).some((row) => row.serverId === serverId && row.revoked !== true);
+  // Every card drawn here is a refusal, so the app was blocked when the Bot asked.
+  const { carried, offer } = useCarryOn({
+    place,
+    ready: connections.data ? connected : null,
+    blockedWhenAsked: true,
+    app: title,
+  });
 
   /*
    * The grants a Bot holds are read per conversation, so the turn that follows has to be asked
@@ -85,9 +97,18 @@ export function ConnectAppCard({
         <p className="text-muted-foreground text-sm">{message}</p>
       </div>
       {connected ? (
-        <p className="text-sm" role="status">
-          {title} is connected. Ask again and the Bot can use it.
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm" role="status">
+            {carried || offer
+              ? `${title} is connected.`
+              : `${title} is connected. Ask again and the Bot can use it.`}
+          </p>
+          {offer ? (
+            <Button onClick={offer} size="sm">
+              Continue
+            </Button>
+          ) : null}
+        </div>
       ) : needsKey ? (
         <p className="text-sm" role="status">
           {title} needs a key from you.{" "}

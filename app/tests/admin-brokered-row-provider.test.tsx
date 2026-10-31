@@ -80,6 +80,8 @@ function server(provider: Provider, shared: boolean): PluginServer {
     dynamicClient: false,
     accountMode: shared ? "shared" : null,
     sharedVendorConnected: false,
+    ownerGrants: shared ? "admin" : "any",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };

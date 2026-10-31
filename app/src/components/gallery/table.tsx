@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame } from "./frame";
+import { byPosition } from "./positions";
+import { GalleryStreamingContext } from "./streaming";
 
 export const DataTableProps = z
   .object({
@@ -33,13 +35,40 @@ export const DataTableProps = z
     "Column labels must be unique and every row must have one cell per column",
   );
 
+/**
+ * The table without its last row while that row is still being written.
+ *
+ * The table is validated whole, and a row must have one cell per column, so a row half written made
+ * the whole table invalid: it dropped to "Waiting for complete table data" every time a new row
+ * started, and a table whose last column is a number (held back while it arrives) never drew until
+ * the call ended. Only a short LAST row, and only while the call streams, is set aside: a short row
+ * anywhere else, or in a finished table, is still wrong.
+ */
+function withoutArrivingRow(props: Record<string, unknown>): {
+  table: Record<string, unknown>;
+  arriving: boolean;
+} {
+  const { columns, rows } = props;
+  if (!Array.isArray(columns) || !Array.isArray(rows) || rows.length === 0) {
+    return { table: props, arriving: false };
+  }
+  const last = rows.at(-1) as { cells?: unknown } | undefined;
+  const cells = Array.isArray(last?.cells) ? last.cells.length : 0;
+  if (cells >= columns.length) return { table: props, arriving: false };
+  return { table: { ...props, rows: rows.slice(0, -1) }, arriving: true };
+}
+
 /** A real table: header buttons sort while the native row/column relationships stay intact. */
 export function DataTable(props: Record<string, unknown>) {
   const [sort, setSort] = useState<{
     column: number;
     ascending: boolean;
   } | null>(null);
-  const parsed = DataTableProps.safeParse(props);
+  const streaming = useContext(GalleryStreamingContext);
+  const { table, arriving } = streaming
+    ? withoutArrivingRow(props)
+    : { table: props, arriving: false };
+  const parsed = DataTableProps.safeParse(table);
   if (!parsed.success) {
     return (
       <GalleryFrame title="Table">
@@ -86,9 +115,9 @@ export function DataTable(props: Record<string, unknown>) {
           </caption>
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {columns.map((column, index) => (
+              {byPosition(columns).map(({ item: column, key }, index) => (
                 <th
-                  key={column}
+                  key={key}
                   scope="col"
                   aria-sort={
                     sort?.column === index
@@ -132,9 +161,9 @@ export function DataTable(props: Record<string, unknown>) {
                 key={row.position}
                 className="even:bg-muted/20 hover:bg-muted/40"
               >
-                {columns.map((column, index) => (
+                {byPosition(columns).map(({ key }, index) => (
                   <td
-                    key={column}
+                    key={key}
                     className={`min-w-24 max-w-xs break-words px-3 py-2.5 align-top ${typeof row.cells[index] === "number" ? "text-right tabular-nums" : ""}`}
                   >
                     {row.cells[index] === "" ? (
@@ -154,7 +183,18 @@ export function DataTable(props: Record<string, unknown>) {
                 ))}
               </tr>
             ))}
-            {rows.length === 0 && (
+            {arriving ? (
+              // The row still being written, holding its place rather than the whole table waiting.
+              <tr>
+                <td
+                  colSpan={columns.length}
+                  className="px-3 py-2.5 text-muted-foreground"
+                >
+                  <span aria-hidden="true">…</span>
+                </td>
+              </tr>
+            ) : null}
+            {rows.length === 0 && !arriving && (
               <tr>
                 <td
                   colSpan={columns.length}

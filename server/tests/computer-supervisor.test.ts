@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { ComputerStillStartingError } from "../src/computer/client";
+import { botSeat, personSeat } from "../src/computer/computer-key";
 import type { ComputerProvider } from "../src/computer/provider";
 import {
   createDockerSupervisorProvider,
@@ -27,13 +29,14 @@ describe("locating a Bot's computer", () => {
   test("uses the address the supervisor reports", async () => {
     const client = clientWith(() =>
       Response.json({
-        botId: "sales",
+        kind: "bot",
+        id: "sales",
         container: "openbot-computer-sales",
         status: "running",
         url: "http://openbot-computer-sales:4100",
       }),
     );
-    expect(await client.locate("sales")).toBe(
+    expect(await client.locate(botSeat("sales"))).toBe(
       "http://openbot-computer-sales:4100",
     );
   });
@@ -42,7 +45,8 @@ describe("locating a Bot's computer", () => {
     // A laptop: the server runs outside Docker, so the only way in is the published port.
     const client = clientWith(() =>
       Response.json({
-        botId: "sales",
+        kind: "bot",
+        id: "sales",
         container: "openbot-computer-sales",
         status: "running",
         port: 49213,
@@ -50,18 +54,21 @@ describe("locating a Bot's computer", () => {
     );
     // Numeric, never `localhost`: it resolves to a different interface depending on the
     // runtime, so a computer that is listening can look like one that is not.
-    expect(await client.locate("sales")).toBe("http://127.0.0.1:49213");
+    expect(await client.locate(botSeat("sales"))).toBe(
+      "http://127.0.0.1:49213",
+    );
   });
 
   test("a computer with no address at all is an error, not a fallback", async () => {
     const client = clientWith(() =>
       Response.json({
-        botId: "sales",
+        kind: "bot",
+        id: "sales",
         container: "openbot-computer-sales",
         status: "running",
       }),
     );
-    expect(client.locate("sales")).rejects.toThrow(SupervisorError);
+    expect(client.locate(botSeat("sales"))).rejects.toThrow(SupervisorError);
   });
 
   test("a refusal from the supervisor is reported in its own words", async () => {
@@ -71,7 +78,7 @@ describe("locating a Bot's computer", () => {
         { status: 400 },
       ),
     );
-    expect(client.locate("bad id")).rejects.toThrow(
+    expect(client.locate(botSeat("bad id"))).rejects.toThrow(
       "A bot id may contain only letters.",
     );
   });
@@ -85,7 +92,70 @@ describe("locating a Bot's computer", () => {
         throw new Error("connection refused");
       }) as unknown as typeof fetch,
     });
-    expect(client.locate("sales")).rejects.toThrow(/could not be reached/);
+    expect(client.locate(botSeat("sales"))).rejects.toThrow(
+      /could not be reached/,
+    );
+  });
+
+  test("an ensure that runs out of time is a computer still starting, not a broken supervisor", async () => {
+    // `/ensure` is the call that waits on a container coming up, so its deadline is a slow start.
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }) as unknown as typeof fetch,
+    });
+    const failure = await client
+      .locate(botSeat("sales"))
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(ComputerStillStartingError);
+  });
+
+  test("a timeout on a plain read is still the supervisor's fault", async () => {
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }) as unknown as typeof fetch,
+    });
+    await expect(client.stop({ key: botSeat("sales").key })).rejects.toThrow(
+      SupervisorError,
+    );
+  });
+
+  test("an ensure the supervisor answers as still booting is a computer still starting", async () => {
+    // The supervisor's own health wait ran out on a container that is up, and it says so.
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json(
+          {
+            error: "The computer started but did not answer within 60000ms.",
+            starting: true,
+          },
+          { status: 503 },
+        )) as unknown as typeof fetch,
+    });
+    const failure = await client
+      .locate(botSeat("sales"))
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(ComputerStillStartingError);
+  });
+
+  test("a 503 from an unreachable Docker is still the supervisor's fault", async () => {
+    const client = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json(
+          { error: "Docker is not reachable." },
+          { status: 503 },
+        )) as unknown as typeof fetch,
+    });
+    const failure = await client
+      .locate(botSeat("sales"))
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(SupervisorError);
+    expect(failure).not.toBeInstanceOf(ComputerStillStartingError);
   });
 
   test("the bot id is escaped into the path", async () => {
@@ -97,8 +167,8 @@ describe("locating a Bot's computer", () => {
         return Response.json({ url: "http://c:4100" });
       }) as unknown as typeof fetch,
     });
-    await client.locate("a/b");
-    expect(seen).toBe("/computers/a%2Fb/ensure");
+    await client.locate(botSeat("a/b"));
+    expect(seen).toBe("/computers/bot/a%2Fb/ensure");
   });
 });
 
@@ -111,7 +181,7 @@ describe("Docker supervisor provider", () => {
     });
 
     expect(provider.name).toBe("Docker supervisor");
-    expect(provider.isolation).toBe("per-bot");
+    expect(provider.isolation).toBe("per-person");
   });
 
   test.each([
@@ -131,7 +201,8 @@ describe("Docker supervisor provider", () => {
           Response.json({
             computers: [
               {
-                botId: "bot",
+                kind: "bot",
+                id: "bot",
                 container: "openbot-computer-bot",
                 status: dockerStatus,
                 url: "http://openbot-computer-bot:4100",
@@ -140,10 +211,32 @@ describe("Docker supervisor provider", () => {
           })) as unknown as typeof fetch,
       });
 
-      const result = await provider.status("bot");
+      const result = await provider.status(botSeat("bot"));
       expect(result).toMatchObject(expected);
     },
   );
+
+  test("a running container whose healthcheck is still starting is starting, not ready", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({
+          computers: [
+            { kind: "bot", id: "bot", status: "running", health: "starting" },
+            { kind: "bot", id: "other", status: "running", health: "healthy" },
+          ],
+        })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.status(botSeat("bot"))).toEqual({
+      botId: "bot",
+      state: "starting",
+    });
+    expect(await provider.status(botSeat("other"))).toEqual({
+      botId: "other",
+      state: "ready",
+    });
+  });
 
   test("reports missing bot as absent", async () => {
     const provider = createDockerSupervisorProvider({
@@ -152,7 +245,7 @@ describe("Docker supervisor provider", () => {
         Response.json({ computers: [] })) as unknown as typeof fetch,
     });
 
-    expect(await provider.status("missing-bot")).toEqual({
+    expect(await provider.status(botSeat("missing-bot"))).toEqual({
       botId: "missing-bot",
       state: "absent",
     });
@@ -165,7 +258,8 @@ describe("Docker supervisor provider", () => {
         Response.json({
           computers: [
             {
-              botId: "sales",
+              kind: "bot",
+              id: "sales",
               container: "computer-sales",
               status: "running",
               port: 49152,
@@ -173,7 +267,8 @@ describe("Docker supervisor provider", () => {
               startedAt: "2026-08-20T12:00:00.000Z",
             },
             {
-              botId: "support",
+              kind: "bot",
+              id: "support",
               container: "computer-support",
               status: "exited",
               port: 49153,
@@ -185,13 +280,13 @@ describe("Docker supervisor provider", () => {
 
     expect(await provider.list()).toEqual([
       {
-        botId: "sales",
+        key: { kind: "bot", botId: "sales" },
         status: "running",
         url: "http://computer-sales:4100",
         startedAt: "2026-08-20T12:00:00.000Z",
       },
       {
-        botId: "support",
+        key: { kind: "bot", botId: "support" },
         status: "stopped",
         url: "http://computer-support:4100",
       },
@@ -205,7 +300,9 @@ describe("Docker supervisor provider", () => {
         Response.json({ stopped: true })) as unknown as typeof fetch,
     });
 
-    expect(await provider.stop("bot")).toEqual({ wasRunning: true });
+    expect(await provider.stop({ key: botSeat("bot").key })).toEqual({
+      wasRunning: true,
+    });
   });
 
   test("stop reports false when container was not running", async () => {
@@ -215,7 +312,9 @@ describe("Docker supervisor provider", () => {
         Response.json({ stopped: false })) as unknown as typeof fetch,
     });
 
-    expect(await provider.stop("bot")).toEqual({ wasRunning: false });
+    expect(await provider.stop({ key: botSeat("bot").key })).toEqual({
+      wasRunning: false,
+    });
   });
 
   test("reset reports whether container state was cleared", async () => {
@@ -225,7 +324,9 @@ describe("Docker supervisor provider", () => {
         Response.json({ reset: true })) as unknown as typeof fetch,
     });
 
-    expect(await provider.reset("bot")).toEqual({ cleared: true });
+    expect(await provider.reset({ key: botSeat("bot").key })).toEqual({
+      cleared: true,
+    });
   });
 
   test("reset reports false when container was not present to clear", async () => {
@@ -235,7 +336,9 @@ describe("Docker supervisor provider", () => {
         Response.json({ reset: false })) as unknown as typeof fetch,
     });
 
-    expect(await provider.reset("bot")).toEqual({ cleared: false });
+    expect(await provider.reset({ key: botSeat("bot").key })).toEqual({
+      cleared: false,
+    });
   });
 });
 
@@ -266,7 +369,8 @@ describe("telling one run of a computer from the next, across replicas", () => {
   function replica(botId: string, seen: string[] = []) {
     const running = [
       {
-        botId,
+        kind: "bot",
+        id: botId,
         container: `openbot-computer-${botId}`,
         status: "running",
         url: `http://openbot-computer-${botId}:4100`,
@@ -287,8 +391,8 @@ describe("telling one run of a computer from the next, across replicas", () => {
 
   test("a replica that located the computer knows the run", async () => {
     const client = replica("located");
-    await client.locate("located");
-    expect(await client.sessionOf?.("located")).toBe(startedAt);
+    await client.locate(botSeat("located"));
+    expect(await client.sessionOf?.(botSeat("located"))).toBe(startedAt);
   });
 
   test("a replica that never located it still knows the run", async () => {
@@ -298,7 +402,7 @@ describe("telling one run of a computer from the next, across replicas", () => {
      * replaced resolves against the new one, which is the case the check exists for.
      */
     const client = replica("never-located");
-    expect(await client.sessionOf?.("never-located")).toBe(startedAt);
+    expect(await client.sessionOf?.(botSeat("never-located"))).toBe(startedAt);
   });
 
   test("asking does not start a computer that is not running", async () => {
@@ -310,7 +414,114 @@ describe("telling one run of a computer from the next, across replicas", () => {
      */
     const seen: string[] = [];
     const client = replica("asked-about", seen);
-    await client.sessionOf?.("asked-about");
+    await client.sessionOf?.(botSeat("asked-about"));
     expect(seen.some((path) => path.endsWith("/ensure"))).toBe(false);
+  });
+});
+
+/**
+ * One computer per person, asked of the supervisor by whose it is.
+ *
+ * The regression: every Bot was a container of its own, keyed by the Bot alone, so a public Bot's
+ * one container (and its logins) was shared by everybody who used it.
+ */
+describe("whose computer the supervisor is asked for", () => {
+  function recording() {
+    const asked: { path: string; body: unknown }[] = [];
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+        const path = new URL(String(url)).pathname;
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        asked.push({ path, body });
+        const bots = (body as { carryOver?: string[] } | undefined)?.carryOver;
+        return Response.json({
+          url: `http://c${path.replaceAll("/", "-")}:4100`,
+          ...(bots
+            ? {
+                carriedOver: Object.fromEntries(bots.map((b) => [b, "copied"])),
+              }
+            : {}),
+        });
+      }) as unknown as typeof fetch,
+    });
+    return { provider, asked };
+  }
+
+  test("two people on one public Bot are given two computers", async () => {
+    const { provider, asked } = recording();
+    const ada = await provider.locate(personSeat("ada", "pub-bot"));
+    const bo = await provider.locate(personSeat("bo", "pub-bot"));
+    expect(ada).not.toBe(bo);
+    expect(asked.map((call) => call.path)).toEqual([
+      "/computers/person/ada/ensure",
+      "/computers/person/bo/ensure",
+    ]);
+  });
+
+  test("one person's two Bots run on that person's one computer", async () => {
+    const { provider, asked } = recording();
+    const sales = await provider.locate(personSeat("ada", "sales"));
+    const notes = await provider.locate(personSeat("ada", "notes"));
+    expect(sales).toBe(notes);
+    expect(new Set(asked.map((call) => call.path))).toEqual(
+      new Set(["/computers/person/ada/ensure"]),
+    );
+  });
+
+  test("an isolated Bot is given a computer of its own", async () => {
+    const { provider, asked } = recording();
+    const own = await provider.locate(botSeat("sales"));
+    const adas = await provider.locate(personSeat("ada", "sales"));
+    expect(own).not.toBe(adas);
+    expect(asked[0]?.path).toBe("/computers/bot/sales/ensure");
+  });
+
+  test("a private Bot's old profile is asked for on its owner's computer, until it has been answered", async () => {
+    const { provider, asked } = recording();
+    const owners = { ...personSeat("ada", "notes"), inheritsProfile: true };
+    await provider.locate(owners);
+    await provider.locate(owners);
+    expect(asked.map((call) => call.body)).toEqual([
+      { carryOver: ["notes"] },
+      undefined,
+    ]);
+  });
+
+  test("a public Bot's seat never asks for one", async () => {
+    const { provider, asked } = recording();
+    await provider.locate(personSeat("bo", "pub-bot"));
+    expect(asked.map((call) => call.body === undefined)).toEqual([true]);
+  });
+
+  test("a person's computer is listed as theirs", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({
+          computers: [
+            {
+              kind: "person",
+              id: "ada",
+              status: "running",
+              url: "http://a:4100",
+            },
+            {
+              kind: "bot",
+              id: "sales",
+              status: "exited",
+              url: "http://s:4100",
+            },
+          ],
+        })) as unknown as typeof fetch,
+    });
+    expect((await provider.list()).map((computer) => computer.key)).toEqual([
+      { kind: "person", personId: "ada" },
+      { kind: "bot", botId: "sales" },
+    ]);
+    expect(await provider.status(personSeat("ada", "notes"))).toEqual({
+      botId: "notes",
+      state: "ready",
+    });
   });
 });

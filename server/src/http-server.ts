@@ -3,12 +3,12 @@ import { serve } from "bun";
 import { computerAccessCheck } from "./agents/computer-access";
 import type { AgentProfileStore } from "./agents/profile-store";
 import type { OpenBotRole } from "./auth/roles";
+import { botBrowserRequestSeconds } from "./browser/bot-browser";
+import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
-import type { DemonstrationRecorder } from "./demonstrations/recording";
-import type { DemonstrationStore } from "./demonstrations/store";
 
 /**
  * The server's front door: one Bun server that hands ordinary requests to the Hono app, proxies the
@@ -20,9 +20,6 @@ import type { DemonstrationStore } from "./demonstrations/store";
 /** What each proxied socket carries: where to connect inward, and the socket once opened. */
 type StreamData = {
   upstream: string;
-  ownerUserId: string;
-  botId: string;
-  recordingId?: string;
   inward?: WebSocket;
 };
 
@@ -43,23 +40,19 @@ export function startHttpServer(deps: {
   ) => Promise<{ id: string; name: string; role: OpenBotRole }>;
   agentProfileStore: AgentProfileStore;
   computerGateway: ComputerGateway | undefined;
-  demonstrationStore: DemonstrationStore;
-  demonstrationRecorder: DemonstrationRecorder;
   app: {
     fetch: (
       request: Request,
       env: { server: unknown },
     ) => Response | Promise<Response>;
   };
-}): void {
+}): { stop(closeActiveConnections?: boolean): Promise<void> } {
   const {
     port,
     config,
     resolveRequestActor,
     agentProfileStore,
     computerGateway,
-    demonstrationStore,
-    demonstrationRecorder,
     app,
   } = deps;
 
@@ -74,12 +67,16 @@ export function startHttpServer(deps: {
    * Not a Hono route because an upgrade is not a request/response: Bun hands it over before Hono sees a
    * body, so it is handled in `fetch` ahead of the app.
    */
-  const toStreamUrl = (baseUrl: string, botId: string) =>
+  const toStreamUrl = (
+    baseUrl: string,
+    seat: { botId: string; personId?: string },
+  ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
-    // computer to read and every call it serves is per Bot. The secret travels the same way and for the
+    // computer to read and every call it serves is per Bot. So does the person, on the one computer
+    // many people share, where the seat is the pair. The secret travels the same way and for the
     // same reason, this socket is the one a person can type into, so it is the last thing that should
     // be reachable without it.
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(botId)}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
 
   const isProxiedStream = (data: SocketData): data is StreamData =>
     typeof (data as StreamData).upstream === "string";
@@ -88,7 +85,8 @@ export function startHttpServer(deps: {
   const asChannelSocket = (ws: { data: SocketData }) =>
     ws as unknown as ChannelSocket;
 
-  serve<SocketData>({
+  // Answered so a test can stop the server it started; the deployment keeps it for its whole life.
+  return serve<SocketData>({
     port,
     async fetch(request, server) {
       const url = new URL(request.url);
@@ -97,6 +95,14 @@ export function startHttpServer(deps: {
       }
       if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
       if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
+      // The person's browser's routes wait on its computer for longer than Bun's 10 s: a cold open, a slow page. Kept
+      // open for each route's own budget, so its answer, or its sentence, reaches the person (browser/routes.ts). A
+      // Bot's browser's routes the same, for a start, a Stop waiting on the last of a recording, a slow page
+      // (browser/bot-browser.ts).
+      const browserSeconds =
+        browserRequestSeconds(url.pathname) ??
+        botBrowserRequestSeconds(url.pathname);
+      if (browserSeconds !== undefined) server.timeout(request, browserSeconds);
       const streamBotId = streamPathBotId(url.pathname);
       if (
         streamBotId !== null &&
@@ -113,7 +119,8 @@ export function startHttpServer(deps: {
         }
         // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
         // so signing in is not enough: without this, anybody signed in watches anybody's Bot work. And
-        // seeing a Team Bot is not enough either: its screen is its owner's signed-in browser.
+        // seeing a Team Bot is not enough either: its screen is its owner's signed-in browser. A person's
+        // own OpenBot browser is that person's alone, an administrator's neither: the same check says so.
         if (
           !(await computerAccessCheck(agentProfileStore)(
             { id: actor.id, role: actor.role },
@@ -132,15 +139,20 @@ export function startHttpServer(deps: {
          */
         let upstream: string;
         try {
-          const streamBase = computerGateway
-            ? await computerGateway.locate(streamBotId)
+          // The watcher's own seat on that Bot: their computer, or the Bot's own if it is isolated.
+          const seat = computerGateway
+            ? await computerGateway.seatFor(streamBotId, actor.id)
             : undefined;
-          if (!streamBase) {
+          const streamBase =
+            computerGateway && seat
+              ? await computerGateway.locate(seat)
+              : undefined;
+          if (!streamBase || !computerGateway || !seat) {
             return new Response("No computer address is configured.", {
               status: 503,
             });
           }
-          upstream = toStreamUrl(streamBase, streamBotId);
+          upstream = toStreamUrl(streamBase, computerGateway.addressOf(seat));
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
           // whole path exists to prevent.
@@ -151,22 +163,7 @@ export function startHttpServer(deps: {
             { status: 502 },
           );
         }
-        const recording = await demonstrationStore.active(
-          actor.id,
-          streamBotId,
-        );
-        if (recording)
-          upstream += `&recording=${encodeURIComponent(recording.id)}`;
-        if (
-          server.upgrade(request, {
-            data: {
-              upstream,
-              ownerUserId: actor.id,
-              botId: streamBotId,
-              ...(recording ? { recordingId: recording.id } : {}),
-            },
-          })
-        ) {
+        if (server.upgrade(request, { data: { upstream } })) {
           return undefined as unknown as Response;
         }
         return new Response("Expected a WebSocket upgrade.", { status: 400 });
@@ -185,66 +182,6 @@ export function startHttpServer(deps: {
         // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
         // should be dropped, not queued, because a stale frame is worse than a missing one.
         inward.onmessage = (event) => {
-          if (stream.recordingId) {
-            let recorded: unknown;
-            try {
-              recorded = JSON.parse(String(event.data));
-            } catch {
-              recorded = null;
-            }
-            if (
-              recorded &&
-              typeof recorded === "object" &&
-              "type" in recorded &&
-              recorded.type === "demonstration.action"
-            ) {
-              const data = stream;
-              const message = recorded as {
-                recordingId?: unknown;
-                action?: unknown;
-              };
-              if (message.recordingId !== data.recordingId) {
-                ws.send(
-                  JSON.stringify({
-                    type: "error",
-                    error:
-                      "The recording identity changed. Stop and restart recording.",
-                  }),
-                );
-                return;
-              }
-              demonstrationRecorder
-                .capture(
-                  data.ownerUserId,
-                  data.botId,
-                  data.recordingId ?? "",
-                  message.action,
-                )
-                .catch((error) => {
-                  console.error(
-                    JSON.stringify({
-                      type: "demonstration-capture-error",
-                      error:
-                        error instanceof Error ? error.name : "UnknownError",
-                      context: { recordingId: data.recordingId },
-                      timestamp: new Date().toISOString(),
-                    }),
-                  );
-                  try {
-                    ws.send(
-                      JSON.stringify({
-                        type: "error",
-                        error:
-                          "A browser step could not be saved. Stop and review the demonstration before continuing.",
-                      }),
-                    );
-                  } catch {
-                    /* A closed viewer cannot receive the already logged failure. */
-                  }
-                });
-              return;
-            }
-          }
           try {
             ws.send(String(event.data));
           } catch {

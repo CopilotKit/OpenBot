@@ -15,6 +15,9 @@
  *
  *     bun scripts/check-new-values-keys.ts <ci-values.yaml> [--since v0.0.4]
  */
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parse, parseAllDocuments } from "yaml";
 
 const [valuesFile, ...rest] = process.argv.slice(2);
@@ -460,5 +463,80 @@ for (const { path, variable } of offSwitches) {
     continue;
   }
   console.log(`${path}=0 stays zero`);
+}
+
+/*
+ * The computer's own settings, which the chart passes through only when somebody set them, so a
+ * blank leaves the computer's own default in force. Two things have gone wrong with that shape.
+ *
+ * ZERO. Each of these switches something off at zero, and `with` reads zero as empty, so a
+ * deployment that wrote `0` got nothing rendered and the default left on.
+ *
+ * A WHOLE NUMBER FROM A VALUES FILE. Helm reads values files through JSON, so `tabIdleMs: 1200000`
+ * arrives as a float and renders as `1.2e+06`. The computer reads digits only and falls back to its
+ * default without a word. `--set` parses an integer, which is why this needs a file of its own.
+ *
+ * Only where the chart runs the shared computer, which is the workload that carries them.
+ */
+const computerSettings: Array<{
+  path: string;
+  variable: string;
+  whole: number;
+}> = [
+  {
+    path: "computers.memoryHighPercent",
+    variable: "COMPUTER_MEMORY_HIGH_PERCENT",
+    whole: 90,
+  },
+  {
+    path: "computers.tabIdleMs",
+    variable: "COMPUTER_TAB_IDLE_MS",
+    whole: 1_200_000,
+  },
+  // Older than this check: an hour rendered as `3.6e+06`, and `0` ("keep browsers resident") as nothing.
+  {
+    path: "computers.browserIdleMs",
+    variable: "COMPUTER_BROWSER_IDLE_MS",
+    whole: 3_600_000,
+  },
+];
+if (!baseline.out.includes("name: COMPUTER_SEPARATE_WORKSPACES")) {
+  console.log(
+    `${valuesFile} runs no shared computer, so its settings are not checked here`,
+  );
+} else {
+  const scratch = await mkdtemp(join(tmpdir(), "openbot-values-"));
+  try {
+    for (const { path, variable, whole } of computerSettings) {
+      const zero = render(["--set", `${path}=0`]);
+      const zeroGot = zero.ok ? renderedValue(zero.out, variable) : undefined;
+      if (zeroGot !== "0") {
+        console.error(
+          `::error::Setting ${path}=0 rendered ${variable}=${zeroGot ?? "nothing"} rather than 0. A zero is an off switch, not an absent value.`,
+        );
+        bad += 1;
+      } else {
+        console.log(`${path}=0 stays zero`);
+      }
+
+      const leaf = path.slice(path.lastIndexOf(".") + 1);
+      const file = join(scratch, `${leaf}.yaml`);
+      await Bun.write(file, `computers:\n  ${leaf}: ${whole}\n`);
+      const fromFile = render(["--values", file]);
+      const fileGot = fromFile.ok
+        ? renderedValue(fromFile.out, variable)
+        : undefined;
+      if (fileGot !== String(whole)) {
+        console.error(
+          `::error::${leaf}: ${whole} in a values file rendered ${variable}=${fileGot ?? "nothing"}, which the computer does not read as ${whole}.`,
+        );
+        bad += 1;
+      } else {
+        console.log(`${path} from a values file renders as ${fileGot}`);
+      }
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
 }
 process.exit(bad === 0 ? 0 : 1);

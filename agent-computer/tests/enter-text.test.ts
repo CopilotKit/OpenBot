@@ -40,7 +40,8 @@ let browser: Browser;
 beforeAll(async () => {
   if (!asked) return;
   const { chromium } = await import("playwright");
-  browser = await chromium.launch();
+  // Match the computer image: full Chromium is installed without the headless shell.
+  browser = await chromium.launch({ channel: "chromium" });
 });
 
 afterAll(async () => {

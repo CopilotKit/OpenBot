@@ -1,0 +1,916 @@
+{
+  "name": "interrupt",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"shopper\"},\"body\":{\"threadId\":\"5a638d2c-f692-4405-b230-b1f80f841a6e\",\"runId\":\"1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"c3271c9a-7846-46ea-be0e-564c3dff1f31\",\"role\":\"user\",\"content\":\"Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 95,
+          "text": "{\"threadId\":\"5a638d2c-f692-4405-b230-b1f80f841a6e\",\"runId\":\"1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:5a638d2c-f692-4405-b230-b1f80f841a6e\"}}"
+        }
+      ],
+      "end": {
+        "at": 95,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 1212,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"shopper\"},\"body\":{\"threadId\":\"5a638d2c-f692-4405-b230-b1f80f841a6e\",\"runId\":\"16606e8c-ce40-4276-820a-816d1b2ce382\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"c3271c9a-7846-46ea-be0e-564c3dff1f31\",\"role\":\"user\",\"content\":\"Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.\"},{\"id\":\"32179a65-c990-450a-9005-2274ddcebb85\",\"role\":\"assistant\",\"toolCalls\":[{\"id\":\"call_tWsSMjCS0ltNdVhztaeiHqLZ\",\"type\":\"function\",\"function\":{\"name\":\"approvePurchase\",\"arguments\":\"{\\\"item\\\":\\\"coffee\\\",\\\"amount\\\":4}\"},\"metadata\":{\"cpki_event_id\":\"643ca3cb-84c2-4a8b-91ef-8cb143f69b4d\",\"cpki_event_seq\":12,\"cpki_ingested\":\"01a15b9e-0d9e-775a-a1f1-f6c5f06156f3\"}}]}],\"resume\":[{\"interruptId\":\"call_tWsSMjCS0ltNdVhztaeiHqLZ\",\"status\":\"resolved\",\"payload\":{\"approved\":true}}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 1245,
+          "text": "{\"threadId\":\"5a638d2c-f692-4405-b230-b1f80f841a6e\",\"runId\":\"16606e8c-ce40-4276-820a-816d1b2ce382\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:5a638d2c-f692-4405-b230-b1f80f841a6e\"}}"
+        }
+      ],
+      "end": {
+        "at": 1245,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 99,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7"
+      }
+    },
+    {
+      "at": 154,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.",
+              "id": "c3271c9a-7846-46ea-be0e-564c3dff1f31",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+          "state": {},
+          "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "91034bf9-3a31-4eec-9385-5a04a25b6e62",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9e-09e7-7a02-84d7-dbefb9e3c305"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 158,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "replay_complete"
+    },
+    {
+      "at": 916,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "e2f9b600-0d22-4f1d-a7a9-140d9257322f",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9e-0d15-7715-886f-86e9ed1c2f96"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "32179a65-c990-450a-9005-2274ddcebb85",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "toolCallName": "approvePurchase",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 918,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "00411982-69ae-4641-b4fe-c783a070b606",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9e-0d15-7da9-bdf2-70613b39fe07"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 924,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "item",
+        "metadata": {
+          "cpki_event_id": "37ee6014-2490-49f3-9227-ad4d788cad72",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9e-0d1d-77e9-afb3-3413b13d99d1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 924,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":\"",
+        "metadata": {
+          "cpki_event_id": "3f85def5-2e84-4530-ba6c-566b9eb6c37a",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9e-0d1d-78c5-8cce-4711622cb3c1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 924,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "coffee",
+        "metadata": {
+          "cpki_event_id": "44f3feb4-4131-40a2-8ab8-41a8b4f570c0",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15b9e-0d1d-739b-9a07-6daaf394ee13"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 925,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\",\"",
+        "metadata": {
+          "cpki_event_id": "6e11b17c-eea9-4377-8056-05ec900dcc75",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15b9e-0d1d-7660-87da-76755dbb094f"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 925,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "amount",
+        "metadata": {
+          "cpki_event_id": "de9b2183-517a-430d-b518-550a1edcfc49",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15b9e-0d1d-7f83-852b-62ecf20fddb5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 931,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":",
+        "metadata": {
+          "cpki_event_id": "c66bae5d-8cd0-401c-a524-8f0a162ded85",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15b9e-0d25-75f8-9826-a02a022783ee"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 932,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "4",
+        "metadata": {
+          "cpki_event_id": "3100170c-3d42-495d-ac8e-ef9288d1a45c",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15b9e-0d25-7efe-a3b1-f4cbea197b95"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 955,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "}",
+        "metadata": {
+          "cpki_event_id": "9f11b02c-327b-47aa-99e8-ee9ca53632ba",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15b9e-0d3c-7e81-83dc-44a5222e06b8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1053,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "643ca3cb-84c2-4a8b-91ef-8cb143f69b4d",
+          "cpki_event_seq": 12,
+          "cpki_ingested": "01a15b9e-0d9e-775a-a1f1-f6c5f06156f3"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 1206,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "84a7590c-14c0-4a71-a5ac-6200b6307155",
+          "cpki_event_seq": 13,
+          "cpki_ingested": "01a15b9e-0e37-789b-a927-4d2f2712bf37",
+          "finishReason": "tool-calls"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "outcome": {
+          "interrupts": [
+            {
+              "id": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+              "message": "Approve this purchase?",
+              "reason": "tool_call",
+              "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ"
+            }
+          ],
+          "type": "interrupt"
+        },
+        "project_id": 1,
+        "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "run_id": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 230,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 20,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 250
+          }
+        ]
+      }
+    },
+    {
+      "at": 1209,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "phx_leave"
+    },
+    {
+      "at": 1246,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382"
+      }
+    },
+    {
+      "at": 1303,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [],
+          "protocolVersion": "1.0",
+          "resume": [
+            {
+              "interruptId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+              "payload": {
+                "approved": true
+              },
+              "status": "resolved"
+            }
+          ],
+          "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+          "state": {},
+          "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "a52df413-aaf9-4595-a323-40812f3f7d1e",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9e-0e62-7271-9deb-37e7de22f67e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 1304,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "replay_complete"
+    },
+    {
+      "at": 2150,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "c9402254-ef48-4f7b-8493-7a5c9733e688",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9e-11e7-7472-91fb-35b829f1e594"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "c7f87c3e-43dd-4e61-870a-dcd9ca699d83",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_sacWKIHU1LNOIEWX5KyaYWhS",
+        "toolCallName": "AGUISendStateDelta",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 2163,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"delta\":[{\"op\":\"add\",\"path\":\"/purchases/-\",\"value\":{\"item\":\"coffee\",\"amount\":4}}]}",
+        "metadata": {
+          "cpki_event_id": "c94ed052-4a72-4410-a207-337b60d60e67",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9e-11f4-7e2c-8afc-077547114095"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_sacWKIHU1LNOIEWX5KyaYWhS",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2185,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "d66c3e8b-be0d-4bcb-96de-f854a622c7c8",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9e-1209-70ff-b229-2724db4c7936"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_sacWKIHU1LNOIEWX5KyaYWhS",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 2185,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "7e22467c-77f0-4252-ac69-a1dfaef8c192",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9e-1209-7d2a-950f-2c5bb636fab4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "snapshot": {},
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "type": "STATE_SNAPSHOT"
+      }
+    },
+    {
+      "at": 2186,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": [
+          {
+            "op": "add",
+            "path": "/purchases",
+            "value": []
+          },
+          {
+            "op": "add",
+            "path": "/purchases/-",
+            "value": {
+              "amount": 4,
+              "item": "coffee"
+            }
+          }
+        ],
+        "metadata": {
+          "cpki_event_id": "730f1f80-2404-4dfb-a63e-d86ed571ef03",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15b9e-1209-76bb-be4f-01217f7342f6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "type": "STATE_DELTA"
+      }
+    },
+    {
+      "at": 2187,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "content": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/purchases/-\",\"value\":{\"item\":\"coffee\",\"amount\":4}}]}",
+        "messageId": "4949902f-6356-48e6-9f8e-592902e5dfff",
+        "metadata": {
+          "cpki_event_id": "d99e2fa7-443f-47fb-b00a-0ec3e62f8775",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15b9e-1209-7449-8c36-2bcd22a56558"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "tool",
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_sacWKIHU1LNOIEWX5KyaYWhS",
+        "type": "TOOL_CALL_RESULT"
+      }
+    },
+    {
+      "at": 2188,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "3f70159f-1a71-45f0-a028-98eeb62f8e7d",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15b9e-1209-7876-bcec-04a19a889094"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "c7f87c3e-43dd-4e61-870a-dcd9ca699d83",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_RE8kjrnRtMKebHikN9nCaI5E",
+        "toolCallName": "approvePurchase",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 2188,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"item\":\"coffee\",\"amount\":4}",
+        "metadata": {
+          "cpki_event_id": "2c2f2350-a245-4214-9204-84b4026871b6",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15b9e-1209-7db4-9591-b3449e1e1134"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_RE8kjrnRtMKebHikN9nCaI5E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2188,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "41559bab-fe85-4a9f-8d76-1795577d67f5",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15b9e-1209-753d-a525-49aef016f958"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "toolCallId": "call_RE8kjrnRtMKebHikN9nCaI5E",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 2429,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "6433ddfc-e713-4d3d-884f-06d1e6e130ee",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15b9e-12fe-7350-bc2f-767b99fd0e6e",
+          "finishReason": "tool-calls"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "outcome": {
+          "interrupts": [
+            {
+              "id": "call_RE8kjrnRtMKebHikN9nCaI5E",
+              "message": "Approve this purchase?",
+              "reason": "tool_call",
+              "toolCallId": "call_RE8kjrnRtMKebHikN9nCaI5E"
+            }
+          ],
+          "type": "interrupt"
+        },
+        "project_id": 1,
+        "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "run_id": "16606e8c-ce40-4276-820a-816d1b2ce382",
+        "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "thread_id": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 261,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 74,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 335
+          }
+        ]
+      }
+    },
+    {
+      "at": 2430,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:5a638d2c-f692-4405-b230-b1f80f841a6e",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "079ae5e6-e515-4747-a91f-cc12de60759e",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538446220
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "c3271c9a-7846-46ea-be0e-564c3dff1f31",
+            "runId": null,
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "agentId": "shopper",
+            "role": "user",
+            "textLength": 74,
+            "text": "Buy one coffee for 4 dollars. Ask for approval with approvePurchase first.",
+            "seq": 2
+          },
+          "timestamp": 1792538446272
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "agentId": "shopper",
+            "seq": 3
+          },
+          "timestamp": 1792538446376
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_tWsSMjCS0ltNdVhztaeiHqLZ",
+            "toolName": "approvePurchase",
+            "agentId": "shopper",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "messageId": "32179a65-c990-450a-9005-2274ddcebb85",
+            "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+            "seq": 4
+          },
+          "timestamp": 1792538447136
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "agentId": "shopper",
+            "seq": 5
+          },
+          "timestamp": 1792538447429
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "agentId": "shopper",
+            "seq": 6
+          },
+          "timestamp": 1792538447522
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "079ae5e6-e515-4747-a91f-cc12de60759e",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_sacWKIHU1LNOIEWX5KyaYWhS",
+            "toolName": "AGUISendStateDelta",
+            "agentId": "shopper",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "messageId": "c7f87c3e-43dd-4e61-870a-dcd9ca699d83",
+            "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+            "seq": 7
+          },
+          "timestamp": 1792538448369
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "4949902f-6356-48e6-9f8e-592902e5dfff",
+            "runId": "1bfcd48d-b221-4c95-8f66-b60dfc1ad0e7",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "agentId": "shopper",
+            "role": "tool",
+            "textLength": 98,
+            "text": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/purchases/-\",\"value\":{\"item\":\"coffee\",\"amount\":4}}]}",
+            "seq": 8
+          },
+          "timestamp": 1792538448406
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_RE8kjrnRtMKebHikN9nCaI5E",
+            "toolName": "approvePurchase",
+            "agentId": "shopper",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "messageId": "c7f87c3e-43dd-4e61-870a-dcd9ca699d83",
+            "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+            "seq": 9
+          },
+          "timestamp": 1792538448407
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "16606e8c-ce40-4276-820a-816d1b2ce382",
+            "threadId": "5a638d2c-f692-4405-b230-b1f80f841a6e",
+            "agentId": "shopper",
+            "seq": 10
+          },
+          "timestamp": 1792538448649
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

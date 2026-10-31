@@ -1,5 +1,10 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
+import { researchRoleOfTool } from "@openbot/shared/research";
+import {
   IconFileText,
   IconPlug,
   IconSearch,
@@ -23,11 +28,6 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import {
-  readConnectPrompt,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
-import { researchRoleOfTool } from "@openbot/shared/research";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
 import { ToolLine } from "./tool-line";
@@ -55,19 +55,24 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  *
  * `isDrawn` says which tools the app draws itself; the transcript reads it from `useDrawnTool`.
  *
- * The group takes its first step's id, so the row keeps its identity while later steps stream in.
+ * EVERY RUN IS A GROUP, A RUN OF ONE INCLUDED, AND KEEPS ITS ROW ID FOR ITS WHOLE LIFE. A lone call
+ * used to be its own `tool` row and became a `tools` row when a second call arrived, under the same
+ * key but a different tree, so React tore the row down and rebuilt it and its entrance replayed. A
+ * group took its first step's id, so when that step turned out to ask the person something and left,
+ * the group's id changed and it was rebuilt again. Now the transcript draws a group of one as the
+ * line it always was, inside the one row type, and `rowIds` remembers which row each step was drawn
+ * in: a run reuses the row of the first of its steps no earlier run in this pass has claimed. Group
+ * ids carry a `group:` prefix, so they can never collide with a single row's id.
  */
 export function groupToolSteps(
   items: readonly VisibleChatItem[],
   isDrawn: (name: string) => boolean,
+  rowIds: Map<string, string> = new Map(),
 ): TranscriptItem[] {
-  const grouped: TranscriptItem[] = [];
+  const segments: (VisibleChatItem | ToolItem[])[] = [];
   let run: ToolItem[] = [];
   const close = () => {
-    const [first] = run;
-    if (!first) return;
-    if (run.length === 1 && !isBrowserStep(first)) grouped.push(first);
-    else grouped.push({ kind: "tools", id: first.id, steps: run });
+    if (run.length > 0) segments.push(run);
     run = [];
   };
   for (const item of items) {
@@ -76,10 +81,41 @@ export function groupToolSteps(
       continue;
     }
     close();
-    grouped.push(item);
+    segments.push(item);
   }
   close();
-  return grouped;
+
+  // Runs claim their rows first, so a group keeps its row when its first step leaves it...
+  const claimed = new Set<string>();
+  const runIds = new Map<ToolItem[], string>();
+  for (const segment of segments) {
+    if (!Array.isArray(segment)) continue;
+    const [first] = segment;
+    if (!first) continue;
+    const kept = segment
+      .map((step) => rowIds.get(step.id))
+      .find((id) => id !== undefined && !claimed.has(id));
+    const id = kept ?? `group:${first.id}`;
+    claimed.add(id);
+    runIds.set(segment, id);
+    for (const step of segment) rowIds.set(step.id, id);
+  }
+
+  // ...and a lone call that stops folding (its answer asks the person) keeps the row it had.
+  return segments.map((segment): TranscriptItem => {
+    if (Array.isArray(segment)) {
+      return {
+        kind: "tools",
+        id: runIds.get(segment) ?? "",
+        steps: segment,
+      };
+    }
+    if (segment.kind !== "tool") return segment;
+    const previous = rowIds.get(segment.id);
+    if (previous === undefined || claimed.has(previous)) return segment;
+    claimed.add(previous);
+    return { ...segment, id: previous };
+  });
 }
 
 function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {

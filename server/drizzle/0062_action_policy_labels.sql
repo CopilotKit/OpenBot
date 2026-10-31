@@ -1,0 +1,1 @@
+ALTER TABLE "action_policy" ADD COLUMN "labels" jsonb DEFAULT '{}'::jsonb NOT NULL;

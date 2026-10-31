@@ -1,3 +1,4 @@
+import { SKIN_IDS } from "@openbot/shared/user-preferences";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "./auth/guards";
@@ -12,6 +13,8 @@ const preferencesPatch = z
   .strictObject({
     messageListEmphasis: z.enum(["agent", "thread"]).optional(),
     selfHostBannerDismissed: z.boolean().optional(),
+    narration: z.enum(["on", "off"]).optional(),
+    skin: z.enum(SKIN_IDS).optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0);
 
@@ -43,8 +46,7 @@ export function userPreferencesRoutes(
     if (!parsed.success) {
       return context.json(
         {
-          error:
-            "Choose agent or thread for message list emphasis, or true or false for the self-host banner.",
+          error: `Choose agent or thread for message list emphasis, true or false for the self-host banner, on or off for narration, or one of these skins: ${SKIN_IDS.join(", ")}.`,
         },
         400,
       );

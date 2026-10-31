@@ -7,6 +7,7 @@ import { AgentProfile } from "@/components/agents/agent-profile";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { ConversationActions } from "@/components/channels/conversation-actions";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
@@ -89,12 +90,26 @@ function RouteComponent() {
           // Manual watch remains active even when there is no current browser action.
           <ComputerViewPanel agentId={agentId} name={channel?.data?.name} />
         ) : (
-          <AgentProfile agentId={agentId} />
+          <AgentProfile
+            agentId={agentId}
+            footer={
+              channel.data ? (
+                <ConversationActions
+                  channelId={channelId}
+                  leave={() => navigate({ to: "/" })}
+                  name={channel.data.name}
+                />
+              ) : null
+            }
+          />
         )
       }
     >
       <div className="flex flex-col">
-        <div className="min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2">
+        <div
+          className="min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2"
+          data-slot="conversation-header"
+        >
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
             <SidebarToggle />

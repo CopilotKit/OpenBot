@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
+import { SkinAccountSync } from "../skins/account-sync";
 
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async ({ context, location }) => {
@@ -25,6 +26,8 @@ export const Route = createFileRoute("/_authed")({
   component: () => (
     <CopilotProvider>
       <AppHotkeys />
+      {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
+      <SkinAccountSync />
       <Outlet />
     </CopilotProvider>
   ),

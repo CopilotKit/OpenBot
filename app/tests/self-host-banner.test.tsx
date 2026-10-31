@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
@@ -16,7 +17,6 @@ import {
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import type { UserPreferences } from "@openbot/shared/user-preferences";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -50,7 +50,13 @@ afterEach(() => {
   clients.length = 0;
   globalThis.fetch = originalFetch;
 });
-afterAll(() => GlobalRegistrator.unregister());
+// A failed save rolls the cache back after the last test has seen the banner return, and React
+// renders that after `cleanup`. Unregistering at once removes `window` under it, and the scheduler's
+// read of `window.event` throws between tests, failing the run with every test passed.
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await GlobalRegistrator.unregister();
+});
 
 const banner = { name: "Self-host OpenBot" } as const;
 
@@ -80,6 +86,8 @@ function setup({
   const preferences: UserPreferences = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: dismissed,
+    narration: null,
+    skin: "openbot",
   };
   client.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,

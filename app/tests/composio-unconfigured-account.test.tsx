@@ -17,6 +17,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
+import { serversListedFor } from "@/lib/plugins/listed";
 import {
   type PluginConnections,
   type PluginServer,
@@ -24,7 +25,6 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
-import { serversListedFor } from "@/routes/_authed/_app/connections.index";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -182,7 +182,8 @@ function renderAccount(composioConfigured: boolean) {
 
 test("the app's page says it is not available yet, and names no setting", async () => {
   const view = renderAccount(false);
-  expect(await view.findByText(/Gmail isn't set up yet/)).toBeTruthy();
+  const empty = await view.findByText(/An admin has to turn on Gmail/);
+  expect(empty.parentElement?.textContent).toContain("Not set up yet");
   expect(view.queryByText(/COMPOSIO_API_KEY/)).toBeNull();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
 });

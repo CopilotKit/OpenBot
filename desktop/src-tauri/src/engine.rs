@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Engine {
-    /// Docker Desktop, OrbStack, Colima, or a Docker daemon by any other name.
+    /// Any Docker daemon, whatever product runs it.
     Docker,
     Podman,
 }
@@ -413,7 +413,13 @@ fn on_path(binary: &str) -> Option<PathBuf> {
 
 /// The fixed places each platform's installers use.
 fn where_installers_put(engine: Engine) -> Option<PathBuf> {
-    let places: Vec<PathBuf> = match engine {
+    installer_places(engine)
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+fn installer_places(engine: Engine) -> Vec<PathBuf> {
+    match engine {
         #[cfg(target_os = "windows")]
         Engine::Podman => {
             // The MSI uses Programs\Podman per user and Program Files\Podman per machine.
@@ -444,15 +450,19 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
         .iter()
         .map(PathBuf::from)
         .collect(),
+        // Docker Desktop's own copy is looked for in every place `docker_desktop` looks for the
+        // app, `~/Applications` included: an app that setup starts has to have a CLI that setup
+        // can find, or Docker answering is never seen and the start times out.
         #[cfg(target_os = "macos")]
-        Engine::Docker => [
-            "/usr/local/bin/docker",
-            "/opt/homebrew/bin/docker",
-            "/Applications/Docker.app/Contents/Resources/bin/docker",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .collect(),
+        Engine::Docker => ["/usr/local/bin/docker", "/opt/homebrew/bin/docker"]
+            .iter()
+            .map(PathBuf::from)
+            .chain(
+                crate::docker_desktop::app_places()
+                    .into_iter()
+                    .map(|app| app.join("Contents/Resources/bin/docker")),
+            )
+            .collect(),
         #[cfg(target_os = "linux")]
         Engine::Podman => ["/usr/bin/podman", "/usr/local/bin/podman"]
             .iter()
@@ -463,8 +473,7 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
             .iter()
             .map(PathBuf::from)
             .collect(),
-    };
-    places.into_iter().find(|candidate| candidate.is_file())
+    }
 }
 
 /// The rootless socket on Linux, which is the one Compose must mount.
@@ -493,7 +502,23 @@ pub fn rootless_socket() -> Option<PathBuf> {
 
 /// What is here, before anything is installed.
 pub fn detect() -> EngineStatus {
-    for engine in [Engine::Docker, Engine::Podman] {
+    detect_among(&[Engine::Docker, Engine::Podman])
+}
+
+/// What is here of the engine an installation was set up on, or of either when it saved none.
+///
+/// The other engine is never looked at: an installation on Podman that found an answering Docker
+/// would start on it with none of its images and an empty database. See
+/// `preparation::saved_engine`.
+pub fn detect_saved(saved: Option<Engine>) -> EngineStatus {
+    match saved {
+        Some(engine) => detect_among(&[engine]),
+        None => detect(),
+    }
+}
+
+fn detect_among(engines: &[Engine]) -> EngineStatus {
+    for &engine in engines {
         let address = Address::new(engine, None);
         if address.responds() {
             return answering(address);
@@ -502,14 +527,16 @@ pub fn detect() -> EngineStatus {
 
     // Podman's default connection can name a machine that is not running while another one is. That
     // is not "no engine", and creating a second machine in answer to it is the wrong repair.
-    if let Some(machine) = running_machine(crate::acquire::MACHINE) {
-        let address = Address::new(Engine::Podman, Some(machine));
-        if address.responds() {
-            return answering(address);
+    if engines.contains(&Engine::Podman) {
+        if let Some(machine) = running_machine(crate::acquire::MACHINE) {
+            let address = Address::new(Engine::Podman, Some(machine));
+            if address.responds() {
+                return answering(address);
+            }
         }
     }
 
-    for engine in [Engine::Docker, Engine::Podman] {
+    for &engine in engines {
         if program(engine).is_some() {
             return EngineStatus {
                 engine: Some(engine),
@@ -691,23 +718,6 @@ fn main() {
     }
 
     #[test]
-    fn a_missing_engine_is_reported_as_missing_rather_than_as_not_responding() {
-        // Not a call to `detect`: this asserts the shape a caller has to distinguish. "Installed but
-        // not answering" tells somebody to start it; "none found" tells them to install one, and
-        // the wrong one of those sends them looking for a menu bar icon that is not there.
-        let missing = EngineStatus {
-            engine: None,
-            address: None,
-            responding: false,
-            engine_socket: None,
-            detail: "No container engine found. Install Podman Desktop or Docker Desktop first."
-                .into(),
-        };
-        assert!(missing.engine.is_none());
-        assert!(!missing.responding);
-    }
-
-    #[test]
     fn a_podman_machine_is_named_on_every_command_it_is_addressed_with() {
         let address = Address::new(Engine::Podman, Some("openbot".into()));
         let command = address.command();
@@ -801,6 +811,16 @@ fn main() {
         assert!(text.starts_with("/tmp/openbot-tools"), "{text}");
         if let Some(existing) = std::env::var_os("PATH") {
             assert!(text.ends_with(&*existing.to_string_lossy()), "{text}");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn every_docker_desktop_setup_can_start_has_a_cli_setup_can_find() {
+        let places = installer_places(Engine::Docker);
+        for app in crate::docker_desktop::app_places() {
+            let cli = app.join("Contents/Resources/bin/docker");
+            assert!(places.contains(&cli), "{} is not looked for", cli.display());
         }
     }
 

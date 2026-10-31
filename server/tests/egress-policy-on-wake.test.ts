@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { botSeat } from "../src/computer/computer-key";
 import * as network from "../src/computer/policy-network";
 import type {
   ComputerLocation,
@@ -23,18 +24,24 @@ type Wrap = (
   },
 ) => ComputerProvider;
 
+/** An isolated Bot, which has its own computer and so one run per computer. */
+const SALES = botSeat("sales");
+
 function suspendedComputer() {
   let session = "run-1";
   let running = false;
   const provider: ComputerProvider = {
     name: "fake",
-    isolation: "per-bot",
+    isolation: "per-person",
     async locate() {
       running = true;
       return "http://computer.test:4100";
     },
-    async status(botId) {
-      return { botId, state: running ? "ready" : "stopped" } as never;
+    async status(seat) {
+      return {
+        botId: seat.botId,
+        state: running ? "ready" : "stopped",
+      } as never;
     },
     async stop() {
       running = false;
@@ -47,7 +54,7 @@ function suspendedComputer() {
     async list(): Promise<ComputerLocation[]> {
       return [
         {
-          botId: "sales",
+          key: { kind: "bot", botId: "sales" },
           status: running ? "running" : "stopped",
           url: "http://computer.test:4100",
         },
@@ -96,7 +103,7 @@ describe("a computer woken by an action", () => {
       ).pushed,
     ).toEqual([]);
 
-    await provider.locate("sales");
+    await provider.locate(SALES);
     expect(pushes).toEqual([
       {
         url: "http://computer.test:4100/egress-policy",
@@ -106,12 +113,12 @@ describe("a computer woken by an action", () => {
     ]);
 
     // Same run: no second push on every action.
-    await provider.locate("sales");
+    await provider.locate(SALES);
     expect(pushes).toHaveLength(1);
 
     // Suspended and woken again: a new run, an empty filter, a new push.
-    await provider.stop("sales");
-    await provider.locate("sales");
+    await provider.stop({ key: SALES.key });
+    await provider.locate(SALES);
     expect(pushes).toHaveLength(2);
   });
 
@@ -124,7 +131,7 @@ describe("a computer woken by an action", () => {
           fetchImpl,
         })
       : raw;
-    expect(await provider.locate("sales")).toBe("http://computer.test:4100");
+    expect(await provider.locate(SALES)).toBe("http://computer.test:4100");
   });
 });
 
@@ -140,7 +147,7 @@ test("a policy that cannot be read is logged, and the action still gets its comp
   const warned: string[] = [];
   console.warn = (line: string) => void warned.push(line);
   try {
-    expect(await provider.locate("sales")).toBe("http://computer.test:4100");
+    expect(await provider.locate(SALES)).toBe("http://computer.test:4100");
   } finally {
     console.warn = warn;
   }

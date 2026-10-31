@@ -300,7 +300,7 @@ green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
 LEARNING_CONTAINER="$(setting CPK_INTELLIGENCE_LEARNING_CONTAINER_ID "")"
 LEARNING_AUTO_ASSIGN="$(setting OPENBOT_LEARNING_AUTO_ASSIGN true)"
 if [ -z "$LEARNING_CONTAINER" ] && [ "$LEARNING_AUTO_ASSIGN" != "false" ] \
-   && [ "$LEARNING_AUTO_ASSIGN" != "0" ] && [ -n "$(setting INTELLIGENCE_API_KEY "")" ]; then
+   && [ "$LEARNING_AUTO_ASSIGN" != "0" ] && { [ -n "$(setting CPK_INTELLIGENCE_API_KEY "")" ] || [ -n "$(setting INTELLIGENCE_API_KEY "")" ]; }; then
   LEARNING_LINE="$(bun scripts/setup-learning.ts --non-interactive 2>>"$LOGS/learning-setup.log" | tail -1 || true)"
   info "  ${LEARNING_LINE:-Automatic Learning: the container check did not run. Log: $LOGS/learning-setup.log}"
 fi
@@ -413,7 +413,7 @@ const status = info.licenseStatus;
 const agents = Object.keys(info.agents ?? {});
 if (status !== "valid") {
   console.log(`\x1b[31m  licence is '${status}', not 'valid'.\x1b[0m`);
-  console.log("\x1b[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\x1b[0m");
+  console.log("\x1b[31m  Check CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY): npx copilotkit@latest login && npx copilotkit@latest project select\x1b[0m");
   console.log("\x1b[31m  See README.md for Intelligence setup.\x1b[0m");
   process.exit(1);
 }

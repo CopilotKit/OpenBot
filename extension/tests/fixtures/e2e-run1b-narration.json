@@ -1,0 +1,635 @@
+{
+  "source": "The full end-to-end run, run 1b (Chrome, narrated), rows 8003 to 8017 from cpki.trajectory_events: the person talks while they work, each phrase 4 to 9 s long",
+  "rows": [
+    {
+      "name": "transcript",
+      "type": "CUSTOM",
+      "value": {
+        "text": "I am opening order 10:43 because the customer wants a refund",
+        "endedAt": "2026-10-21T02:03:47.061Z",
+        "language": "en",
+        "startedAt": "2026-10-21T02:03:43.129Z"
+      },
+      "timestamp": 1792548223129
+    },
+    {
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 238,
+          "width": 139,
+          "height": 42
+        },
+        "url": "http://127.0.0.1:7420/",
+        "page": {
+          "url": "http://127.0.0.1:7420/",
+          "title": "Today - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/",
+        "target": {
+          "tag": "button",
+          "name": "Load my profile",
+          "role": "button",
+          "text": "Load my profile",
+          "input": "pointer",
+          "label": "Load my profile",
+          "action": null,
+          "attributes": {
+            "id": "load-profile",
+            "type": "button",
+            "class": "ghost"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "id",
+            "selector": "#load-profile"
+          },
+          {
+            "by": "role",
+            "selector": "role=button[name=\"Load my profile\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Load my profile\""
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > button"
+          }
+        ]
+      },
+      "timestamp": 1792548227264
+    },
+    {
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 387,
+          "width": 720,
+          "height": 40
+        },
+        "url": "http://127.0.0.1:7420/",
+        "page": {
+          "url": "http://127.0.0.1:7420/",
+          "title": "Today - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/",
+        "target": {
+          "tag": "input",
+          "name": "Search orders",
+          "role": "textbox",
+          "text": "",
+          "input": "pointer",
+          "label": "Search orders",
+          "value": "",
+          "action": null,
+          "inputType": "text",
+          "attributes": {
+            "name": "q",
+            "style": "",
+            "aria-label": "Search orders",
+            "placeholder": "Order number or customer"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "name",
+            "selector": "input[name=\"q\"]"
+          },
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Search orders\"]"
+          },
+          {
+            "by": "css",
+            "selector": "#search > input"
+          }
+        ]
+      },
+      "timestamp": 1792548229218
+    },
+    {
+      "name": "input",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 387,
+          "width": 720,
+          "height": 40
+        },
+        "url": "http://127.0.0.1:7420/",
+        "page": {
+          "url": "http://127.0.0.1:7420/",
+          "title": "Today - Corner Shop admin"
+        },
+        "step": "input",
+        "route": "/",
+        "target": {
+          "tag": "input",
+          "name": "Search orders",
+          "role": "textbox",
+          "text": "",
+          "value": "1043",
+          "action": null,
+          "inputType": "text",
+          "attributes": {
+            "name": "q",
+            "style": "",
+            "aria-label": "Search orders",
+            "placeholder": "Order number or customer"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "eventType": "input",
+        "selectors": [
+          {
+            "by": "name",
+            "selector": "input[name=\"q\"]"
+          },
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Search orders\"]"
+          },
+          {
+            "by": "css",
+            "selector": "#search > input"
+          }
+        ]
+      },
+      "timestamp": 1792548229807
+    },
+    {
+      "name": "key",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 387,
+          "width": 720,
+          "height": 40
+        },
+        "key": "Enter",
+        "url": "http://127.0.0.1:7420/",
+        "page": {
+          "url": "http://127.0.0.1:7420/",
+          "title": "Today - Corner Shop admin"
+        },
+        "step": "enter",
+        "route": "/",
+        "target": {
+          "tag": "input",
+          "name": "Search orders",
+          "role": "textbox",
+          "inputType": "text",
+          "attributes": {
+            "name": "q",
+            "aria-label": "Search orders",
+            "placeholder": "Order number or customer"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "name",
+            "selector": "input[name=\"q\"]"
+          },
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Search orders\"]"
+          },
+          {
+            "by": "css",
+            "selector": "#search > input"
+          }
+        ]
+      },
+      "timestamp": 1792548231104
+    },
+    {
+      "name": "transcript",
+      "type": "CUSTOM",
+      "value": {
+        "text": "the parcel arrived damaged so I will send the money back to her card",
+        "endedAt": "2026-10-21T02:03:53.590Z",
+        "language": "en",
+        "startedAt": "2026-10-21T02:03:47.061Z"
+      },
+      "timestamp": 1792548227061
+    },
+    {
+      "name": "submit",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 387,
+          "width": 720,
+          "height": 40
+        },
+        "url": "http://127.0.0.1:7420/",
+        "page": {
+          "url": "http://127.0.0.1:7420/",
+          "title": "Today - Corner Shop admin"
+        },
+        "step": "submit",
+        "route": "/",
+        "target": {
+          "tag": "form",
+          "name": "",
+          "role": "search",
+          "attributes": {
+            "id": "search",
+            "role": "search",
+            "method": "get"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "id",
+            "selector": "#search"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > form"
+          }
+        ]
+      },
+      "timestamp": 1792548231105
+    },
+    {
+      "name": "navigation",
+      "type": "CUSTOM",
+      "value": {
+        "to": "http://127.0.0.1:7420/search?q=1043",
+        "from": "http://127.0.0.1:7420/",
+        "page": {
+          "url": "http://127.0.0.1:7420/search?q=1043",
+          "title": "Search - Corner Shop admin"
+        },
+        "step": "navigate",
+        "frameId": 0,
+        "parentFrameId": -1,
+        "navigationType": "push"
+      },
+      "timestamp": 1792548231126.219
+    },
+    {
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 403,
+          "y": 186,
+          "width": 78,
+          "height": 18
+        },
+        "url": "http://127.0.0.1:7420/search?q=1043",
+        "page": {
+          "url": "http://127.0.0.1:7420/search?q=1043",
+          "title": "Search - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/search",
+        "target": {
+          "tag": "a",
+          "name": "Order 1043",
+          "role": "link",
+          "text": "Order 1043",
+          "input": "pointer",
+          "label": "Order 1043",
+          "action": null,
+          "attributes": {
+            "href": "/orders/1043"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=link[name=\"Order 1043\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Order 1043\""
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > p > a"
+          }
+        ]
+      },
+      "timestamp": 1792548234093
+    },
+    {
+      "name": "navigation",
+      "type": "CUSTOM",
+      "value": {
+        "to": "http://127.0.0.1:7420/orders/1043",
+        "from": "http://127.0.0.1:7420/search?q=1043",
+        "page": {
+          "url": "http://127.0.0.1:7420/orders/1043",
+          "title": "Order 1043 - Corner Shop admin"
+        },
+        "step": "navigate",
+        "frameId": 0,
+        "parentFrameId": -1,
+        "navigationType": "push"
+      },
+      "timestamp": 1792548234105.815
+    },
+    {
+      "name": "input",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 248,
+          "width": 720,
+          "height": 38
+        },
+        "url": "http://127.0.0.1:7420/orders/1043",
+        "page": {
+          "url": "http://127.0.0.1:7420/orders/1043",
+          "title": "Order 1043 - Corner Shop admin"
+        },
+        "step": "input",
+        "route": "/orders/1043",
+        "target": {
+          "tag": "select",
+          "name": "Status",
+          "role": "combobox",
+          "text": "ProcessingShippedDeliveredReturned",
+          "value": "returned",
+          "action": null,
+          "inputType": "select-one",
+          "attributes": {
+            "id": "status",
+            "name": "status"
+          },
+          "selectedValues": ["returned"]
+        },
+        "request": {
+          "url": "http://127.0.0.1:7420/api/orders/1043/status",
+          "body": {
+            "text": "{\"status\":\"returned\"}",
+            "status": "complete",
+            "encoding": "utf-8"
+          },
+          "method": "PUT",
+          "status": 200,
+          "response": {
+            "text": "{\"id\":1043,\"status\":\"returned\"}",
+            "status": "complete",
+            "encoding": "utf-8"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "eventType": "input",
+        "selectors": [
+          {
+            "by": "id",
+            "selector": "#status"
+          },
+          {
+            "by": "name",
+            "selector": "select[name=\"status\"]"
+          },
+          {
+            "by": "role",
+            "selector": "role=combobox[name=\"Status\"]"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > select"
+          }
+        ]
+      },
+      "timestamp": 1792548236629
+    },
+    {
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 284,
+          "y": 304,
+          "width": 13,
+          "height": 13
+        },
+        "url": "http://127.0.0.1:7420/orders/1043",
+        "page": {
+          "url": "http://127.0.0.1:7420/orders/1043",
+          "title": "Order 1043 - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/orders/1043",
+        "target": {
+          "tag": "input",
+          "name": "Notify the customer by email",
+          "role": "checkbox",
+          "text": "",
+          "input": "pointer",
+          "value": "on",
+          "action": null,
+          "checked": true,
+          "inputType": "checkbox",
+          "attributes": {
+            "id": "notify",
+            "type": "checkbox"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "id",
+            "selector": "#notify"
+          },
+          {
+            "by": "role",
+            "selector": "role=checkbox[name=\"Notify the customer by email\"]"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > label:nth-of-type(2) > input"
+          }
+        ]
+      },
+      "timestamp": 1792548238671
+    },
+    {
+      "name": "input",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 284,
+          "y": 304,
+          "width": 13,
+          "height": 13
+        },
+        "url": "http://127.0.0.1:7420/orders/1043",
+        "page": {
+          "url": "http://127.0.0.1:7420/orders/1043",
+          "title": "Order 1043 - Corner Shop admin"
+        },
+        "step": "input",
+        "route": "/orders/1043",
+        "target": {
+          "tag": "input",
+          "name": "Notify the customer by email",
+          "role": "checkbox",
+          "text": "",
+          "value": "on",
+          "action": null,
+          "checked": true,
+          "inputType": "checkbox",
+          "attributes": {
+            "id": "notify",
+            "type": "checkbox"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "eventType": "input",
+        "selectors": [
+          {
+            "by": "id",
+            "selector": "#notify"
+          },
+          {
+            "by": "role",
+            "selector": "role=checkbox[name=\"Notify the customer by email\"]"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > label:nth-of-type(2) > input"
+          }
+        ]
+      },
+      "timestamp": 1792548238671
+    },
+    {
+      "name": "transcript",
+      "type": "CUSTOM",
+      "value": {
+        "text": "the card number is [redacted]",
+        "endedAt": "2026-10-21T02:04:02.847Z",
+        "language": "en",
+        "startedAt": "2026-10-21T02:03:53.590Z"
+      },
+      "timestamp": 1792548233590
+    },
+    {
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 300,
+          "y": 360,
+          "width": 9,
+          "height": 8
+        },
+        "url": "http://127.0.0.1:7420/orders/1043",
+        "page": {
+          "url": "http://127.0.0.1:7420/orders/1043",
+          "title": "Order 1043 - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/orders/1043",
+        "target": {
+          "tag": "button",
+          "name": "Archive order",
+          "role": "button",
+          "text": "Archive order",
+          "input": "pointer",
+          "label": "Archive order",
+          "action": null,
+          "attributes": {
+            "id": "archive",
+            "type": "button",
+            "class": "ghost",
+            "data-testid": "archive-order"
+          }
+        },
+        "request": {
+          "url": "http://127.0.0.1:7420/api/orders/1043",
+          "body": {
+            "text": "{\"archived\":true}",
+            "status": "complete",
+            "encoding": "utf-8"
+          },
+          "method": "PATCH",
+          "status": 200,
+          "response": {
+            "text": "{\"id\":1043,\"archived\":true,\"archivedAt\":\"2026-10-21T02:04:00.694Z\"}",
+            "status": "complete",
+            "encoding": "utf-8"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "testid",
+            "selector": "[data-testid=\"archive-order\"]"
+          },
+          {
+            "by": "id",
+            "selector": "#archive"
+          },
+          {
+            "by": "role",
+            "selector": "role=button[name=\"Archive order\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Archive order\""
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > button"
+          }
+        ]
+      },
+      "timestamp": 1792548240692
+    }
+  ]
+}

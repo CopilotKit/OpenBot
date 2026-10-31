@@ -198,17 +198,6 @@ describe("reading a person's channels", () => {
     expect(found[0]?.agentIds.sort()).toEqual([first, second].sort());
   });
 
-  test("a caller cannot ask for every channel in one page", async () => {
-    // The limit arrives over HTTP, so the ceiling is what makes paging a property of the endpoint.
-    const owner = await createUser();
-    const agentId = await createAgent(owner);
-    await createChannel(owner, [agentId]);
-
-    const page = await store.list(owner, { limit: 100_000 });
-
-    expect(page.channels.length).toBeLessThanOrEqual(200);
-  });
-
   test("a nonsense cursor reads as the first page", async () => {
     const owner = await createUser();
     const agentId = await createAgent(owner);

@@ -1,13 +1,13 @@
 import type { ActivityMessage, Message } from "@ag-ui/core";
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
-import { queryClient } from "@/query-client";
 import type {
   SaveVoiceSessionInput,
   VoiceSessionPage,
   VoiceSessionRecord,
 } from "@openbot/shared/voice-session";
+import { queryOptions, useQuery } from "@tanstack/react-query";
+import { channelKeys } from "@/lib/channels/queries";
+import { client } from "@/lib/client";
+import { queryClient } from "@/query-client";
 import { closingOf } from "./cut";
 import {
   forgetVoiceCall,
@@ -29,6 +29,11 @@ const keys = {
 export function voiceSessionQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: keys.saved(channelId),
+    /*
+     * A channel's history waits on this (see `historyIsLoading`), so a failure is final at once:
+     * retried, it held the conversation behind the placeholder for another second.
+     */
+    retry: false,
     queryFn: async ({ signal }): Promise<VoiceSessionRecord[]> => {
       const sessions: VoiceSessionRecord[] = [];
       let cursor: string | null = null;
@@ -165,6 +170,12 @@ export function useVoiceArchive(channelId: string) {
         a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
     ),
     error: saved.error,
+    /**
+     * The saved calls have not come back yet. A channel waits on this before showing its history,
+     * so a call card is never spliced into a conversation already on screen. False after a failed
+     * load too: the conversation is readable without its calls, and `error` says what went wrong.
+     */
+    pending: saved.isPending,
   };
 }
 
@@ -192,6 +203,27 @@ export function cachedVoiceArchive(channelId: string): VoiceChatEntry[] {
   );
 }
 
+/*
+ * One card message per call, kept for as long as the call object is: the transcript skips redrawing
+ * a card whose message is the one it drew last time, and a fresh object on every render redrew every
+ * voice-chat card on every token of a reply streaming below it.
+ */
+const cardMessages = new WeakMap<VoiceChatEntry, ActivityMessage>();
+
+function cardMessageOf(call: VoiceChatEntry): ActivityMessage {
+  let message = cardMessages.get(call);
+  if (message === undefined) {
+    message = {
+      id: `voice-chat:${call.id}`,
+      role: "activity",
+      activityType: VOICE_CHAT_ACTIVITY,
+      content: { call },
+    };
+    cardMessages.set(call, message);
+  }
+  return message;
+}
+
 /** Card position is anchored to the message preceding the call, ahead of its delegated work. */
 export function withVoiceChats(
   messages: readonly Message[],
@@ -201,12 +233,7 @@ export function withVoiceChats(
   const groups = new Map<string | null, ActivityMessage[]>();
   const ids = new Set(messages.map((message) => message.id));
   for (const call of calls) {
-    const message: ActivityMessage = {
-      id: `voice-chat:${call.id}`,
-      role: "activity",
-      activityType: VOICE_CHAT_ACTIVITY,
-      content: { call },
-    };
+    const message = cardMessageOf(call);
     if (ids.has(message.id)) continue;
     const group = groups.get(call.anchorMessageId) ?? [];
     group.push(message);

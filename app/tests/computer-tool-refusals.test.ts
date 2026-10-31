@@ -25,6 +25,41 @@ function serverAnswering(status: number, body: unknown) {
     })) as unknown as typeof fetch;
 }
 
+describe("a computer still starting", () => {
+  /*
+   * A cold start that outlasted the server's wait. The model has to be told the call did nothing and
+   * is worth repeating; read as an ordinary failure it apologised and gave up on a computer that was
+   * seconds from ready.
+   */
+  test("is reported as starting and not performed, in the server's own words", async () => {
+    serverAnswering(503, {
+      error:
+        "The computer is still starting. This call was not performed. Try it again in a moment.",
+      starting: true,
+      notPerformed: true,
+    });
+
+    const outcome = await callComputer("bot-1", "/click", { method: "POST" });
+
+    expect(outcome).toEqual({
+      ok: false,
+      starting: true,
+      notPerformed: true,
+      reason:
+        "The computer is still starting. This call was not performed. Try it again in a moment.",
+    });
+  });
+
+  test("an ordinary unavailable computer is not mistaken for one starting", async () => {
+    serverAnswering(503, { error: "The computer did not respond." });
+
+    const outcome = await callComputer("bot-1", "/click", { method: "POST" });
+
+    expect(outcome.starting).toBeUndefined();
+    expect(outcome.reason).toBe("The computer did not respond.");
+  });
+});
+
 describe("a computer call the server refused", () => {
   test("a person holding the wheel is reported as that, not as stale refs", async () => {
     serverAnswering(409, {

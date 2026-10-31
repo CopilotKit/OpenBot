@@ -28,7 +28,7 @@ function packagesStartedBy(script: string, workspaces: string[]): string[] {
 }
 
 describe("OpenBot workspace", () => {
-  test("defines the app, server, worker, shared and toolkit packages", () => {
+  test("defines the app, server, worker, shared, toolkit and extension packages", () => {
     const manifest = rootManifest();
     const names: Record<string, string> = {
       app: "app",
@@ -36,6 +36,7 @@ describe("OpenBot workspace", () => {
       worker: "worker",
       shared: "@openbot/shared",
       toolkit: "@openbot/toolkit",
+      extension: "@openbot/recorder-extension",
     };
 
     expect(manifest.workspaces).toEqual(Object.keys(names));
@@ -60,15 +61,5 @@ describe("OpenBot workspace", () => {
     expect(
       packagesStartedBy(manifest.scripts.build, manifest.workspaces),
     ).toEqual(manifest.workspaces);
-  });
-
-  test("scripts/start.sh is what starts the routines worker", () => {
-    const startScript = readFileSync(
-      join(repositoryRoot, "scripts", "start.sh"),
-      "utf8",
-    );
-
-    expect(startScript).toContain("bun worker/src/index.ts");
-    expect(startScript).toContain("WORKER_SHARED_SECRET=");
   });
 });

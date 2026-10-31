@@ -40,7 +40,8 @@ because the admin is the one who sets them. A page anybody can open may not.
 
 1. **Say what happened, then what to do.** "Gmail isn't connected. Connect it to let Bots read your
    mail." Not why the screen is built the way it is.
-2. **One idea per sentence. Short sentences.** A description is one or two sentences, about 20 words.
+2. **Use complete sentences for explanations.** Page descriptions, helper text, notices, and empty-state bodies need a subject and a verb, or a direct instruction ("Connect your accounts"). Avoid fragments such as "The apps your Bots use" or "What this Bot can do." Headings, labels, buttons, and short status labels may be fragments.
+   **Keep only useful explanation.** State the action, outcome, or constraint the person needs. Remove copy that merely repeats the heading. Use natural sentence lengths; do not chop prose into fragments to meet a word count.
 3. **Plain words.** "use", not "hold a grant on". "can't", not "is unable to". Contractions are fine.
 4. **No "rather than", no em dashes, no "which is why", no "so that nothing … that may be wrong".**
    These are the marks of text that is explaining itself. Cut the clause or make it its own sentence.
@@ -59,6 +60,7 @@ because the admin is the one who sets them. A page anybody can open may not.
 
 | Before | After |
 |---|---|
+| The apps and accounts your Bots use as you. Open one to connect it or change it. | Connect your accounts so Bots can use apps on your behalf. |
 | Your connected accounts could not be loaded, so nothing is listed here rather than a list that may be wrong. Reload the page, and tell an administrator if it persists. | Couldn't load your connections. Reload the page, or ask an admin if it keeps happening. |
 | Sent to the coworker it is for. Type @ to choose one yourself. | OpenBot picks the right Bot. Type @ to choose one. |
 | Gmail is a Composio app, and this deployment has no Composio key. (to a non-admin) | Gmail isn't set up yet. An admin has to turn it on. |
@@ -73,5 +75,6 @@ because the admin is the one who sets them. A page anybody can open may not.
 | "this deployment" on a page anybody can open | OpenBot, or say what is missing |
 | A sentence over ~25 words | Split it, or cut the clause that justifies the screen |
 | "rather than", an em dash, "which is" in UI text | Rewrite as two short sentences |
+| A description beginning "The apps…", "What…", "Who…", or "Where…" without a main verb | State the action or behavior in a complete sentence; remove redundant explanation |
 | An env var, OAuth, Composio or "grant" outside Admin | Say what the person sees |
 | A test asserting long explanatory copy | Assert the short sentence, or the role and the key words |

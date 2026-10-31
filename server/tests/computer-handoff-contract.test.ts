@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import type { MiddlewareHandler } from "hono";
 import type {
   BrowserChallenge,
   ComputerControlState,
 } from "@openbot/shared/computer-control";
+import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
@@ -35,9 +35,9 @@ function fixture(
   const requests: { path: string; init?: RequestInit }[] = [];
   const provider: ComputerProvider = {
     name: "fixture",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => "http://agent-computer:4100",
-    status: async (botId) => ({ botId, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
     list: async () => [],
@@ -116,11 +116,18 @@ test("request/rejoin and exact polling/take/release/cancel identities reach the 
     "/control/release",
     "/control/cancel",
   ]);
+  // A request that does not say it is a person's own take is the Bot's, and the computer is told so.
   expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
     reason: "Sign in",
     toolCallId: "call-1",
+    source: "model",
   });
-  for (const request of requests.slice(2))
+  // A take says who is taking the wheel, the signed-in person, which the computer keeps as `heldBy`.
+  expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({
+    requestId: "request-1",
+    by: "user-1",
+  });
+  for (const request of requests.slice(3))
     expect(JSON.parse(String(request.init?.body))).toEqual({
       requestId: "request-1",
     });

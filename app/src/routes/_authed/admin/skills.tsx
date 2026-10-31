@@ -94,7 +94,7 @@ function RouteComponent() {
           Write a skill
         </Button>
       }
-      description="Named instructions anybody can run with /. A skill adds no access. It can only ask a Bot to use what it already has."
+      description="Create reusable instructions people can run with /. Skills use a Bot’s existing permissions and do not grant additional access."
       title="Skills"
     >
       {error ? (
@@ -104,7 +104,7 @@ function RouteComponent() {
       ) : null}
 
       <PageSection
-        description="For everybody in this deployment. People write their own on their Skills page."
+        description="Manage skills shared across this deployment. People can create personal skills on their Skills page."
         title="Installed"
       >
         {/* A read that failed says so; `isPending` goes false on it too, and it is not "none". */}
@@ -113,7 +113,21 @@ function RouteComponent() {
             Couldn't load skills. Reload the page.
           </p>
         ) : skills.length === 0 ? (
-          <PageEmpty>No skills yet. Write one with Write a skill.</PageEmpty>
+          <PageEmpty
+            action={
+              <Button
+                onClick={() => setWriting(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <IconPlus />
+                Write a skill
+              </Button>
+            }
+            icon={IconFileText}
+            title="No skills yet"
+          />
         ) : (
           <PageRows>
             {skills.map((skill, index) => (

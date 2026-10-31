@@ -5,10 +5,12 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { Observable } from "rxjs";
 import { z } from "zod";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import type { ApprovalRecord } from "../src/approvals/types";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { createProactiveEngine } from "../src/proactive/engine";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import {
@@ -20,9 +22,7 @@ import {
 } from "../src/proactive/restriction";
 import type { ProactiveStore } from "../src/proactive/store";
 import type { ProactiveSetting } from "../src/proactive/types";
-import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import type { WorkQueue } from "../src/work/queue";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 const catalogue = (effects: Record<string, "read" | "write">) => ({
   listServers: async () => [
@@ -246,6 +246,8 @@ describe("proactive run", () => {
         statuses.push(status);
       },
       readsFor: async () => [],
+      history: async () => ({ open: [], dismissed: [] }),
+      supersede: async () => undefined,
       countSuggestions: async () => suggestions.length,
       addSuggestion: async (input: Record<string, unknown>) => {
         const row = {
@@ -387,6 +389,8 @@ describe("proactive run", () => {
         byId: async () => ({ ...setting, enabled: true }),
         recordRun: async () => undefined,
         readsFor: async () => [{ ref: "linear/list_issues", at: new Date(0) }],
+        history: async () => ({ open: [], dismissed: [] }),
+        supersede: async () => undefined,
         undelivered: async () => [],
       } as unknown as ProactiveStore,
       memory: {
@@ -467,6 +471,166 @@ describe("proactive run", () => {
         initiator: proactiveInitiator("run"),
       }),
     ).toEqual([]);
+  });
+
+  /** One research run driven through the queue, with the turn standing in for the model. */
+  function oneRun(input: {
+    history: { open: string[]; dismissed: string[] };
+    suggest: { title: string; detail: string }[];
+    fail?: boolean;
+  }) {
+    const setting = {
+      id: "s",
+      ownerUserId: "owner",
+      agentId: "bot",
+      enabled: true,
+      focus: "",
+    } as ProactiveSetting;
+    const rows: {
+      id: string;
+      title: string;
+      detail: string;
+      deliveredAt: Date | null;
+    }[] = [];
+    const seen = {
+      instruction: "",
+      refusals: [] as string[],
+      superseded: [] as string[],
+      notified: [] as string[],
+    };
+    let given = false;
+    const engine = createProactiveEngine({
+      store: {
+        claimDue: async () => [],
+        byId: async () => setting,
+        recordRun: async () => undefined,
+        readsFor: async () => [],
+        history: async () => input.history,
+        supersede: async (_settingId: string, runId: string) => {
+          seen.superseded.push(runId);
+        },
+        countSuggestions: async () => rows.length,
+        addSuggestion: async (row: { title: string; detail: string }) => {
+          const added = { ...row, id: `s${rows.length}`, deliveredAt: null };
+          rows.push(added);
+          return added;
+        },
+        undelivered: async () => rows.filter((row) => !row.deliveredAt),
+        markDelivered: async (id: string) => {
+          const row = rows.find((entry) => entry.id === id);
+          if (row) row.deliveredAt = new Date();
+        },
+      } as unknown as ProactiveStore,
+      memory: {
+        formMemory: async () => ({
+          id: "m",
+          duplicate: false,
+          forgotten: false,
+        }),
+      },
+      queue: {
+        offer: async () => "queued",
+        claim: async ({ kind }: { kind: string }) => {
+          if (given || kind !== "proactive.run") return [];
+          given = true;
+          return [
+            {
+              kind,
+              key: "k",
+              payload: { settingId: "s", runId: "run" },
+              attempts: 1,
+            },
+          ];
+        },
+        renew: async () => true,
+        finish: async () => true,
+        release: async () => true,
+      } as unknown as WorkQueue,
+      owner: "worker",
+      runTurn: async ({ instruction }) => {
+        seen.instruction = instruction;
+        const tools = await engine.toolsForTurn({
+          ownerUserId: "owner",
+          agentId: "bot",
+          initiator: proactiveInitiator("run"),
+        });
+        const suggest = tools.find(
+          (tool) => tool.definition.name === "suggest_next_step",
+        );
+        for (const [index, args] of input.suggest.entries()) {
+          const result = String(
+            await suggest?.execute(args, {
+              toolCallId: `c${index}`,
+              signal: new AbortController().signal,
+            }),
+          );
+          if (result.startsWith("Refused.")) seen.refusals.push(result);
+        }
+        if (input.fail) throw new Error("model went away");
+        return { replyText: "done" };
+      },
+      resolveScope: async () => ({
+        ownerUserId: "owner",
+        channelId: "c",
+        agentId: "bot",
+        threadId: "t",
+      }),
+      notify: async (_scope, message) => {
+        seen.notified.push(message.text);
+      },
+      startTask: async () => undefined,
+      catalogue: { listServers: async () => [] },
+      mintThreadId: () => "t",
+    });
+    return { engine, rows, seen };
+  }
+
+  test("a run is shown what is open and what was dismissed, and is told to keep tool names out", async () => {
+    const { engine, seen } = oneRun({
+      history: { open: ["Reply to Sam"], dismissed: ["Archive old tickets"] },
+      suggest: [],
+    });
+    await engine.sweep();
+    expect(seen.instruction).toContain('- "Reply to Sam"');
+    expect(seen.instruction).toContain('- "Archive old tickets"');
+    expect(seen.instruction).toContain("Never mention tool names");
+    expect(seen.instruction).toContain("suggest nothing rather than saying so");
+  });
+
+  test("a finished run replaces the open list, and only what is new is announced", async () => {
+    const { engine, rows, seen } = oneRun({
+      history: { open: ["Reply to Sam"], dismissed: ["Archive old tickets"] },
+      suggest: [
+        { title: "reply to  sam", detail: "Still waiting on the spec." },
+        { title: "Archive old tickets", detail: "Again." },
+        { title: "Book the venue", detail: "The hold expires Friday." },
+        { title: "Book the venue", detail: "Twice in one run." },
+      ],
+    });
+    await engine.sweep();
+    expect(rows.map((row) => row.title)).toEqual([
+      "reply to  sam",
+      "Book the venue",
+    ]);
+    expect(seen.refusals).toHaveLength(2);
+    expect(seen.superseded).toEqual(["run"]);
+    expect(seen.notified).toHaveLength(1);
+    expect(seen.notified[0]).toContain("Book the venue");
+    // The kept one is recorded as delivered, so it is not announced on a later pass either.
+    expect(rows.every((row) => row.deliveredAt)).toBe(true);
+  });
+
+  test("a run that fails leaves the open list as it was", async () => {
+    const { engine, seen } = oneRun({
+      history: { open: ["Reply to Sam"], dismissed: [] },
+      suggest: [
+        { title: "Book the venue", detail: "The hold expires Friday." },
+      ],
+      fail: true,
+    });
+    await engine.sweep().catch(() => undefined);
+    expect(seen.superseded).toEqual([]);
+    expect(seen.notified).toHaveLength(1);
   });
 });
 

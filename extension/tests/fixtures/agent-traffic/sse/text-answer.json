@@ -1,0 +1,131 @@
+{
+  "name": "text-answer",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"7832e216-ead6-41f5-acda-ccfea87c636c\",\"runId\":\"a231ee27-37a3-4b37-80ff-c5152bcec8fd\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"ac2e1424-b82b-4a52-a912-92757ad25d25\",\"role\":\"user\",\"content\":\"Reply with exactly five words about the sea. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 68,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"7832e216-ead6-41f5-acda-ccfea87c636c\",\"runId\":\"a231ee27-37a3-4b37-80ff-c5152bcec8fd\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"7832e216-ead6-41f5-acda-ccfea87c636c\",\"runId\":\"a231ee27-37a3-4b37-80ff-c5152bcec8fd\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"ac2e1424-b82b-4a52-a912-92757ad25d25\",\"role\":\"user\",\"content\":\"Reply with exactly five words about the sea. Call no tools.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1187,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\"V\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\"ast\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\",\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\" deep\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\",\"}\n\n"
+        },
+        {
+          "at": 1188,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\" mysterious\"}\n\n"
+        },
+        {
+          "at": 1195,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\",\"}\n\n"
+        },
+        {
+          "at": 1197,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\" blue\"}\n\n"
+        },
+        {
+          "at": 1204,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\",\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\" calming\"}\n\n"
+        },
+        {
+          "at": 1215,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 1428,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"7832e216-ead6-41f5-acda-ccfea87c636c\",\"runId\":\"a231ee27-37a3-4b37-80ff-c5152bcec8fd\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":211,\"outputTokens\":13,\"totalTokens\":224,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 1430,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "145ba127-4a61-4eae-baf9-9e53c0f68dfd",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538292417
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "ac2e1424-b82b-4a52-a912-92757ad25d25",
+            "runId": null,
+            "threadId": "7832e216-ead6-41f5-acda-ccfea87c636c",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 59,
+            "text": "Reply with exactly five words about the sea. Call no tools.",
+            "seq": 2
+          },
+          "timestamp": 1792538292469
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "a231ee27-37a3-4b37-80ff-c5152bcec8fd",
+            "threadId": "7832e216-ead6-41f5-acda-ccfea87c636c",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538292487
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0fd6567cb44ca5c9006ad7f6b5965c87d0adfc8023bd737db2",
+            "runId": "a231ee27-37a3-4b37-80ff-c5152bcec8fd",
+            "threadId": "7832e216-ead6-41f5-acda-ccfea87c636c",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 38,
+            "text": "Vast, deep, mysterious, blue, calming.",
+            "seq": 4
+          },
+          "timestamp": 1792538293846
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "a231ee27-37a3-4b37-80ff-c5152bcec8fd",
+            "threadId": "7832e216-ead6-41f5-acda-ccfea87c636c",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792538293846
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

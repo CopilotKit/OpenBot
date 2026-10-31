@@ -392,7 +392,7 @@ export const GALLERY: GalleryComponent[] = [
       status: "executing",
       args: {
         title: "Plan your next project",
-        description: "A few details to prepare a useful first draft.",
+        description: "Provide a few details to help prepare your first draft.",
         fields: [
           { id: "team", label: "Team name", type: "text", required: true },
           { id: "email", label: "Work email", type: "email", required: true },

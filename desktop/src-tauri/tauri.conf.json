@@ -27,15 +27,24 @@
     "macOS": {
       "entitlements": "./Entitlements.plist"
     },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    },
     "linux": {
-      "deb": { "depends": ["pkexec", "procps", "lsof", "ca-certificates"] },
+      "deb": {
+        "depends": ["pkexec", "procps", "lsof", "ca-certificates"],
+        "postRemoveScript": "./linux/remove.sh"
+      },
       "rpm": {
         "depends": [
           "/usr/bin/pkexec",
           "/usr/bin/ps",
           "/usr/bin/lsof",
           "ca-certificates"
-        ]
+        ],
+        "postRemoveScript": "./linux/remove.sh"
       }
     },
     "targets": ["dmg", "nsis", "appimage", "deb", "rpm"],

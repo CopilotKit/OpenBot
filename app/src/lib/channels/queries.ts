@@ -21,7 +21,48 @@ export type AgentChannel = {
    * history, and one whose history this deployment cannot reach. See `channel-chat.tsx`.
    */
   lastMessageAt: string | null;
+  /**
+   * What this conversation is waiting on right now, oldest first. See `ChannelWork`.
+   *
+   * Read with the channel and replaced whole by every busy event, so a reload shows the same thing
+   * the socket last said. Absent from a server that predates it, which reads as nothing.
+   */
+  work?: ChannelWork[];
+  /**
+   * When the server read `work`, from the socket event that last set it. Absent on a fetched read.
+   * Kept so an older event arriving late does not put back a list that has moved on.
+   */
+  workAt?: string;
 };
+
+/**
+ * Something a conversation is waiting on that nobody's browser is running: a Bot its Bot asked,
+ * answering out of sight, or a routine firing into it.
+ *
+ * The server reads it from the hop queue and the routine runs, so it holds for as long as the work
+ * does, across reloads and replicas. `since` is when it started, for the timer a person watches.
+ */
+export type ChannelWork =
+  | {
+      kind: "handoff";
+      key: string;
+      /** The Bot that was asked. */
+      botId: string;
+      /** Its name when it was asked, or null. Prefer the roster's name when the person has one. */
+      botName: string | null;
+      /** ISO-8601. */
+      since: string;
+    }
+  | {
+      kind: "routine";
+      key: string;
+      routineId: string;
+      /** The Bot the routine runs as. */
+      botId: string;
+      botName: string | null;
+      /** ISO-8601. */
+      since: string;
+    };
 
 /** A channel plus what the roster renders about it. */
 export type ChannelSummary = AgentChannel & {
@@ -38,10 +79,10 @@ export type ChannelSummary = AgentChannel & {
   /**
    * Whether a turn is running in this channel right now.
    *
-   * Socket-only and transient: the server never persists it and the roster query never returns it,
-   * so it is undefined until a busy event arrives and is dropped whenever the roster is refetched.
-   * A headless turn — a handoff hop, a relay — sets it, which is how the roster shows work the
-   * browser never streamed.
+   * Mostly socket-only and transient: a person's own run is announced and never stored, so a
+   * refetch drops it. The roster returns it true for a channel with `work`, which is stored, so a
+   * conversation a Bot is still answering in stays lit across a reload. A headless turn — a handoff
+   * hop, a relay — sets it, which is how the roster shows work the browser never streamed.
    */
   busy?: boolean;
 };
@@ -49,6 +90,8 @@ export type ChannelSummary = AgentChannel & {
 export const channelKeys = {
   all: ["channels"] as const,
   list: () => ["channels", "list"] as const,
+  /** Every channel read by id, to refetch them together. */
+  details: () => ["channels", "detail"] as const,
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
 };
 

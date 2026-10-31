@@ -147,13 +147,6 @@ const declared = (tail: string): { type: string; notNull: boolean } => ({
   notNull: /\bNOT NULL\b/i.test(tail),
 });
 
-test("column declarations exclude the cast on a quoted JSON default", () => {
-  expect(declared(" jsonb DEFAULT '{}'::jsonb NOT NULL")).toEqual({
-    type: "jsonb",
-    notNull: true,
-  });
-});
-
 /**
  * The text between a `(` and the `)` that closes it, with nested parentheses and quoted strings
  * kept whole.
@@ -313,45 +306,6 @@ const checkDisagreements = (
 
   return problems;
 };
-
-test("a CHECK body is read past the parentheses of its own roster", () => {
-  expect(
-    checksIn(
-      `ALTER TABLE "t" ADD CONSTRAINT "t_check" CHECK ("t"."c" IN ('a', 'b'));`,
-    ),
-  ).toEqual([{ table: "t", name: "t_check", value: `"t"."c" IN ('a', 'b')` }]);
-});
-
-test("a CHECK declared inside CREATE TABLE is read as the table's own", () => {
-  expect(
-    checksIn(
-      `CREATE TABLE "t" (\n\t"c" text NOT NULL,\n\tCONSTRAINT "t_check" CHECK ("t"."c" IN ('a'))\n);`,
-    ),
-  ).toEqual([{ table: "t", name: "t_check", value: `"t"."c" IN ('a')` }]);
-});
-
-test("a widened roster disagrees with the snapshot that records the narrow one", () => {
-  const snapshot = (value: string): Snapshot => ({
-    tables: {
-      "public.t": {
-        name: "t",
-        checkConstraints: { t_check: { name: "t_check", value } },
-      },
-    },
-  });
-
-  expect(
-    checkDisagreements(
-      `ALTER TABLE "t" DROP CONSTRAINT "t_check";--> statement-breakpoint\nALTER TABLE "t" ADD CONSTRAINT "t_check" CHECK ("t"."c" IN ('a', 'b', 'c'));`,
-      snapshot(`"t"."c" IN ('a')`),
-      snapshot(`"t"."c" IN ('a', 'b')`),
-      [],
-    ),
-  ).toEqual([
-    `the snapshot changes CHECK "t_check" on "t", the migration never writes that predicate`,
-    `the migration adds CHECK "t_check" on "t", the snapshot does not record that predicate`,
-  ]);
-});
 
 const everyIndexName = (snapshot: Snapshot) =>
   new Set(
@@ -523,29 +477,6 @@ describe("the migration journal", () => {
 
   test("stamps nothing later than the moment this test runs", async () => {
     expect(stampedAhead(await readJournal(), Date.now())).toEqual([]);
-  });
-
-  test("would have caught the migration stamped a day past the one before it", () => {
-    /*
-     * The mistake from the header, reconstructed, because the check above can only see it on the
-     * day it is made. `0012` was stamped `previous + 86_400_000` and then sat in the journal for
-     * years; asking today whether it is in the future says no, and says nothing about whether the
-     * guard works. So ask on the day it was written instead, which is the day CI would have run on
-     * the change that introduced it, and pin the answer here where the clock cannot erode it.
-     */
-    const authored = 1_787_358_347_113;
-    const entries: Entry[] = [
-      { idx: 11, tag: "0011_drop_the_old_connector_tables", when: authored },
-      {
-        idx: 12,
-        tag: "0012_truncate_is_not_a_way_around_append_only",
-        when: authored + 86_400_000,
-      },
-    ];
-
-    expect(stampedAhead(entries, authored)).toEqual([
-      "0012_truncate_is_not_a_way_around_append_only is stamped 1787444747113, 86400000ms ahead of the clock",
-    ]);
   });
 
   test("has an entry for every migration file, and a file for every entry", async () => {

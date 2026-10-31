@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { auditEvents } from "../db/schema/core";
 import {
@@ -193,6 +193,55 @@ export function createProactiveStore(database: Database) {
         .returning();
       if (!row) throw new Error("Suggestion insert returned no row.");
       return row;
+    },
+    /**
+     * What a setting already suggested, for the next run to build on: the titles still open, and the
+     * ones the person dismissed in the last 30 days, newest first.
+     */
+    async history(
+      settingId: string,
+    ): Promise<{ open: string[]; dismissed: string[] }> {
+      const titles = (status: "open" | "dismissed") =>
+        database
+          .select({ title: proactiveSuggestions.title })
+          .from(proactiveSuggestions)
+          .where(
+            and(
+              eq(proactiveSuggestions.settingId, settingId),
+              eq(proactiveSuggestions.status, status),
+              ...(status === "dismissed"
+                ? [
+                    gte(
+                      proactiveSuggestions.resolvedAt,
+                      new Date(Date.now() - 30 * 86_400_000),
+                    ),
+                  ]
+                : []),
+            ),
+          )
+          .orderBy(desc(proactiveSuggestions.createdAt))
+          .limit(20);
+      const [open, dismissed] = await Promise.all([
+        titles("open"),
+        titles("dismissed"),
+      ]);
+      return {
+        open: [...new Set(open.map((row) => row.title))],
+        dismissed: [...new Set(dismissed.map((row) => row.title))],
+      };
+    },
+    /** A finished run's suggestions replace whatever earlier runs left open. */
+    async supersede(settingId: string, runId: string) {
+      await database
+        .update(proactiveSuggestions)
+        .set({ status: "superseded", resolvedAt: new Date() })
+        .where(
+          and(
+            eq(proactiveSuggestions.settingId, settingId),
+            eq(proactiveSuggestions.status, "open"),
+            ne(proactiveSuggestions.runId, runId),
+          ),
+        );
     },
     async undelivered(runId: string): Promise<ProactiveSuggestion[]> {
       return database

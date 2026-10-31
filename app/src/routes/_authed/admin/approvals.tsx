@@ -9,7 +9,7 @@ export const Route = createFileRoute("/_authed/admin/approvals")({
 function AdminApprovalsPage() {
   return (
     <PageShell
-      description="What members' Bots must ask before they act, rules for everyone, and requests to use shared accounts."
+      description="Set approval rules for members’ Bots and review requests to use shared accounts."
       title="Approvals"
     >
       <TeamApprovalSettings />

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
+import { eq, inArray } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";

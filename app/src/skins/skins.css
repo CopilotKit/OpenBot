@@ -1,0 +1,9 @@
+/*
+ * Each skin scopes its tokens to `:root[data-skin="<id>"]` and `:root[data-skin="<id>"].dark`.
+ * That selector outranks OpenBot's own `.dark`, so a token a skin sets for light it must also set
+ * for dark, or dark mode would show the skin's light value. `app/tests/skins.test.ts` holds every
+ * skin to that.
+ */
+@import "./openduet/skin.css";
+@import "./opendots/skin.css";
+@import "./openmuse/skin.css";

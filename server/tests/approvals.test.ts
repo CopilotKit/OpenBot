@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { z } from "zod";
 import { createApprovalRoutes } from "../src/approvals/routes";
 import * as serviceModule from "../src/approvals/service";
@@ -11,10 +12,10 @@ import {
   approvalAction,
   withApprovalContext,
 } from "../src/approvals/types";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { CatalogueEntryUnknownError } from "../src/plugins/store";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 const context = {
   runId: "run",
@@ -279,9 +280,9 @@ test("computer policy runs before personal approval and simultaneous once reques
   const gateway = createComputerGateway({
     provider: {
       name: "test",
-      isolation: "per-bot",
+      isolation: "per-person",
       locate: async () => "http://computer:4100",
-      status: async (botId) => ({ botId, state: "ready" }),
+      status: async (seat) => ({ botId: seat.botId, state: "ready" }),
       list: async () => [],
       stop: async () => ({ wasRunning: true }),
       reset: async () => ({ cleared: true }),
@@ -315,7 +316,7 @@ test("computer policy runs before personal approval and simultaneous once reques
       },
       () =>
         gateway.runCommand(
-          "bot",
+          botSeat("bot"),
           { id: "owner", userId: "owner" },
           { command: "pwd" },
         ),
@@ -339,7 +340,7 @@ test("computer policy runs before personal approval and simultaneous once reques
   denied = true;
   await expect(
     withApprovalContext({ ...context, runId: "other" }, () =>
-      gateway.runCommand("bot", { id: "owner" }, { command: "pwd" }),
+      gateway.runCommand(botSeat("bot"), { id: "owner" }, { command: "pwd" }),
     ),
   ).rejects.toThrow();
   expect(await store.list("owner")).toHaveLength(1);

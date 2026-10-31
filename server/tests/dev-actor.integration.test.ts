@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { DEV_ACTOR, initializeDevActorUser } from "../src/auth/dev-actor";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema";
+import { createProfileStore } from "../src/people/profile";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -74,9 +75,48 @@ describe("development actor persistence", () => {
         expect(restoredRows[0]).toMatchObject({
           id: DEV_ACTOR.id,
           email: DEV_ACTOR.email,
-          name: DEV_ACTOR.name ?? DEV_ACTOR.email,
+          name: "Changed",
         });
 
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+
+  test("profile edits survive startup without changing identity or onboarding", async () => {
+    const rollback = new Error("rollback profile test");
+    await expect(
+      database.transaction(async (transaction) => {
+        await initializeDevActorUser(transaction, true);
+        const profile = createProfileStore(transaction);
+        expect((await profile.read(DEV_ACTOR.id)).needsName).toBe(true);
+        await transaction
+          .update(users)
+          .set({
+            preferences: { selfHostBannerDismissed: true },
+            onboardingCompletedAt: new Date("2026-01-01"),
+          })
+          .where(eq(users.id, DEV_ACTOR.id));
+        await profile.save(DEV_ACTOR.id, "Sam");
+        await initializeDevActorUser(transaction, true);
+        expect(await profile.read(DEV_ACTOR.id)).toEqual({
+          name: "Sam",
+          needsName: false,
+        });
+        const [user] = await transaction
+          .select()
+          .from(users)
+          .where(eq(users.id, DEV_ACTOR.id));
+        expect(user).toMatchObject({
+          id: DEV_ACTOR.id,
+          email: DEV_ACTOR.email,
+          preferences: { selfHostBannerDismissed: true, profileNameSet: true },
+          onboardingCompletedAt: new Date("2026-01-01"),
+        });
+        // Even deliberately choosing the old placeholder counts as completing the prompt.
+        await profile.save(DEV_ACTOR.id, DEV_ACTOR.email);
+        await initializeDevActorUser(transaction, true);
+        expect((await profile.read(DEV_ACTOR.id)).needsName).toBe(false);
         throw rollback;
       }),
     ).rejects.toBe(rollback);

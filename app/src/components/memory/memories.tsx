@@ -1,4 +1,4 @@
-import { IconPlus, IconRobot, IconUser } from "@tabler/icons-react";
+import { IconBrain, IconPlus, IconRobot, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import {
@@ -163,7 +163,9 @@ export function MemoryList({
           ))}
         </PageRows>
       ) : (
-        <PageEmpty>No memories yet. Add one with Remember a fact.</PageEmpty>
+        <PageEmpty icon={IconBrain} title="No memories yet">
+          Add one with Remember a fact.
+        </PageEmpty>
       )}
     </PageSection>
   );

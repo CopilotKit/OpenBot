@@ -2,6 +2,8 @@ import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
+import type { RunCli } from "../server/src/learning/ensure-container";
+import { runLocalIntelligenceCli } from "./local-intelligence-cli";
 
 export type SetupProject = { id: string; name: string };
 export type LearningConnection = {
@@ -57,6 +59,69 @@ export function intelligenceApiOrigin(value: string): string {
     );
   }
   return url.origin;
+}
+
+function loopbackOrigin(value: string): string {
+  const url = new URL(intelligenceApiOrigin(value));
+  if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+    url.hostname = "localhost";
+  return url.origin;
+}
+
+/** Local evaluation authenticates and proxies session requests on its dashboard origin. */
+export async function learningSessionOrigin(
+  apiUrl: string,
+  run: RunCli = runLocalIntelligenceCli,
+): Promise<string> {
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(apiUrl).hostname))
+    return apiUrl;
+  try {
+    const result = await run(["local", "list", "--json"], process.cwd());
+    if (result.exitCode === 127) return apiUrl;
+    const status: unknown = JSON.parse(result.stdout);
+    if (
+      result.exitCode !== 0 ||
+      !object(status) ||
+      status.status !== "completed" ||
+      !Array.isArray(status.stacks)
+    )
+      throw new Error();
+    const matches = status.stacks.filter(
+      (stack: unknown) =>
+        object(stack) &&
+        object(stack.urls) &&
+        typeof stack.urls.api === "string" &&
+        loopbackOrigin(stack.urls.api) === loopbackOrigin(apiUrl),
+    );
+    // A manually hosted local deployment has no CLI record; retain its existing API login flow.
+    if (matches.length === 0) return apiUrl;
+    if (matches.length !== 1) throw new Error();
+    const stack: unknown = matches[0];
+    if (
+      !object(stack) ||
+      !object(stack.urls) ||
+      typeof stack.urls.dashboard !== "string"
+    )
+      throw new Error();
+    const dashboard = new URL(stack.urls.dashboard);
+    if (
+      dashboard.protocol !== "http:" ||
+      !["localhost", "cpk.localhost", "127.0.0.1", "[::1]"].includes(
+        dashboard.hostname,
+      ) ||
+      dashboard.username ||
+      dashboard.password ||
+      dashboard.pathname !== "/" ||
+      dashboard.search ||
+      dashboard.hash
+    )
+      throw new Error();
+    return dashboard.origin;
+  } catch {
+    throw new SetupError(
+      "Could not identify the local Intelligence dashboard for this API. Check that the local Intelligence installation is available and that its API URL is correct, then try again.",
+    );
+  }
 }
 
 async function openBrowser(signal: AbortSignal): Promise<SetupBrowser> {
@@ -139,6 +204,7 @@ export async function setupSelfHostedLearning(options: {
   ) => Promise<string>;
   signal?: AbortSignal;
   openBrowser?: (signal: AbortSignal) => Promise<SetupBrowser>;
+  runCli?: RunCli;
   pollIntervalMs?: number;
   timeoutMs?: number;
 }): Promise<LearningConnection> {
@@ -165,6 +231,13 @@ export async function setupSelfHostedLearning(options: {
   signal.addEventListener("abort", cancel, { once: true });
   try {
     signal.throwIfAborted();
+    const sessionOrigin = await learningSessionOrigin(
+      apiUrl,
+      options.runCli ??
+        ((args, directory) =>
+          runLocalIntelligenceCli(args, directory, { signal })),
+    );
+    signal.throwIfAborted();
     session = await (options.openBrowser ?? openBrowser)(signal);
     signal.throwIfAborted();
     const browser = session;
@@ -174,16 +247,16 @@ export async function setupSelfHostedLearning(options: {
       data?: Record<string, string>,
     ) => {
       signal.throwIfAborted();
-      return browser.request(`${apiUrl}${path}`, {
+      return browser.request(`${sessionOrigin}${path}`, {
         method,
-        headers: { Origin: apiUrl, Accept: "application/json" },
+        headers: { Origin: sessionOrigin, Accept: "application/json" },
         ...(data ? { data } : {}),
         maxRedirects: 0,
         signal,
       });
     };
-    const signIn = new URL("/auth/signin", apiUrl);
-    signIn.searchParams.set("callbackUrl", `${apiUrl}/`);
+    const signIn = new URL("/auth/signin", sessionOrigin);
+    signIn.searchParams.set("callbackUrl", `${sessionOrigin}/`);
     await session.navigate(signIn.toString());
     while (true) {
       const me = await request("/api/me");

@@ -1,0 +1,83 @@
+{
+  "description": "End-to-end run 1 (2026-10-21, real Chrome, CopilotKit main's learning demo on :7620): the person typed a message ending in a test card into CopilotKit's React chat box. `recorded` is the Recorder's input event exactly as Intelligence stored it (seq 1792542749188006): its value masked, its text (the textarea's text content, a keystroke behind its value) still holding the card's first 15 digits. `copilotkit` is the same keystroke as the demo's own CopilotKit capture stored it, unmasked, in its learning sink (seq 7).",
+  "recorded": {
+    "name": "input",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 697,
+        "y": 313,
+        "width": 514,
+        "height": 72
+      },
+      "seq": 1792542749188006,
+      "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+      "page": {
+        "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+        "title": "Create Next App"
+      },
+      "step": "input",
+      "route": "/learning/deals/deal-1",
+      "target": {
+        "tag": "textarea",
+        "name": "Type a message...",
+        "role": "textbox",
+        "text": "Please look up this deal's history and then get it approved. Card on file for the invoice: 4111 1111 1111 111",
+        "value": "Please look up this deal's history and then get it approved. Card on file for the invoice: [redacted]",
+        "action": null,
+        "inputType": "textarea",
+        "attributes": {
+          "rows": "1",
+          "class": "cpk:bg-transparent cpk:outline-none cpk:antialiased cpk:font-regular cpk:text-[16px] cpk:placeholder:text-[#00000077] cpk:dark:placeholder:text-[#fffc] cpk:w-full cpk:py-3 cpk:px-5",
+          "style": "overflow: auto; resize: none; max-height: 144px; height: 72px;",
+          "data-testid": "copilot-chat-textarea",
+          "placeholder": "Type a message..."
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "eventType": "input",
+      "selectors": [
+        {
+          "by": "testid",
+          "selector": "[data-testid=\"copilot-chat-textarea\"]"
+        },
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Type a message...\"]"
+        },
+        {
+          "by": "css",
+          "selector": "[data-testid=\"copilot-chat-input\"] > div > div:nth-of-type(2) > textarea"
+        }
+      ]
+    },
+    "timestamp": 1792542763687
+  },
+  "copilotkit": {
+    "name": "input",
+    "timestamp": 1792542763688,
+    "value": {
+      "eventType": "input",
+      "target": {
+        "tag": "textarea",
+        "role": null,
+        "action": null,
+        "text": "Please look up this deal's history and then get it approved. Card on file for the invoice: 4111 1111 1111 111",
+        "attributes": {
+          "data-testid": "copilot-chat-textarea",
+          "placeholder": "Type a message...",
+          "class": "cpk:bg-transparent cpk:outline-none cpk:antialiased cpk:font-regular cpk:text-[16px] cpk:placeholder:text-[#00000077] cpk:dark:placeholder:text-[#fffc] cpk:w-full cpk:py-3 cpk:px-5",
+          "rows": "1",
+          "style": "overflow: auto; resize: none; max-height: 144px; height: 72px;"
+        },
+        "value": "Please look up this deal's history and then get it approved. Card on file for the invoice: 4111 1111 1111 1111"
+      },
+      "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+      "route": "/learning/deals/deal-1",
+      "seq": 7
+    }
+  }
+}

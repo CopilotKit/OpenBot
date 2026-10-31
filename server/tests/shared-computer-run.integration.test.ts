@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createSharedComputerProvider } from "../src/computer/provider";
@@ -106,13 +107,13 @@ describe("a Bot on the one shared computer, against the table", () => {
     const computer = sharedComputer();
     try {
       const { gateway, rows, snapshots } = gatewayOn(computer);
-      const taken = await gateway.snapshot("bot-1");
+      const taken = await gateway.snapshot(botSeat("bot-1"));
 
-      await gateway.resetComputer("bot-1", ACTOR);
-      expect(await snapshots.load("bot-1")).toBeUndefined();
+      await gateway.resetComputer(botSeat("bot-1"), ACTOR);
+      expect(await snapshots.load("bot:bot-1")).toBeUndefined();
       computer.replaceRun("run-2");
       // The row is gone, so this inserts rather than conflicting, which is the whole of the race.
-      await snapshots.save("bot-1", {
+      await snapshots.save("bot:bot-1", {
         snapshotId: taken.snapshotId,
         url: taken.url,
         elements: new Map(
@@ -120,10 +121,13 @@ describe("a Bot on the one shared computer, against the table", () => {
         ),
         session: "run-1",
       });
-      expect((await snapshots.load("bot-1"))?.url).toBe(DEAD.url);
+      expect((await snapshots.load("bot:bot-1"))?.url).toBe(DEAD.url);
 
       const refusal = await gateway
-        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .click(botSeat("bot-1"), ACTOR, {
+          ref: "e9",
+          snapshotId: taken.snapshotId,
+        })
         .catch((error: unknown) => error);
 
       expect(refusal).toBeInstanceOf(StaleSnapshotError);
@@ -142,16 +146,16 @@ describe("a Bot on the one shared computer, against the table", () => {
     const computer = sharedComputer();
     try {
       const { gateway, snapshots } = gatewayOn(computer);
-      await gateway.snapshot("bot-1");
-      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+      await gateway.snapshot(botSeat("bot-1"));
+      expect((await snapshots.load("bot:bot-1"))?.snapshotId).toBe(7);
 
       computer.replaceRun("run-2");
       computer.showing(FRESH);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
 
       // Read through a second store, the way a second replica would, rather than from the one that
       // wrote it.
-      const held = await createSnapshotStore(database).load("bot-1");
+      const held = await createSnapshotStore(database).load("bot:bot-1");
       expect(held?.snapshotId).toBe(1);
       expect(held?.url).toBe(FRESH.url);
       expect(held?.session).toBe("run-2");
@@ -166,12 +170,12 @@ describe("a Bot on the one shared computer, against the table", () => {
     const computer = sharedComputer();
     try {
       const { gateway, rows } = gatewayOn(computer);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
       computer.replaceRun("run-2");
       computer.showing(FRESH);
-      const fresh = await gateway.snapshot("bot-1");
+      const fresh = await gateway.snapshot(botSeat("bot-1"));
 
-      await gateway.click("bot-1", ACTOR, {
+      await gateway.click(botSeat("bot-1"), ACTOR, {
         ref: "e1",
         snapshotId: fresh.snapshotId,
       });
@@ -189,12 +193,12 @@ describe("a Bot on the one shared computer, against the table", () => {
     const computer = sharedComputer();
     try {
       const { gateway, snapshots } = gatewayOn(computer);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
       computer.showing(FRESH);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
 
-      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
-      expect((await snapshots.load("bot-1"))?.url).toBe(DEAD.url);
+      expect((await snapshots.load("bot:bot-1"))?.snapshotId).toBe(7);
+      expect((await snapshots.load("bot:bot-1"))?.url).toBe(DEAD.url);
     } finally {
       computer.stop();
     }
@@ -210,10 +214,10 @@ describe("a Bot on the one shared computer, against the table", () => {
     const computer = sharedComputer();
     try {
       const { gateway, rows } = gatewayOn(computer);
-      const taken = await gateway.snapshot("bot-1");
+      const taken = await gateway.snapshot(botSeat("bot-1"));
       computer.stopAnswering();
 
-      await gateway.click("bot-1", ACTOR, {
+      await gateway.click(botSeat("bot-1"), ACTOR, {
         ref: "e9",
         snapshotId: taken.snapshotId,
       });
@@ -260,16 +264,72 @@ describe("a Bot on the one shared computer, against the table", () => {
         snapshots,
       });
 
-      const taken = await gateway.snapshot("bot-1");
-      expect((await snapshots.load("bot-1"))?.session).toBeUndefined();
+      const taken = await gateway.snapshot(botSeat("bot-1"));
+      expect((await snapshots.load("bot:bot-1"))?.session).toBeUndefined();
 
-      await gateway.click("bot-1", ACTOR, {
+      await gateway.click(botSeat("bot-1"), ACTOR, {
         ref: "e9",
         snapshotId: taken.snapshotId,
       });
       expect(rows.at(-1)?.payload.element).toMatchObject({
         name: "Confirm transfer",
       });
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
+/**
+ * Two people on one public Bot, on the one computer they share.
+ *
+ * The regression this pins: the shared computer kept one profile, one page and one snapshot row per
+ * Bot, so whoever used a public Bot last left their signed-in page where the next person's Bot would
+ * act on it, and a ref one person held resolved against the other's screen. Each person's seat now
+ * has its own browser on the computer and its own row here.
+ */
+describe("two people on one public Bot, on the shared computer", () => {
+  test("each keeps their own page and snapshot, and one's ref never acts on the other's", async () => {
+    const asked: (string | null)[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        const path = new URL(request.url).pathname;
+        const person = request.headers.get("x-openbot-person-id");
+        asked.push(person);
+        if (path === "/run") return Response.json({ run: `run-${person}` });
+        // Ada's seat is on her bank; Bo's is on a sign-in page.
+        if (path === "/snapshot")
+          return Response.json(person === "ada" ? DEAD : FRESH);
+        if (path === "/click")
+          return Response.json({ action: "click", url: "x", elapsedMs: 1 });
+        return Response.json({ error: path }, { status: 404 });
+      },
+    });
+    try {
+      const { gateway, snapshots, rows } = gatewayOn({
+        baseUrl: `http://127.0.0.1:${server.port}`,
+      } as ReturnType<typeof sharedComputer>);
+      const ada = await gateway.seatFor("pub-bot", "ada");
+      const bo = await gateway.seatFor("pub-bot", "bo");
+
+      await gateway.snapshot(ada);
+      await gateway.snapshot(bo);
+      expect((await snapshots.load("person:ada/pub-bot"))?.url).toBe(DEAD.url);
+      expect((await snapshots.load("person:bo/pub-bot"))?.url).toBe(FRESH.url);
+      // Every call named whose seat it was.
+      expect(asked.every((person) => person === "ada" || person === "bo")).toBe(
+        true,
+      );
+
+      // Bo's Bot citing the ref Ada's page handed out: refused, and never named as her button.
+      const refusal = await gateway
+        .click(bo, ACTOR, { ref: "e9", snapshotId: DEAD.snapshotId })
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(StaleSnapshotError);
+      expect(JSON.stringify(rows.at(-1)?.payload ?? {})).not.toContain(
+        "Confirm transfer",
+      );
     } finally {
       server.stop(true);
     }

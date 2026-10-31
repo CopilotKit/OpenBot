@@ -1,4 +1,11 @@
 import {
+  classifyAttachment,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
+  namesNoFormat,
+} from "@openbot/shared/attachments";
+import {
   and,
   eq,
   exists,
@@ -19,15 +26,8 @@ import {
   channels,
   intelligenceChannelMappings,
 } from "../db/schema";
-import {
-  classifyAttachment,
-  MAX_ATTACHMENTS_PER_MESSAGE,
-  MAX_FILE_BYTES,
-  MAX_IMAGE_BYTES,
-  namesNoFormat,
-} from "@openbot/shared/attachments";
-import type { StoredAttachment } from "./attachment-parts";
 import { sniffMimeType } from "./attachment-mime";
+import type { StoredAttachment } from "./attachment-parts";
 
 function megabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(0)}MB`;

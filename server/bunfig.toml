@@ -8,5 +8,5 @@
 # the race described in scripts/test-preload.ts.
 #
 # Both files name the same scripts, so their contents cannot drift. What could drift is this list, and
-# tests/bunfig-preload.test.ts fails if the two stop agreeing.
+# server/tests/bunfig-preload.test.ts fails if the two stop agreeing.
 preload = ["./scripts/test-preload.ts", "../app/tests/preload.ts"]

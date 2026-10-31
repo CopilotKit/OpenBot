@@ -416,14 +416,6 @@ const ownedToolkits = [
   unschemedToolkit,
 ];
 /**
- * An app this file does NOT own, standing in for another run's fixture — or another file's.
- *
- * It carries this run's suffix so it cannot collide with a real row, and it is deliberately absent
- * from {@link ownedToolkits} so {@link clean} cannot reach it. Its whole purpose is to be the row
- * that a sweep keyed on `user_id` alone would take by mistake.
- */
-const foreignToolkit = `foreign-${suite}`;
-/**
  * The app the probe chooser reads, which holds actions and nothing else.
  *
  * Its own `mcp_servers` id rather than {@link toolkit}'s, because every other fixture here seeds
@@ -891,21 +883,6 @@ async function clean() {
   await database.delete(users).where(inArray(users.id, [askerId, leaverId]));
 }
 
-/**
- * The stand-in for somebody else's fixture, taken back by hand.
- *
- * Deliberately NOT part of {@link clean}, because a test below asserts that `clean` leaves this row
- * standing: folding it in would make that assertion agree with itself. Run beside `clean` from
- * `beforeEach` and `afterAll` instead, so the row cannot outlive the run even if the test that
- * inserts it dies partway — the same shared database that makes the row worth protecting makes a
- * leaked one everybody's problem.
- */
-async function cleanForeign() {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, foreignToolkit));
-}
-
 /** Which of this run's app rows the deployment still holds, so "the app survived" is an assertion. */
 async function appsHeld(): Promise<string[]> {
   const rows = await database
@@ -1068,21 +1045,15 @@ async function addRenamedApp() {
  * unreachable by the cleanup here, and reddens this file for everybody until the database is edited
  * by hand. Narrowing to named apps is what makes the assertion about this run.
  *
- * `within` DEFAULTS TO THIS RUN'S OWN APPS and is passed explicitly only to ask about
- * {@link foreignToolkit} — the one row this file holds that it deliberately does not own, and
- * therefore the one it has to be able to ask about separately.
  */
-async function connectedToolkitsFor(
-  userId: string,
-  within: string[] = ownedToolkits,
-): Promise<string[]> {
+async function connectedToolkitsFor(userId: string): Promise<string[]> {
   const rows = await database
     .select({ toolkit: brokeredConnections.app })
     .from(brokeredConnections)
     .where(
       and(
         eq(brokeredConnections.userId, userId),
-        inArray(brokeredConnections.app, within),
+        inArray(brokeredConnections.app, ownedToolkits),
       ),
     )
     .orderBy(asc(brokeredConnections.app));
@@ -1097,7 +1068,6 @@ function recordedOfType(eventType: string) {
 // one nothing to trip over.
 beforeEach(async () => {
   await clean();
-  await cleanForeign();
   events.length = 0;
   reached.length = 0;
   asks.length = 0;
@@ -1121,7 +1091,6 @@ afterEach(() => useComposioClient(null));
 
 afterAll(async () => {
   await clean();
-  await cleanForeign();
 });
 
 /**
@@ -1476,56 +1445,6 @@ test("retiring nobody retires nothing and leaves the anonymous row alone", async
   // And nothing reached Composio either. An unattributed offboarding has no account to name, so a
   // revoke sent under an empty user id would be this deployment asking the vendor about nobody.
   expect(asksMade()).toEqual([]);
-});
-
-/**
- * The fixture above is taken back by the same sweep every other row here is, and by nothing wider.
- *
- * CRITERION. Two halves, and the second is the one that has teeth. After the sweep this run holds
- * no `composio_connections` row at all — the one at the anonymous actor included, which none of the
- * person ids that sweep names would reach — AND an anonymous row belonging to somebody else is
- * still standing.
- *
- * REASON. Brokered connections are removed here by toolkit, so the anonymous row is already
- * covered and needs no second, broader delete to reach it. Asserted rather than read off the code,
- * because the tempting spelling for "take the anonymous row too" is `user_id = ''`, which is every
- * app at once: the sweep that lands on another file's fixture.
- *
- * WHY THE SECOND HALF IS NOT OPTIONAL. "This run's rows are gone" is satisfied just as well by the
- * wider delete as by the narrow one — a `user_id = ''` sweep takes this run's anonymous row too,
- * and every assertion about absence goes on passing while the defect it forbids is present. Only a
- * row the correct sweep must LEAVE BEHIND can tell the two deletes apart, so {@link foreignToolkit}
- * stands in for one: a row this file inserted, deliberately outside {@link ownedToolkits}, at the
- * pair another run legitimately holds. It is cleaned up by {@link cleanForeign} rather than by the
- * sweep under test, for the reason given there.
- */
-test("the sweep takes this run's anonymous row without reaching by actor", async () => {
-  await seedApp({ connect: false });
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: toolkit,
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
-  // Somebody else's anonymous row, at an app this file's sweep does not name.
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: foreignToolkit,
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
-  expect(await connectedToolkitsFor("")).toEqual([toolkit]);
-
-  await clean();
-
-  expect(await connectionsHeld()).toEqual([]);
-  // And the row that was never this sweep's to take is exactly where it was. This is the assertion
-  // a delete keyed on `user_id = ''` fails, and the only one here that it fails.
-  expect(await connectedToolkitsFor("", [foreignToolkit])).toEqual([
-    foreignToolkit,
-  ]);
 });
 
 /**

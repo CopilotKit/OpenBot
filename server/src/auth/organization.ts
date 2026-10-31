@@ -4,10 +4,55 @@ import {
 } from "../desktop-connection-failure";
 import type { AuthenticatedActor, AuthService } from "./guards";
 
-const COOKIE = "openbot.organization-session";
+export const ORGANIZATION_SESSION_COOKIE = "openbot.organization-session";
+const COOKIE = ORGANIZATION_SESSION_COOKIE;
 const HANDOFF_PATH = "/api/auth/organization/session";
-const COOKIE_AGE = 7 * 24 * 60 * 60;
-class AuthorityUnavailable extends Error {}
+/** How long the organization session cookie lasts, in seconds: its Max-Age, set once at the handoff and never renewed,
+ * so a person signs in to their organization again after this. The cookie says when it expires (`expiresAt`), and a
+ * Recorder connection made with it ends then too (recorder/wiring.ts), since it carries a sealed copy of it. */
+export const ORGANIZATION_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const COOKIE_AGE = ORGANIZATION_SESSION_MAX_AGE_SECONDS;
+/** What the person is told when their sign-out could not end everything they were signed in with, and so did not happen. */
+export const SIGN_OUT_UNFINISHED = "Signing out did not finish. Try again.";
+export class AuthorityUnavailable extends Error {}
+
+/** The organization session cookie's own record: the authority it is for, the authority's session cookie, and when it
+ * expires (epoch milliseconds). A cookie set before the expiry was written into it has none. */
+function organizationRecord(
+  value: string,
+): { authority: unknown; cookie: unknown; expiresAt?: unknown } | null {
+  try {
+    const record: unknown = JSON.parse(
+      Buffer.from(value, "base64url").toString(),
+    );
+    return record &&
+      typeof record === "object" &&
+      "authority" in record &&
+      "cookie" in record
+      ? record
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When an organization session cookie (its value, as the browser sends it) expires: the expiry it carries, and never
+ * later than its Max-Age from `now`, since no cookie was set in the future and the record is the browser's to edit.
+ * A cookie set before the expiry was written into it is given that Max-Age from now, which none outlives.
+ */
+export function organizationCookieExpiresAt(
+  value: string,
+  now: number = Date.now(),
+): Date {
+  const latest = now + COOKIE_AGE * 1_000;
+  const expiresAt = organizationRecord(value)?.expiresAt;
+  return new Date(
+    typeof expiresAt === "number" && Number.isFinite(expiresAt)
+      ? Math.min(expiresAt, latest)
+      : latest,
+  );
+}
 
 /** Explicit customer OpenBot authority, never inferred from an Intelligence endpoint. */
 export function organizationAuthority(value: string): string {
@@ -70,12 +115,29 @@ function sessionCookie(value: unknown): value is string {
 export function createOrganizationAuth(options: {
   authorityUrl: string;
   materializeUser: (user: AuthenticatedActor) => Promise<AuthenticatedActor>;
-}): AuthService {
+  /**
+   * Ends what else the person is signed in with here (their Recorder connections, index.ts) when they sign out, before
+   * the organization is asked to end their session. Throws when it could not, and then the sign-out does not happen:
+   * see the sign-out route below.
+   */
+  signOutRecorders?: (userId: string, ending: string) => Promise<void>;
+}): AuthService & {
+  verifySessionQuietly: (
+    cookieHeader: string,
+  ) => Promise<AuthenticatedActor | null>;
+} {
   const authority = organizationAuthority(options.authorityUrl);
   const tickets = new Map<string, { cookie: string; expires: number }>();
 
-  async function verify(cookie: string): Promise<AuthenticatedActor | null> {
-    if (!sessionCookie(cookie)) return null;
+  type Verdict =
+    | { kind: "actor"; actor: AuthenticatedActor }
+    | { kind: "refused"; authenticationFailed: boolean }
+    | { kind: "unexpected"; status: number };
+
+  /** Asks the organization about a cookie and reports what it said, with no side effects on Desktop's failure state. */
+  async function verifyAtAuthority(cookie: string): Promise<Verdict> {
+    if (!sessionCookie(cookie))
+      return { kind: "refused", authenticationFailed: false };
     let response: Response;
     try {
       response = await fetch(`${authority}/api/me`, {
@@ -92,19 +154,27 @@ export function createOrganizationAuth(options: {
       throw new AuthorityUnavailable(
         "The organization is temporarily unavailable. Try again.",
       );
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403)
+    if (response.status === 401 || response.status === 403)
+      return { kind: "refused", authenticationFailed: true };
+    if (!response.ok) return { kind: "unexpected", status: response.status };
+    const user = actor(await response.json().catch(() => null));
+    if (!user) return { kind: "unexpected", status: response.status };
+    return { kind: "actor", actor: await options.materializeUser(user) };
+  }
+
+  async function verify(cookie: string): Promise<AuthenticatedActor | null> {
+    const verdict = await verifyAtAuthority(cookie);
+    if (verdict.kind === "refused") {
+      if (verdict.authenticationFailed)
         recordDesktopConnectionFailure({
           connection: "organization",
           code: "organization_authentication_failed",
         });
       return null;
     }
-    const user = actor(await response.json().catch(() => null));
-    if (!user) return null;
-    const localUser = await options.materializeUser(user);
+    if (verdict.kind === "unexpected") return null;
     clearDesktopConnectionFailure("organization");
-    return localUser;
+    return verdict.actor;
   }
 
   function cookieFrom(headers: Headers): string | null {
@@ -115,24 +185,19 @@ export function createOrganizationAuth(options: {
       .find((part) => part.startsWith(`${COOKIE}=`))
       ?.slice(COOKIE.length + 1);
     if (!encoded || encoded.length > 12000) return null;
-    try {
-      // Binding the cookie to the authority prevents a changed organization setting reusing it.
-      const record: unknown = JSON.parse(
-        Buffer.from(encoded, "base64url").toString(),
-      );
-      if (
-        !record ||
-        typeof record !== "object" ||
-        !("authority" in record) ||
-        record.authority !== authority ||
-        !("cookie" in record) ||
-        !sessionCookie(record.cookie)
-      )
-        return null;
-      return record.cookie;
-    } catch {
+    const record = organizationRecord(encoded);
+    // Binding the cookie to the authority prevents a changed organization setting reusing it.
+    if (
+      !record ||
+      record.authority !== authority ||
+      !sessionCookie(record.cookie)
+    )
       return null;
-    }
+    // Past its own expiry it is not taken, wherever it was kept: the browser drops it then, and a sealed copy
+    // (recorder/wiring.ts) must not be worth more than the cookie it copies.
+    if (typeof record.expiresAt === "number" && record.expiresAt <= Date.now())
+      return null;
+    return record.cookie;
   }
 
   const getSession: AuthService["api"]["getSession"] = async ({ headers }) => {
@@ -146,8 +211,23 @@ export function createOrganizationAuth(options: {
     return user ? { user } : null;
   };
 
+  /** Verifies a forwarded cookie header without touching Desktop's failure state; an odd answer is unavailable, never a sign-out. */
+  async function verifySessionQuietly(
+    cookieHeader: string,
+  ): Promise<AuthenticatedActor | null> {
+    const cookie = cookieFrom(new Headers({ cookie: cookieHeader }));
+    if (!cookie) return null;
+    const verdict = await verifyAtAuthority(cookie);
+    if (verdict.kind === "actor") return verdict.actor;
+    if (verdict.kind === "refused") return null;
+    throw new AuthorityUnavailable(
+      "The organization gave an answer OpenBot could not read. Try again.",
+    );
+  }
+
   return {
     api: { getSession },
+    verifySessionQuietly,
     async handler(request) {
       try {
         const url = new URL(request.url);
@@ -212,7 +292,11 @@ export function createOrganizationAuth(options: {
           )
             return unavailable();
           const value = Buffer.from(
-            JSON.stringify({ authority, cookie: ticket.cookie }),
+            JSON.stringify({
+              authority,
+              cookie: ticket.cookie,
+              expiresAt: Date.now() + COOKIE_AGE * 1_000,
+            }),
           ).toString("base64url");
           return new Response(null, {
             status: 303,
@@ -238,6 +322,24 @@ export function createOrganizationAuth(options: {
           if (!allowedOrigin()) return json({ error: "Origin refused." }, 403);
           const cookie = cookieFrom(request.headers);
           if (cookie) {
+            // Who is signing out, asked before the session ends: afterwards the organization no longer says.
+            const before = await verifyAtAuthority(cookie);
+            /*
+             * Their Recorders first, and the sign-out only once they have ended: a sign-out that answered success with a
+             * Recorder still signed in as them would be the one thing it must not be. When they could not be ended
+             * (signOutRecorders has retried, and written the security row), nothing has changed: the person is told,
+             * still signed in, and signing out again tries it all again.
+             */
+            if (before.kind === "actor" && options.signOutRecorders) {
+              try {
+                await options.signOutRecorders(
+                  before.actor.id,
+                  "organization-sign-out",
+                );
+              } catch {
+                return json({ error: SIGN_OUT_UNFINISHED }, 503);
+              }
+            }
             try {
               const response = await fetch(`${authority}/api/auth/sign-out`, {
                 method: "POST",

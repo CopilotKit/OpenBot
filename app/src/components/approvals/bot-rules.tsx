@@ -1,3 +1,4 @@
+import { IconChecklist } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
@@ -67,7 +68,9 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
           {error.message}
         </p>
       ) : null}
-      {saved === 0 ? <PageEmpty>No rules for this Bot.</PageEmpty> : null}
+      {saved === 0 ? (
+        <PageEmpty icon={IconChecklist} title="No rules for this Bot" />
+      ) : null}
       {saved > 0 || canAdd ? (
         <PageRows>
           {team.map((rule, index) => (

@@ -159,6 +159,13 @@ export type ServerRecord = {
    * connected would tell the page something that changes nothing a call does.
    */
   sharedVendorConnected: boolean;
+  /**
+   * Who may give this app to a Bot, with the default for its account filled in: any Bot's owner
+   * (`any`), or only an administrator (`admin`). See `ownerGrantsOf`.
+   */
+  ownerGrants: "any" | "admin";
+  /** What an administrator chose, or null where the default above is in force. */
+  ownerGrantsChosen: "any" | "admin" | null;
   tools: ToolRecord[];
   /**
    * Grants on tools this server no longer advertises.

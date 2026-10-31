@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import type { PluginServer } from "@/lib/plugins/queries";
 import {
   brokeredAccountsListedOn,
   sharedAccountsListedOn,
-} from "@/routes/_authed/_app/connections.index";
+} from "@/lib/plugins/listed";
+import type { PluginServer } from "@/lib/plugins/queries";
 
 /**
  * The Connected accounts index lists brokered rows from either broker. A deployment holds rows from

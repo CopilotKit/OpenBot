@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 export type ProactiveRunStatus = "idle" | "running" | "succeeded" | "error";
-export type SuggestionStatus = "open" | "dismissed" | "started";
+/**
+ * `superseded` is OpenBot's, never the person's: a later run's suggestions replaced this one while it
+ * was still open. Kept apart from `dismissed` so that list stays a record of their own decisions.
+ */
+export type SuggestionStatus = "open" | "dismissed" | "started" | "superseded";
 
 /** Bounds on how often a Bot may look through a person's apps: once an hour at most, once a day at least. */
 export const MIN_INTERVAL_MINUTES = 60;
@@ -31,9 +35,29 @@ export const proactiveSettingPatchSchema = proactiveSettingInputSchema
 
 export const suggestionInputSchema = z
   .object({
-    title: z.string().trim().min(1).max(160),
-    detail: z.string().trim().min(1).max(2000),
-    sourceTool: z.string().trim().min(1).max(256).optional(),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(160)
+      .describe("What to do, in plain words the person would use."),
+    detail: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2000)
+      .describe(
+        "Why it matters and what you found, written for the person. Never name tools or functions.",
+      ),
+    sourceTool: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .optional()
+      .describe(
+        "The tool you read the evidence with. Recorded as the source; the person never sees it.",
+      ),
     sourceLink: z
       .string()
       .trim()

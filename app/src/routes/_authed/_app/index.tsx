@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
@@ -15,6 +15,9 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
+import { firstConversationGreeting } from "@/lib/auth/greeting";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   CoworkerRoutingRefusedError,
   routeMessage,
@@ -27,6 +30,8 @@ export const Route = createFileRoute("/_authed/_app/")({
 });
 
 function RouteComponent() {
+  const { data: user } = useQuery(currentUserQueryOptions());
+  const channels = useInfiniteQuery(channelListQueryOptions());
   const {
     data: agents,
     isPending: loading,
@@ -51,7 +56,10 @@ function RouteComponent() {
             {appConfig.brand.productName}
           </h2>
           <h1 className="text-2xl font-bold tracking-tight mt-1.5 text-center">
-            Start a conversation
+            {firstConversationGreeting(
+              user,
+              channels.isSuccess && channels.data.length === 0,
+            )}
           </h1>
         </div>
         <div className="mt-8 w-full flex flex-col items-center">

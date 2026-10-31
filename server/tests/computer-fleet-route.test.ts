@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
@@ -26,6 +27,9 @@ import { createComputerRoutes } from "../src/computer/routes";
 
 const ADMIN = { id: "u1", email: "admin@openbot.test", role: "admin" } as const;
 
+/** What the administrator's buttons reached, in order. */
+let acted: unknown[] = [];
+
 function app(role: "admin" | "user" = "admin") {
   const asActor: MiddlewareHandler<{ Variables: AppVariables }> = async (
     context,
@@ -36,8 +40,18 @@ function app(role: "admin" | "user" = "admin") {
   };
 
   const gateway = {
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
+    stopTarget: async (target: unknown) => {
+      acted.push(["stop", target]);
+      return { wasRunning: true };
+    },
+    resetTarget: async (target: unknown) => {
+      acted.push(["reset", target]);
+      return { cleared: true };
+    },
     computers: async () => ({
-      isolation: "per-bot",
+      isolation: "per-person",
       computers: [
         { botId: "risk-analyst", running: true, startedAt: null },
         { botId: "general-assistant", running: false, startedAt: null },
@@ -71,7 +85,7 @@ describe("listing every computer in the deployment", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      isolation: "per-bot",
+      isolation: "per-person",
       computers: [{ botId: "risk-analyst" }, { botId: "general-assistant" }],
     });
   });
@@ -91,5 +105,50 @@ describe("listing every computer in the deployment", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+});
+
+/**
+ * Stopping or resetting a computer from the list.
+ *
+ * Addressed by whose computer it is, because the one on the list is somebody else's: the Bot routes
+ * act on the asker's own seat, so an administrator pressing Reset on Ada's computer through them
+ * would have reset their own.
+ */
+describe("acting on a computer from the list", () => {
+  const post = (body: unknown, role: "admin" | "user" = "admin") =>
+    app(role).request("http://t/api/computers/fleet", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  test("an administrator resets a person's whole computer by naming it", async () => {
+    acted = [];
+    const response = await post({ action: "reset", computer: "person:ada" });
+    expect(response.status).toBe(200);
+    expect(acted).toEqual([
+      ["reset", { key: { kind: "person", personId: "ada" } }],
+    ]);
+  });
+
+  test("one seat on the shared computer is named by its Bot as well", async () => {
+    acted = [];
+    await post({ action: "stop", computer: "person:ada", botId: "sales" });
+    expect(acted).toEqual([
+      ["stop", { key: { kind: "person", personId: "ada" }, botId: "sales" }],
+    ]);
+  });
+
+  test("it is administrator-only, and refuses what is not a computer", async () => {
+    acted = [];
+    expect(
+      (await post({ action: "reset", computer: "person:ada" }, "user")).status,
+    ).toBe(403);
+    expect((await post({ action: "reset", computer: "ada" })).status).toBe(400);
+    expect(
+      (await post({ action: "explode", computer: "person:ada" })).status,
+    ).toBe(400);
+    expect(acted).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { AgentProfileStore } from "../src/agents/profile-store";
 import { createApp } from "../src/app";
 import type { AppVariables } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import { createComputerRoutes } from "../src/computer/routes";
 import { loadConfig } from "../src/config";
 import type { RoutineRunner } from "../src/routines/runner";
@@ -160,7 +161,10 @@ describe("GET /api/computers/:botId/page-frame/:toolCallId", () => {
     app.route(
       "/",
       createComputerRoutes(
-        {} as never,
+        {
+          seatFor: async (botId: string, personId: string) =>
+            personSeat(personId, botId),
+        } as never,
         {} as never,
         requireUser,
         async () => true,
@@ -177,7 +181,12 @@ describe("GET /api/computers/:botId/page-frame/:toolCallId", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ frame: null });
-    expect(calls).toEqual([["bot-1", "turn-1"]]);
+    // The asker's own seat first, then the Bot alone, where frames from before computers were per
+    // person were kept.
+    expect(calls).toEqual([
+      ["person:user-1/bot-1", "turn-1"],
+      ["bot-1", "turn-1"],
+    ]);
   });
 
   test("refuses an overlong toolCallId with 400 and never reads", async () => {

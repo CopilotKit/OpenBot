@@ -1,0 +1,222 @@
+{
+  "name": "frontend-tool",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 53,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"89abb4f6-4d47-426b-85f1-7c2c2168fd49\",\"protocolVersion\":\"1.0\",\"tools\":[{\"name\":\"showGreeting\",\"description\":\"Show a greeting card to the person in the page.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"mood\":{\"type\":\"string\"}},\"required\":[\"name\",\"mood\"]}}],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"498ac57b-d649-4f9f-98e5-3a1adb7393d7\",\"role\":\"user\",\"content\":\"Call showGreeting with name Ada and mood cheerful, then say done in one word.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 55,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"89abb4f6-4d47-426b-85f1-7c2c2168fd49\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"89abb4f6-4d47-426b-85f1-7c2c2168fd49\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"498ac57b-d649-4f9f-98e5-3a1adb7393d7\",\"role\":\"user\",\"content\":\"Call showGreeting with name Ada and mood cheerful, then say done in one word.\"}],\"tools\":[{\"name\":\"showGreeting\",\"description\":\"Show a greeting card to the person in the page.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"mood\":{\"type\":\"string\"}},\"required\":[\"name\",\"mood\"]}}],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1070,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\",\"toolCallName\":\"showGreeting\",\"parentMessageId\":\"bf80e13c-f5c3-40dc-9b73-dc2ed4648fc6\"}\n\n"
+        },
+        {
+          "at": 1088,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\",\"delta\":\"{\\\"name\\\":\\\"Ada\\\",\\\"mood\\\":\\\"cheerful\\\"}\"}\n\n"
+        },
+        {
+          "at": 1095,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\"}\n\n"
+        },
+        {
+          "at": 1228,
+          "text": "data: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"tool-calls\"},\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"89abb4f6-4d47-426b-85f1-7c2c2168fd49\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":244,\"outputTokens\":38,\"totalTokens\":282,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 1228,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 1229,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"d60b007e-0118-488a-8c7c-46d547636340\",\"protocolVersion\":\"1.0\",\"tools\":[{\"name\":\"showGreeting\",\"description\":\"Show a greeting card to the person in the page.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"mood\":{\"type\":\"string\"}},\"required\":[\"name\",\"mood\"]}}],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"498ac57b-d649-4f9f-98e5-3a1adb7393d7\",\"role\":\"user\",\"content\":\"Call showGreeting with name Ada and mood cheerful, then say done in one word.\"},{\"id\":\"bf80e13c-f5c3-40dc-9b73-dc2ed4648fc6\",\"role\":\"assistant\",\"toolCalls\":[{\"id\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\",\"type\":\"function\",\"function\":{\"name\":\"showGreeting\",\"arguments\":\"{\\\"name\\\":\\\"Ada\\\",\\\"mood\\\":\\\"cheerful\\\"}\"}}]},{\"id\":\"7f0b70ff-eb5b-45dc-8e11-26296df60301\",\"role\":\"tool\",\"toolCallId\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\",\"content\":\"Shown a greeting card for Ada.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 1231,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"d60b007e-0118-488a-8c7c-46d547636340\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"d60b007e-0118-488a-8c7c-46d547636340\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"bf80e13c-f5c3-40dc-9b73-dc2ed4648fc6\",\"role\":\"assistant\",\"toolCalls\":[{\"id\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\",\"type\":\"function\",\"function\":{\"name\":\"showGreeting\",\"arguments\":\"{\\\"name\\\":\\\"Ada\\\",\\\"mood\\\":\\\"cheerful\\\"}\"}}]},{\"id\":\"7f0b70ff-eb5b-45dc-8e11-26296df60301\",\"role\":\"tool\",\"content\":\"Shown a greeting card for Ada.\",\"toolCallId\":\"call_dT7Oa2spQDAON1HCKWBkFUQx\"}],\"tools\":[{\"name\":\"showGreeting\",\"description\":\"Show a greeting card to the person in the page.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"mood\":{\"type\":\"string\"}},\"required\":[\"name\",\"mood\"]}}],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1858,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_0db39211e9cc8a80006ad7f6bb6f0087d09b4ada1df41a5055\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0db39211e9cc8a80006ad7f6bb6f0087d09b4ada1df41a5055\",\"delta\":\"done\"}\n\n"
+        },
+        {
+          "at": 2019,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_0db39211e9cc8a80006ad7f6bb6f0087d09b4ada1df41a5055\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26\",\"runId\":\"d60b007e-0118-488a-8c7c-46d547636340\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":278,\"outputTokens\":3,\"totalTokens\":281,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 2020,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "4d763ed1-c0db-499a-be49-98489cf8f65a",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538297639
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "498ac57b-d649-4f9f-98e5-3a1adb7393d7",
+            "runId": null,
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 77,
+            "text": "Call showGreeting with name Ada and mood cheerful, then say done in one word.",
+            "seq": 2
+          },
+          "timestamp": 1792538297691
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "89abb4f6-4d47-426b-85f1-7c2c2168fd49",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538297694
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_dT7Oa2spQDAON1HCKWBkFUQx",
+            "toolName": "showGreeting",
+            "agentId": "default",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "messageId": "bf80e13c-f5c3-40dc-9b73-dc2ed4648fc6",
+            "runId": "89abb4f6-4d47-426b-85f1-7c2c2168fd49",
+            "seq": 4
+          },
+          "timestamp": 1792538298710
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "89abb4f6-4d47-426b-85f1-7c2c2168fd49",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792538298867
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "executing",
+            "toolCallId": "call_dT7Oa2spQDAON1HCKWBkFUQx",
+            "toolName": "showGreeting",
+            "agentId": "default",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "messageId": "bf80e13c-f5c3-40dc-9b73-dc2ed4648fc6",
+            "runId": "89abb4f6-4d47-426b-85f1-7c2c2168fd49",
+            "seq": 6
+          },
+          "timestamp": 1792538298867
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "completed",
+            "toolCallId": "call_dT7Oa2spQDAON1HCKWBkFUQx",
+            "toolName": "showGreeting",
+            "agentId": "default",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "messageId": "bf80e13c-f5c3-40dc-9b73-dc2ed4648fc6",
+            "runId": "89abb4f6-4d47-426b-85f1-7c2c2168fd49",
+            "durationMs": 1,
+            "outcome": "ok",
+            "seq": 7
+          },
+          "timestamp": 1792538298868
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "d60b007e-0118-488a-8c7c-46d547636340",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "agentId": "default",
+            "seq": 8
+          },
+          "timestamp": 1792538298871
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "4d763ed1-c0db-499a-be49-98489cf8f65a",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0db39211e9cc8a80006ad7f6bb6f0087d09b4ada1df41a5055",
+            "runId": "89abb4f6-4d47-426b-85f1-7c2c2168fd49",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "done",
+            "seq": 9
+          },
+          "timestamp": 1792538299659
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "d60b007e-0118-488a-8c7c-46d547636340",
+            "threadId": "ce9a71ec-6fee-4fe1-a0f6-b42b3a8c5c26",
+            "agentId": "default",
+            "seq": 10
+          },
+          "timestamp": 1792538299659
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

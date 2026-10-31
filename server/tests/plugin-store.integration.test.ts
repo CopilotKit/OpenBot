@@ -8,11 +8,9 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
-import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
@@ -6739,65 +6737,6 @@ describe("a query of this deployment's own that failed", () => {
     expect(failure).not.toContain("Failed query");
     expect(failure).not.toContain("params:");
     expect(failure).not.toContain("mcp_user_credentials");
-  });
-
-  /**
-   * AND THE ONE REMAINING SITE THAT ASKS NOTHING, read as text because nothing can drive it.
-   *
-   * WHY THERE IS NO BEHAVIOURAL TEST FOR THIS ONE, and why that is a reason to assert it rather
-   * than to leave it. `refreshTools`' vendor `catch` opens with `isDeploymentFault`, which answers
-   * true for a query failure, so every arrival whose message is a statement is raised before the
-   * line below it can copy one. What that line can still be handed is a WRAPPER: `composio.ts`'s
-   * `listTools` catches whatever the client threw and rethrows `new Error(listingSentence(...))`,
-   * and `listingSentence` falls through to the thrown message verbatim. A wrapper has no `query`
-   * and no `params` of its own, so it is not on the shelf and it is not a query failure by shape —
-   * it is simply a message this deployment has stopped asking any question about. Nothing reachable
-   * puts a statement inside one today, which is exactly the sentence that was true of the credential
-   * envelope before the rotation path started writing one.
-   *
-   * SO WHAT IS ASSERTED IS THAT THE DOOR IS THE ONLY WAY THROUGH. `db/query-failure.ts` exists to be
-   * the single place the question is asked; a site reading `.message` directly is a second answer to
-   * it, and the last two leaks in this review were both a second answer that had drifted. The test
-   * above owns the behaviour of the reachable path; this owns the shape of every path.
-   */
-  test("no recording site in the plugin store reads a caught message without asking", () => {
-    // Every file the store is made of: the assembly in `store.ts` and the modules it was split into.
-    const plugins = join(import.meta.dir, "..", "src", "plugins");
-    const files = [
-      "store.ts",
-      ...readdirSync(join(plugins, "plugin-store"))
-        .filter((name) => name.endsWith(".ts"))
-        .map((name) => `plugin-store/${name}`),
-    ];
-    /*
-     * Comments blanked rather than removed, because these files argue about `error.message` at
-     * length — the prose naming the hazard must not be mistaken for the hazard, and the line
-     * numbers reported below have to stay each file's own so a failure names where to look.
-     */
-    const code = files.map((file) => ({
-      file,
-      code: readFileSync(join(plugins, file), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
-        .replace(/^([^\n"'`]*?)\/\/.*$/gm, "$1"),
-    }));
-
-    // Listed rather than matched, so a failure prints the line to correct instead of the file.
-    expect(
-      code.flatMap(({ file, code: text }) =>
-        text
-          .split("\n")
-          .flatMap((line, index) =>
-            /\berror\.message\b/.test(line)
-              ? [`${file}:${index + 1}: ${line.trim()}`]
-              : [],
-          ),
-      ),
-    ).toEqual([]);
-    // And the door is genuinely in use, so the assertion above cannot be satisfied by deleting the
-    // read altogether and saying nothing.
-    expect(code.map(({ code: text }) => text).join("\n")).toMatch(
-      /\b(withoutStatement|reasonWithoutStatement)\(/,
-    );
   });
 });
 

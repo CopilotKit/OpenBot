@@ -1,9 +1,21 @@
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 
-/** One Bot's computer, as Admin sees it. */
+/**
+ * One computer as Admin sees it: a person's, or an isolated Bot's.
+ *
+ * On a deployment with one shared computer, each entry is one person's seat on one Bot there, and
+ * names both.
+ */
 export type ComputerProfile = {
-  botId: string;
+  /** Whose computer, as `person:<id>` or `bot:<id>`. What the stop, reset and update calls name. */
+  computer: string;
+  kind: "person" | "bot";
+  personId?: string;
+  /** The person's name and address, where the deployment knows them. */
+  person?: { name: string | null; email: string };
+  /** The isolated Bot, or the Bot of one seat on the shared computer. */
+  botId?: string;
   running: boolean;
   startedAt: string | null;
   /** Absent when the provider does not report egress at all, which is not the same as none. */
@@ -12,8 +24,8 @@ export type ComputerProfile = {
   updateAvailable?: boolean;
 };
 
-/** Whether each Bot has a browser profile of its own, or they share one. */
-export type ComputerIsolation = "per-bot" | "shared";
+/** One computer per person (and per isolated Bot), or one computer every person's Bots share. */
+export type ComputerIsolation = "per-person" | "shared";
 
 /** What the list endpoint answers: the computers, and how they are separated. */
 export type ComputerFleet = {
@@ -34,13 +46,51 @@ export type ActionPolicy = {
   mode: PolicyMode;
   deny: string[];
   allow: string[];
+  /** Each rule's name and what it stops, keyed by the rule's text. Display only. */
+  labels?: Record<string, RuleLabel>;
+};
+
+export type RuleLabel = { name: string; description: string };
+
+/**
+ * Where one Bot's computer is in its life, as the server's provider reports it.
+ *
+ * `absent` is a computer that is not running: never started, or put to sleep after a quiet spell.
+ * Either way it starts on the Bot's next computer action, so it is not a fault. `starting` is on its
+ * way up. `unreachable` is the only one that is something wrong.
+ */
+export type ComputerState = "absent" | "starting" | "ready" | "unreachable";
+
+export type ComputerStatus = {
+  botId: string;
+  state: ComputerState;
+  /** Set when `state` is `unreachable`. Written for an admin, so not shown on a screen anybody can open. */
+  reason?: string;
 };
 
 export const computerKeys = {
   all: ["computers"] as const,
   fleet: () => ["computers", "fleet"] as const,
   policy: () => ["computers", "policy"] as const,
+  status: (botId: string) => ["computers", "status", botId] as const,
 };
+
+/**
+ * One Bot's computer's state, read without waking it.
+ *
+ * The status route reads the provider's own record of the computer and never dials it, which is what
+ * makes it safe to poll while somebody is watching a computer start: asking for a screenshot instead
+ * went through the path that resumes a sleeping computer, so looking was enough to start it.
+ */
+export function computerStatusQueryOptions(botId: string) {
+  return queryOptions({
+    queryKey: computerKeys.status(botId),
+    queryFn: (): Promise<ComputerStatus> =>
+      client(`/api/computers/${encodeURIComponent(botId)}/status`, {
+        fallback: "Couldn't check the computer.",
+      }).then((response) => response.json()),
+  });
+}
 
 /**
  * The deployment-wide fleet route.

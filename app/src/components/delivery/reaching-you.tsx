@@ -3,6 +3,7 @@ import {
   IconBrandTeams,
   IconChevronRight,
   IconDeviceMobileMessage,
+  IconSend,
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -189,7 +190,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           </p>
         ) : null}
         {reach.isPending || !destinations ? null : destinations.length === 0 ? (
-          <PageEmpty>No destinations connected.</PageEmpty>
+          <PageEmpty icon={IconSend} title="No destinations connected" />
         ) : (
           <PageRows>
             {destinations.map((binding, index) => {

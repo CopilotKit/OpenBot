@@ -278,16 +278,30 @@ export function botSettings(
 /**
  * Whether this model has to be driven through the Responses API.
  *
- * `gpt-5.6-*` rejects function tools on `/v1/chat/completions` — "To use function tools, use
- * /v1/responses or set reasoning_effort to 'none'" — so a Bot that speaks chat completions by hand
- * cannot use it, and a Bot whose integration offers the Responses API has to turn it on. The same
- * predicate answers both questions; which question is asked belongs to the Bot.
+ * Two kinds of OpenAI model, as OpenAI's own API answered on 2026-10-28:
+ *
+ * - `gpt-5.6-*` and every `gpt-6*` reject function tools on `/v1/chat/completions` ("To use
+ *   function tools, use /v1/responses or set reasoning_effort to 'none'"), and `none` is itself
+ *   refused by some of them (`gpt-6-astra`, `gpt-6.1-sol`), so the Responses API is the one way all
+ *   of them take tools.
+ * - The `-pro` models (`gpt-5-pro`, `gpt-5.5-pro`, `o3-pro`) and `gpt-5.3-codex` are not served on
+ *   `/v1/chat/completions` at all.
+ *
+ * So a Bot that speaks chat completions by hand cannot use them, and a Bot whose integration offers
+ * the Responses API has to turn it on. The same predicate answers both questions; which question is
+ * asked belongs to the Bot.
+ *
+ * A name a gateway publishes under its own namespace is the same model: LiteLLM and OpenRouter call
+ * `gpt-5.6-terra` `openai/gpt-5.6-terra`, so only what follows the last slash is read.
  *
  * Named for the fact rather than for either consequence, because `agent-bot` uses it to refuse a
  * model and `agent-langgraph` uses it to select a flag, and neither name fits both.
  */
 export function requiresResponsesApi(model: string): boolean {
-  return /^gpt-5\.[6-9]|^gpt-[6-9]/.test(model);
+  const name = model.trim().split("/").at(-1) ?? "";
+  return /^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b/.test(
+    name,
+  );
 }
 
 /**

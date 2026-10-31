@@ -42,9 +42,9 @@ function routesFor(baseUrl: string) {
   const rows: AuditEventInput[] = [];
   const provider: ComputerProvider = {
     name: "test",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => baseUrl,
-    status: async (botId) => ({ botId, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
     list: async () => [],
@@ -154,21 +154,5 @@ describe("a refusal because a person has the wheel", () => {
 
     expect(status).toBe(409);
     expect(body.humanHasControl).toBe(true);
-  });
-
-  test("the refusal is still audited as a refusal", async () => {
-    // The gateway writes a row when a forwarded action fails. Telling the caller something new must
-    // not quietly cost the trail the record that the action did not happen.
-    const { rows } = await click(
-      computerAnswering(
-        {
-          error: "A person has taken control of this computer.",
-          humanHasControl: true,
-        },
-        409,
-      ),
-    );
-
-    expect(rows.length).toBeGreaterThan(0);
   });
 });

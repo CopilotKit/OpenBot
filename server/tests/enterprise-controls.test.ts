@@ -359,6 +359,11 @@ describe("scrubbing commands", () => {
       "psql postgres://app:[REDACTED]@db:5432/app",
     ],
     ["mysql -uroot -phunter2 app", "mysql -uroot -p[REDACTED] app"],
+    // `-P` is mysql's port, not its password: the attached port must survive and the real
+    // password later in the same command must still be redacted (gh-815).
+    ["mysql -h db -P3306 -phunter2 app", "mysql -h db -P3306 -p[REDACTED] app"],
+    ["mysql -uroot -p3306 app", "mysql -uroot -p[REDACTED] app"],
+    ["mysqldump -phunter2 db", "mysqldump -p[REDACTED] db"],
     [
       "tool --password hunter2 --verbose",
       "tool --password [REDACTED] --verbose",

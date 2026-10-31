@@ -105,7 +105,7 @@ function IdentityProvidersPage() {
           Add a provider
         </Button>
       }
-      description="Your company's own SAML or OpenID Connect provider. People sign in with their email, and its domain picks the provider."
+      description="Configure your company’s SAML or OpenID Connect provider. Email domains determine which provider people use to sign in."
       title="Identity providers"
     >
       <PageSection
@@ -122,9 +122,16 @@ function IdentityProvidersPage() {
             Couldn't load identity providers. Reload the page.
           </p>
         ) : providers.data?.length === 0 ? (
-          <PageEmpty>
-            No identity providers yet. Add one with the metadata from your
-            identity team.
+          <PageEmpty
+            action={
+              <Button onClick={() => setOpen(true)} size="sm" variant="outline">
+                Add a provider
+              </Button>
+            }
+            icon={IconBuildingBank}
+            title="No identity providers yet"
+          >
+            Use the metadata from your identity team.
           </PageEmpty>
         ) : (
           <PageRows>

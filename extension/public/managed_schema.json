@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "OpenBotUrl": {
+      "title": "OpenBot address",
+      "description": "The HTTPS address of your organization's OpenBot. The Recorder connects only to this address. Chrome ignores a value that is not a string, so check that chrome://policy shows it with no error.",
+      "type": "string"
+    },
+    "AllowedIntelligenceUrls": {
+      "title": "Allowed Intelligence addresses",
+      "description": "WSS addresses of your Intelligence realtime gateway, as a list. The Recorder refuses a capture pass that points anywhere else. Chrome ignores a value that is not a list of strings (on Windows, numbered values under a subkey, or one JSON list), and an ignored value means no restriction, so check that chrome://policy shows it with no error.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

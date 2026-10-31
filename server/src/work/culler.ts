@@ -13,6 +13,11 @@
  * put to the thing that did it.
  */
 import { and, inArray, like, sql } from "drizzle-orm";
+import {
+  type ComputerKey,
+  computerKeyText,
+  parseComputerKey,
+} from "../computer/computer-key";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
 import { auditEvents } from "../db/schema";
@@ -36,40 +41,85 @@ export type CullerOptions = {
 
 export type CullReport = {
   considered: number;
+  /** The computers suspended, as `person:<id>` or `bot:<id>`. */
   suspended: string[];
-  skipped: { botId: string; reason: string }[];
+  skipped: { computer: string; reason: string }[];
 };
 
 /**
- * Which Bots have a computer running, and when each was last asked to do anything.
+ * When each computer was last asked to do anything, keyed by `person:<id>` or `bot:<id>`.
  *
  * The audit trail is the source: every acting call writes a row before the computer is touched, so
  * "last used" is already recorded, server-side, and survives a restart. A computer that has never
  * acted has no row and reads as idle since it started, which is the answer wanted.
+ *
+ * BY COMPUTER, NOT BY BOT. A person's computer carries every Bot they use, so it is in use while any
+ * of them is: grouping by Bot would put it to sleep under one Bot because another had gone quiet.
+ * Each row names its computer; a row from before computers were per person names only its Bot, and
+ * that Bot had a computer of its own, which is what `bot:<id>` means.
+ *
+ * Exported for the inactive-computer stop in admin/controls.ts, which asks the same question.
  */
-async function lastActedAt(
+export async function lastUsedByComputer(
   database: Database,
-  botIds: string[],
+  computers: string[],
 ): Promise<Map<string, Date>> {
-  if (botIds.length === 0) return new Map();
+  if (computers.length === 0) return new Map();
   /*
-   * The Bot is in the payload rather than in a column, so the grouping key is an expression. Written
-   * through the query builder rather than as one raw string, because a list parameter has to be
-   * bound as a list: handed to `= any($1)` as a JavaScript array it arrives as one opaque value and
-   * the query fails rather than matching nothing, which at least says so.
+   * The computer is in the payload rather than in a column, so the grouping key is an expression.
+   * Written through the query builder rather than as one raw string, because a list parameter has
+   * to be bound as a list: handed to `= any($1)` as a JavaScript array it arrives as one opaque value
+   * and the query fails rather than matching nothing, which at least says so.
    */
-  const bot = sql<string>`${auditEvents.payload}->>'bot'`;
+  const computer = sql<string>`coalesce(${auditEvents.payload}->>'computer', 'bot:' || (${auditEvents.payload}->>'bot'))`;
   const rows = await database
-    .select({ bot, last: sql<string>`max(${auditEvents.createdAt})` })
+    .select({ computer, last: sql<string>`max(${auditEvents.createdAt})` })
     .from(auditEvents)
-    .where(and(like(auditEvents.eventType, "computer.%"), inArray(bot, botIds)))
-    .groupBy(bot);
+    .where(
+      and(
+        like(auditEvents.eventType, "computer.%"),
+        inArray(computer, computers),
+      ),
+    )
+    .groupBy(computer);
 
   return new Map(
     rows
-      .filter((row) => row.bot)
-      .map((row) => [row.bot, new Date(row.last)] as const),
+      .filter((row) => row.computer)
+      .map((row) => [row.computer, new Date(row.last)] as const),
   );
+}
+
+/**
+ * The running computers, one entry each.
+ *
+ * The shared computer lists a person's seats on it rather than computers, so a person with three
+ * Bots there would otherwise be three entries for the one thing that is stopped.
+ */
+export function runningComputers(
+  computers: { key: ComputerKey; status: string; startedAt?: string }[],
+): { key: ComputerKey; computer: string; startedAt?: string }[] {
+  const seen = new Map<
+    string,
+    { key: ComputerKey; computer: string; startedAt?: string }
+  >();
+  for (const entry of computers) {
+    if (entry.status !== "running") continue;
+    const computer = computerKeyText(entry.key);
+    const held = seen.get(computer);
+    // The earliest start stands for the computer: it has been up at least that long.
+    if (
+      !held ||
+      (entry.startedAt && (!held.startedAt || entry.startedAt < held.startedAt))
+    ) {
+      seen.set(computer, {
+        key: entry.key,
+        computer,
+        ...(entry.startedAt ? { startedAt: entry.startedAt } : {}),
+      });
+    }
+  }
+  return [...seen.values()];
 }
 
 /**
@@ -83,17 +133,16 @@ export async function offerIdleComputers(
   options: CullerOptions,
 ): Promise<{ offered: string[] }> {
   const now = options.now?.() ?? new Date();
-  const computers = await options.provider.list();
-  const running = computers.filter((computer) => computer.status === "running");
-  const used = await lastActedAt(
+  const running = runningComputers(await options.provider.list());
+  const used = await lastUsedByComputer(
     options.database,
-    running.map((computer) => computer.botId),
+    running.map((computer) => computer.computer),
   );
 
   const offered: string[] = [];
   for (const computer of running) {
     const since =
-      used.get(computer.botId) ??
+      used.get(computer.computer) ??
       (computer.startedAt ? new Date(computer.startedAt) : undefined);
     // No row and no start time means nothing is known about it, and suspending on no evidence is
     // how somebody's session disappears mid-task. Left alone.
@@ -101,10 +150,10 @@ export async function offerIdleComputers(
     if (now.getTime() - since.getTime() < options.idleAfterMs) continue;
     await options.queue.offer({
       kind: CULL_KIND,
-      key: computer.botId,
-      payload: { botId: computer.botId, idleSince: since.toISOString() },
+      key: computer.computer,
+      payload: { computer: computer.computer, idleSince: since.toISOString() },
     });
-    offered.push(computer.botId);
+    offered.push(computer.computer);
   }
   return { offered };
 }
@@ -137,7 +186,17 @@ export async function suspendClaimedComputers(
   };
 
   for (const item of claimed) {
-    const botId = String(item.payload.botId ?? item.key);
+    /*
+     * Whose computer. An item offered before computers were per person carries only its Bot, which
+     * then had a computer of its own: `bot:<id>`.
+     */
+    const computer =
+      typeof item.payload.computer === "string"
+        ? item.payload.computer
+        : typeof item.payload.botId === "string"
+          ? `bot:${item.payload.botId}`
+          : item.key;
+    const key = parseComputerKey(computer);
     /*
      * Renewed before each one, because the batch is twenty and the lease is one.
      *
@@ -158,15 +217,16 @@ export async function suspendClaimedComputers(
       }))
     ) {
       report.skipped.push({
-        botId,
+        computer,
         reason: "the lease went to another replica",
       });
       continue;
     }
     try {
+      if (!key) throw new Error(`${computer} does not name a computer`);
       const now = options.now?.() ?? new Date();
-      const used = await lastActedAt(options.database, [botId]);
-      const since = used.get(botId);
+      const used = await lastUsedByComputer(options.database, [computer]);
+      const since = used.get(computer);
       if (since && now.getTime() - since.getTime() < options.idleAfterMs) {
         // Somebody came back. Drop the item rather than releasing it, because the next sweep will
         // offer it again if it goes quiet, and a released one would just be reclaimed and re-checked.
@@ -176,19 +236,19 @@ export async function suspendClaimedComputers(
           owner: options.owner,
         });
         report.skipped.push({
-          botId,
+          computer,
           reason: "used again before it was suspended",
         });
         continue;
       }
 
-      await options.provider.stop(botId);
+      await options.provider.stop({ key });
       await options.queue.finish({
         kind: CULL_KIND,
         key: item.key,
         owner: options.owner,
       });
-      report.suspended.push(botId);
+      report.suspended.push(computer);
     } catch (error) {
       /*
        * Released rather than dropped, and pushed out rather than retried immediately: a cluster that
@@ -207,7 +267,7 @@ export async function suspendClaimedComputers(
       /*
        * Said out loud when it gives up, because otherwise it stops silently.
        *
-       * At the cap the item is no longer claimed, so this loop simply never sees that Bot again and
+       * At the cap the item is no longer claimed, so this loop simply never sees that computer again and
        * every sweep looks clean while one computer stays awake indefinitely. The row carries the
        * count and the reason for anybody who queries it; this is for the person reading the logs.
        */
@@ -215,13 +275,13 @@ export async function suspendClaimedComputers(
         console.warn(
           JSON.stringify({
             type: "computer-cull-gave-up",
-            botId,
+            computer,
             attempts: item.attempts,
             reason,
           }),
         );
       }
-      report.skipped.push({ botId, reason });
+      report.skipped.push({ computer, reason });
     }
   }
 

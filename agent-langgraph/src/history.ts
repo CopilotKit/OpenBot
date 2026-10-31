@@ -13,7 +13,8 @@ import {
   SystemMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { COMPUTER_GUIDANCE, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { computerGuidance, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { researchRoleOfToolName } from "../../shared/research";
 import { userContent } from "../../shared/user-content";
 
 /*
@@ -39,7 +40,14 @@ export function toLangChainMessages(
   provider = "openai",
 ): BaseMessage[] {
   const messages: BaseMessage[] = [
-    new SystemMessage(COMPUTER_GUIDANCE),
+    // Worded for the tools this run offers; see `computerGuidance` and agent-bot's history.ts.
+    new SystemMessage(
+      computerGuidance({
+        search: (input.tools ?? []).some(
+          (tool) => researchRoleOfToolName(tool.name) === "search",
+        ),
+      }),
+    ),
     // AG-UI carries application context separately from conversation history. CopilotKit puts
     // the A2UI catalog and tool instructions here; dropping it leaves the model guessing the
     // component schema and can strand the renderer on an invalid, never-painted surface.

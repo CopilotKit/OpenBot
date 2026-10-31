@@ -429,6 +429,15 @@ them), or everyone — and separately, whether outside input (email, Slack, webh
 than a schedule or Run now) may. Every call is checked against that, including runs handed on from
 another Bot, which are judged by what started the first run.
 
+**Owners can decide, if an administrator lets them.** By default only an administrator gives a
+Shared app to a Bot. If the app's page says Bot owners can give it to their Bots, an owner who gives
+it to a Bot they own also sets who may use the account through that Bot: the people who can use the
+Bot when they give it (only the owner for a private Bot, its published audience for a Team Bot),
+and never outside input. No separate approval is needed. The trail records it as
+`shared_use.owner_approved`, naming the owner, the Bot and the app. Taking the app back, or the
+administrator switching the app back to admins only, withdraws that audience
+(`shared_use.owner_withdrawn`); an audience an administrator approved stays.
+
 **Widening a Bot later** — publishing it further, assigning it to a group, making it public, adding a
 trigger — goes through. If an administrator made the change, it is approved in the same step. If the
 owner did, the screen says the shared calls will be refused and offers Request approval, and a call

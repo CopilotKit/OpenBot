@@ -14,7 +14,6 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 import {
   cleanup,
   fireEvent,
@@ -23,13 +22,14 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ApprovalSettings } from "@/components/approvals/settings";
+import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { ApprovalSettings } from "@/components/approvals/settings";
+import { toVisibleChatItems } from "@/components/channels/chat-messages";
 import {
   groupToolSteps,
   ToolActivity,
 } from "@/components/channels/tool-activity";
-import { toVisibleChatItems } from "@/components/channels/chat-messages";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);

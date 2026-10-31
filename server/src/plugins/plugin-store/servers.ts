@@ -14,6 +14,7 @@ import {
   pluginGrants,
 } from "../../db/schema";
 import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
+import { ownerGrantsOf } from "../app-access";
 import {
   type BrokerConnection,
   BrokerUnconfiguredError,
@@ -2004,6 +2005,18 @@ export function serverMethods(context: StoreContext) {
             toolkit !== null &&
             brokeredApps.get(row.url)?.accountMode === "shared" &&
             deploymentHeld.has(toolkit),
+          ownerGrants: ownerGrantsOf({
+            provider: toolkit ? brokerProvider : entry ? "catalogue" : "custom",
+            authScheme: toolkit
+              ? (brokeredApps.get(row.url)?.authScheme ?? null)
+              : row.authScheme,
+            accountMode: toolkit
+              ? (brokeredApps.get(row.url)?.accountMode ?? null)
+              : row.accountMode,
+            catalogueAuth: entry?.auth ?? null,
+            ownerGrants: row.ownerGrants,
+          }),
+          ownerGrantsChosen: row.ownerGrants,
           tools: tools
             .filter((tool) => tool.serverId === row.id)
             .map((tool) => {

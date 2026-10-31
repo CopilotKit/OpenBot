@@ -1,3 +1,8 @@
+import {
+  IconAlertTriangle,
+  IconDeviceDesktop,
+  IconRobot,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -27,28 +32,37 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
 import {
+  type HostAccessPendingOperation,
+  type HostFolderGrant,
   hostAccessQueryOptions,
   requestHostFolderGrantMutationOptions,
   revokeHostFolderGrantMutationOptions,
   stopHostAccessMutationOptions,
-  type HostFolderGrant,
-  type HostAccessPendingOperation,
 } from "@/lib/computers/host-access";
-import { computerFleetQueryOptions } from "@/lib/computers/queries";
+import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
+import {
+  type ComputerProfile,
+  computerFleetQueryOptions,
+} from "@/lib/computers/queries";
 
 export const Route = createFileRoute("/_authed/admin/computers")({
   component: ComputersPage,
 });
 
+/** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
+function rowId(computer: ComputerProfile): string {
+  return `${computer.computer}|${computer.botId ?? ""}`;
+}
+
 function ComputersPage() {
-  /** Bot id currently running a stop/reset request. */
+  /** The row currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
-  /** Reset deletes the browser profile, so it requires confirmation. */
-  const [confirming, setConfirming] = useState<string | null>(null);
+  /** Reset deletes the browser profiles, so it requires confirmation. */
+  const [confirming, setConfirming] = useState<ComputerProfile | null>(null);
   /** Updating restarts a running computer mid-task, so it is confirmed too. */
-  const [confirmingUpdate, setConfirmingUpdate] = useState<string | null>(null);
+  const [confirmingUpdate, setConfirmingUpdate] =
+    useState<ComputerProfile | null>(null);
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
 
@@ -85,16 +99,55 @@ function ComputersPage() {
           ? stopHostAccess.error.message
           : null;
 
-  const run = (botId: string, action: "stop" | "reset" | "update") => {
-    setBusy(botId);
+  const run = (
+    computer: ComputerProfile,
+    action: "stop" | "reset" | "update",
+  ) => {
+    setBusy(rowId(computer));
     setConfirming(null);
     setConfirmingUpdate(null);
-    setState.mutate({ action, botId }, { onSettled: () => setBusy(null) });
+    setState.mutate(
+      {
+        action,
+        computer: computer.computer,
+        ...(computer.botId ? { botId: computer.botId } : {}),
+      },
+      { onSettled: () => setBusy(null) },
+    );
+  };
+
+  /**
+   * Whose computer a row is, in the words the rest of Admin uses.
+   *
+   * A person's computer is named for the person. An isolated Bot's is named for the Bot. On a shared
+   * computer a row is one person's seat on one Bot, so it names both.
+   */
+  const titleOf = (computer: ComputerProfile): string => {
+    const person =
+      computer.person?.name ?? computer.person?.email ?? computer.personId;
+    if (computer.kind === "person") {
+      return computer.botId
+        ? `${person} · ${nameFor(computer.botId)}`
+        : `${person}'s computer`;
+    }
+    return nameFor(computer.botId ?? computer.computer);
+  };
+
+  /** What a row carries, said once before its state. */
+  const scopeOf = (computer: ComputerProfile): string => {
+    if (computer.kind === "person") {
+      return computer.botId
+        ? "This person's profile and folder for this Bot"
+        : "Runs every Bot this person uses";
+    }
+    return isolation === "shared"
+      ? "This Bot's profile from before each person had their own"
+      : "Isolated: a computer of its own, shared by everyone who uses it";
   };
 
   return (
     <PageShell
-      description="Each Bot's browser and the profile it keeps. The profile keeps a Bot signed in. Resetting it signs the Bot out of everything."
+      description="Each person's computer, and each isolated Bot's. Every Bot keeps its own browser profile on it, which keeps that Bot signed in. Resetting a computer signs every Bot on it out of everything."
       title="Computers"
     >
       {problem ? (
@@ -109,16 +162,20 @@ function ComputersPage() {
       {isolation === "shared" ? (
         <p className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
           <span className="font-medium">
-            Every Bot is sharing one computer.
+            Every person's Bots run on one computer.
           </span>{" "}
-          They share its logins, files and session. A Bot can reach what another
-          signed into. Set <code>COMPUTER_SUPERVISOR_URL</code> to give each Bot
-          its own.
+          Each person keeps their own browser profile and folder for each Bot,
+          so logins aren't shared. A command one Bot runs can still read
+          another's files. Set <code>COMPUTER_SUPERVISOR_URL</code> to give each
+          person a computer of their own.
         </p>
-      ) : isolation === "per-bot" ? (
+      ) : isolation === "per-person" ? (
         <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
-          Each Bot has its own computer, with its own container, files and
-          browser profile.
+          Each person has their own computer, and every Bot they use runs on it,
+          public Bots made by other people included. Each Bot keeps its own
+          browser profile and folder there, but a command one Bot runs can reach
+          anything else on that person's computer. An isolated Bot has a
+          computer of its own.
         </p>
       ) : null}
 
@@ -156,21 +213,23 @@ function ComputersPage() {
           </p>
         ) : null}
         {computers === null && problem ? (
-          <PageEmpty>Couldn't load the list.</PageEmpty>
+          <PageEmpty icon={IconAlertTriangle} title="Couldn't load the list" />
         ) : computers === null ? null : computers.length === 0 ? (
-          <PageEmpty>
-            No computers yet. One shows up the first time a Bot opens a page.
+          <PageEmpty icon={IconDeviceDesktop} title="No computers yet">
+            One shows up the first time a Bot opens a page.
           </PageEmpty>
         ) : (
           <PageRows>
             {computers.map((computer, index) => (
-              <StaggerItem index={index} key={computer.botId}>
+              <StaggerItem index={index} key={rowId(computer)}>
                 <Item size="sm">
                   <ItemContent>
-                    <ItemTitle title={computer.botId}>
-                      {nameFor(computer.botId)}
+                    <ItemTitle title={computer.computer}>
+                      {titleOf(computer)}
                     </ItemTitle>
                     <ItemDescription>
+                      {scopeOf(computer)}
+                      {" · "}
                       {computer.running
                         ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
                         : "No browser running. It starts when the Bot next needs it."}
@@ -186,8 +245,8 @@ function ComputersPage() {
                   <ItemActions>
                     {computer.updateAvailable ? (
                       <Button
-                        disabled={busy === computer.botId}
-                        onClick={() => setConfirmingUpdate(computer.botId)}
+                        disabled={busy === rowId(computer)}
+                        onClick={() => setConfirmingUpdate(computer)}
                         size="sm"
                         variant="outline"
                       >
@@ -195,16 +254,16 @@ function ComputersPage() {
                       </Button>
                     ) : null}
                     <Button
-                      disabled={busy === computer.botId || !computer.running}
-                      onClick={() => void run(computer.botId, "stop")}
+                      disabled={busy === rowId(computer) || !computer.running}
+                      onClick={() => void run(computer, "stop")}
                       size="sm"
                       variant="outline"
                     >
-                      {busy === computer.botId ? "Working…" : "Stop browser"}
+                      {busy === rowId(computer) ? "Working…" : "Stop browser"}
                     </Button>
                     <Button
-                      disabled={busy === computer.botId}
-                      onClick={() => setConfirming(computer.botId)}
+                      disabled={busy === rowId(computer)}
+                      onClick={() => setConfirming(computer)}
                       size="sm"
                       variant="outline"
                     >
@@ -222,8 +281,8 @@ function ComputersPage() {
       {/*
        * A DIALOG RATHER THAN AN INLINE CONFIRM. Resetting signs a Bot out of everything it has ever
        * logged into and cannot be undone, and the row it was confirmed on was one of several
-       * identical-looking rows. The dialog names the Bot, so the sentence somebody agrees to says
-       * which computer it destroys.
+       * identical-looking rows. The dialog names whose computer it is, so the sentence somebody
+       * agrees to says which computer it destroys.
        */}
       <Dialog
         onOpenChange={(open) => {
@@ -234,11 +293,13 @@ function ComputersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Reset {confirming ? nameFor(confirming) : ""}'s computer?
+              Reset {confirming ? titleOf(confirming) : ""}?
             </DialogTitle>
             <DialogDescription>
-              Its profile is deleted. The Bot is signed out of every service and
-              starts clean. You can't undo this.
+              {confirming?.kind === "person" && !confirming.botId
+                ? "Every Bot's profile on this person's computer is deleted. Each is signed out of every service and starts clean."
+                : "Its profile is deleted. The Bot is signed out of every service and starts clean."}{" "}
+              You can't undo this.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -250,14 +311,16 @@ function ComputersPage() {
               Cancel
             </Button>
             <Button
-              disabled={busy === confirming}
+              disabled={confirming !== null && busy === rowId(confirming)}
               onClick={() => {
                 if (confirming) void run(confirming, "reset");
               }}
               size="sm"
               variant="destructive"
             >
-              {busy === confirming ? "Resetting…" : "Reset it"}
+              {confirming !== null && busy === rowId(confirming)
+                ? "Resetting…"
+                : "Reset it"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -272,8 +335,7 @@ function ComputersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Update {confirmingUpdate ? nameFor(confirmingUpdate) : ""}'s
-              computer?
+              Update {confirmingUpdate ? titleOf(confirmingUpdate) : ""}?
             </DialogTitle>
             <DialogDescription>
               It moves to the computer image this deployment now runs. Its files
@@ -290,25 +352,29 @@ function ComputersPage() {
               Cancel
             </Button>
             <Button
-              disabled={busy === confirmingUpdate}
+              disabled={
+                confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+              }
               onClick={() => {
                 if (confirmingUpdate) void run(confirmingUpdate, "update");
               }}
               size="sm"
             >
-              {busy === confirmingUpdate ? "Updating…" : "Update it"}
+              {confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+                ? "Updating…"
+                : "Update it"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <p className="mt-4 text-muted-foreground text-sm">
-        <strong>Stop</strong> closes the browser and keeps its logins. It starts
-        again the next time the Bot needs it. <strong>Reset</strong> deletes the
-        profile and signs the Bot out of everything.{" "}
-        <strong>Update computer</strong> shows when a computer runs an older
-        image. It moves the computer to the new one and keeps its files and
-        sign-ins. All three show in{" "}
+        <strong>Stop</strong> closes the computer's browsers and keeps their
+        logins. It starts again the next time a Bot needs it.{" "}
+        <strong>Reset</strong> deletes the profiles and signs every Bot on it
+        out of everything. <strong>Update computer</strong> shows when a
+        computer runs an older image. It moves the computer to the new one and
+        keeps its files and sign-ins. All three show in{" "}
         <Link className="underline" to="/admin/audit">
           Audit
         </Link>
@@ -379,7 +445,9 @@ function HostFoldersSection({
       ) : null}
 
       {loading ? null : botIds.length === 0 ? (
-        <PageEmpty>No Bots yet. Create one, then choose its folders.</PageEmpty>
+        <PageEmpty icon={IconRobot} title="No Bots yet">
+          Create one, then choose its folders.
+        </PageEmpty>
       ) : (
         <PageRows>
           {botIds.map((botId, index) => (

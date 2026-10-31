@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
+import { botSeat } from "../src/computer/computer-key";
 import {
   ActionRefusedError,
   createComputerGateway,
@@ -47,9 +48,11 @@ const SNAPSHOT: SnapshotResult = {
  */
 function fakeSupervisor(startedAt: () => string, known: string[] = []) {
   const ensured = new Set(known);
+  // An isolated Bot's computer, which is what each of these Bots stands for.
   const describe = (botId: string) => ({
-    botId,
-    container: `openbot-computer-${botId}`,
+    kind: "bot",
+    id: botId,
+    container: `openbot-computer-bot-${botId}`,
     status: "running",
     url: "http://openbot-computer:4100",
     startedAt: startedAt(),
@@ -58,7 +61,7 @@ function fakeSupervisor(startedAt: () => string, known: string[] = []) {
     const path = new URL(url).pathname;
     if (path.endsWith("/ensure")) {
       const asked = decodeURIComponent(
-        path.slice("/computers/".length, -"/ensure".length),
+        path.slice("/computers/bot/".length, -"/ensure".length),
       );
       ensured.add(asked);
       return Response.json(describe(asked));
@@ -116,7 +119,7 @@ describe("a ref outliving the computer that produced it", () => {
     let run = FIRST_RUN;
     const { gateway, rows } = stack(() => run);
 
-    const taken = await gateway.snapshot("bot-a");
+    const taken = await gateway.snapshot(botSeat("bot-a"));
     expect(taken.snapshotId).toBe(7);
 
     // The supervisor replaces the container because the image tag moved. Generations start from one
@@ -124,7 +127,10 @@ describe("a ref outliving the computer that produced it", () => {
     run = SECOND_RUN;
 
     const first = await gateway
-      .click("bot-a", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+      .click(botSeat("bot-a"), ACTOR, {
+        ref: "e9",
+        snapshotId: taken.snapshotId,
+      })
       .catch((error: unknown) => error);
     expect(first).toBeInstanceOf(StaleSnapshotError);
 
@@ -134,7 +140,10 @@ describe("a ref outliving the computer that produced it", () => {
     );
 
     const second = await gateway
-      .click("bot-a", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+      .click(botSeat("bot-a"), ACTOR, {
+        ref: "e9",
+        snapshotId: taken.snapshotId,
+      })
       .catch((error: unknown) => error);
     expect(second).toBeInstanceOf(StaleSnapshotError);
   });
@@ -145,7 +154,7 @@ describe("a ref outliving the computer that produced it", () => {
     const { gateway, snapshots } = stack(() => SECOND_RUN, PERMISSIVE, [
       "bot-c",
     ]);
-    await snapshots.save("bot-c", {
+    await snapshots.save("bot:bot-c", {
       snapshotId: 7,
       url: SNAPSHOT.url,
       elements: new Map(SNAPSHOT.elements.map((e) => [e.ref, e])),
@@ -153,7 +162,7 @@ describe("a ref outliving the computer that produced it", () => {
     });
 
     const clicked = await gateway
-      .click("bot-c", ACTOR, { ref: "e9", snapshotId: 7 })
+      .click(botSeat("bot-c"), ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((error: unknown) => error);
     expect(clicked).toBeInstanceOf(StaleSnapshotError);
   });
@@ -169,11 +178,14 @@ describe("a ref outliving the computer that produced it", () => {
       allow: ["true"],
     });
 
-    const taken = await gateway.snapshot("bot-d");
+    const taken = await gateway.snapshot(botSeat("bot-d"));
     run = SECOND_RUN;
 
     const clicked = await gateway
-      .click("bot-d", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+      .click(botSeat("bot-d"), ACTOR, {
+        ref: "e9",
+        snapshotId: taken.snapshotId,
+      })
       .catch((error: unknown) => error);
     expect(clicked).not.toBeInstanceOf(ActionRefusedError);
     expect(clicked).toBeInstanceOf(StaleSnapshotError);
@@ -191,9 +203,9 @@ describe("a ref outliving the computer that produced it", () => {
       fetchImpl: fakeSupervisor(() => SECOND_RUN, ["bot-e"]),
     });
 
-    await replicaA.locate("bot-e");
-    expect(await replicaA.sessionOf?.("bot-e")).toBe(FIRST_RUN);
-    expect(await replicaB.sessionOf?.("bot-e")).toBe(SECOND_RUN);
+    await replicaA.locate(botSeat("bot-e"));
+    expect(await replicaA.sessionOf?.(botSeat("bot-e"))).toBe(FIRST_RUN);
+    expect(await replicaB.sessionOf?.(botSeat("bot-e"))).toBe(SECOND_RUN);
   });
 
   test("CONTROL: a ref from the run that is still current still resolves", async () => {
@@ -201,8 +213,8 @@ describe("a ref outliving the computer that produced it", () => {
     // is what says the refusals above are about the run and not about the ordering itself.
     const { gateway, rows } = stack(() => FIRST_RUN);
 
-    const taken = await gateway.snapshot("bot-f");
-    const clicked = await gateway.click("bot-f", ACTOR, {
+    const taken = await gateway.snapshot(botSeat("bot-f"));
+    const clicked = await gateway.click(botSeat("bot-f"), ACTOR, {
       ref: "e9",
       snapshotId: taken.snapshotId,
     });

@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, type Column, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { accounts, sessions, ssoProviders, users } from "../db/schema/core";
 
@@ -18,6 +18,47 @@ export async function revokeSessionsWithoutSso(
   initialAdminEmails: readonly string[],
   keepUserId?: string,
 ): Promise<number> {
+  const ended = await database
+    .delete(sessions)
+    .where(
+      withoutSso(database, initialAdminEmails, sessions.userId, keepUserId),
+    )
+    .returning({ id: sessions.id });
+  return ended.length;
+}
+
+/**
+ * Which of these people SSO-required signs out: the same people {@link revokeSessionsWithoutSso} ends the sessions of,
+ * asked of a list rather than of the sessions table, so what else they are signed in with (their Recorders) can be
+ * ended first, and again on a retry once their sessions are already gone.
+ */
+export async function peopleWithoutSso(
+  database: Database,
+  initialAdminEmails: readonly string[],
+  among: readonly string[],
+  keepUserId?: string,
+): Promise<string[]> {
+  if (among.length === 0) return [];
+  const rows = await database
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        inArray(users.id, [...among]),
+        withoutSso(database, initialAdminEmails, users.id, keepUserId),
+      ),
+    );
+  return rows.map((row) => row.id);
+}
+
+/** A person (`userId`, a column holding one) with no account at a registered identity provider, who is neither a
+ * break-glass address nor `keepUserId`. */
+function withoutSso(
+  database: Database,
+  initialAdminEmails: readonly string[],
+  userId: Column,
+  keepUserId?: string,
+) {
   const admins = initialAdminEmails
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
@@ -31,17 +72,11 @@ export async function revokeSessionsWithoutSso(
     .select({ id: accounts.userId })
     .from(accounts)
     .innerJoin(ssoProviders, eq(ssoProviders.providerId, accounts.providerId));
-  const ended = await database
-    .delete(sessions)
-    .where(
-      and(
-        notInArray(sessions.userId, breakGlass),
-        notInArray(sessions.userId, signedInWithSso),
-        ...(keepUserId ? [sql`${sessions.userId} <> ${keepUserId}`] : []),
-      ),
-    )
-    .returning({ id: sessions.id });
-  return ended.length;
+  return and(
+    notInArray(userId, breakGlass),
+    notInArray(userId, signedInWithSso),
+    ...(keepUserId ? [sql`${userId} <> ${keepUserId}`] : []),
+  );
 }
 
 /** Whether any enterprise identity provider is registered, which SSO-required depends on. */

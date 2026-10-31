@@ -9,7 +9,7 @@ would fight over one `ReadWriteOnce` claim and a rollout would hand the new pod 
 which reads as every Bot being signed out of everything at once.
 
 `replicas: 1` on purpose in this mode. One browser for every Bot is what `shared` means, and it is
-the mode that needs no CRD in the cluster. `computers.mode: sandbox` gives each Bot its own, and is
+the mode that needs no CRD in the cluster. `computers.mode: sandbox` gives each person their own (and each Isolated Bot its own), and is
 where the idle suspend lives; see the provider RBAC beside this file.
 
 STORAGE HAS GRAVITY. The volume below is `ReadWriteOnce`, and on all three clouds the ordinary block
@@ -149,14 +149,12 @@ spec:
                 secretKeyRef:
                   name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
                   key: computer-token
-            {{- with .Values.computers.maxBrowsers }}
-            - name: COMPUTER_MAX_BROWSERS
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.computers.browserIdleMs }}
-            - name: COMPUTER_BROWSER_IDLE_MS
-              value: {{ . | quote }}
-            {{- end }}
+            {{- /*
+              Every Bot reaches this one pod, so each gets its own folder of files and its shell
+              starts there. See agent-computer/src/workspaces.ts.
+            */}}
+            - name: COMPUTER_SEPARATE_WORKSPACES
+              value: "on"
             {{- with include "openbot.computerEnv" . | fromJsonArray }}
 {{ toYaml . | indent 12 }}
             {{- end }}

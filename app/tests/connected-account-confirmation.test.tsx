@@ -24,8 +24,8 @@ import {
 } from "@/lib/plugins/provider-vocabulary";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import {
-  landedActionFrom,
   Route as ConnectedAccountRoute,
+  landedActionFrom,
 } from "@/routes/_authed/_app/connections.$key";
 
 /**
@@ -92,6 +92,8 @@ function server(provider: Provider): PluginServer {
     dynamicClient: false,
     accountMode: null,
     sharedVendorConnected: false,
+    ownerGrants: "any",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };

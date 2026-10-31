@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import {
+  botSeat,
+  computerKeyText,
+  personSeat,
+} from "../src/computer/computer-key";
+import {
   ActionRefusedError,
   createComputerGateway,
   WorkspaceNotFoundError,
@@ -63,19 +68,19 @@ function fakeComputer(options?: {
   });
   const provider: ComputerProvider = {
     name: "test",
-    isolation: "per-bot",
-    locate: async (botId) => {
-      addressedAs.push(botId);
+    isolation: "per-person",
+    locate: async (seat) => {
+      addressedAs.push(seat.botId);
       return "http://agent-computer:4100";
     },
     ...(options?.session ? { sessionOf: async () => options.session?.() } : {}),
-    status: async (botId) => ({ botId, state: "ready" }),
-    stop: async (botId) => {
-      calls.push(`stop:${botId}`);
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
+    stop: async (target) => {
+      calls.push(`stop:${target.botId ?? computerKeyText(target.key)}`);
       return stopResult;
     },
-    reset: async (botId) => {
-      calls.push(`reset:${botId}`);
+    reset: async (target) => {
+      calls.push(`reset:${target.botId ?? computerKeyText(target.key)}`);
       return resetResult;
     },
     list: async () => locations,
@@ -227,14 +232,14 @@ async function gatewayWith(
     token: options?.token,
   });
   // Every test acts on refs, so the server must hold a snapshot first, exactly as the real flow does.
-  await gateway.snapshot("bot-1");
+  await gateway.snapshot(botSeat("bot-1"));
   return { gateway, calls, rows, addressedAs, requests, provider };
 }
 
 describe("the computer gateway", () => {
   test("carries out an allowed action and records it", async () => {
     const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.click("bot-1", ACTOR, {
+    await gateway.click(botSeat("bot-1"), ACTOR, {
       ref: "e9",
       snapshotId: 7,
     });
@@ -252,7 +257,7 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 }),
+      gateway.click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 7 }),
     ).rejects.toThrow(ActionRefusedError);
 
     // The decision happens before the effect.
@@ -271,7 +276,7 @@ describe("the computer gateway", () => {
       deny: ['mcp.effect == "write"'],
     });
 
-    await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+    await gateway.click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 7 });
 
     expect(calls).toEqual(["click"]);
     expect(rows[0]?.eventType).toBe("computer.action_allowed");
@@ -284,7 +289,7 @@ describe("the computer gateway", () => {
     });
 
     const error = await gateway
-      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
+      .click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ActionRefusedError);
@@ -302,7 +307,7 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.click("bot-1", ACTOR, {
+      gateway.click(botSeat("bot-1"), ACTOR, {
         ref: "e9",
         snapshotId: 7,
         // Not part of the input contract, and must not influence anything even when supplied.
@@ -314,7 +319,7 @@ describe("the computer gateway", () => {
 
   test("an allowed action reports the element's label for the transcript", async () => {
     const { gateway } = await gatewayWith(PERMISSIVE);
-    const result = await gateway.type("bot-1", ACTOR, {
+    const result = await gateway.type(botSeat("bot-1"), ACTOR, {
       ref: "e1",
       snapshotId: 7,
       text: "Grace Hopper",
@@ -324,7 +329,7 @@ describe("the computer gateway", () => {
 
   test("the typed text never enters the audit payload", async () => {
     const { gateway, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.type("bot-1", ACTOR, {
+    await gateway.type(botSeat("bot-1"), ACTOR, {
       ref: "e1",
       snapshotId: 7,
       text: "hunter2-not-a-real-password",
@@ -345,7 +350,7 @@ describe("the computer gateway", () => {
   test("an absent policy refuses every action", async () => {
     const { gateway, calls, rows } = await gatewayWith(undefined);
     await expect(
-      gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 }),
+      gateway.click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 7 }),
     ).rejects.toThrow(ActionRefusedError);
     expect(calls).toEqual([]);
     expect(rows[0]?.eventType).toBe("computer.action_refused");
@@ -358,7 +363,7 @@ describe("the computer gateway", () => {
       allow: ["true"],
     });
 
-    await gateway.click("bot-1", ACTOR, {
+    await gateway.click(botSeat("bot-1"), ACTOR, {
       ref: "e9",
       snapshotId: 7,
     });
@@ -374,7 +379,7 @@ describe("the computer gateway", () => {
     // Writing an id with no `users` row fails the constraint and loses the row entirely, so who it
     // was is carried in the payload instead. The route decides this; the gateway must honour it.
     const { gateway, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.click("bot-1", ACTOR, {
+    await gateway.click(botSeat("bot-1"), ACTOR, {
       ref: "e9",
       snapshotId: 7,
     });
@@ -389,7 +394,7 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.readFile("bot-1", ACTOR, {
+      gateway.readFile(botSeat("bot-1"), ACTOR, {
         path: "credentials/aws.txt",
       }),
     ).rejects.toThrow(ActionRefusedError);
@@ -405,10 +410,10 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.readFile("bot-1", ACTOR, { path: "config/prod.env" }),
+      gateway.readFile(botSeat("bot-1"), ACTOR, { path: "config/prod.env" }),
     ).rejects.toThrow(ActionRefusedError);
     // A different extension in the same folder is untouched by that rule.
-    await gateway.readFile("bot-1", ACTOR, {
+    await gateway.readFile(botSeat("bot-1"), ACTOR, {
       path: "config/prod.json",
     });
     expect(calls).toEqual(["readFile"]);
@@ -416,7 +421,7 @@ describe("the computer gateway", () => {
 
   test("a permitted write happens and is recorded by path, never by contents", async () => {
     const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.writeFile("bot-1", ACTOR, {
+    await gateway.writeFile(botSeat("bot-1"), ACTOR, {
       path: "notes.md",
       contents: "the customer's card number is 4111-1111-1111-1111",
     });
@@ -431,7 +436,9 @@ describe("the computer gateway", () => {
 
   test("a permitted command runs and is recorded by command, never by output", async () => {
     const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.runCommand("bot-1", ACTOR, { command: "cat secrets.txt" });
+    await gateway.runCommand(botSeat("bot-1"), ACTOR, {
+      command: "cat secrets.txt",
+    });
 
     expect(calls).toEqual(["runCommand"]);
     expect(rows[0]?.eventType).toBe("computer.action_allowed");
@@ -453,7 +460,7 @@ describe("the computer gateway", () => {
 
     await expect(
       gateway.runCommand(
-        "bot-1",
+        botSeat("bot-1"),
         ACTOR,
         { command: "cat secrets.txt" },
         stop.signal,
@@ -474,7 +481,9 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.runCommand("bot-1", ACTOR, { command: "cat secrets.txt" }),
+      gateway.runCommand(botSeat("bot-1"), ACTOR, {
+        command: "cat secrets.txt",
+      }),
     ).rejects.toThrow(ActionRefusedError);
     expect(calls).toEqual([]);
     expect(rows[0]?.eventType).toBe("computer.action_refused");
@@ -498,7 +507,7 @@ describe("the computer gateway", () => {
         what: "a command",
         route: "/exec",
         run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
-          gateway.runCommand("bot-1", ACTOR, {
+          gateway.runCommand(botSeat("bot-1"), ACTOR, {
             command: "rm -rf /workspace/build",
           }),
       },
@@ -506,7 +515,7 @@ describe("the computer gateway", () => {
         what: "a keypress",
         route: "/key",
         run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
-          gateway.key("bot-1", ACTOR, {
+          gateway.key(botSeat("bot-1"), ACTOR, {
             ref: "e1",
             snapshotId: 7,
             key: "Enter",
@@ -516,7 +525,10 @@ describe("the computer gateway", () => {
         what: "a file write",
         route: "/files/write",
         run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
-          gateway.writeFile("bot-1", ACTOR, { path: "notes.md", text: "kept" }),
+          gateway.writeFile(botSeat("bot-1"), ACTOR, {
+            path: "notes.md",
+            text: "kept",
+          }),
       },
     ]) {
       const { gateway, rows } = await gatewayWith(PERMISSIVE, {
@@ -555,12 +567,12 @@ describe("the computer gateway", () => {
       policy: () => PERMISSIVE,
     });
 
-    await gateway.snapshot("sales-bot");
-    await gateway.click("sales-bot", ACTOR, {
+    await gateway.snapshot(botSeat("sales-bot"));
+    await gateway.click(botSeat("sales-bot"), ACTOR, {
       ref: "e1",
       snapshotId: 7,
     });
-    await gateway.read("research-bot");
+    await gateway.read(botSeat("research-bot"));
 
     expect(addressedAs).toContain("sales-bot");
     expect(addressedAs).toContain("research-bot");
@@ -593,7 +605,7 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.readFile("bot-1", ACTOR, { path: "../../etc/passwd" }),
+      gateway.readFile(botSeat("bot-1"), ACTOR, { path: "../../etc/passwd" }),
     ).rejects.toThrow(WorkspaceRefusedError);
 
     expect(rows).toHaveLength(2);
@@ -607,7 +619,7 @@ describe("the computer gateway", () => {
   test("opening a page is recorded, with the address it was opening", async () => {
     // The target guard refuses forbidden addresses before the request leaves.
     const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.navigate("bot-1", ACTOR, "https://example.com/");
+    await gateway.navigate(botSeat("bot-1"), ACTOR, "https://example.com/");
 
     expect(calls).toEqual(["navigate"]);
     expect(rows[0]?.eventType).toBe("computer.action_allowed");
@@ -624,11 +636,15 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.navigate("bot-1", ACTOR, "https://intranet.example.com/hr"),
+      gateway.navigate(
+        botSeat("bot-1"),
+        ACTOR,
+        "https://intranet.example.com/hr",
+      ),
     ).rejects.toThrow(ActionRefusedError);
     expect(calls).toEqual([]);
 
-    await gateway.navigate("bot-1", ACTOR, "https://example.com/");
+    await gateway.navigate(botSeat("bot-1"), ACTOR, "https://example.com/");
     expect(calls).toEqual(["navigate"]);
   });
 
@@ -640,7 +656,7 @@ describe("the computer gateway", () => {
   test("an action that never named an element records no element", async () => {
     const { gateway, rows } = await gatewayWith(PERMISSIVE);
 
-    await gateway.navigate("bot-1", ACTOR, "https://example.com/");
+    await gateway.navigate(botSeat("bot-1"), ACTOR, "https://example.com/");
 
     expect(rows.at(-1)?.payload.action).toBe("computer_navigate");
     expect(rows.at(-1)?.payload.element).toBeUndefined();
@@ -654,7 +670,7 @@ describe("the computer gateway", () => {
     // element-keyed deny rule could not match and the click landed anyway. It is now refused. The
     // row is still written first, which is what keeps the attempt on the trail.
     const refusal = await gateway
-      .click("bot-1", ACTOR, { ref: "e404", snapshotId: 7 })
+      .click(botSeat("bot-1"), ACTOR, { ref: "e404", snapshotId: 7 })
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(StaleSnapshotError);
@@ -666,7 +682,7 @@ describe("the computer gateway", () => {
       stopResult: { wasRunning: true },
     });
 
-    const result = await gateway.stopComputer("bot-1", ACTOR);
+    const result = await gateway.stopComputer(botSeat("bot-1"), ACTOR);
 
     expect(result).toEqual({ wasRunning: true });
     expect(calls).toContain("stop:bot-1");
@@ -681,7 +697,7 @@ describe("the computer gateway", () => {
       stopResult: { wasRunning: false },
     });
 
-    const result = await gateway.stopComputer("bot-2", ACTOR);
+    const result = await gateway.stopComputer(botSeat("bot-2"), ACTOR);
 
     expect(result).toEqual({ wasRunning: false });
     expect(calls).toContain("stop:bot-2");
@@ -695,7 +711,7 @@ describe("the computer gateway", () => {
       resetResult: { cleared: true },
     });
 
-    const result = await gateway.resetComputer("bot-1", ACTOR);
+    const result = await gateway.resetComputer(botSeat("bot-1"), ACTOR);
 
     expect(result).toEqual({ cleared: true });
     expect(calls).toContain("reset:bot-1");
@@ -710,7 +726,7 @@ describe("the computer gateway", () => {
       resetResult: { cleared: false },
     });
 
-    const result = await gateway.resetComputer("bot-2", ACTOR);
+    const result = await gateway.resetComputer(botSeat("bot-2"), ACTOR);
 
     expect(result).toEqual({ cleared: false });
     expect(calls).toContain("reset:bot-2");
@@ -746,9 +762,9 @@ describe("the computer gateway", () => {
       snapshots,
     });
 
-    await expect(gateway.resetComputer("bot-1", ACTOR)).rejects.toThrow(
-      "connection reset by peer",
-    );
+    await expect(
+      gateway.resetComputer(botSeat("bot-1"), ACTOR),
+    ).rejects.toThrow("connection reset by peer");
 
     expect(rows.map((row) => row.eventType)).toContain("computer.reset");
     expect(rows[0]?.targetId).toBe("bot-1");
@@ -773,9 +789,9 @@ describe("the computer gateway", () => {
       >,
     });
 
-    await expect(gateway.resetComputer("bot-1", ACTOR)).rejects.toThrow(
-      "statement timeout",
-    );
+    await expect(
+      gateway.resetComputer(botSeat("bot-1"), ACTOR),
+    ).rejects.toThrow("statement timeout");
 
     expect(rows.map((row) => row.eventType)).toContain("computer.reset");
   });
@@ -783,19 +799,19 @@ describe("the computer gateway", () => {
   test("computers maps provider status 'running' and 'stopped' directly and preserves egress distinctions", async () => {
     const locations: ComputerLocation[] = [
       {
-        botId: "bot-proxied",
+        key: { kind: "bot", botId: "bot-proxied" },
         status: "running",
         startedAt: "2026-08-20T12:00:00.000Z",
         egress: "198.51.100.42",
       },
       {
-        botId: "bot-direct",
+        key: { kind: "bot", botId: "bot-direct" },
         status: "stopped",
         startedAt: "2026-08-20T11:00:00.000Z",
         egress: null,
       },
       {
-        botId: "bot-unknown-egress",
+        key: { kind: "bot", botId: "bot-unknown-egress" },
         status: "stopped",
         startedAt: "2026-08-20T10:00:00.000Z",
         egress: undefined,
@@ -806,21 +822,27 @@ describe("the computer gateway", () => {
     const result = await gateway.computers();
 
     expect(result).toEqual({
-      isolation: "per-bot",
+      isolation: "per-person",
       computers: [
         {
+          computer: "bot:bot-proxied",
+          kind: "bot",
           botId: "bot-proxied",
           running: true,
           startedAt: "2026-08-20T12:00:00.000Z",
           egress: "198.51.100.42",
         },
         {
+          computer: "bot:bot-direct",
+          kind: "bot",
           botId: "bot-direct",
           running: false,
           startedAt: "2026-08-20T11:00:00.000Z",
           egress: null,
         },
         {
+          computer: "bot:bot-unknown-egress",
+          kind: "bot",
           botId: "bot-unknown-egress",
           running: false,
           startedAt: "2026-08-20T10:00:00.000Z",
@@ -835,7 +857,7 @@ describe("the computer gateway", () => {
       token: "computer-secret",
     });
 
-    const result = await gateway.screenshot("bot-1");
+    const result = await gateway.screenshot(botSeat("bot-1"));
 
     expect(result).toEqual({
       image: "aGVsbG8=",
@@ -855,7 +877,7 @@ describe("the computer gateway", () => {
       token: "computer-secret",
     });
 
-    const download = await gateway.downloadFile("bot-1", ACTOR, {
+    const download = await gateway.downloadFile(botSeat("bot-1"), ACTOR, {
       path: "reports/Q3 file.pdf",
     });
 
@@ -886,7 +908,7 @@ describe("the computer gateway", () => {
     const { gateway, calls, rows } = await gatewayWith(undefined);
 
     await expect(
-      gateway.downloadFile("bot-1", ACTOR, { path: "report.pdf" }),
+      gateway.downloadFile(botSeat("bot-1"), ACTOR, { path: "report.pdf" }),
     ).rejects.toThrow(ActionRefusedError);
     expect(calls).not.toContain("downloadFile");
     expect(rows[0]?.eventType).toBe("computer.action_refused");
@@ -899,7 +921,9 @@ describe("the computer gateway", () => {
       deny: ['tool.name == "computer_read_file"'],
     });
     await expect(
-      separate.gateway.downloadFile("bot-1", ACTOR, { path: "report.pdf" }),
+      separate.gateway.downloadFile(botSeat("bot-1"), ACTOR, {
+        path: "report.pdf",
+      }),
     ).resolves.toMatchObject({ name: "report.pdf" });
     expect(separate.calls).toContain("downloadFile");
 
@@ -908,7 +932,9 @@ describe("the computer gateway", () => {
       deny: ['intent == "download_file"'],
     });
     await expect(
-      denied.gateway.downloadFile("bot-1", ACTOR, { path: "report.pdf" }),
+      denied.gateway.downloadFile(botSeat("bot-1"), ACTOR, {
+        path: "report.pdf",
+      }),
     ).rejects.toThrow(ActionRefusedError);
     expect(denied.calls).not.toContain("downloadFile");
     expect(denied.rows[0]?.eventType).toBe("computer.action_refused");
@@ -923,7 +949,7 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.downloadFile("bot-1", ACTOR, { path: "missing.pdf" }),
+      gateway.downloadFile(botSeat("bot-1"), ACTOR, { path: "missing.pdf" }),
     ).rejects.toThrow(WorkspaceNotFoundError);
     expect(rows.map(({ eventType }) => eventType)).toEqual([
       "computer.action_allowed",
@@ -940,27 +966,27 @@ describe("the computer gateway", () => {
     });
 
     await expect(
-      gateway.downloadFile("bot-1", ACTOR, { path: "big.zip" }),
+      gateway.downloadFile(botSeat("bot-1"), ACTOR, { path: "big.zip" }),
     ).rejects.toThrow(WorkspaceTooLargeError);
   });
 
   test("routes acting, control, file, secret, and human input calls to the correct endpoint paths", async () => {
     const { gateway, requests } = await gatewayWith(PERMISSIVE);
 
-    await gateway.key("bot-1", ACTOR, { key: "Tab" });
-    await gateway.scroll("bot-1", ACTOR, { deltaY: 400 });
-    await gateway.listFiles("bot-1", ACTOR, { path: "notes" });
-    await gateway.control("bot-1");
-    await gateway.requestHelp("bot-1", ACTOR, "Sign in");
-    await gateway.takeControl("bot-1", ACTOR, "request-1");
-    await gateway.releaseControl("bot-1", ACTOR, "request-1");
-    await gateway.requestSecret("bot-1", ACTOR, {
+    await gateway.key(botSeat("bot-1"), ACTOR, { key: "Tab" });
+    await gateway.scroll(botSeat("bot-1"), ACTOR, { deltaY: 400 });
+    await gateway.listFiles(botSeat("bot-1"), ACTOR, { path: "notes" });
+    await gateway.control(botSeat("bot-1"));
+    await gateway.requestHelp(botSeat("bot-1"), ACTOR, "Sign in");
+    await gateway.takeControl(botSeat("bot-1"), ACTOR, "request-1");
+    await gateway.releaseControl(botSeat("bot-1"), ACTOR, "request-1");
+    await gateway.requestSecret(botSeat("bot-1"), ACTOR, {
       label: "Password",
       ref: "e1",
       snapshotId: 7,
     });
-    await gateway.supplySecret("bot-1", ACTOR, "secret");
-    await gateway.humanInput("bot-1", { kind: "click", x: 10, y: 20 });
+    await gateway.supplySecret(botSeat("bot-1"), ACTOR, "secret");
+    await gateway.humanInput(botSeat("bot-1"), { kind: "click", x: 10, y: 20 });
 
     const paths = requests.map(({ url }) => new URL(url).pathname);
     expect(paths).toEqual([
@@ -992,7 +1018,10 @@ describe("the computer gateway", () => {
         deny: ['contains(command, "rm -rf")'],
       });
 
-      await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+      await gateway.click(botSeat("bot-1"), ACTOR, {
+        ref: "e9",
+        snapshotId: 7,
+      });
 
       expect(calls).toEqual(["click"]);
       expect(rows[0]?.eventType).toBe("computer.action_allowed");
@@ -1004,7 +1033,10 @@ describe("the computer gateway", () => {
         deny: ['key == "Enter"'],
       });
 
-      await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+      await gateway.click(botSeat("bot-1"), ACTOR, {
+        ref: "e9",
+        snapshotId: 7,
+      });
 
       expect(calls).toEqual(["click"]);
     });
@@ -1015,7 +1047,10 @@ describe("the computer gateway", () => {
         deny: ['contains(file.path, "secret")'],
       });
 
-      await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+      await gateway.click(botSeat("bot-1"), ACTOR, {
+        ref: "e9",
+        snapshotId: 7,
+      });
 
       expect(calls).toEqual(["click"]);
     });
@@ -1036,7 +1071,7 @@ describe("the computer gateway", () => {
       });
 
       await expect(
-        gateway.type("bot-1", ACTOR, {
+        gateway.type(botSeat("bot-1"), ACTOR, {
           ref: "e1",
           snapshotId: 7,
           text: "Ada",
@@ -1060,7 +1095,7 @@ describe("the computer gateway", () => {
         deny: ['key == "Enter"'],
       });
 
-      await gateway.type("bot-1", ACTOR, {
+      await gateway.type(botSeat("bot-1"), ACTOR, {
         ref: "e1",
         snapshotId: 7,
         text: "Ada",
@@ -1078,7 +1113,7 @@ describe("the computer gateway", () => {
       });
 
       await expect(
-        gateway.type("bot-1", ACTOR, {
+        gateway.type(botSeat("bot-1"), ACTOR, {
           ref: "e1",
           snapshotId: 7,
           text: "Ada",
@@ -1104,13 +1139,16 @@ describe("the computer gateway", () => {
 
       const click = await gatewayWith(shipped);
       await expect(
-        click.gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 }),
+        click.gateway.click(botSeat("bot-1"), ACTOR, {
+          ref: "e9",
+          snapshotId: 7,
+        }),
       ).rejects.toThrow();
       expect(click.calls).toEqual([]);
 
       const enter = await gatewayWith(shipped);
       await expect(
-        enter.gateway.key("bot-1", ACTOR, {
+        enter.gateway.key(botSeat("bot-1"), ACTOR, {
           ref: "e1",
           snapshotId: 7,
           key: "Enter",
@@ -1120,7 +1158,7 @@ describe("the computer gateway", () => {
 
       const submit = await gatewayWith(shipped);
       await expect(
-        submit.gateway.type("bot-1", ACTOR, {
+        submit.gateway.type(botSeat("bot-1"), ACTOR, {
           ref: "e1",
           snapshotId: 7,
           text: "Ada",
@@ -1136,7 +1174,7 @@ describe("the computer gateway", () => {
       const shipped = { ...PERMISSIVE, deny: [SHIPPED_NEVER_SUBMIT] };
 
       const typing = await gatewayWith(shipped);
-      await typing.gateway.type("bot-1", ACTOR, {
+      await typing.gateway.type(botSeat("bot-1"), ACTOR, {
         ref: "e1",
         snapshotId: 7,
         text: "Ada",
@@ -1144,7 +1182,7 @@ describe("the computer gateway", () => {
       expect(typing.calls).toEqual(["type"]);
 
       const looking = await gatewayWith(shipped);
-      await looking.gateway.screenshot("bot-1", ACTOR, {});
+      await looking.gateway.screenshot(botSeat("bot-1"));
       expect(looking.calls).toEqual(["screenshot"]);
     });
 
@@ -1157,7 +1195,11 @@ describe("the computer gateway", () => {
       });
 
       await expect(
-        gateway.key("bot-1", ACTOR, { ref: "e9", snapshotId: 7, key: "Enter" }),
+        gateway.key(botSeat("bot-1"), ACTOR, {
+          ref: "e9",
+          snapshotId: 7,
+          key: "Enter",
+        }),
       ).rejects.toThrow();
       expect(calls).toEqual([]);
       expect(rows[0]?.eventType).toBe("computer.action_refused");
@@ -1184,7 +1226,7 @@ describe("human input names a gesture, not a path", () => {
     const before = requests.length;
 
     await expect(
-      gateway.humanInput("bot-1", { kind, x: 1, y: 1 } as never),
+      gateway.humanInput(botSeat("bot-1"), { kind, x: 1, y: 1 } as never),
     ).rejects.toThrow();
     // Nothing left this process. Asserting only that it threw would pass just as well when the
     // request went out and the far side answered 404, which is the failure being fixed.
@@ -1196,7 +1238,7 @@ describe("human input names a gesture, not a path", () => {
     async (kind) => {
       const { gateway, requests } = await gatewayWith(PERMISSIVE);
 
-      await gateway.humanInput("bot-1", { kind, x: 1, y: 1 } as never);
+      await gateway.humanInput(botSeat("bot-1"), { kind, x: 1, y: 1 } as never);
 
       expect(
         requests.some(
@@ -1225,7 +1267,7 @@ describe("resolving a computer's address", () => {
       token: "deployment-token",
     });
 
-    await expect(gateway.locate("bot-1")).rejects.toThrow();
+    await expect(gateway.locate(botSeat("bot-1"))).rejects.toThrow();
     // Refused before anything was sent, so the token never left.
     expect(requests).toEqual([]);
   });
@@ -1240,7 +1282,7 @@ describe("resolving a computer's address", () => {
       policy: () => PERMISSIVE,
     });
 
-    await expect(gateway.locate("bot-1")).resolves.toContain("http");
+    await expect(gateway.locate(botSeat("bot-1"))).resolves.toContain("http");
   });
 });
 
@@ -1281,14 +1323,14 @@ describe("resolving a ref across replicas", () => {
     const tookSnapshot = replica(DENY_SUBMIT, snapshots);
     const handlesClick = replica(DENY_SUBMIT, snapshots);
 
-    await tookSnapshot.gateway.snapshot("bot-1");
+    await tookSnapshot.gateway.snapshot(botSeat("bot-1"));
 
     // e9 is the Submit button. The replica that never snapshotted still resolves it from the store and
     // refuses it. Held in a Map, this gateway's snapshot would be empty, the rule would have no element
     // to match, and the Submit click would go straight through: the boundary silently off on every
     // server but the one that happened to snapshot.
     await expect(
-      handlesClick.gateway.click("bot-1", ACTOR, {
+      handlesClick.gateway.click(botSeat("bot-1"), ACTOR, {
         ref: "e9",
         snapshotId: 7,
       }),
@@ -1302,8 +1344,8 @@ describe("resolving a ref across replicas", () => {
     const tookSnapshot = replica(PERMISSIVE, snapshots);
     const handlesClick = replica(PERMISSIVE, snapshots);
 
-    await tookSnapshot.gateway.snapshot("bot-1");
-    const result = await handlesClick.gateway.type("bot-1", ACTOR, {
+    await tookSnapshot.gateway.snapshot(botSeat("bot-1"));
+    const result = await handlesClick.gateway.type(botSeat("bot-1"), ACTOR, {
       ref: "e1",
       snapshotId: 7,
       text: "Grace Hopper",
@@ -1329,9 +1371,9 @@ describe("resolving a ref across replicas", () => {
     const tookSnapshot = replica(PERMISSIVE, snapshots);
     const handlesClick = replica(PERMISSIVE, snapshots);
 
-    await tookSnapshot.gateway.snapshot("bot-1");
+    await tookSnapshot.gateway.snapshot(botSeat("bot-1"));
 
-    const current = await handlesClick.gateway.click("bot-1", ACTOR, {
+    const current = await handlesClick.gateway.click(botSeat("bot-1"), ACTOR, {
       ref: "e9",
       snapshotId: 7,
     });
@@ -1341,7 +1383,7 @@ describe("resolving a ref across replicas", () => {
     // unchanged; the assertion moved because a citation that cannot be resolved is now refused rather
     // than forwarded with an empty element, which is what let an element-keyed deny rule go inert.
     const superseded = await handlesClick.gateway
-      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 6 })
+      .click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 6 })
       .catch((error: unknown) => error);
 
     expect(superseded).toBeInstanceOf(StaleSnapshotError);
@@ -1358,18 +1400,22 @@ describe("resolving a ref across replicas", () => {
     const tookSnapshot = replica(PERMISSIVE, snapshots);
     const handlesClick = replica(PERMISSIVE, snapshots);
 
-    await tookSnapshot.gateway.snapshot("bot-1");
-    await tookSnapshot.gateway.resetComputer("bot-1", ACTOR);
+    await tookSnapshot.gateway.snapshot(botSeat("bot-1"));
+    await tookSnapshot.gateway.resetComputer(botSeat("bot-1"), ACTOR);
 
     // Still forwarded with the element unresolved, and deliberately so. A reset deletes the row, so
     // this server holds no snapshot for the computer at all and has nothing to judge the citation
     // against; the refusal added for a stale citation fires only where there is a stored page to see
     // that it is stale. The computer is the party that can answer here, and taking its answer away
     // would also take away the one that says a person has the wheel.
-    const afterReset = await handlesClick.gateway.click("bot-1", ACTOR, {
-      ref: "e9",
-      snapshotId: 7,
-    });
+    const afterReset = await handlesClick.gateway.click(
+      botSeat("bot-1"),
+      ACTOR,
+      {
+        ref: "e9",
+        snapshotId: 7,
+      },
+    );
     expect(afterReset.element).toBeUndefined();
   });
 });
@@ -1401,7 +1447,7 @@ describe("a ref that outlived its computer", () => {
       snapshots,
     });
 
-    const taken = await gateway.snapshot("bot-1");
+    const taken = await gateway.snapshot(botSeat("bot-1"));
     // The computer is replaced. Its generation counter starts again, and nothing clears the row.
     run = "run-2";
 
@@ -1416,7 +1462,10 @@ describe("a ref that outlived its computer", () => {
      * refused now, which is what makes the sentence true.
      */
     const refusal = await gateway
-      .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+      .click(botSeat("bot-1"), ACTOR, {
+        ref: "e9",
+        snapshotId: taken.snapshotId,
+      })
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(StaleSnapshotError);
@@ -1439,8 +1488,8 @@ describe("a ref that outlived its computer", () => {
       snapshots,
     });
 
-    const taken = await gateway.snapshot("bot-1");
-    await gateway.click("bot-1", ACTOR, {
+    const taken = await gateway.snapshot(botSeat("bot-1"));
+    await gateway.click(botSeat("bot-1"), ACTOR, {
       ref: "e9",
       snapshotId: taken.snapshotId,
     });
@@ -1463,7 +1512,7 @@ describe("acting on a ref the server cannot resolve", () => {
     const { gateway, calls } = await gatewayWith(DENY_SUBMIT);
 
     const refusal = await gateway
-      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
+      .click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(ActionRefusedError);
@@ -1479,7 +1528,7 @@ describe("acting on a ref the server cannot resolve", () => {
     const { gateway, calls, rows } = await gatewayWith(DENY_SUBMIT);
 
     const refusal = await gateway
-      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 2 })
+      .click(botSeat("bot-1"), ACTOR, { ref: "e9", snapshotId: 2 })
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(StaleSnapshotError);
@@ -1500,7 +1549,7 @@ describe("acting on a ref the server cannot resolve", () => {
     // be honoured is refused here.
     const { gateway, calls } = await gatewayWith(PERMISSIVE);
 
-    await gateway.scroll("bot-1", ACTOR, { deltaY: 200 });
+    await gateway.scroll(botSeat("bot-1"), ACTOR, { deltaY: 200 });
 
     expect(calls).toEqual(["scroll"]);
   });
@@ -1592,14 +1641,14 @@ describe("a Bot on the one shared computer", () => {
     const computer = sharedComputer();
     try {
       const { gateway, rows, snapshots } = gatewayOn(computer);
-      const taken = await gateway.snapshot("bot-1");
+      const taken = await gateway.snapshot(botSeat("bot-1"));
 
-      await gateway.resetComputer("bot-1", ACTOR);
-      expect(await snapshots.load("bot-1")).toBeUndefined();
+      await gateway.resetComputer(botSeat("bot-1"), ACTOR);
+      expect(await snapshots.load("bot:bot-1")).toBeUndefined();
       // The reset closed that browser, so the next one is a different run.
       computer.replaceRun("run-2");
       // And now the save that was in flight when it landed, carrying the run it was taken on.
-      await snapshots.save("bot-1", {
+      await snapshots.save("bot:bot-1", {
         snapshotId: taken.snapshotId,
         url: taken.url,
         elements: new Map(
@@ -1609,7 +1658,10 @@ describe("a Bot on the one shared computer", () => {
       });
 
       const refusal = await gateway
-        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .click(botSeat("bot-1"), ACTOR, {
+          ref: "e9",
+          snapshotId: taken.snapshotId,
+        })
         .catch((error: unknown) => error);
 
       expect(refusal).toBeInstanceOf(StaleSnapshotError);
@@ -1630,14 +1682,14 @@ describe("a Bot on the one shared computer", () => {
     const computer = sharedComputer();
     try {
       const { gateway, snapshots } = gatewayOn(computer);
-      await gateway.snapshot("bot-1");
-      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+      await gateway.snapshot(botSeat("bot-1"));
+      expect((await snapshots.load("bot:bot-1"))?.snapshotId).toBe(7);
 
       computer.replaceRun("run-2");
       computer.showing(FRESH);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
 
-      const held = await snapshots.load("bot-1");
+      const held = await snapshots.load("bot:bot-1");
       expect(held?.snapshotId).toBe(1);
       expect(held?.url).toBe(FRESH.url);
     } finally {
@@ -1663,11 +1715,14 @@ describe("a Bot on the one shared computer", () => {
       const { gateway, rows, snapshots } = gatewayOn(computer);
       computer.onSnapshot(() => computer.replaceRun("run-2"));
 
-      const taken = await gateway.snapshot("bot-1");
-      expect((await snapshots.load("bot-1"))?.session).toBe("run-1");
+      const taken = await gateway.snapshot(botSeat("bot-1"));
+      expect((await snapshots.load("bot:bot-1"))?.session).toBe("run-1");
 
       const refusal = await gateway
-        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .click(botSeat("bot-1"), ACTOR, {
+          ref: "e9",
+          snapshotId: taken.snapshotId,
+        })
         .catch((error: unknown) => error);
 
       expect(refusal).toBeInstanceOf(StaleSnapshotError);
@@ -1683,11 +1738,11 @@ describe("a Bot on the one shared computer", () => {
     const computer = sharedComputer();
     try {
       const { gateway, snapshots } = gatewayOn(computer);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
       computer.showing(FRESH);
-      await gateway.snapshot("bot-1");
+      await gateway.snapshot(botSeat("bot-1"));
 
-      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+      expect((await snapshots.load("bot:bot-1"))?.snapshotId).toBe(7);
     } finally {
       computer.stop();
     }
@@ -1699,8 +1754,8 @@ describe("updating a computer's image", () => {
     const { provider, fetchImpl } = fakeComputer();
     const { store, rows } = fakeAudit();
     const asked: string[] = [];
-    provider.update = async (botId) => {
-      asked.push(botId);
+    provider.update = async (key) => {
+      asked.push(computerKeyText(key));
       return { updated: true, wasRunning: true, from: "old", to: "new" };
     };
     const gateway = createComputerGateway({
@@ -1710,10 +1765,12 @@ describe("updating a computer's image", () => {
       policy: () => PERMISSIVE,
     });
 
-    expect(await gateway.updateComputer("bot-1", ACTOR)).toMatchObject({
-      updated: true,
-    });
-    expect(asked).toEqual(["bot-1"]);
+    expect(await gateway.updateComputer(botSeat("bot-1"), ACTOR)).toMatchObject(
+      {
+        updated: true,
+      },
+    );
+    expect(asked).toEqual(["bot:bot-1"]);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.eventType).toBe("computer.updated");
     expect(rows[0]?.targetId).toBe("bot-1");
@@ -1729,9 +1786,213 @@ describe("updating a computer's image", () => {
       auditStore: store,
       policy: () => PERMISSIVE,
     });
-    await expect(gateway.updateComputer("bot-1", ACTOR)).rejects.toThrow(
-      /no computer image/,
-    );
+    await expect(
+      gateway.updateComputer(botSeat("bot-1"), ACTOR),
+    ).rejects.toThrow(/no computer image/);
     expect(rows).toHaveLength(0);
+  });
+});
+
+/**
+ * One computer per person, with a seat per Bot inside it.
+ *
+ * Every layer used to key a computer by the Bot alone, so a public Bot had one computer and one
+ * set of logins that everybody shared. These pin the gateway's half: which computer a seat reaches,
+ * what the computer is told about whose seat it is, and where the server files what it remembers.
+ */
+describe("seats on a person's computer", () => {
+  function onePerPerson() {
+    const computer = fakeComputer({
+      routes: {
+        "/computers/reset": () => Response.json({ reset: true }),
+        "/computers/stop": () => Response.json({ wasRunning: true }),
+      },
+    });
+    const located: string[] = [];
+    const locate = computer.provider.locate;
+    computer.provider.locate = async (seat) => {
+      located.push(computerKeyText(seat.key));
+      return locate(seat);
+    };
+    const snapshots = createInMemorySnapshotStore();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider: computer.provider,
+      fetchImpl: computer.fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+    return { ...computer, gateway, located, snapshots, rows };
+  }
+  const headersOf = (request: { init?: RequestInit }) =>
+    request.init?.headers as Record<string, string>;
+
+  test("two people on one public Bot reach two computers and keep two snapshots", async () => {
+    const { gateway, located, snapshots } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "pub-bot"));
+    await gateway.snapshot(personSeat("bo", "pub-bot"));
+
+    expect(located).toEqual(["person:ada", "person:bo"]);
+    expect(await snapshots.load("person:ada/pub-bot")).toBeDefined();
+    expect(await snapshots.load("person:bo/pub-bot")).toBeDefined();
+    expect(await snapshots.load("pub-bot")).toBeUndefined();
+  });
+
+  test("one person's two Bots share the computer but not a profile or folder", async () => {
+    const { gateway, located, requests } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "sales"));
+    await gateway.snapshot(personSeat("ada", "notes"));
+
+    expect(located).toEqual(["person:ada", "person:ada"]);
+    // Inside the computer the Bot picks the profile and folder; the person is the computer itself,
+    // so it is not sent, and each Bot keeps the profile it has always had there.
+    expect(
+      requests.map((request) => headersOf(request)["x-openbot-bot-id"]),
+    ).toEqual(["sales", "notes"]);
+    expect(
+      requests.every(
+        (request) => headersOf(request)["x-openbot-person-id"] === undefined,
+      ),
+    ).toBe(true);
+  });
+
+  test("an isolated Bot reaches a computer of its own", async () => {
+    const { gateway, located } = onePerPerson();
+    await gateway.snapshot(botSeat("sales"));
+    expect(located).toEqual(["bot:sales"]);
+  });
+
+  test("resetting one Bot on a person's computer clears that Bot's profile and nothing else", async () => {
+    const { gateway, calls, requests, snapshots, rows } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "sales"));
+    await gateway.snapshot(personSeat("ada", "notes"));
+
+    expect(
+      await gateway.resetComputer(personSeat("ada", "sales"), ACTOR),
+    ).toEqual({ cleared: true });
+
+    // The computer was asked about one seat, not thrown away with the person's other Bots on it.
+    expect(calls.filter((call) => call.startsWith("reset:"))).toEqual([]);
+    const reset = requests.find((request) =>
+      request.url.endsWith("/computers/reset"),
+    );
+    expect(reset && headersOf(reset)["x-openbot-bot-id"]).toBe("sales");
+    expect(await snapshots.load("person:ada/sales")).toBeUndefined();
+    expect(await snapshots.load("person:ada/notes")).toBeDefined();
+    expect(rows.at(-1)?.payload).toMatchObject({
+      bot: "sales",
+      computer: "person:ada",
+    });
+  });
+
+  test("a reset also forgets what was filed under the Bot alone, before computers were per person", async () => {
+    const { gateway, snapshots } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "sales"));
+    const taken = await snapshots.load("person:ada/sales");
+    if (!taken) throw new Error("No snapshot was taken.");
+    // Filed as every snapshot and picture of a page was before: under the Bot, for everybody who used it.
+    await snapshots.save("sales", taken);
+    await gateway.resetComputer(personSeat("ada", "sales"), ACTOR);
+    expect(await snapshots.load("sales")).toBeUndefined();
+
+    // An administrator resetting an isolated Bot's computer from the list does the same.
+    await snapshots.save("notes", taken);
+    await gateway.resetTarget({ key: { kind: "bot", botId: "notes" } }, ACTOR);
+    expect(await snapshots.load("notes")).toBeUndefined();
+  });
+
+  test("an administrator resetting a person's whole computer clears every seat on it, and only theirs", async () => {
+    const { gateway, calls, snapshots } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "sales"));
+    await gateway.snapshot(personSeat("ada", "notes"));
+    await gateway.snapshot(personSeat("bo", "sales"));
+
+    await gateway.resetTarget(
+      { key: { kind: "person", personId: "ada" } },
+      ACTOR,
+    );
+
+    expect(calls).toContain("reset:person:ada");
+    expect(await snapshots.load("person:ada/sales")).toBeUndefined();
+    expect(await snapshots.load("person:ada/notes")).toBeUndefined();
+    expect(await snapshots.load("person:bo/sales")).toBeDefined();
+  });
+
+  test("every action's row names the computer it ran on, for the idle culler", async () => {
+    const { gateway, rows } = onePerPerson();
+    await gateway.snapshot(personSeat("ada", "sales"));
+    await gateway.scroll(personSeat("ada", "sales"), ACTOR, {});
+    expect(rows.at(-1)?.payload).toMatchObject({
+      bot: "sales",
+      computer: "person:ada",
+    });
+  });
+
+  test("the admin list says whose each computer is", async () => {
+    const computer = fakeComputer({
+      locations: [
+        { key: { kind: "person", personId: "ada" }, status: "running" },
+        { key: { kind: "bot", botId: "sales" }, status: "stopped" },
+      ],
+    });
+    const gateway = createComputerGateway({
+      provider: computer.provider,
+      fetchImpl: computer.fetchImpl,
+      auditStore: fakeAudit().store,
+      policy: () => PERMISSIVE,
+      people: async () =>
+        new Map([["ada", { name: "Ada", email: "ada@acme.test" }]]),
+    });
+
+    expect((await gateway.computers()).computers).toEqual([
+      expect.objectContaining({
+        computer: "person:ada",
+        kind: "person",
+        personId: "ada",
+        person: { name: "Ada", email: "ada@acme.test" },
+        running: true,
+      }),
+      expect.objectContaining({
+        computer: "bot:sales",
+        kind: "bot",
+        botId: "sales",
+        running: false,
+      }),
+    ]);
+  });
+});
+
+/**
+ * The same seats on the one computer everybody shares, where the person has to travel with the Bot
+ * because the computer cannot tell them apart any other way.
+ */
+describe("seats on the shared computer", () => {
+  test("every call names the person as well as the Bot", async () => {
+    const requests: Headers[] = [];
+    const gateway = createComputerGateway({
+      provider: createSharedComputerProvider({
+        baseUrl: "http://agent-computer:4100",
+        fetchImpl: (async () => Response.json({ run: "r" })) as never,
+      }),
+      fetchImpl: (async (_url: string, init?: RequestInit) => {
+        requests.push(new Headers(init?.headers));
+        return Response.json(SNAPSHOT);
+      }) as unknown as typeof fetch,
+      auditStore: fakeAudit().store,
+      policy: () => PERMISSIVE,
+    });
+
+    await gateway.snapshot(personSeat("ada", "pub-bot"));
+    await gateway.snapshot(personSeat("bo", "pub-bot"));
+    expect(
+      requests.map((headers) => [
+        headers.get("x-openbot-person-id"),
+        headers.get("x-openbot-bot-id"),
+      ]),
+    ).toEqual([
+      ["ada", "pub-bot"],
+      ["bo", "pub-bot"],
+    ]);
   });
 });

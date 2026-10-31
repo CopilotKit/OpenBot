@@ -1,0 +1,833 @@
+{
+  "description": "End-to-end runs 1 and 2 (2026-10-21, real Chrome, the CopilotKit v2 react demo's learning deal page on 127.0.0.1:7620 with CopilotKit's own legacy capture on, the Recorder recording the same tab): the person sent a message and approved the deal with the agent, clicked the page, then New thread, the chat box, typed a question and sent it. `copilotKit` is what CopilotKit's legacy sink stored for each run (its clicks and its agent rows, `seq` and message text left out). `typed` is the edit step the Recorder's content script captured as the second question was typed (its row 035, Intelligence's own fields left out). `secondRunRequestAt` is when the page asked for the run on the new Thread, as the Recorder saw it (the time of its thread.linked and agent.message for that Thread).",
+  "runs": [
+    {
+      "name": "run1",
+      "copilotKit": [
+        {
+          "name": "click",
+          "timestamp": 1792551493334,
+          "value": {
+            "threadId": null,
+            "target": {
+              "tag": "a",
+              "label": "Open",
+              "action": "deal.open"
+            }
+          }
+        },
+        {
+          "name": "thread.linked",
+          "timestamp": 1792551493396,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default",
+            "hasMessages": false,
+            "reason": "open"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551496357,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "target": {
+              "tag": "textarea",
+              "label": null,
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551502009,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "target": {
+              "tag": "button",
+              "label": "Send message",
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551502012,
+          "value": {
+            "messageId": "34c0e617-379e-42bb-a8e7-d17bee9cb1a3",
+            "runId": null,
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 110
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551502266,
+          "value": {
+            "phase": "started",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551506221,
+          "value": {
+            "messageId": "rs_03064afd74037d4e006ad82a507af887d0bb7638eea3d2dffb:0",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default",
+            "role": "reasoning",
+            "textLength": 450
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551506223,
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_slgmG65c7Xikww7gRGnuhyIT",
+            "toolName": "lookupDealHistory",
+            "agentId": "default",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "messageId": "6f5a4d3f-5dba-4812-8ccc-1390a7898d70",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551506300,
+          "value": {
+            "messageId": "57a4dc5c-6457-4bfe-82b2-a9dbfa13c047",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 188
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551507771,
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_NzTS1sPZdcnFdRT3Q0jGufoG",
+            "toolName": "approveDeal",
+            "agentId": "default",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "messageId": "6f5a4d3f-5dba-4812-8ccc-1390a7898d70",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921"
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551508142,
+          "value": {
+            "phase": "finished",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551508145,
+          "value": {
+            "phase": "executing",
+            "toolCallId": "call_NzTS1sPZdcnFdRT3Q0jGufoG",
+            "toolName": "approveDeal",
+            "agentId": "default",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "messageId": "6f5a4d3f-5dba-4812-8ccc-1390a7898d70",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551510606,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default",
+            "messageId": "6f5a4d3f-5dba-4812-8ccc-1390a7898d70",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "toolCallId": "call_NzTS1sPZdcnFdRT3Q0jGufoG",
+            "toolName": "approveDeal",
+            "toolStatus": "executing",
+            "target": {
+              "tag": "button",
+              "label": "Approve",
+              "action": "hitl.approve"
+            }
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551510606,
+          "value": {
+            "phase": "completed",
+            "toolCallId": "call_NzTS1sPZdcnFdRT3Q0jGufoG",
+            "toolName": "approveDeal",
+            "agentId": "default",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "messageId": "6f5a4d3f-5dba-4812-8ccc-1390a7898d70",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "durationMs": 2461,
+            "outcome": "ok"
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551510846,
+          "value": {
+            "phase": "started",
+            "runId": "c1f2e8eb-32e0-4445-8173-dddef35a20ae",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551514043,
+          "value": {
+            "messageId": "msg_09397627c2dfb282006ad82a57a45487d0af3a3bc4b3a1d212",
+            "runId": "ccee3512-fee8-455e-b488-3240b25c9921",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 495
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551514043,
+          "value": {
+            "phase": "finished",
+            "runId": "c1f2e8eb-32e0-4445-8173-dddef35a20ae",
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551521640,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "target": {
+              "tag": "h1",
+              "label": null,
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551522660,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "target": {
+              "tag": "button",
+              "label": "Approve without the agent",
+              "action": "deal.approve"
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551524313,
+          "value": {
+            "threadId": "4cdc1995-04f8-4d35-b2ca-5c96de1779f3",
+            "target": {
+              "tag": "button",
+              "label": "New thread",
+              "action": "thread.new"
+            }
+          }
+        },
+        {
+          "name": "thread.linked",
+          "timestamp": 1792551524320,
+          "value": {
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default",
+            "hasMessages": false,
+            "reason": "switch"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551527299,
+          "value": {
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "target": {
+              "tag": "textarea",
+              "label": null,
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551530321,
+          "value": {
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "target": {
+              "tag": "button",
+              "label": "Send message",
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551530323,
+          "value": {
+            "messageId": "9027f658-8d44-4f47-9f42-c20ada902bcd",
+            "runId": "c1f2e8eb-32e0-4445-8173-dddef35a20ae",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 59
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551530567,
+          "value": {
+            "phase": "started",
+            "runId": "51d0f330-2a94-4d41-b72b-4bc8888f639e",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551532526,
+          "value": {
+            "messageId": "rs_001b33e74d7a36dc006ad82a6b75f887d0ae942006313b4625:0",
+            "runId": "51d0f330-2a94-4d41-b72b-4bc8888f639e",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default",
+            "role": "reasoning",
+            "textLength": 0
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551532528,
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_N7QtRyNSNGMMA3TfyNtZmn3W",
+            "toolName": "lookupDealHistory",
+            "agentId": "default",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "messageId": "e64e197c-8409-461e-90b8-d9e40bffdb2f",
+            "runId": "51d0f330-2a94-4d41-b72b-4bc8888f639e"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551532724,
+          "value": {
+            "messageId": "b40f8758-fe6b-490b-ac83-019f582d37d4",
+            "runId": "51d0f330-2a94-4d41-b72b-4bc8888f639e",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 188
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551534228,
+          "value": {
+            "messageId": "msg_001b33e74d7a36dc006ad82a6dd13487d0a84f7f4b5ac4d5e2",
+            "runId": "51d0f330-2a94-4d41-b72b-4bc8888f639e",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 51
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551534228,
+          "value": {
+            "phase": "finished",
+            "runId": "51d0f330-2a94-4d41-b72b-4bc8888f639e",
+            "threadId": "1e4649f2-bdd2-4045-8591-b534bcb464f8",
+            "agentId": "default"
+          }
+        }
+      ],
+      "typed": {
+        "type": "CUSTOM",
+        "name": "input",
+        "timestamp": 1792551529968,
+        "value": {
+          "box": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+          "step": "input",
+          "route": "/learning/deals/deal-1",
+          "target": {
+            "tag": "textarea",
+            "name": "Type a message...",
+            "role": "textbox",
+            "text": "What is this deal's payment record? Answer in one sentence",
+            "value": "What is this deal's payment record? Answer in one sentence.",
+            "action": null,
+            "inputType": "textarea",
+            "attributes": {
+              "rows": "1",
+              "class": "cpk:bg-transparent cpk:outline-none cpk:antialiased cpk:font-regular cpk:text-[16px] cpk:placeholder:text-[#00000077] cpk:dark:placeholder:text-[#fffc] cpk:w-full cpk:py-3 cpk:px-5",
+              "style": "overflow: auto; resize: none; max-height: 144px; height: 48px;",
+              "data-testid": "copilot-chat-textarea",
+              "placeholder": "Type a message..."
+            }
+          },
+          "viewport": {
+            "width": 1280,
+            "height": 860
+          },
+          "eventType": "input",
+          "selectors": [
+            {
+              "by": "testid",
+              "selector": "[data-testid=\"copilot-chat-textarea\"]"
+            },
+            {
+              "by": "role",
+              "selector": "role=textbox[name=\"Type a message...\"]"
+            },
+            {
+              "by": "css",
+              "selector": "[data-testid=\"copilot-chat-input\"] > div > div:nth-of-type(2) > textarea"
+            }
+          ]
+        }
+      },
+      "secondRunRequestAt": 1792551530334
+    },
+    {
+      "name": "run2",
+      "copilotKit": [
+        {
+          "name": "click",
+          "timestamp": 1792551597178,
+          "value": {
+            "threadId": null,
+            "target": {
+              "tag": "a",
+              "label": "Open",
+              "action": "deal.open"
+            }
+          }
+        },
+        {
+          "name": "thread.linked",
+          "timestamp": 1792551597240,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default",
+            "hasMessages": false,
+            "reason": "open"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551600204,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "target": {
+              "tag": "textarea",
+              "label": null,
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551605828,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "target": {
+              "tag": "button",
+              "label": "Send message",
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551605831,
+          "value": {
+            "messageId": "d67521ab-8d25-4b97-a495-854342e8f7ef",
+            "runId": null,
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 110
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551606213,
+          "value": {
+            "phase": "started",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551609979,
+          "value": {
+            "messageId": "rs_0b017279a2a98725006ad82ab7543887d0b7cba27a3db810a2:0",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default",
+            "role": "reasoning",
+            "textLength": 502
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551609980,
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_ygwYZiZIAo7Wunu4lRnNgp02",
+            "toolName": "lookupDealHistory",
+            "agentId": "default",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "messageId": "09d4a613-bb75-4fdc-828e-12f3b0322580",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551610161,
+          "value": {
+            "messageId": "9cb84361-4ed2-4078-9f87-8148ef257521",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 193
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551611245,
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_GujmjatlMdiHHlZhzNOFxWXY",
+            "toolName": "approveDeal",
+            "agentId": "default",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "messageId": "09d4a613-bb75-4fdc-828e-12f3b0322580",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca"
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551611632,
+          "value": {
+            "phase": "finished",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551611634,
+          "value": {
+            "phase": "executing",
+            "toolCallId": "call_GujmjatlMdiHHlZhzNOFxWXY",
+            "toolName": "approveDeal",
+            "agentId": "default",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "messageId": "09d4a613-bb75-4fdc-828e-12f3b0322580",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551614127,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default",
+            "messageId": "09d4a613-bb75-4fdc-828e-12f3b0322580",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "toolCallId": "call_GujmjatlMdiHHlZhzNOFxWXY",
+            "toolName": "approveDeal",
+            "toolStatus": "executing",
+            "target": {
+              "tag": "button",
+              "label": "Approve",
+              "action": "hitl.approve"
+            }
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551614127,
+          "value": {
+            "phase": "completed",
+            "toolCallId": "call_GujmjatlMdiHHlZhzNOFxWXY",
+            "toolName": "approveDeal",
+            "agentId": "default",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "messageId": "09d4a613-bb75-4fdc-828e-12f3b0322580",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "durationMs": 2493,
+            "outcome": "ok"
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551614414,
+          "value": {
+            "phase": "started",
+            "runId": "19874006-8500-446e-a61e-ea4a49476668",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551617382,
+          "value": {
+            "messageId": "msg_09ab12a6156e58ce006ad82abf2ad887d0a17ef0d7524e9032",
+            "runId": "1f993164-2bd6-4467-a415-f92eaf1c86ca",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 441
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551617384,
+          "value": {
+            "phase": "finished",
+            "runId": "19874006-8500-446e-a61e-ea4a49476668",
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551625104,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "target": {
+              "tag": "h1",
+              "label": null,
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551626128,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "target": {
+              "tag": "button",
+              "label": "Approve without the agent",
+              "action": "deal.approve"
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551627786,
+          "value": {
+            "threadId": "f80d1f25-4130-4e44-ac33-43c75f171a67",
+            "target": {
+              "tag": "button",
+              "label": "New thread",
+              "action": "thread.new"
+            }
+          }
+        },
+        {
+          "name": "thread.linked",
+          "timestamp": 1792551627794,
+          "value": {
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default",
+            "hasMessages": false,
+            "reason": "switch"
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551630771,
+          "value": {
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "target": {
+              "tag": "textarea",
+              "label": null,
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "click",
+          "timestamp": 1792551633803,
+          "value": {
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "target": {
+              "tag": "button",
+              "label": "Send message",
+              "action": null
+            }
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551633808,
+          "value": {
+            "messageId": "fc878b75-7300-4c03-a46b-3f58a4670f85",
+            "runId": "19874006-8500-446e-a61e-ea4a49476668",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 59
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551634161,
+          "value": {
+            "phase": "started",
+            "runId": "2a22f761-826d-4b56-86e8-e109e86b38a7",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551636653,
+          "value": {
+            "messageId": "rs_07e1485584212e22006ad82ad3057c87d094caff2eae618ff4:0",
+            "runId": "2a22f761-826d-4b56-86e8-e109e86b38a7",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default",
+            "role": "reasoning",
+            "textLength": 412
+          }
+        },
+        {
+          "name": "tool.call",
+          "timestamp": 1792551636660,
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_mWKtB7uCXzxzl5N6TuaAZmci",
+            "toolName": "lookupDealHistory",
+            "agentId": "default",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "messageId": "62b85e43-0e97-4acb-9e13-a4e1e88fe241",
+            "runId": "2a22f761-826d-4b56-86e8-e109e86b38a7"
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551636744,
+          "value": {
+            "messageId": "0c57ea2a-badd-4d11-b46d-5ac100525f56",
+            "runId": "2a22f761-826d-4b56-86e8-e109e86b38a7",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 193
+          }
+        },
+        {
+          "name": "agent.message",
+          "timestamp": 1792551638273,
+          "value": {
+            "messageId": "msg_07e1485584212e22006ad82ad5d66c87d08609300e0acaf19f",
+            "runId": "2a22f761-826d-4b56-86e8-e109e86b38a7",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 50
+          }
+        },
+        {
+          "name": "agent.run",
+          "timestamp": 1792551638274,
+          "value": {
+            "phase": "finished",
+            "runId": "2a22f761-826d-4b56-86e8-e109e86b38a7",
+            "threadId": "6ad8ea93-8c73-4cc7-8c34-8ee9af79dbc1",
+            "agentId": "default"
+          }
+        }
+      ],
+      "typed": {
+        "type": "CUSTOM",
+        "name": "input",
+        "timestamp": 1792551633443,
+        "value": {
+          "box": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "url": "http://127.0.0.1:7621/learning/deals/deal-2",
+          "step": "input",
+          "route": "/learning/deals/deal-2",
+          "target": {
+            "tag": "textarea",
+            "name": "Type a message...",
+            "role": "textbox",
+            "text": "What is this deal's payment record? Answer in one sentence",
+            "value": "What is this deal's payment record? Answer in one sentence.",
+            "action": null,
+            "inputType": "textarea",
+            "attributes": {
+              "rows": "1",
+              "class": "cpk:bg-transparent cpk:outline-none cpk:antialiased cpk:font-regular cpk:text-[16px] cpk:placeholder:text-[#00000077] cpk:dark:placeholder:text-[#fffc] cpk:w-full cpk:py-3 cpk:px-5",
+              "style": "overflow: auto; resize: none; max-height: 144px; height: 48px;",
+              "data-testid": "copilot-chat-textarea",
+              "placeholder": "Type a message..."
+            }
+          },
+          "viewport": {
+            "width": 1280,
+            "height": 860
+          },
+          "eventType": "input",
+          "selectors": [
+            {
+              "by": "testid",
+              "selector": "[data-testid=\"copilot-chat-textarea\"]"
+            },
+            {
+              "by": "role",
+              "selector": "role=textbox[name=\"Type a message...\"]"
+            },
+            {
+              "by": "css",
+              "selector": "[data-testid=\"copilot-chat-input\"] > div > div:nth-of-type(2) > textarea"
+            }
+          ]
+        }
+      },
+      "secondRunRequestAt": 1792551633825
+    }
+  ]
+}

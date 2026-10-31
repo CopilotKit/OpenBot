@@ -1,0 +1,254 @@
+{
+  "description": "CopilotKit's own capture of the learning deal page (CopilotKit main c21eeda029, v2 react demo, single-route runtime, real BuiltInAgent on OpenAI gpt-5.2 with reasoning, the backend lookupDealHistory and the page's human-in-the-loop approveDeal), recorded by the demo's legacy learning sink in real Chrome while a person clicked the chat box, typed, clicked Send and then Approve: the Thread's thread.linked, its agent.run, agent.message and tool.call events, and the clicks on the deal page with the agent context CopilotKit added. Recorded side by side with the Recorder in the end-to-end run of 2026-10-21 (run 1); the same page's own traffic, in another session, is single-route-sse.json and intelligence-websocket.json.",
+  "copilotkit": "c21eeda029",
+  "events": [
+    {
+      "name": "thread.linked",
+      "timestamp": 1792542755731,
+      "value": {
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "hasMessages": false,
+        "reason": "open",
+        "seq": 5
+      }
+    },
+    {
+      "name": "click",
+      "timestamp": 1792542758733,
+      "value": {
+        "target": {
+          "tag": "textarea",
+          "role": null,
+          "action": null,
+          "text": "",
+          "attributes": {
+            "data-testid": "copilot-chat-textarea",
+            "placeholder": "Type a message...",
+            "class": "cpk:bg-transparent cpk:outline-none cpk:antialiased cpk:font-regular cpk:text-[16px] cpk:placeholder:text-[#00000077] cpk:dark:placeholder:text-[#fffc] cpk:w-full cpk:py-3 cpk:pr-5",
+            "rows": "1",
+            "style": "overflow: auto; resize: none; max-height: 144px; height: 48px;"
+          },
+          "value": "",
+          "input": "pointer"
+        },
+        "route": "/learning/deals/deal-1",
+        "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "seq": 6
+      }
+    },
+    {
+      "name": "click",
+      "timestamp": 1792542764489,
+      "value": {
+        "target": {
+          "tag": "button",
+          "role": null,
+          "action": null,
+          "text": "",
+          "attributes": {
+            "data-slot": "button",
+            "class": "cpk:inline-flex cpk:items-center cpk:justify-center cpk:gap-2 cpk:whitespace-nowrap cpk:text-sm cpk:font-medium cpk:disabled:pointer-events-none cpk:disabled:opacity-50 cpk:[&_svg]:pointer-events-none cpk:[&_svg:not([class*='size-'])]:size-4 cpk:shrink-0 cpk:[&_svg]:shrink-0 cpk:outline-none cpk:focus-visible:border-ring cpk:focus-visible:ring-ring/50 cpk:focus-visible:ring-[3px] cpk:aria-invalid:ring-destructive/20 cpk:dark:aria-invalid:ring-destructive/40 cpk:aria-invalid:border-destructive cpk:cursor-pointer cpk:bg-black cpk:text-white cpk:dark:bg-white cpk:dark:text-black cpk:dark:focus-visible:outline-white cpk:transition-colors cpk:focus:outline-none cpk:hover:opacity-70 cpk:disabled:hover:opacity-100 cpk:disabled:cursor-not-allowed cpk:disabled:bg-[#00000014] cpk:disabled:text-[rgb(13,13,13)] cpk:dark:disabled:bg-[#454545] cpk:dark:disabled:text-white cpk:h-9 cpk:w-9 cpk:rounded-full",
+            "type": "button",
+            "data-testid": "copilot-send-button",
+            "aria-label": "Send message"
+          },
+          "label": "Send message",
+          "input": "pointer"
+        },
+        "route": "/learning/deals/deal-1",
+        "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "seq": 8
+      }
+    },
+    {
+      "name": "agent.message",
+      "timestamp": 1792542764492,
+      "value": {
+        "messageId": "8817a504-3cfa-4fd0-8c1b-8373f3200a1f",
+        "runId": null,
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "role": "user",
+        "textLength": 110,
+        "text": "Please look up this deal's history and then get it approved. Card on file for the invoice: 4111 1111 1111 1111",
+        "seq": 9
+      }
+    },
+    {
+      "name": "agent.run",
+      "timestamp": 1792542764742,
+      "value": {
+        "phase": "started",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "seq": 10
+      }
+    },
+    {
+      "name": "agent.message",
+      "timestamp": 1792542767714,
+      "value": {
+        "messageId": "rs_0530f8014c243060006ad8082e3a2887d0ba5f96532cc91265:0",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "role": "reasoning",
+        "textLength": 0,
+        "text": "",
+        "seq": 11
+      }
+    },
+    {
+      "name": "tool.call",
+      "timestamp": 1792542767714,
+      "value": {
+        "phase": "started",
+        "toolCallId": "call_X1STYNUUDKbTQqUA84uOwVc8",
+        "toolName": "lookupDealHistory",
+        "agentId": "default",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "messageId": "906697cb-e70e-4621-8690-fd8756b73b99",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "seq": 12
+      }
+    },
+    {
+      "name": "agent.message",
+      "timestamp": 1792542767755,
+      "value": {
+        "messageId": "65fb4911-a205-445c-beab-dbcf63685bb3",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "role": "tool",
+        "textLength": 188,
+        "text": "{\"dealId\":\"deal-1\",\"name\":\"Acme renewal\",\"amount\":12000,\"stage\":\"ready\",\"pastDiscounts\":[\"10% on renewal in 2025\"],\"paymentRecord\":\"paid on time for 3 years\",\"approvals\":[\"sales manager\"]}",
+        "seq": 13
+      }
+    },
+    {
+      "name": "tool.call",
+      "timestamp": 1792542768945,
+      "value": {
+        "phase": "started",
+        "toolCallId": "call_B8zX2k4ZuUx09Qfa6BetfCo7",
+        "toolName": "approveDeal",
+        "agentId": "default",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "messageId": "906697cb-e70e-4621-8690-fd8756b73b99",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "seq": 14
+      }
+    },
+    {
+      "name": "agent.run",
+      "timestamp": 1792542769409,
+      "value": {
+        "phase": "finished",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "seq": 15
+      }
+    },
+    {
+      "name": "tool.call",
+      "timestamp": 1792542769410,
+      "value": {
+        "phase": "executing",
+        "toolCallId": "call_B8zX2k4ZuUx09Qfa6BetfCo7",
+        "toolName": "approveDeal",
+        "agentId": "default",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "messageId": "906697cb-e70e-4621-8690-fd8756b73b99",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "seq": 16
+      }
+    },
+    {
+      "name": "click",
+      "timestamp": 1792542771878,
+      "value": {
+        "target": {
+          "tag": "button",
+          "role": null,
+          "action": "hitl.approve",
+          "text": "Approve",
+          "attributes": {
+            "type": "button",
+            "data-copilotkit-action": "hitl.approve",
+            "class": "rounded bg-green-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+          },
+          "label": "Approve",
+          "input": "pointer"
+        },
+        "route": "/learning/deals/deal-1",
+        "url": "http://127.0.0.1:7620/learning/deals/deal-1",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "messageId": "906697cb-e70e-4621-8690-fd8756b73b99",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "toolCallId": "call_B8zX2k4ZuUx09Qfa6BetfCo7",
+        "toolName": "approveDeal",
+        "toolStatus": "executing",
+        "seq": 17
+      }
+    },
+    {
+      "name": "tool.call",
+      "timestamp": 1792542771878,
+      "value": {
+        "phase": "completed",
+        "toolCallId": "call_B8zX2k4ZuUx09Qfa6BetfCo7",
+        "toolName": "approveDeal",
+        "agentId": "default",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "messageId": "906697cb-e70e-4621-8690-fd8756b73b99",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "durationMs": 2468,
+        "outcome": "ok",
+        "seq": 19
+      }
+    },
+    {
+      "name": "agent.run",
+      "timestamp": 1792542772117,
+      "value": {
+        "phase": "started",
+        "runId": "14198bcd-3f32-4cf9-a29f-15f7fc492753",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "seq": 20
+      }
+    },
+    {
+      "name": "agent.message",
+      "timestamp": 1792542774781,
+      "value": {
+        "messageId": "msg_0ad4e0cafee4a0a5006ad80834ea2c87d0bc6c744ddf5ebf8c",
+        "runId": "b29c7a8c-bb6c-4eeb-82dd-e2475b2ea9d3",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "role": "assistant",
+        "textLength": 427,
+        "text": "Deal history (deal-1, **Acme renewal**, **$12,000**):\n- Stage: **ready**\n- Past discounts: **10% on renewal in 2025**\n- Payment record: **paid on time for 3 years**\n- Approvals so far: **sales manager**\n\nApproval request sent for **$12,000**. Decision: **approved**.\n\nAlso, I can\u2019t accept or store card numbers here\u2014please remove the card details from chat and enter/update payment info only in your approved billing system UI.",
+        "seq": 21
+      }
+    },
+    {
+      "name": "agent.run",
+      "timestamp": 1792542774781,
+      "value": {
+        "phase": "finished",
+        "runId": "14198bcd-3f32-4cf9-a29f-15f7fc492753",
+        "threadId": "bf7f6a4f-e5a7-40fd-8d08-046fdcb4dec7",
+        "agentId": "default",
+        "seq": 22
+      }
+    }
+  ]
+}

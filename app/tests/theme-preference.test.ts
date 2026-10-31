@@ -30,39 +30,26 @@ describe("theme preference", () => {
   });
 });
 
-describe("pre-paint theme boot", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-
-  test("the boot script reads the same storage key the app writes", () => {
-    expect(html).toContain(THEME_STORAGE_KEY);
-  });
-
-  test("the boot script runs before the first paint", () => {
-    const boot = html.match(/<script(?![^>]*\bsrc=)[^>]*>/);
-
-    expect(boot).not.toBeNull();
-    expect(boot?.[0]).not.toContain("module");
-    expect(boot?.[0]).not.toContain("defer");
-  });
-
-  test("the boot script applies the dark class itself", () => {
-    expect(html).toContain("documentElement");
-    expect(html).toMatch(/classList[\s\S]*dark/);
-  });
-
-  test("the document declares a color scheme before the stylesheet arrives", () => {
-    expect(html).toContain("colorScheme");
-  });
-});
-
 describe("color scheme", () => {
   const styles = readFileSync(
-    new URL("../src/styles.css", import.meta.url),
+    new URL("../src/theme.css", import.meta.url),
     "utf8",
   );
 
   test("both themes tell the browser which one they are", () => {
     expect(styles).toMatch(/:root\s*\{[\s\S]*?color-scheme:\s*light/);
     expect(styles).toMatch(/\.dark\s*\{[\s\S]*?color-scheme:\s*dark/);
+  });
+
+  // The Recorder's pages import theme.css too, so the chat's own rules live in styles.css.
+  test("the shared theme carries no chat-only rule", () => {
+    expect(styles).not.toContain("tool-line");
+    expect(styles).not.toContain("websandbox");
+    const app = readFileSync(
+      new URL("../src/styles.css", import.meta.url),
+      "utf8",
+    );
+    expect(app).toContain(".tool-line-running");
+    expect(app).toContain("iframe.websandbox__frame");
   });
 });

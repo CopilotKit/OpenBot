@@ -1,6 +1,6 @@
+import type { VoiceSessionRecord } from "@openbot/shared/voice-session";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { VoiceSessionRecord } from "@openbot/shared/voice-session";
 import type { AgentActor } from "../agents/profile-types";
 import type { AppVariables } from "../auth/guards";
 import type { ChannelStore } from "../channels/routes";

@@ -16,11 +16,11 @@ import { AppHotkeys } from "@/lib/hotkeys/app-hotkeys";
 /**
  * The app's own shortcuts while a person drives a Bot's browser.
  *
- * Every keystroke then belongs to the Bot's browser: LiveScreen forwards it and prevents its default.
- * The app's shortcuts listen on the same window, and they were bound first, when the signed-in app
- * mounted, so they saw each keystroke before LiveScreen did and acted on it as well. Typing a
- * capital N into a page, "New York" in a search box, started a new chat and took the person away
- * from the Bot mid-word; Ctrl+B, bold in a document, showed or hid the sidebar here as well.
+ * Every keystroke typed into the screen then belongs to the Bot's browser: LiveScreen forwards it and prevents its
+ * default. The app's shortcuts listen on the same window, and they were bound first, when the signed-in app mounted, so
+ * they saw each keystroke before LiveScreen did and acted on it as well. Typing a capital N into a page, "New York" in a
+ * search box, started a new chat and took the person away from the Bot mid-word; Ctrl+B, bold in a document, showed or
+ * hid the sidebar here as well.
  */
 
 class SocketDouble {
@@ -104,13 +104,19 @@ async function renderDriving(driving: boolean) {
     expect(view.container.querySelector("canvas")).not.toBeNull(),
   );
   if (driving) await waitFor(() => expect(SocketDouble.latest).toBeDefined());
+  const canvas = view.container.querySelector("canvas") as HTMLCanvasElement;
+  if (driving) {
+    // The person clicked the screen to type into the page on it, which gives the screen the keyboard.
+    await waitFor(() => expect(canvas.dataset.connected).toBe("true"));
+    canvas.focus();
+  }
   return {
     router,
     sidebar: () => view.container.querySelector("output")?.textContent,
-    /** A keystroke where the browser sends one while the page has no focused field: at the body. */
+    /** A keystroke where the browser sends one: at the screen while it has the focus, else at the body. */
     press(init: KeyboardEventInit) {
       act(() => {
-        document.body.dispatchEvent(
+        (document.activeElement ?? document.body).dispatchEvent(
           new KeyboardEvent("keydown", {
             ...init,
             bubbles: true,

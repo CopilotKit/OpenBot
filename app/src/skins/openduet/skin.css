@@ -1,0 +1,321 @@
+/*
+ * OpenDuet: neutral greys with a cool bias, one violet accent used in a few fixed places, four
+ * status colours for how work stands, frosted glass for the chrome that floats over a screen, and
+ * Inter set with the single-storey a and flat-topped 3. The values are OpenDuet's own
+ * (`openduet/openbot/app/src/styles.css`), so a screen drawn here reads as the same product.
+ *
+ * Light is `:root[data-skin="openduet"]` and dark is `:root[data-skin="openduet"].dark`, and every
+ * token is set in both: the skin's selector outranks OpenBot's `.dark`, so a token set only for
+ * light would leak into dark.
+ */
+
+:root[data-skin="openduet"] {
+  color-scheme: light;
+
+  /* OpenBot's shadcn tokens, so every OpenBot page drawn inside the frame wears OpenDuet. */
+  --background: #f6f6f8;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #111114;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1f4;
+  --secondary-foreground: #18181b;
+  --muted: #f1f1f4;
+  --muted-foreground: #55555e;
+  --accent: #f1f1f4;
+  --accent-foreground: #18181b;
+  --destructive: #b91c1c;
+  --success: #147a3a;
+  --border: rgb(24 24 27 / 9%);
+  --input: rgb(24 24 27 / 12%);
+  --ring: #6430ab;
+  --radius: 0.875rem;
+  --sidebar: #f6f6f8;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #111114;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececf0;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: rgb(24 24 27 / 9%);
+  --sidebar-ring: #6430ab;
+
+  /* OpenDuet's own roles. */
+  --openduet-surface: #f6f6f8;
+  --openduet-card: #ffffff;
+  --openduet-bubble: #ececf0;
+  --openduet-ink: #18181b;
+  --openduet-ink-2: #55555e;
+  --openduet-ink-3: #6b6b75;
+  --openduet-hair: rgb(24 24 27 / 9%);
+  --openduet-hair-2: rgb(24 24 27 / 6%);
+  --openduet-tile: #f1f1f4;
+  /* The one accent: the Tasks badge, the unread dot, the focus ring, the Chat row's glyph. */
+  --openduet-accent: #6430ab;
+  --openduet-accent-soft: #f0ebfa;
+  --openduet-on-accent: #ffffff;
+  /* How work stands: done, needs you, working, couldn't finish. Only on status. */
+  --openduet-done: #147a3a;
+  --openduet-done-soft: #e6f4ea;
+  --openduet-needs: #a34a06;
+  --openduet-needs-soft: #fdf3e1;
+  --openduet-working: #1d4ed8;
+  --openduet-working-soft: #eaf0fd;
+  --openduet-problem: #b91c1c;
+  --openduet-problem-soft: #fbeaea;
+  /* The primary button: near-black on light, white on dark. */
+  --openduet-black: #111114;
+  --openduet-on-black: #ffffff;
+  --openduet-shadow-float:
+    0 0 0 0.5px rgb(1 5 7 / 10%), 0 1px 1.5px rgb(1 5 7 / 6%),
+    0 4px 12px -4px rgb(1 5 7 / 12%);
+  --openduet-shadow-card:
+    0 0 0 1px rgb(24 24 27 / 9%), 0 6px 18px -12px rgb(1 5 7 / 18%);
+  --openduet-shadow-raised:
+    0 0 0 1px rgb(24 24 27 / 9%), 0 10px 26px -14px rgb(1 5 7 / 20%);
+  /* Glass: frosted chrome over a scrolling screen, about 80% so text under it never competes. */
+  --openduet-glass: rgb(255 255 255 / 80%);
+  --openduet-veil: rgb(246 246 248 / 74%);
+  --openduet-shadow-glass:
+    inset 0 0.5px 0 rgb(255 255 255 / 80%), 0 0 0 0.5px rgb(1 5 7 / 10%),
+    0 1px 1.5px rgb(1 5 7 / 6%), 0 4px 12px -4px rgb(1 5 7 / 12%);
+  /* The fade behind the floating header, from the surface to nothing. */
+  --openduet-fade: linear-gradient(#f6f6f8 55%, rgb(246 246 248 / 0%));
+}
+
+:root[data-skin="openduet"].dark {
+  color-scheme: dark;
+
+  --background: #111113;
+  --foreground: #f4f4f5;
+  --card: #1c1c1f;
+  --card-foreground: #f4f4f5;
+  --popover: #1c1c1f;
+  --popover-foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #111114;
+  --secondary: #26262b;
+  --secondary-foreground: #f4f4f5;
+  --muted: #26262b;
+  --muted-foreground: #a1a1aa;
+  --accent: #26262b;
+  --accent-foreground: #f4f4f5;
+  --destructive: #f87171;
+  --success: #4ade80;
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 14%);
+  --ring: #b49ae8;
+  --radius: 0.875rem;
+  --sidebar: #111113;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-primary: #f4f4f5;
+  --sidebar-primary-foreground: #111114;
+  --sidebar-accent: #26262b;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: rgb(255 255 255 / 10%);
+  --sidebar-ring: #b49ae8;
+
+  /* Near-black and neutral, as OpenDuet samples it; the primary action turns light. */
+  --openduet-surface: #111113;
+  --openduet-card: #1c1c1f;
+  --openduet-bubble: #26262b;
+  --openduet-ink: #f4f4f5;
+  --openduet-ink-2: #a1a1aa;
+  --openduet-ink-3: #8e8e98;
+  --openduet-hair: rgb(255 255 255 / 10%);
+  --openduet-hair-2: rgb(255 255 255 / 7%);
+  --openduet-tile: #26262b;
+  --openduet-accent: #b49ae8;
+  --openduet-accent-soft: #2a2140;
+  /* Dark text on the light lilac: white on it is 2.4:1. */
+  --openduet-on-accent: #1a1033;
+  --openduet-done: #4ade80;
+  --openduet-done-soft: #14301f;
+  --openduet-needs: #fbbf24;
+  --openduet-needs-soft: #3a2a0c;
+  --openduet-working: #7aa2ff;
+  --openduet-working-soft: #18233d;
+  --openduet-problem: #f87171;
+  --openduet-problem-soft: #3a1717;
+  --openduet-black: #f4f4f5;
+  --openduet-on-black: #111114;
+  --openduet-shadow-float:
+    0 0 0 0.5px rgb(255 255 255 / 10%), 0 4px 12px -4px rgb(0 0 0 / 50%);
+  --openduet-shadow-card: 0 0 0 1px rgb(255 255 255 / 10%);
+  --openduet-shadow-raised:
+    0 0 0 1px rgb(255 255 255 / 10%), 0 10px 26px -14px rgb(0 0 0 / 60%);
+  --openduet-glass: rgb(28 28 31 / 82%);
+  --openduet-veil: rgb(17 17 19 / 72%);
+  --openduet-shadow-glass:
+    inset 0 0.5px 0 rgb(255 255 255 / 8%), 0 0 0 0.5px rgb(255 255 255 / 10%),
+    0 4px 12px -4px rgb(0 0 0 / 50%);
+  --openduet-fade: linear-gradient(#111113 55%, rgb(17 17 19 / 0%));
+}
+
+/*
+ * The roles as Tailwind colours, so the skin's own components write `bg-openduet-card`. `inline`
+ * emits no variables of its own: each utility reads the `--openduet-*` token above, which only
+ * exists while this skin is active.
+ */
+@theme inline {
+  --color-openduet-surface: var(--openduet-surface);
+  --color-openduet-card: var(--openduet-card);
+  --color-openduet-bubble: var(--openduet-bubble);
+  --color-openduet-ink: var(--openduet-ink);
+  --color-openduet-ink-2: var(--openduet-ink-2);
+  --color-openduet-ink-3: var(--openduet-ink-3);
+  --color-openduet-hair: var(--openduet-hair);
+  --color-openduet-hair-2: var(--openduet-hair-2);
+  --color-openduet-tile: var(--openduet-tile);
+  --color-openduet-accent: var(--openduet-accent);
+  --color-openduet-accent-soft: var(--openduet-accent-soft);
+  --color-openduet-on-accent: var(--openduet-on-accent);
+  --color-openduet-done: var(--openduet-done);
+  --color-openduet-done-soft: var(--openduet-done-soft);
+  --color-openduet-needs: var(--openduet-needs);
+  --color-openduet-needs-soft: var(--openduet-needs-soft);
+  --color-openduet-working: var(--openduet-working);
+  --color-openduet-working-soft: var(--openduet-working-soft);
+  --color-openduet-problem: var(--openduet-problem);
+  --color-openduet-problem-soft: var(--openduet-problem-soft);
+  --color-openduet-black: var(--openduet-black);
+  --color-openduet-on-black: var(--openduet-on-black);
+  --shadow-openduet-float: var(--openduet-shadow-float);
+  --shadow-openduet-card: var(--openduet-shadow-card);
+  --shadow-openduet-raised: var(--openduet-shadow-raised);
+  --shadow-openduet-glass: var(--openduet-shadow-glass);
+}
+
+/* Inter as OpenDuet sets it: the single-storey a (cv11) and the flat-topped 3 (ss03). */
+:root[data-skin="openduet"] body {
+  font-feature-settings: "cv11", "ss03";
+}
+
+@layer utilities {
+  /*
+   * OpenDuet's five sizes, in rem so they follow the person's text size. Weights are not part of
+   * a size: 600 for titles, 500 for rows, chips and buttons, 400 otherwise. In the utilities layer,
+   * and scoped to the skin, so a size given to one of OpenBot's primitives outranks the primitive's
+   * own `text-*`.
+   */
+  [data-skin="openduet"] .openduet-type-display {
+    font-size: 1.5rem;
+    line-height: 1.75rem;
+    letter-spacing: -0.018em;
+  }
+  [data-skin="openduet"] .openduet-type-nav {
+    font-size: 1.125rem;
+    line-height: 1.375rem;
+    letter-spacing: -0.011em;
+  }
+  [data-skin="openduet"] .openduet-type-body {
+    font-size: 1.0625rem;
+    line-height: 1.4375rem;
+    letter-spacing: -0.011em;
+  }
+  [data-skin="openduet"] .openduet-type-sub {
+    font-size: 0.9375rem;
+    line-height: 1.25rem;
+    letter-spacing: -0.006em;
+  }
+  [data-skin="openduet"] .openduet-type-caption {
+    font-size: 0.8125rem;
+    line-height: 1rem;
+    letter-spacing: 0;
+  }
+}
+
+@layer components {
+  /*
+   * Frosted chrome. The blur is what makes the translucency readable; a browser that cannot blur
+   * gets the opaque card instead, never a see-through bar.
+   */
+  [data-skin="openduet"] .openduet-glass {
+    background-color: var(--openduet-card);
+  }
+  [data-skin="openduet"] .openduet-veil {
+    background-color: var(--openduet-surface);
+  }
+  @supports (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px)) {
+    [data-skin="openduet"] .openduet-glass {
+      background-color: var(--openduet-glass);
+      -webkit-backdrop-filter: blur(22px) saturate(180%);
+      backdrop-filter: blur(22px) saturate(180%);
+    }
+    [data-skin="openduet"] .openduet-veil {
+      background-color: var(--openduet-veil);
+      -webkit-backdrop-filter: blur(28px) saturate(160%);
+      backdrop-filter: blur(28px) saturate(160%);
+    }
+  }
+}
+
+/*
+ * Inside the frame, OpenBot's own controls take OpenDuet's shape: buttons are pills, and every
+ * control is at least 44px to tap, the smallest thing a finger can hit. The primitives mark
+ * themselves with `data-slot`, so one rule covers every page without touching any of them. A link
+ * drawn as a button sits inside a sentence and keeps its line height.
+ */
+[data-skin="openduet"] [data-openduet-frame] [data-slot="button"] {
+  border-radius: 9999px;
+}
+[data-skin="openduet"]
+  [data-openduet-page]
+  [data-slot="button"]:not([data-variant="link"]) {
+  min-height: 44px;
+}
+[data-skin="openduet"] [data-openduet-page] [data-slot="select-trigger"] {
+  min-height: 44px;
+}
+[data-skin="openduet"] [data-openduet-page] [data-slot="input"] {
+  min-height: 44px;
+}
+[data-skin="openduet"] [data-openduet-page] [data-slot="input-group"] {
+  min-height: 44px;
+}
+
+/*
+ * A conversation's composer floats inset from the column's edges, as OpenDuet's does, with its
+ * focus ring off the screen's edge. OpenBot draws it in a column with no side padding.
+ */
+[data-skin="openduet"] [data-openduet-frame] [data-slot="composer-column"] {
+  padding-inline: 12px;
+}
+
+/*
+ * A page opened over the app names itself in the chrome's title pill, read from the page's own
+ * title, which stays for screen readers only, as OpenDuet draws a page. The page then starts right
+ * under the chrome, and its one action keeps its place on the right of the title's line.
+ */
+[data-skin="openduet"] [data-openduet-page] [data-slot="page-title"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+[data-skin="openduet"] [data-openduet-page] [data-slot="page-header"] > div {
+  justify-content: flex-end;
+}
+[data-skin="openduet"]
+  [data-openduet-page]
+  div:has(> [data-slot="page-header"]) {
+  padding-top: 0.5rem;
+}
+
+/*
+ * The bar a page draws above its scroller holds its own back link. The chrome's back disc goes
+ * where that link goes (`header.tsx`), so the bar is not drawn twice.
+ */
+[data-skin="openduet"]
+  [data-openduet-page]
+  div:has(+ div > div > [data-slot="page-header"]) {
+  display: none;
+}

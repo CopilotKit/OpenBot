@@ -1,4 +1,5 @@
 import { tryClient } from "@/lib/client";
+import type { ComputerState } from "./queries";
 
 /**
  * One frame of a Bot's screen.
@@ -17,6 +18,26 @@ export type Screenshot = {
 };
 
 /**
+ * What a screenshot request can come back with.
+ *
+ * `notReady` is not an error. The server answers it for a computer that is asleep or starting, and
+ * does so without waking it; a computer in either state is behaving normally, so the caller draws it
+ * calmly and keeps polling. `error` is a screenshot that was attempted and failed.
+ */
+export type ScreenshotRead = {
+  frame?: Screenshot;
+  error?: string;
+  notReady?: { state: ComputerState; reason?: string };
+};
+
+const COMPUTER_STATES: readonly ComputerState[] = [
+  "absent",
+  "starting",
+  "ready",
+  "unreachable",
+];
+
+/**
  * Read the current frame.
  *
  * Fails closed, and says why: the screen going unavailable is something the person watching needs
@@ -25,7 +46,7 @@ export type Screenshot = {
  */
 export async function readScreenshot(
   computerId: string,
-): Promise<{ frame?: Screenshot; error?: string }> {
+): Promise<ScreenshotRead> {
   const unavailable = "The screen is not available right now.";
   try {
     const response = await tryClient(`/api/computers/${computerId}/screenshot`);
@@ -35,10 +56,29 @@ export async function readScreenshot(
       } | null;
       return { error: body?.error ?? unavailable };
     }
-    return parseScreenshot(await response.json().catch(() => null));
+    const body = (await response.json().catch(() => null)) as unknown;
+    const notReady = notReadyOf(body);
+    if (notReady) return { notReady };
+    return parseScreenshot(body);
   } catch {
     return { error: unavailable };
   }
+}
+
+/** The server's "not ready yet" answer, or nothing when the body is something else. */
+function notReadyOf(body: unknown): ScreenshotRead["notReady"] {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return;
+  const { ready, state, reason } = body as {
+    ready?: unknown;
+    state?: unknown;
+    reason?: unknown;
+  };
+  if (ready !== false) return;
+  if (!COMPUTER_STATES.includes(state as ComputerState)) return;
+  return {
+    state: state as ComputerState,
+    ...(typeof reason === "string" ? { reason } : {}),
+  };
 }
 
 function parseScreenshot(body: unknown): {

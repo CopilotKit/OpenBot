@@ -1,0 +1,1860 @@
+{
+  "name": "state",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"e190b000-d47e-4b2e-9c40-bd291c72e586\",\"runId\":\"d9a2743a-15f8-47ff-a528-857867b6436b\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{\"todos\":[]},\"messages\":[{\"id\":\"088af6cb-f367-4dd1-89ad-49ccb221ac3f\",\"role\":\"user\",\"content\":\"First call AGUISendStateSnapshot with snapshot {\\\"todos\\\":[\\\"buy milk\\\"]}. Then call AGUISendStateDelta to add \\\"walk dog\\\" at /todos/-. Then call AGUISendStateDelta again to add \\\"post letter\\\" at /todos/-. Then say done.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 99,
+          "text": "{\"threadId\":\"e190b000-d47e-4b2e-9c40-bd291c72e586\",\"runId\":\"d9a2743a-15f8-47ff-a528-857867b6436b\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:e190b000-d47e-4b2e-9c40-bd291c72e586\"}}"
+        }
+      ],
+      "end": {
+        "at": 99,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 102,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b"
+      }
+    },
+    {
+      "at": 158,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "First call AGUISendStateSnapshot with snapshot {\"todos\":[\"buy milk\"]}. Then call AGUISendStateDelta to add \"walk dog\" at /todos/-. Then call AGUISendStateDelta again to add \"post letter\" at /todos/-. Then say done.",
+              "id": "088af6cb-f367-4dd1-89ad-49ccb221ac3f",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+          "state": {
+            "todos": []
+          },
+          "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "9822fb21-e4a8-4413-af03-731b1b9ff621",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-c201-704d-b18c-5eea682e0935"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 161,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "replay_complete"
+    },
+    {
+      "at": 897,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "8df96c99-dcf1-454c-b4a9-2fc2dad68302",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-c518-771e-91ed-e4ee7d74d476"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "bb4ce748-d503-43b4-9e69-a3a594ea1419",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "toolCallName": "AGUISendStateSnapshot",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 899,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "e12f20b1-79ed-44bc-a7bb-567ed08933e2",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-c518-710b-908a-b3564574c3b7"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 900,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "snapshot",
+        "metadata": {
+          "cpki_event_id": "74664e0c-26a5-48b5-a0dd-a697d6a5fed4",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-c518-751e-bfcd-a9498f90196c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 900,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":{\"",
+        "metadata": {
+          "cpki_event_id": "c29ca9b8-4145-4ef6-a62c-8a38eafff15c",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-c518-728f-ac72-e3ee846b4dd0"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 901,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "todos",
+        "metadata": {
+          "cpki_event_id": "32e71e7e-ca37-4299-87bd-f2606e09653f",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15b9d-c518-78ec-9df5-001602456d18"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 901,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":[\"",
+        "metadata": {
+          "cpki_event_id": "96cea2f0-da9e-4d6a-b016-37d03ba6519f",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15b9d-c518-728b-9b7e-5269aefbe8ad"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 901,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "buy",
+        "metadata": {
+          "cpki_event_id": "f037dcd9-957c-4175-b420-f502c4cce951",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15b9d-c518-72e4-a11d-f28659ab5d66"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 907,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " milk",
+        "metadata": {
+          "cpki_event_id": "5a7c6da2-8a6a-44cf-9fa6-2c0d68088645",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15b9d-c522-7490-ba76-74a048f2af64"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 907,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\"]",
+        "metadata": {
+          "cpki_event_id": "5b0cc9cc-8997-422f-a240-84a08e4a45e5",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15b9d-c522-769c-ab88-bb0d4cfc7295"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 950,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "}}",
+        "metadata": {
+          "cpki_event_id": "a4f97cf1-e374-4e92-9490-f84ee936336c",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15b9d-c54d-7421-88e6-c2226a558ae9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 973,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "7afde53d-bb31-48de-9c7d-1d80410792df",
+          "cpki_event_seq": 12,
+          "cpki_ingested": "01a15b9d-c565-7758-bea7-52ce74684059"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 974,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "492b2cc5-0578-4d4a-8022-d5d2e3e4d930",
+          "cpki_event_seq": 13,
+          "cpki_ingested": "01a15b9d-c565-73e8-a2a0-2d9927208df1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "snapshot": {
+          "todos": ["buy milk"]
+        },
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "STATE_SNAPSHOT"
+      }
+    },
+    {
+      "at": 975,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "content": "{\"success\":true,\"snapshot\":{\"todos\":[\"buy milk\"]}}",
+        "messageId": "7bc999fa-0a7f-4e91-b83a-cd401e66580f",
+        "metadata": {
+          "cpki_event_id": "f2bd4ebd-2ab4-4e12-bc38-d29a296b58dc",
+          "cpki_event_seq": 14,
+          "cpki_ingested": "01a15b9d-c565-7b60-a35b-4306083a12a9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "tool",
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+        "type": "TOOL_CALL_RESULT"
+      }
+    },
+    {
+      "at": 1929,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "0fc8e471-5c76-4865-83d3-d0ee1e46800f",
+          "cpki_event_seq": 15,
+          "cpki_ingested": "01a15b9d-c920-7d28-abd7-fa7faedf812f"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "bb4ce748-d503-43b4-9e69-a3a594ea1419",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "toolCallName": "AGUISendStateDelta",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 1930,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "75019bc4-9a2d-4350-a827-79b0421cbd67",
+          "cpki_event_seq": 16,
+          "cpki_ingested": "01a15b9d-c920-7a11-b4c8-01b01076445a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1930,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "delta",
+        "metadata": {
+          "cpki_event_id": "40378395-a9d3-4154-8072-f7a2e709dacd",
+          "cpki_event_seq": 17,
+          "cpki_ingested": "01a15b9d-c920-7dea-a087-7f3ee5ec29fc"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1941,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":[",
+        "metadata": {
+          "cpki_event_id": "669fa6bd-dcc1-4ef8-9950-90d912b7f030",
+          "cpki_event_seq": 18,
+          "cpki_ingested": "01a15b9d-c92c-76ce-8434-b9d5aee34aa6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1941,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "22e44af6-3db4-48a2-8e2e-1ce0944586c2",
+          "cpki_event_seq": 19,
+          "cpki_ingested": "01a15b9d-c92c-761a-965c-6392a1a0d3b4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1941,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "op",
+        "metadata": {
+          "cpki_event_id": "4ecc7cce-379d-45a4-9586-40b563f004f6",
+          "cpki_event_seq": 20,
+          "cpki_ingested": "01a15b9d-c92c-7929-b1b3-0f8110ffd67d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 1941,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":\"",
+        "metadata": {
+          "cpki_event_id": "d144a79a-6857-47b7-8582-015ef01f33e8",
+          "cpki_event_seq": 21,
+          "cpki_ingested": "01a15b9d-c92c-7dae-aac5-1732a53477fb"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2010,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "add",
+        "metadata": {
+          "cpki_event_id": "0557f3ad-95d6-4ea8-9cd8-70f7ec24fe8f",
+          "cpki_event_seq": 22,
+          "cpki_ingested": "01a15b9d-c971-7e1f-99bf-bd1cda400e76"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2011,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\",\"",
+        "metadata": {
+          "cpki_event_id": "8d24be67-2c0b-4fc2-94ae-e8e0007a5be9",
+          "cpki_event_seq": 23,
+          "cpki_ingested": "01a15b9d-c971-76fc-80ee-57b25d63f166"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2019,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "path",
+        "metadata": {
+          "cpki_event_id": "d07aeb29-8fb8-40b0-99a0-121ce3b51c75",
+          "cpki_event_seq": 24,
+          "cpki_ingested": "01a15b9d-c97a-7544-82b0-17211f9f35b6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2020,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":",
+        "metadata": {
+          "cpki_event_id": "ffbe5ade-de18-458a-a03e-b1fc9c1c43a7",
+          "cpki_event_seq": 25,
+          "cpki_ingested": "01a15b9d-c97a-7d15-ab97-117c39cccfe4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2029,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\"/",
+        "metadata": {
+          "cpki_event_id": "51ceb81e-523f-4fa8-acc3-8564d2176a18",
+          "cpki_event_seq": 26,
+          "cpki_ingested": "01a15b9d-c984-7f18-a284-de7cce961cec"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2030,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "todos",
+        "metadata": {
+          "cpki_event_id": "c2f0539e-ece1-4ed2-b465-9219f8ca736d",
+          "cpki_event_seq": 27,
+          "cpki_ingested": "01a15b9d-c984-74eb-8713-01c37f9768ba"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2055,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "/-",
+        "metadata": {
+          "cpki_event_id": "f0bc3790-0f1c-4112-9bd7-cf02747f2e21",
+          "cpki_event_seq": 28,
+          "cpki_ingested": "01a15b9d-c99e-73d7-9b3f-fb417ec933b8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2074,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\",\"",
+        "metadata": {
+          "cpki_event_id": "b3658809-a93a-4130-bb72-29cce3676a34",
+          "cpki_event_seq": 29,
+          "cpki_ingested": "01a15b9d-c9b1-7d5b-a337-8723850201c3"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2085,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "value",
+        "metadata": {
+          "cpki_event_id": "896429de-93c2-477d-865c-2eec38106306",
+          "cpki_event_seq": 30,
+          "cpki_ingested": "01a15b9d-c9bd-748e-bc4a-166cdcdbb4df"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2086,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":\"",
+        "metadata": {
+          "cpki_event_id": "34d9745d-d860-44e6-8465-3e8bbcce1b6f",
+          "cpki_event_seq": 31,
+          "cpki_ingested": "01a15b9d-c9bd-74a1-ace5-604ae3696661"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2086,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "walk",
+        "metadata": {
+          "cpki_event_id": "72aa555b-bb74-4c38-959d-ad5cb0eb4d6a",
+          "cpki_event_seq": 32,
+          "cpki_ingested": "01a15b9d-c9bd-737e-b7ee-be7eb705700d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2093,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " dog",
+        "metadata": {
+          "cpki_event_id": "0ae758ba-e96c-49b0-8abc-59dbdc0916fb",
+          "cpki_event_seq": 33,
+          "cpki_ingested": "01a15b9d-c9c4-7923-93ed-e8c31387a3e8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2093,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\"}",
+        "metadata": {
+          "cpki_event_id": "8d7f3139-7d84-4e96-92cf-8c54c2e30f59",
+          "cpki_event_seq": 34,
+          "cpki_ingested": "01a15b9d-c9c4-73e4-afd2-c092deb0daba"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2093,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "]}",
+        "metadata": {
+          "cpki_event_id": "90d990fd-0dcf-436c-a2af-c612cf4da67b",
+          "cpki_event_seq": 35,
+          "cpki_ingested": "01a15b9d-c9c4-7138-95bc-2d83bf951bad"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2094,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "8c37c282-8f0e-4dfd-879b-21acfe433a7b",
+          "cpki_event_seq": 36,
+          "cpki_ingested": "01a15b9d-c9c4-73a5-8674-10a53701c79a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 2094,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": [
+          {
+            "op": "add",
+            "path": "/todos/-",
+            "value": "walk dog"
+          }
+        ],
+        "metadata": {
+          "cpki_event_id": "1e938772-9a59-47c6-b3d5-2915a85c865a",
+          "cpki_event_seq": 37,
+          "cpki_ingested": "01a15b9d-c9c4-7fa3-9e77-b0a52e3371b2"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "STATE_DELTA"
+      }
+    },
+    {
+      "at": 2095,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "content": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"walk dog\"}]}",
+        "messageId": "a3f6030c-7014-49d6-a8d4-212689cf4132",
+        "metadata": {
+          "cpki_event_id": "921c3caf-f8fa-43ef-b766-485c2656ffc4",
+          "cpki_event_seq": 38,
+          "cpki_ingested": "01a15b9d-c9c4-7493-90b4-52fa7ec2c60b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "tool",
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+        "type": "TOOL_CALL_RESULT"
+      }
+    },
+    {
+      "at": 2883,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "d4f74e42-622b-40d3-a8ba-9706192ce54d",
+          "cpki_event_seq": 39,
+          "cpki_ingested": "01a15b9d-ccd8-74d1-87c8-1dc81a2b3ab5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "parentMessageId": "bb4ce748-d503-43b4-9e69-a3a594ea1419",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "toolCallName": "AGUISendStateDelta",
+        "type": "TOOL_CALL_START"
+      }
+    },
+    {
+      "at": 2884,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "d4ede5f9-777c-4992-ad19-4e19ec137d2a",
+          "cpki_event_seq": 40,
+          "cpki_ingested": "01a15b9d-ccd8-7773-9646-974bfc115e68"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2884,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "delta",
+        "metadata": {
+          "cpki_event_id": "9caf8976-8622-4771-81d7-1f6b910be74e",
+          "cpki_event_seq": 41,
+          "cpki_ingested": "01a15b9d-ccd8-7f74-a864-374a2a9f350e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2904,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":[",
+        "metadata": {
+          "cpki_event_id": "826ac289-032d-45c2-b6b1-ea7deb012d3f",
+          "cpki_event_seq": 42,
+          "cpki_ingested": "01a15b9d-ccf0-7bbd-a2ca-3307ed9fe859"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2905,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "{\"",
+        "metadata": {
+          "cpki_event_id": "fa073f53-dc14-4b7e-ba48-401cdb9b2455",
+          "cpki_event_seq": 43,
+          "cpki_ingested": "01a15b9d-ccf0-76c7-8497-907a25152c42"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2910,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "op",
+        "metadata": {
+          "cpki_event_id": "6f2d05fd-8d6c-4cd6-a307-b819e9525693",
+          "cpki_event_seq": 44,
+          "cpki_ingested": "01a15b9d-ccf6-7c14-be81-c18edb6b1323"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2911,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":\"",
+        "metadata": {
+          "cpki_event_id": "f993ffba-70aa-42d3-b772-a7fdaf76d9ac",
+          "cpki_event_seq": 45,
+          "cpki_ingested": "01a15b9d-ccf6-7863-9847-efeee78e68b1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2954,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "add",
+        "metadata": {
+          "cpki_event_id": "b3197d99-cd89-4b7f-984a-94d1f044f6ae",
+          "cpki_event_seq": 46,
+          "cpki_ingested": "01a15b9d-cd1f-7861-9c2c-a4603bf05927"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2954,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\",\"",
+        "metadata": {
+          "cpki_event_id": "d6e6cbf3-8fe3-4ad1-9b8b-9664667da5ad",
+          "cpki_event_seq": 47,
+          "cpki_ingested": "01a15b9d-cd1f-79b4-9b98-c8b79c3a9868"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2966,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "path",
+        "metadata": {
+          "cpki_event_id": "e8ed1380-caf5-4263-abeb-d821c73587e5",
+          "cpki_event_seq": 48,
+          "cpki_ingested": "01a15b9d-cd2d-720a-a94b-0a5c3218a2da"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2966,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":",
+        "metadata": {
+          "cpki_event_id": "7c7701ba-9078-4381-a445-70b4a890e2fa",
+          "cpki_event_seq": 49,
+          "cpki_ingested": "01a15b9d-cd2d-7221-af47-0e2144334b5b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2967,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\"/",
+        "metadata": {
+          "cpki_event_id": "ea50d07a-7348-4a77-beea-cf205897ddfd",
+          "cpki_event_seq": 50,
+          "cpki_ingested": "01a15b9d-cd2d-7f4e-a9c8-01a886e8fca6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2979,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "todos",
+        "metadata": {
+          "cpki_event_id": "f02e3473-0326-4470-94ab-75afa5b86aa0",
+          "cpki_event_seq": 51,
+          "cpki_ingested": "01a15b9d-cd39-72ae-a816-f1fc77b55466"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2979,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "/-",
+        "metadata": {
+          "cpki_event_id": "f91136fe-2bde-42d2-8359-3ba860081940",
+          "cpki_event_seq": 52,
+          "cpki_ingested": "01a15b9d-cd39-7ca6-846d-805910907cc5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2984,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\",\"",
+        "metadata": {
+          "cpki_event_id": "22ce34e8-b109-4b5c-a8b7-0c04a14bbeb5",
+          "cpki_event_seq": 53,
+          "cpki_ingested": "01a15b9d-cd3e-75e7-a7a7-c4d84c792e7b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 2984,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "value",
+        "metadata": {
+          "cpki_event_id": "ecff8b16-d709-452d-84ee-44e6dde67242",
+          "cpki_event_seq": 54,
+          "cpki_ingested": "01a15b9d-cd3e-7c5c-b1bd-b9b2ae8a1c5c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 3003,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\":\"",
+        "metadata": {
+          "cpki_event_id": "67a973bf-6a0d-4770-be19-6091845c5875",
+          "cpki_event_seq": 55,
+          "cpki_ingested": "01a15b9d-cd53-7c38-82c8-2b047715a941"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 3021,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "post",
+        "metadata": {
+          "cpki_event_id": "bdeea007-ee3b-4e03-a50c-18f68896cf50",
+          "cpki_event_seq": 56,
+          "cpki_ingested": "01a15b9d-cd64-7e2d-9015-c420cc2a98bf"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 3041,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " letter",
+        "metadata": {
+          "cpki_event_id": "cc343169-f19a-4952-9d72-0a2db72fb2cd",
+          "cpki_event_seq": 57,
+          "cpki_ingested": "01a15b9d-cd77-7b24-8163-0ca71cbb4283"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 3046,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "\"}",
+        "metadata": {
+          "cpki_event_id": "ed3896e4-d080-49f3-b552-6ec4c7e3262b",
+          "cpki_event_seq": 58,
+          "cpki_ingested": "01a15b9d-cd7c-7c80-aa5a-ca212b7a7e80"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 3051,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "]}",
+        "metadata": {
+          "cpki_event_id": "e41abae6-fe22-44f4-b2fa-f366317f5b2f",
+          "cpki_event_seq": 59,
+          "cpki_ingested": "01a15b9d-cd82-73cc-9b5c-170c977483aa"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_ARGS"
+      }
+    },
+    {
+      "at": 3058,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "256aa73f-9b06-4919-98fa-f51bd44b29fa",
+          "cpki_event_seq": 60,
+          "cpki_ingested": "01a15b9d-cd89-779a-ad15-5a881e6a95b5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_END"
+      }
+    },
+    {
+      "at": 3058,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": [
+          {
+            "op": "add",
+            "path": "/todos/-",
+            "value": "post letter"
+          }
+        ],
+        "metadata": {
+          "cpki_event_id": "cafd4965-8a1d-4178-83d4-18faa60a6989",
+          "cpki_event_seq": 61,
+          "cpki_ingested": "01a15b9d-cd89-7474-8384-895cc366a19e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "STATE_DELTA"
+      }
+    },
+    {
+      "at": 3059,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "content": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"post letter\"}]}",
+        "messageId": "cb76eb57-4b2c-4239-9128-374f8bc636f5",
+        "metadata": {
+          "cpki_event_id": "f37441eb-db55-4719-9521-fc5fae48d2d8",
+          "cpki_event_seq": 62,
+          "cpki_ingested": "01a15b9d-cd89-7e03-9b3c-9baedd1a971c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "tool",
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+        "type": "TOOL_CALL_RESULT"
+      }
+    },
+    {
+      "at": 4476,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_00c77993a962e514006ad7f740480887d0a0ca49fa90c7c4d7",
+        "metadata": {
+          "cpki_event_id": "524a7481-7105-4535-bc76-6b8d5d3193b6",
+          "cpki_event_seq": 63,
+          "cpki_ingested": "01a15b9d-d313-7365-a07e-ad645a0b84e4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 4477,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "done",
+        "messageId": "msg_00c77993a962e514006ad7f740480887d0a0ca49fa90c7c4d7",
+        "metadata": {
+          "cpki_event_id": "d0da0498-8769-46ce-8ba5-0dea8a7df2e7",
+          "cpki_event_seq": 64,
+          "cpki_ingested": "01a15b9d-d313-72e0-a55a-72e773bd7abd"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 4720,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_00c77993a962e514006ad7f740480887d0a0ca49fa90c7c4d7",
+        "metadata": {
+          "cpki_event_id": "0905fd60-5bef-4208-8df3-64a6cba92ccb",
+          "cpki_event_seq": 65,
+          "cpki_ingested": "01a15b9d-d406-7226-83be-19820921bd01"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 4721,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "8679af3f-5997-4686-9d3a-cf2dd21c7071",
+          "cpki_event_seq": 66,
+          "cpki_ingested": "01a15b9d-d406-7f71-bf98-5d979df7dae2",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "run_id": "d9a2743a-15f8-47ff-a528-857867b6436b",
+        "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "thread_id": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 1534,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 94,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 1628
+          }
+        ]
+      }
+    },
+    {
+      "at": 4723,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:e190b000-d47e-4b2e-9c40-bd291c72e586",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "0528015b-13dc-4b45-a867-89c9909aea22",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538427810
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "088af6cb-f367-4dd1-89ad-49ccb221ac3f",
+            "runId": null,
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 214,
+            "text": "First call AGUISendStateSnapshot with snapshot {\"todos\":[\"buy milk\"]}. Then call AGUISendStateDelta to add \"walk dog\" at /todos/-. Then call AGUISendStateDelta again to add \"post letter\" at /todos/-. Then say done.",
+            "seq": 2
+          },
+          "timestamp": 1792538427862
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538427970
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_7jlfyGjahjej8leVnWuWkDxm",
+            "toolName": "AGUISendStateSnapshot",
+            "agentId": "default",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "messageId": "bb4ce748-d503-43b4-9e69-a3a594ea1419",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "seq": 4
+          },
+          "timestamp": 1792538428707
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "7bc999fa-0a7f-4e91-b83a-cd401e66580f",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 50,
+            "text": "{\"success\":true,\"snapshot\":{\"todos\":[\"buy milk\"]}}",
+            "seq": 5
+          },
+          "timestamp": 1792538428784
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_qTDNe2uRkEYbrMXXQtR6qTMx",
+            "toolName": "AGUISendStateDelta",
+            "agentId": "default",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "messageId": "bb4ce748-d503-43b4-9e69-a3a594ea1419",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "seq": 6
+          },
+          "timestamp": 1792538429738
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "0528015b-13dc-4b45-a867-89c9909aea22",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "a3f6030c-7014-49d6-a8d4-212689cf4132",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 76,
+            "text": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"walk dog\"}]}",
+            "seq": 7
+          },
+          "timestamp": 1792538429904
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_Rh3uRPIpibQmw2H7LnnqFq8E",
+            "toolName": "AGUISendStateDelta",
+            "agentId": "default",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "messageId": "bb4ce748-d503-43b4-9e69-a3a594ea1419",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "seq": 8
+          },
+          "timestamp": 1792538430692
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "cb76eb57-4b2c-4239-9128-374f8bc636f5",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 79,
+            "text": "{\"success\":true,\"delta\":[{\"op\":\"add\",\"path\":\"/todos/-\",\"value\":\"post letter\"}]}",
+            "seq": 9
+          },
+          "timestamp": 1792538430867
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "0528015b-13dc-4b45-a867-89c9909aea22",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_00c77993a962e514006ad7f740480887d0a0ca49fa90c7c4d7",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "done",
+            "seq": 10
+          },
+          "timestamp": 1792538432529
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "d9a2743a-15f8-47ff-a528-857867b6436b",
+            "threadId": "e190b000-d47e-4b2e-9c40-bd291c72e586",
+            "agentId": "default",
+            "seq": 11
+          },
+          "timestamp": 1792538432532
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

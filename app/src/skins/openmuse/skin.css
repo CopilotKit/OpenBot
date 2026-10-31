@@ -1,0 +1,338 @@
+/*
+ * OpenMuse. Light is OpenMuse's own palette from its `ui.tsx`: a near-white canvas, white cards, a
+ * pale sky blue for the primary action and the person's own words, and soft pastel tiles. OpenMuse
+ * ships no dark theme, so dark is drawn in its spirit: the same airy shapes at night, a deep slate
+ * canvas with a blue cast, cards one step up, and the sky blue deepened into a night blue so the
+ * person's bubble and the primary pill still read as the one warm accent.
+ *
+ * Every token is set for both. A skin's `:root[data-skin]` outranks OpenBot's `.dark`, so a token set
+ * only for light would leak into dark.
+ */
+
+:root[data-skin="openmuse"] {
+  color-scheme: light;
+  --background: #fcfcfc;
+  --foreground: #11191c;
+  --card: #ffffff;
+  --card-foreground: #11191c;
+  --popover: #ffffff;
+  --popover-foreground: #11191c;
+  --primary: #c8e7ff;
+  --primary-foreground: #11191c;
+  --secondary: #f1f2f3;
+  --secondary-foreground: #11191c;
+  --muted: #f0f1f2;
+  --muted-foreground: #697176;
+  --accent: #edf7fd;
+  --accent-foreground: #11191c;
+  --destructive: #aa4a45;
+  --success: #189a58;
+  --border: #eeeef0;
+  --input: #e6e8ea;
+  --ring: #7fbde9;
+  --chart-1: #1473c8;
+  --chart-2: #6aaee0;
+  --chart-3: #24a46b;
+  --chart-4: #6866a6;
+  --chart-5: #e59a2b;
+  --radius: 1rem;
+  --sidebar: #f6f7f8;
+  --sidebar-foreground: #11191c;
+  --sidebar-primary: #1473c8;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #edeef0;
+  --sidebar-accent-foreground: #11191c;
+  --sidebar-border: #eeeef0;
+  --sidebar-ring: #7fbde9;
+
+  --openmuse-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-sans: var(--openmuse-font);
+  --openmuse-accent: #1473c8;
+  --openmuse-blue: #c8e7ff;
+  --openmuse-sky: #edf7fd;
+  --openmuse-green: #e3f3e8;
+  --openmuse-lavender: #f0eefa;
+  --openmuse-orange: #fdf0df;
+  --openmuse-chip: #f3f4f5;
+  --openmuse-danger-tint: #fbefed;
+  --openmuse-pressed: #e9eaec;
+  --openmuse-primary-hover: #b5ddfb;
+  --openmuse-task: #f0f1f2;
+  --openmuse-tab-active: #f0f1f2;
+  --openmuse-tab-hover: #f7f8f8;
+  --openmuse-pill: #ffffff;
+  --openmuse-pill-border: #f8f8f8;
+  --openmuse-pill-shadow: rgba(19, 38, 49, 0.07);
+  --openmuse-scrim: rgba(35, 48, 44, 0.25);
+  --openmuse-handle: #d8dbde;
+  --openmuse-group: #f3f4f5;
+  --openmuse-group-line: #e5e7e9;
+  --openmuse-group-soft: #f4f5f6;
+  --openmuse-quiet: #a3a6a8;
+  --openmuse-quiet-text: #666a6d;
+  --openmuse-green-dot: #24a46b;
+  --openmuse-green-ring: #d9f1e2;
+  --openmuse-green-text: #189a58;
+  --openmuse-blue-dot: #3d9bde;
+  --openmuse-blue-ring: #d7e9fa;
+  --openmuse-amber: #e59a2b;
+  --openmuse-focus: #c7e4f9;
+  --openmuse-user-bubble: #c8e7ff;
+  --openmuse-bot-bubble: #eeeef0;
+  --openmuse-composer: #ffffff;
+  --openmuse-composer-border: #eef0f2;
+  --openmuse-composer-shadow: rgba(24, 56, 75, 0.06);
+  --openmuse-send-idle: #f3f5f6;
+}
+
+:root[data-skin="openmuse"].dark {
+  color-scheme: dark;
+  --background: #0e1316;
+  --foreground: #e8edef;
+  --card: #161c20;
+  --card-foreground: #e8edef;
+  --popover: #161c20;
+  --popover-foreground: #e8edef;
+  --primary: #1f4766;
+  --primary-foreground: #dcefff;
+  --secondary: #1d2428;
+  --secondary-foreground: #e8edef;
+  --muted: #1b2226;
+  --muted-foreground: #8d989e;
+  --accent: #142530;
+  --accent-foreground: #e8edef;
+  --destructive: #e07a73;
+  --success: #4cc38a;
+  --border: #232b30;
+  --input: #2a3338;
+  --ring: #3f7fae;
+  --chart-1: #6fb6f0;
+  --chart-2: #3d9bde;
+  --chart-3: #4cc38a;
+  --chart-4: #a19fe0;
+  --chart-5: #f0b45a;
+  --radius: 1rem;
+  --sidebar: #12181b;
+  --sidebar-foreground: #e8edef;
+  --sidebar-primary: #6fb6f0;
+  --sidebar-primary-foreground: #0e1316;
+  --sidebar-accent: #1d2428;
+  --sidebar-accent-foreground: #e8edef;
+  --sidebar-border: #232b30;
+  --sidebar-ring: #3f7fae;
+
+  --openmuse-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-sans: var(--openmuse-font);
+  --openmuse-accent: #6fb6f0;
+  --openmuse-blue: #2a5576;
+  --openmuse-sky: #13242e;
+  --openmuse-green: #142a1f;
+  --openmuse-lavender: #1f1d33;
+  --openmuse-orange: #2d2215;
+  --openmuse-chip: #1f272b;
+  --openmuse-danger-tint: #2e1716;
+  --openmuse-pressed: #232b30;
+  --openmuse-primary-hover: #275678;
+  --openmuse-task: #182025;
+  --openmuse-tab-active: #232c31;
+  --openmuse-tab-hover: #1b2226;
+  --openmuse-pill: #161c20;
+  --openmuse-pill-border: #222a2f;
+  --openmuse-pill-shadow: rgba(0, 0, 0, 0.45);
+  --openmuse-scrim: rgba(4, 8, 10, 0.6);
+  --openmuse-handle: #3a444a;
+  --openmuse-group: #161c20;
+  --openmuse-group-line: #232b30;
+  --openmuse-group-soft: #161c20;
+  --openmuse-quiet: #5f6a70;
+  --openmuse-quiet-text: #a3adb2;
+  --openmuse-green-dot: #4cc38a;
+  --openmuse-green-ring: #173827;
+  --openmuse-green-text: #5fd39b;
+  --openmuse-blue-dot: #5aaee8;
+  --openmuse-blue-ring: #17344a;
+  --openmuse-amber: #f0b45a;
+  --openmuse-focus: #2f6a95;
+  --openmuse-user-bubble: #1f4766;
+  --openmuse-bot-bubble: #1b2226;
+  --openmuse-composer: #161c20;
+  --openmuse-composer-border: #242d32;
+  --openmuse-composer-shadow: rgba(0, 0, 0, 0.35);
+  --openmuse-send-idle: #1f272b;
+}
+
+/*
+ * OpenMuse is set in the device's own system font. `--font-sans` above is the token OpenBot's
+ * headings read; the page itself takes it here, because OpenBot names Inter on `html` directly.
+ */
+:root[data-skin="openmuse"] {
+  font-family: var(--font-sans);
+}
+
+/*
+ * OpenBot's own pages, worn the OpenMuse way. Every rule below reaches OpenBot's components only
+ * through the `data-slot` hooks they publish for this, so restyling a component inside OpenBot cannot
+ * silently break the skin.
+ */
+
+/* OpenMuse's buttons are pills. */
+:root[data-skin="openmuse"] [data-slot="button"] {
+  border-radius: 9999px;
+}
+
+/* Page titles at OpenMuse's 25px, semibold and tight. */
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="page-title"] {
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.7px;
+}
+
+/* OpenBot's "a Bot needs you" badge, drawn as OpenMuse's small blue dot on the menu button. */
+:root[data-skin="openmuse"] .openmuse-menu-badge [role="img"] {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 9999px;
+  font-size: 0;
+  line-height: 0;
+  background: var(--openmuse-accent);
+  color: transparent;
+}
+
+/* Chat sits in OpenMuse's padded column: 17px on a phone, 42px on a desktop. */
+:root[data-skin="openmuse"]
+  .openmuse-frame[data-openmuse-tab="chat"]
+  .openmuse-stage {
+  padding-inline: 17px;
+}
+
+@media (min-width: 900px) {
+  :root[data-skin="openmuse"]
+    .openmuse-frame[data-openmuse-tab="chat"]
+    .openmuse-stage {
+    padding-inline: 42px;
+  }
+}
+
+:root[data-skin="openmuse"]
+  .openmuse-stage
+  [data-slot="message-scroller-content"] {
+  padding-inline: 0;
+  gap: 13px;
+}
+
+/* A conversation's own header row carries no rule beneath it; the frame above already separates. */
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="conversation-header"] {
+  border-bottom-color: transparent;
+  padding-inline: 0;
+}
+
+/* With the computer or settings beside it on a wide screen, the conversation takes OpenBot's own layout. */
+@media (min-width: 1100px) {
+  :root[data-skin="openmuse"]
+    .openmuse-frame[data-openmuse-tab="chat"]
+    .openmuse-stage[data-openmuse-width="page"] {
+    padding-inline: 0;
+  }
+
+  :root[data-skin="openmuse"]
+    .openmuse-stage[data-openmuse-width="page"]
+    [data-slot="conversation-header"] {
+    padding-inline: 12px;
+  }
+}
+
+/* The person's words: OpenMuse's pale-blue bubble with its tucked corner. */
+:root[data-skin="openmuse"]
+  .openmuse-stage
+  [data-slot="bubble"][data-align="end"]
+  > [data-slot="bubble-content"] {
+  background: var(--openmuse-user-bubble);
+  color: var(--foreground);
+  border-radius: 22px 22px 7px 22px;
+  padding: 13px 16px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+/* The Bot's words: OpenMuse's soft grey bubble, tucked on the other side. */
+:root[data-skin="openmuse"]
+  .openmuse-stage
+  [data-slot="bubble"][data-variant="ghost"][data-align="start"]
+  > [data-slot="bubble-content"] {
+  background: var(--openmuse-bot-bubble);
+  border-radius: 22px 22px 22px 7px;
+  padding: 13px 16px;
+  font-size: 15px;
+  line-height: 23px;
+}
+
+/* The composer: OpenMuse's white pill with a soft shadow, a "+" on the left and a round send. */
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer"] {
+  min-height: 62px;
+  padding: 8px;
+  border: 1px solid var(--openmuse-composer-border);
+  border-radius: 32px;
+  background: var(--openmuse-composer);
+  box-shadow: 0 4px 20px var(--openmuse-composer-shadow);
+}
+
+:root[data-skin="openmuse"]
+  .openmuse-stage
+  [data-slot="composer"]:focus-within {
+  border-color: var(--openmuse-focus);
+  box-shadow: 0 4px 20px var(--openmuse-composer-shadow);
+}
+
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-input"] > * {
+  font-size: 17px;
+  line-height: 24px;
+}
+
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-attach"],
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-send"],
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-stop"] {
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  align-self: flex-end;
+}
+
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-attach"] svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.5;
+}
+
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-send"],
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-stop"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+:root[data-skin="openmuse"]
+  .openmuse-stage
+  [data-slot="composer-send"]:disabled {
+  background: var(--openmuse-send-idle);
+  color: var(--openmuse-quiet);
+  opacity: 1;
+}
+
+:root[data-skin="openmuse"] .openmuse-stage [data-slot="composer-send"] svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* A row that opens something reads from its start, as every other row does. */
+:root[data-skin="openmuse"] .openmuse-stage button[data-slot="item"] {
+  text-align: start;
+}

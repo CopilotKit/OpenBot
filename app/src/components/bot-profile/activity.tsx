@@ -3,8 +3,10 @@ import {
   type IconBell,
   IconCalendarRepeat,
   IconChecks,
+  IconChevronRight,
   IconClockPlay,
   IconHelpCircle,
+  IconHistory,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -32,9 +34,11 @@ import {
 import {
   type ActivityItem,
   type ActivityKind,
+  type BotActivity,
   botActivityQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { relativeTime } from "@/lib/relative-time";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 const ICONS: Record<ActivityKind, typeof IconBell> = {
@@ -77,9 +81,12 @@ function linkFor(item: ActivityItem, agentId: string) {
 function ActivityRow({
   agentId,
   item,
+  live = false,
 }: {
   agentId: string;
   item: ActivityItem;
+  /** Under way now: a pulsing dot on its icon, amber when it is waiting on the person. */
+  live?: boolean;
 }) {
   const stop = useMutation(stopHandoffMutationOptions(queryClient));
   const cancel = useMutation(cancelFollowUpMutationOptions(queryClient));
@@ -107,8 +114,17 @@ function ActivityRow({
   ) : null;
   const content = (
     <>
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         <Icon />
+        {live ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full ring-2 ring-card",
+              item.needsYou ? "bg-amber-500" : "bg-emerald-500",
+            )}
+          />
+        ) : null}
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{item.title}</ItemTitle>
@@ -151,29 +167,102 @@ function ActivitySection({
   agentId,
   empty,
   items,
+  live = false,
   title,
 }: {
   agentId: string;
   empty: string;
   items: ActivityItem[];
+  live?: boolean;
   title: string;
 }) {
   return (
     <PageSection title={title}>
       {items.length === 0 ? (
-        <PageEmpty>{empty}</PageEmpty>
+        <PageEmpty icon={IconHistory}>{empty}</PageEmpty>
       ) : (
         <PageRows>
           {items.map((item, index) => (
             <Fragment key={item.id}>
               {index > 0 ? <Separator /> : null}
-              <ActivityRow agentId={agentId} item={item} />
+              <ActivityRow agentId={agentId} item={item} live={live} />
             </Fragment>
           ))}
         </PageRows>
       )}
     </PageSection>
   );
+}
+
+/** How many running or scheduled items the Bot's page shows before "All activity". */
+const GLANCE = 3;
+
+/**
+ * The Bot page's view of its activity: what is under way and what is lined up, so either is seen
+ * without opening anything, then a row to the full lists. Running work comes first, with its dot.
+ *
+ * The full lists used to sit here and ran on for screens; finished work is the long part and the
+ * least urgent, so it lives only on the Activity page.
+ */
+export function BotActivityGlance({ agentId }: { agentId: string }) {
+  const activity = useQuery(botActivityQueryOptions(agentId));
+  if (activity.isPending) return null;
+  const upcoming = activity.data
+    ? [
+        ...activity.data.inProgress.map((item) => ({ item, live: true })),
+        ...activity.data.scheduled.map((item) => ({ item, live: false })),
+      ].slice(0, GLANCE)
+    : [];
+  return (
+    <PageSection title="Activity">
+      <PageRows>
+        {upcoming.map(({ item, live }) => (
+          <Fragment key={item.id}>
+            <ActivityRow agentId={agentId} item={item} live={live} />
+            <Separator />
+          </Fragment>
+        ))}
+        <Item
+          render={<Link params={{ agentId }} to="/bots/$agentId/activity" />}
+          size="sm"
+        >
+          {upcoming.length ? null : (
+            <ItemMedia variant="icon">
+              <IconHistory />
+            </ItemMedia>
+          )}
+          <ItemContent>
+            <ItemTitle>All activity</ItemTitle>
+            <ItemDescription>
+              {activity.data
+                ? activitySummary(activity.data)
+                : "Couldn't load this Bot's activity."}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+      </PageRows>
+    </PageSection>
+  );
+}
+
+/**
+ * The Bot page's one line about its activity: what is running and what is lined up, the two that
+ * might want a look. Finished work is only counted when there is nothing else to say.
+ */
+export function activitySummary(activity: BotActivity): string {
+  const parts = [
+    activity.inProgress.length
+      ? `${activity.inProgress.length} in progress`
+      : null,
+    activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
+  ].filter(Boolean);
+  if (parts.length) return parts.join(" · ");
+  return activity.completed.length
+    ? "Nothing running or scheduled"
+    : "Nothing yet";
 }
 
 /** In progress, Scheduled and Completed, read from the ledgers the work already lives in. */
@@ -194,6 +283,7 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
         agentId={agentId}
         empty="Nothing is running or waiting on you."
         items={activity.data.inProgress}
+        live
         title="In progress"
       />
       <ActivitySection

@@ -1,0 +1,199 @@
+{
+  "name": "backend-tool",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 52,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"d77c1431-613f-4735-82ec-698e565c972f\",\"runId\":\"1bafd489-293d-4745-9901-606e7193abae\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"42bc7ccb-fda9-42c8-bdad-a3ff3c11a772\",\"role\":\"user\",\"content\":\"What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 54,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"d77c1431-613f-4735-82ec-698e565c972f\",\"runId\":\"1bafd489-293d-4745-9901-606e7193abae\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"d77c1431-613f-4735-82ec-698e565c972f\",\"runId\":\"1bafd489-293d-4745-9901-606e7193abae\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"42bc7ccb-fda9-42c8-bdad-a3ff3c11a772\",\"role\":\"user\",\"content\":\"What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1369,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"toolCallName\":\"lookupWeather\",\"parentMessageId\":\"239758bc-73d3-4d65-a056-6448ed338655\"}\n\n"
+        },
+        {
+          "at": 1370,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 1373,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"delta\":\"city\"}\n\n"
+        },
+        {
+          "at": 1382,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"delta\":\"\\\":\\\"\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"delta\":\"Lis\"}\n\n"
+        },
+        {
+          "at": 1395,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"delta\":\"bon\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"delta\":\"\\\"}\"}\n\n"
+        },
+        {
+          "at": 1474,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\"}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"messageId\":\"3eafed64-3abb-4755-b116-b3722f50ac22\",\"toolCallId\":\"call_x5zUxFHbsYNbObzZhbGIchs6\",\"content\":\"{\\\"city\\\":\\\"Lisbon\\\",\\\"forecast\\\":\\\"sunny\\\",\\\"celsius\\\":21}\",\"role\":\"tool\"}\n\n"
+        },
+        {
+          "at": 2645,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\"The\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" weather\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" in\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" Lisbon\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" is\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" sunny\"}\n\n"
+        },
+        {
+          "at": 2700,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" with\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" a\"}\n\n"
+        },
+        {
+          "at": 2715,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" temperature\"}\n\n"
+        },
+        {
+          "at": 2718,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" of\"}\n\n"
+        },
+        {
+          "at": 2720,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" \"}\n\n"
+        },
+        {
+          "at": 2722,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\"21\"}\n\n"
+        },
+        {
+          "at": 2725,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" degrees\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\" Celsius\"}\n\n"
+        },
+        {
+          "at": 2729,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3042,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"d77c1431-613f-4735-82ec-698e565c972f\",\"runId\":\"1bafd489-293d-4745-9901-606e7193abae\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":472,\"outputTokens\":33,\"totalTokens\":505,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 3043,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "4bb9402d-1d94-4e62-8401-97af3ab6f544",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538294228
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "42bc7ccb-fda9-42c8-bdad-a3ff3c11a772",
+            "runId": null,
+            "threadId": "d77c1431-613f-4735-82ec-698e565c972f",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 84,
+            "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.",
+            "seq": 2
+          },
+          "timestamp": 1792538294279
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "1bafd489-293d-4745-9901-606e7193abae",
+            "threadId": "d77c1431-613f-4735-82ec-698e565c972f",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538294283
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_x5zUxFHbsYNbObzZhbGIchs6",
+            "toolName": "lookupWeather",
+            "agentId": "default",
+            "threadId": "d77c1431-613f-4735-82ec-698e565c972f",
+            "messageId": "239758bc-73d3-4d65-a056-6448ed338655",
+            "runId": "1bafd489-293d-4745-9901-606e7193abae",
+            "seq": 4
+          },
+          "timestamp": 1792538295598
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "3eafed64-3abb-4755-b116-b3722f50ac22",
+            "runId": "1bafd489-293d-4745-9901-606e7193abae",
+            "threadId": "d77c1431-613f-4735-82ec-698e565c972f",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 49,
+            "text": "{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}",
+            "seq": 5
+          },
+          "timestamp": 1792538295703
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "4bb9402d-1d94-4e62-8401-97af3ab6f544",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0f8746950fbfb18d006ad7f6b8db8c87d082d16524036e8516",
+            "runId": "1bafd489-293d-4745-9901-606e7193abae",
+            "threadId": "d77c1431-613f-4735-82ec-698e565c972f",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 72,
+            "text": "The weather in Lisbon is sunny with a temperature of 21 degrees Celsius.",
+            "seq": 6
+          },
+          "timestamp": 1792538297271
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "1bafd489-293d-4745-9901-606e7193abae",
+            "threadId": "d77c1431-613f-4735-82ec-698e565c972f",
+            "agentId": "default",
+            "seq": 7
+          },
+          "timestamp": 1792538297271
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

@@ -31,6 +31,13 @@ export type EnterpriseSettings = {
   inactiveComputerDays: number;
   modelAllowlist: { enabled: boolean; models: string[] };
   mcpAllowlist: { enabled: boolean; servers: string[] };
+  /**
+   * People may open the Skills learned from their own recordings to every Bot (Settings, Learning). Off by default:
+   * an opened Skill puts one person's recorded and narrated text in front of everybody's Bots, so an administrator
+   * decides whether this deployment's people trust each other's recordings that far. Off, nobody can open one and a
+   * Skill opened while it was on reaches no other person's Bot (learning/runtime.ts).
+   */
+  skillSharing: boolean;
 };
 
 export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
@@ -39,6 +46,7 @@ export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   inactiveComputerDays: 30,
   modelAllowlist: { enabled: false, models: [] },
   mcpAllowlist: { enabled: false, servers: [] },
+  skillSharing: false,
 };
 
 const SETTING_KEYS = {
@@ -47,6 +55,7 @@ const SETTING_KEYS = {
   inactiveComputerDays: "inactive_computer_days",
   modelAllowlist: "model_allowlist",
   mcpAllowlist: "mcp_allowlist",
+  skillSharing: "skill_sharing",
 } as const satisfies Record<keyof EnterpriseSettings, string>;
 
 export type NetworkPolicyRow = {

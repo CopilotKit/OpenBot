@@ -1,0 +1,244 @@
+{
+  "source": "The full end-to-end run, run 5 (Chrome, service worker stopped 600 ms after a saving click) and run4 (the refund form), rows from cpki.trajectory_events",
+  "archiveClick": {
+    "name": "click",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 319,
+        "y": 353,
+        "width": 92,
+        "height": 18
+      },
+      "url": "http://127.0.0.1:7420/orders/1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/orders/1043",
+        "title": "Order 1043 - Corner Shop admin"
+      },
+      "step": "click",
+      "route": "/orders/1043",
+      "target": {
+        "tag": "button",
+        "name": "Archive order",
+        "role": "button",
+        "text": "Archive order",
+        "input": "pointer",
+        "label": "Archive order",
+        "action": null,
+        "attributes": {
+          "id": "archive",
+          "type": "button",
+          "class": "ghost",
+          "data-testid": "archive-order"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "selectors": [
+        {
+          "by": "testid",
+          "selector": "[data-testid=\"archive-order\"]"
+        },
+        {
+          "by": "id",
+          "selector": "#archive"
+        },
+        {
+          "by": "role",
+          "selector": "role=button[name=\"Archive order\"]"
+        },
+        {
+          "by": "text",
+          "selector": "text=\"Archive order\""
+        },
+        {
+          "by": "css",
+          "selector": "html > body > main > button"
+        }
+      ]
+    },
+    "timestamp": 1792549415251
+  },
+  "archiveSave": {
+    "url": "http://127.0.0.1:7420/api/orders/1043",
+    "body": {
+      "text": "{\"archived\":true}",
+      "status": "complete",
+      "encoding": "utf-8"
+    },
+    "method": "PATCH",
+    "status": 200,
+    "response": {
+      "text": "{\"id\":1043,\"archived\":true,\"archivedAt\":\"2026-10-21T02:23:35.252Z\"}",
+      "status": "complete",
+      "encoding": "utf-8"
+    }
+  },
+  "notifyClick": {
+    "name": "click",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 284,
+        "y": 304,
+        "width": 13,
+        "height": 13
+      },
+      "url": "http://127.0.0.1:7420/orders/1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/orders/1043",
+        "title": "Order 1043 - Corner Shop admin"
+      },
+      "step": "click",
+      "route": "/orders/1043",
+      "target": {
+        "tag": "input",
+        "name": "Notify the customer by email",
+        "role": "checkbox",
+        "text": "",
+        "input": "pointer",
+        "value": "on",
+        "action": null,
+        "checked": true,
+        "inputType": "checkbox",
+        "attributes": {
+          "id": "notify",
+          "type": "checkbox"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 757
+      },
+      "selectors": [
+        {
+          "by": "id",
+          "selector": "#notify"
+        },
+        {
+          "by": "role",
+          "selector": "role=checkbox[name=\"Notify the customer by email\"]"
+        },
+        {
+          "by": "css",
+          "selector": "html > body > main > label:nth-of-type(2) > input"
+        }
+      ]
+    },
+    "timestamp": 1792549512098
+  },
+  "reasonClick": {
+    "name": "click",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 280,
+        "y": 291,
+        "width": 720,
+        "height": 62
+      },
+      "url": "http://127.0.0.1:7420/checkout?order=1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/checkout?order=1043",
+        "title": "Refund to card - Corner Shop admin"
+      },
+      "step": "click",
+      "route": "/checkout",
+      "target": {
+        "tag": "textarea",
+        "name": "Reason",
+        "role": "textbox",
+        "text": "",
+        "input": "pointer",
+        "value": "",
+        "action": null,
+        "inputType": "textarea",
+        "attributes": {
+          "id": "reason",
+          "name": "reason"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "selectors": [
+        {
+          "by": "id",
+          "selector": "#reason"
+        },
+        {
+          "by": "name",
+          "selector": "textarea[name=\"reason\"]"
+        },
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Reason\"]"
+        },
+        {
+          "by": "css",
+          "selector": "#refund-form > textarea:nth-of-type(1)"
+        }
+      ]
+    },
+    "timestamp": 1792549263309
+  },
+  "reasonInput": {
+    "name": "input",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 280,
+        "y": 291,
+        "width": 720,
+        "height": 62
+      },
+      "url": "http://127.0.0.1:7420/checkout?order=1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/checkout?order=1043",
+        "title": "Refund to card - Corner Shop admin"
+      },
+      "step": "input",
+      "route": "/checkout",
+      "target": {
+        "tag": "textarea",
+        "name": "Reason",
+        "role": "textbox",
+        "text": "",
+        "value": "Sent while the socket was down",
+        "action": null,
+        "inputType": "textarea",
+        "attributes": {
+          "id": "reason",
+          "name": "reason"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "eventType": "input",
+      "selectors": [
+        {
+          "by": "id",
+          "selector": "#reason"
+        },
+        {
+          "by": "name",
+          "selector": "textarea[name=\"reason\"]"
+        },
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Reason\"]"
+        },
+        {
+          "by": "css",
+          "selector": "#refund-form > textarea:nth-of-type(1)"
+        }
+      ]
+    },
+    "timestamp": 1792549264892
+  }
+}

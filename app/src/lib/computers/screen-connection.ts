@@ -11,6 +11,16 @@ type Options = {
   verifyOwnership: () => Promise<boolean>;
   onReady: (ready: boolean) => void;
   onProblem: (problem: string | null) => void;
+  /**
+   * Whether a dropped stream is being retried on its own.
+   *
+   * Separate from `onProblem` on purpose. A retry in progress is routine (a deploy, a laptop waking,
+   * a load balancer recycling a connection) and is drawn as a small badge over the screen. A problem
+   * is what is left once the retries are spent, and only that gets the overlay with a Retry button.
+   * Both used to arrive through `onProblem`, so every brief blip covered the screen with the same
+   * panel a dead connection gets.
+   */
+  onReconnecting?: (reconnecting: boolean) => void;
   onDisconnect: () => void;
   onMessage: (event: { data: unknown }) => void;
   schedule?: (run: () => void, delay: number) => () => void;
@@ -40,12 +50,13 @@ export function connectScreen(options: Options) {
       options.onReady(false);
       const delay = BACKOFF[attempts++];
       if (delay === undefined) {
+        options.onReconnecting?.(false);
         options.onProblem(
           "The live screen is disconnected. Retry to reconnect.",
         );
         return;
       }
-      options.onProblem("Reconnecting to the live screen…");
+      options.onReconnecting?.(true);
       cancelTimer = schedule(connect, delay);
     };
     current.onopen = async () => {
@@ -53,6 +64,7 @@ export function connectScreen(options: Options) {
       const permitted =
         attempts === 0 || (await options.verifyOwnership().catch(() => false));
       if (!owns()) return;
+      options.onReconnecting?.(false);
       options.onProblem(null);
       options.onReady(permitted);
     };
@@ -73,6 +85,7 @@ export function connectScreen(options: Options) {
         ) {
           stopped = true;
           cancelTimer?.();
+          options.onReconnecting?.(false);
           options.onDisconnect();
           options.onReady(false);
           options.onProblem(
@@ -99,6 +112,7 @@ export function connectScreen(options: Options) {
     stop: () => {
       stopped = true;
       cancelTimer?.();
+      options.onReconnecting?.(false);
       options.onReady(false);
       socket?.close();
     },

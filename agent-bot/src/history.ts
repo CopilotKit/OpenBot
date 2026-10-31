@@ -7,7 +7,8 @@
  */
 import type { RunAgentInput } from "@ag-ui/core";
 import type OpenAI from "openai";
-import { COMPUTER_GUIDANCE, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { computerGuidance, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { researchRoleOfToolName } from "../../shared/research";
 import { userContent } from "../../shared/user-content";
 
 export { NO_ANSWER_CAME };
@@ -17,7 +18,19 @@ export function toProviderMessages(
   input: RunAgentInput,
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: COMPUTER_GUIDANCE },
+    /*
+     * Worded for the tools this run offers, which is all this Bot can see of its grants: the names
+     * say whether one of them is a search tool, and that decides whether the browser is told to
+     * leave searching to it or never to search at all.
+     */
+    {
+      role: "system",
+      content: computerGuidance({
+        search: (input.tools ?? []).some(
+          (tool) => researchRoleOfToolName(tool.name) === "search",
+        ),
+      }),
+    },
     // AG-UI application context is separate from history. The A2UI catalog and tool instructions
     // arrive here; omitting them leaves the model guessing component names and action schemas.
     ...(input.context ?? []).map(({ description, value }) => ({

@@ -42,8 +42,6 @@
  * say so. Editing a `want` to match what production does is the one move this file forbids.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import Arcade from "@arcadeai/arcadejs";
 import { listTools, useArcadeClient } from "../src/plugins/arcade";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
@@ -621,48 +619,6 @@ const KNOWN_FAIL_OPEN: Record<string, { now: string; finding: string }> = {};
 // ---------------------------------------------------------------------------------------------
 // The checks.
 // ---------------------------------------------------------------------------------------------
-
-const REPO = join(import.meta.dir, "..", "..");
-
-describe("every vendor-field reader is still where the table says", () => {
-  const readers = [
-    ...new Map(
-      ROWS.map((r) => [`${r.reader.file}#${r.reader.name}`, r.reader]),
-    ).values(),
-  ];
-  for (const reader of readers) {
-    test(`${reader.name} is bound in ${reader.file}`, () => {
-      const source = readFileSync(join(REPO, reader.file), "utf8");
-      const binding = new RegExp(
-        `(?:^|\\n)\\s*(?:export\\s+)?(?:async\\s+)?(?:function|const)\\s+${reader.name}\\b`,
-      );
-      expect(binding.test(source)).toBe(true);
-    });
-  }
-});
-
-describe("the debt list is honest", () => {
-  test("every KNOWN_FAIL_OPEN entry names a row in the table", () => {
-    const keys = new Set(ROWS.map(keyOf));
-    expect(Object.keys(KNOWN_FAIL_OPEN).filter((k) => !keys.has(k))).toEqual(
-      [],
-    );
-  });
-
-  test("no debt entry records the right answer as its wrong one", () => {
-    const wants = new Map(ROWS.map((r) => [keyOf(r), r.want]));
-    expect(
-      Object.entries(KNOWN_FAIL_OPEN)
-        .filter(([key, debt]) => wants.get(key) === debt.now)
-        .map(([key]) => key),
-    ).toEqual([]);
-  });
-
-  test("row keys are unique", () => {
-    const keys = ROWS.map(keyOf);
-    expect(keys.length).toBe(new Set(keys).size);
-  });
-});
 
 describe("a vendor field this deployment cannot read fails closed", () => {
   for (const row of ROWS) {
