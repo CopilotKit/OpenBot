@@ -1066,9 +1066,15 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
  *
  * A scheme or a path is a mistake worth catching here rather than at the first registration that
  * silently never matches, so both are refused with the offending entry named.
+ *
+ * The deployment's own agent endpoints join the list implicitly: they are named by configuration,
+ * not typed by a person, so a "Run it here" Bot bound to the managed agent clears the
+ * private-network refusal the way a named host does (#888). The never-allowed list is still
+ * consulted first, so this cannot admit the metadata address or a non-web address.
  */
 function agentEndpointAllowedHosts(
   environment: NodeJS.ProcessEnv,
+  managedAgent: ManagedAgentConfig | undefined,
 ): ReadonlySet<string> {
   const named = commaSeparated(environment, "AGENT_ENDPOINT_ALLOWED_HOSTS");
   const hosts = new Set<string>();
@@ -1086,6 +1092,13 @@ function agentEndpointAllowedHosts(
       );
     }
     hosts.add(normalizeAllowedHost(entry, host));
+  }
+  for (const url of [managedAgent?.endpoint, managedAgent?.alsoRun]) {
+    if (!url) continue;
+    // Spelled the way `namedAsAllowed` in agents/endpoint.ts compares: the parser's own
+    // hostname, lower-cased, with the port pinned when one is present.
+    const hostname = url.hostname.toLowerCase();
+    hosts.add(url.port ? `${hostname}:${url.port}` : hostname);
   }
   return hosts;
 }
@@ -1432,7 +1445,7 @@ export function loadConfig(
     ...(webBotAuth ? { webBotAuth } : {}),
     ...(managedAgent ? { managedAgent } : {}),
     ...(githubApp ? { githubApp } : {}),
-    agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
+    agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment, managedAgent),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
     arcadeApiKey: optional(environment, "ARCADE_API_KEY"),

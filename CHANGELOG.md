@@ -84,6 +84,14 @@ The built-in safety rules hand paying, purchasing or moving money to you, but a 
 (such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
 rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
 
+### "Run it here" Bots work when the managed agent is on loopback
+
+A Bot with no endpoint ("Run it here") is bound to the deployment's managed agent, but when that
+address was on loopback every message failed with "this deployment will not dial ... : that
+address is inside OpenBot's own network". The managed agent's address is this deployment's own
+setting, not an address a person typed, so it is now trusted the way a named allowed host is, and
+those Bots run. `AGENT_ENDPOINT_ALLOWED_HOSTS` still controls only the addresses people type.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
