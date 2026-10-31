@@ -179,6 +179,8 @@ export const auditEventTypes = [
    * was current when it was made. The client id, never the secret.
    */
   "mcp.oauth_client_registered",
+  /** A Connect attempt could not read the deployment's client. No credential or raw fault is recorded. */
+  "mcp.oauth_client_read_failed",
   /*
    * One person's brokered account was exercised with a real call, to see whether it is really there.
    *

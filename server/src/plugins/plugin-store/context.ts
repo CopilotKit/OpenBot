@@ -47,6 +47,7 @@ import {
   INVALID_GRANT,
   isUsableClient,
   type OAuthClient,
+  OAuthClientReadError,
   PluginInvariantError,
   type PluginKind,
   PluginRefusedError,
@@ -1259,6 +1260,17 @@ export function createStoreContext(options: PluginStoreOptions) {
     keyId: `oauth-client-${serverId}`,
   });
 
+  /** Classify only client reads, never vendor registration or subsequent vault writes. */
+  async function readClient(
+    work: () => Promise<OAuthClient | null>,
+  ): Promise<OAuthClient | null> {
+    try {
+      return await work();
+    } catch {
+      throw new OAuthClientReadError();
+    }
+  }
+
   /** Parse errors can quote plaintext, so an invalid client is never rethrown with its secret. */
   function clientFromStoredJson(plaintext: string): OAuthClient | null {
     try {
@@ -1314,27 +1326,29 @@ export function createStoreContext(options: PluginStoreOptions) {
     transaction: Transaction,
     serverId: string,
   ): Promise<OAuthClient | null> {
-    const [server] = await transaction
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
-    if (!server?.credentialId) return null;
+    return readClient(async () => {
+      const [server] = await transaction
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!server?.credentialId) return null;
 
-    const [held] = await transaction
-      .select({
-        encryptedValue: credentialRows.encryptedValue,
-        revokedAt: credentialRows.revokedAt,
-      })
-      .from(credentialRows)
-      .where(eq(credentialRows.id, server.credentialId))
-      .limit(1);
-    if (!held || held.revokedAt) return null;
+      const [held] = await transaction
+        .select({
+          encryptedValue: credentialRows.encryptedValue,
+          revokedAt: credentialRows.revokedAt,
+        })
+        .from(credentialRows)
+        .where(eq(credentialRows.id, server.credentialId))
+        .limit(1);
+      if (!held || held.revokedAt) return null;
 
-    // A decryption fault does not mean the vendor forgot this client. Re-registering would replace
-    // the live client for every replica, including those that can still decrypt it.
-    const plaintext = await decryptSecret(encryptionKey, held.encryptedValue);
-    return clientFromStoredJson(plaintext);
+      // A decryption fault does not mean the vendor forgot this client. Re-registering would replace
+      // the live client for every replica, including those that can still decrypt it.
+      const plaintext = await decryptSecret(encryptionKey, held.encryptedValue);
+      return clientFromStoredJson(plaintext);
+    });
   }
 
   /**
@@ -1455,27 +1469,29 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function storedOAuthClient(
     serverId: string,
   ): Promise<OAuthClient | null> {
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
-    if (!row?.credentialId) return null;
+    return readClient(async () => {
+      const [row] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!row?.credentialId) return null;
 
-    let plaintext: string;
-    try {
-      plaintext = await decryptCredentialForUse(
-        encryptionKey,
-        credentials,
-        row.credentialId,
-      );
-    } catch (error) {
-      // Only a confirmed missing or revoked credential permits obtaining a replacement. A failed
-      // read or decryption must not turn a working deployment-wide registration into a new client.
-      if (error instanceof CredentialUnusableError) return null;
-      throw error;
-    }
-    return clientFromStoredJson(plaintext);
+      let plaintext: string;
+      try {
+        plaintext = await decryptCredentialForUse(
+          encryptionKey,
+          credentials,
+          row.credentialId,
+        );
+      } catch (error) {
+        // Only a confirmed missing or revoked credential permits obtaining a replacement. A failed
+        // read or decryption must not turn a working deployment-wide registration into a new client.
+        if (error instanceof CredentialUnusableError) return null;
+        throw error;
+      }
+      return clientFromStoredJson(plaintext);
+    });
   }
 
   /**

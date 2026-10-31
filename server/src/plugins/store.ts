@@ -35,6 +35,7 @@ export {
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
   isDeploymentFault,
+  OAuthClientReadError,
   PluginInvariantError,
   PluginRefusedError,
   refFromToolName,
