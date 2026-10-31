@@ -647,19 +647,38 @@ export function createTaskStore(
   return {
     /**
      * Records a task opened in a conversation made for it. On the transaction that made the
-     * conversation, so neither is ever there without the other.
+     * conversation, so neither is ever there without the other. Null when the person already has a
+     * task opened with this `clientId`: the same Start, sent twice.
      */
     async create(
       input: NewTask,
       executor: Database | TaskTransaction = database,
-    ): Promise<TaskRecord> {
+    ): Promise<TaskRecord | null> {
       const at = now();
       const [row] = await executor
         .insert(tasks)
         .values({ id: randomUUID(), ...input, createdAt: at, updatedAt: at })
+        .onConflictDoNothing({ target: [tasks.ownerUserId, tasks.clientId] })
         .returning();
+      if (!row && input.clientId) return null;
       if (!row) throw new Error("The task was not saved.");
       return recordOf(row, undefined);
+    },
+    /** The task a Start with this browser-made id opened, as the engine needs it. */
+    async byClientId(
+      owner: string,
+      clientId: string,
+    ): Promise<{ id: string; channelId: string; title: string } | null> {
+      const [row] = await database
+        .select({
+          id: tasks.id,
+          channelId: tasks.channelId,
+          title: tasks.title,
+        })
+        .from(tasks)
+        .where(and(eq(tasks.ownerUserId, owner), eq(tasks.clientId, clientId)))
+        .limit(1);
+      return row ?? null;
     },
     /**
      * The person's questions waiting in a task's conversation, less any a reply already answered:

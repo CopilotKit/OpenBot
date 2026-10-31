@@ -236,6 +236,8 @@ export type TaskThreads = {
     suggestionId: string | null;
     sourceApp: string | null;
     sourceLink: string | null;
+    /** A Start the browser sent with its own id. Opened again, it answers the task it opened. */
+    clientId?: string | null;
   }): Promise<OpenedTask>;
   /** The task's own conversation, or null once the person can no longer reach it or its Bot. */
   scope(ownerUserId: string, taskId: string): Promise<ProactiveScope | null>;
@@ -263,6 +265,8 @@ export type AskedTask = {
   why?: string | undefined;
   source?: string | undefined;
   link?: string | undefined;
+  /** The id the browser made for a Start on Tasks, so a Start sent twice opens one task. */
+  clientId?: string | undefined;
 };
 
 export type ProactiveEngineDeps = {
@@ -1032,6 +1036,9 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     /**
      * Work asked for in so many words, by `start_task` or the + on Tasks: opened as a task with its
      * own conversation and started there. No cap on how many a person has.
+     *
+     * A Start sent again with the same `clientId` is the same Start: opening answers the task the
+     * first one opened, and its turn is offered under the same key, so it is not queued twice.
      */
     async startAsked(
       ownerUserId: string,
@@ -1047,6 +1054,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         suggestionId: null,
         sourceApp: input.source ?? null,
         sourceLink: input.link ?? null,
+        ...(input.clientId ? { clientId: input.clientId } : {}),
       });
       await deps.queue.offer({
         kind: PROACTIVE_TASK_KIND,

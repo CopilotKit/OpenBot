@@ -60,7 +60,7 @@ export type TaskIntake = {
   start(
     ownerUserId: string,
     botId: string,
-    task: { title: string; instruction: string },
+    task: { title: string; instruction: string; clientId?: string },
   ): Promise<{ id: string }>;
 };
 
@@ -93,6 +93,8 @@ const askSchema = z
     botId: z.string().trim().min(1).max(200),
     instruction: z.string().trim().min(1).max(MAX_ASK),
     title: z.string().trim().min(1).max(160).optional(),
+    /** The id the browser made for this Start, so sending it twice opens one task. */
+    clientId: z.uuid().optional(),
   })
   .strict();
 
@@ -151,6 +153,9 @@ export function createTaskRoutes(
      * The + on Tasks, Start now: the ask opens a task in a conversation of its own with the Bot the
      * person chose, and starts there, the path `start_task` takes. Any Bot of theirs, wherever it
      * runs. Answers with the task as Tasks reads it.
+     *
+     * A Start sent again with the same `clientId`, a double click or a retried request, answers the
+     * task the first one opened, and starts nothing more.
      */
     routes.post("/", async (context) => {
       const owner = context.var.actor.id;
@@ -158,6 +163,7 @@ export function createTaskRoutes(
       const opened = await intake.start(owner, ask.botId, {
         title: ask.title,
         instruction: ask.instruction,
+        ...(ask.clientId ? { clientId: ask.clientId } : {}),
       });
       return context.json({ task: await store.get(owner, opened.id) }, 201);
     });
@@ -259,12 +265,15 @@ async function readAsk(request: Request) {
     throw new TaskRefusedError(
       parsed.error.issues.some((issue) => issue.path[0] === "instruction")
         ? `Say what your Bot should do, in at most ${MAX_ASK} characters.`
-        : "Choose one of your Bots.",
+        : parsed.error.issues.some((issue) => issue.path[0] === "clientId")
+          ? "Couldn't start this task. Reload the page and try again."
+          : "Choose one of your Bots.",
     );
-  const { botId, instruction } = parsed.data;
+  const { botId, instruction, clientId } = parsed.data;
   return {
     botId,
     instruction,
+    ...(clientId ? { clientId } : {}),
     title: parsed.data.title ?? titleFrom(instruction),
   };
 }

@@ -47,6 +47,7 @@ import {
   agents,
   approvalRequests,
   attachments,
+  channelMemberships,
   channels,
   intelligenceChannelMappings,
   pluginGrants,
@@ -2915,6 +2916,72 @@ describe("the + on Tasks", () => {
     expect((await taskStore.list(owner.id)).map((row) => row.id)).toContain(
       task.id,
     );
+  });
+
+  test("a Start sent twice with the same clientId opens one task and starts it once", async () => {
+    const { engine, started, post } = plus();
+    const clientId = randomUUID();
+    const ask = {
+      botId: bot,
+      instruction: "Plan a three-day trip to Lisbon.",
+      clientId,
+    };
+    const conversations = async () =>
+      (
+        await database
+          .select({ id: channelMemberships.channelId })
+          .from(channelMemberships)
+          .where(eq(channelMemberships.userId, owner.id))
+      ).length;
+    const before = await conversations();
+    // A double click: both at once, then a retried request after.
+    const responses = await Promise.all([post("/", ask), post("/", ask)]);
+    const again = await post("/", ask);
+    await engine.idle();
+    const ids = await Promise.all(
+      [...responses, again].map(async (response) => {
+        expect(response.status).toBe(201);
+        return ((await response.json()) as { task: TaskRecord }).task.id;
+      }),
+    );
+    expect(new Set(ids).size).toBe(1);
+    const rows = await database
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(eq(tasks.ownerUserId, owner.id), eq(tasks.clientId, clientId)),
+      );
+    expect(rows).toEqual([{ id: ids[0] ?? "" }]);
+    // The Start that lost the race left no conversation behind.
+    expect(await conversations()).toBe(before + 1);
+    expect(started).toHaveLength(1);
+    // Another person's id is theirs alone.
+    expect(await taskStore.byClientId(other.id, clientId)).toBeNull();
+    // Without an id, each Start is its own task.
+    const plain = { botId: bot, instruction: "Plan a day in Porto." };
+    const first = await post("/", plain);
+    const second = await post("/", plain);
+    await engine.idle();
+    const [a, b] = await Promise.all(
+      [first, second].map(
+        async (response) =>
+          ((await response.json()) as { task: TaskRecord }).task.id,
+      ),
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("a clientId that isn't a uuid is refused", async () => {
+    const { post } = plus();
+    const response = await post("/", {
+      botId: bot,
+      instruction: "Plan a day in Porto.",
+      clientId: "click-1",
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Couldn't start this task. Reload the page and try again.",
+    });
   });
 
   test("a title the person gives is kept", async () => {
