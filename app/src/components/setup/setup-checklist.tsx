@@ -44,6 +44,9 @@ const PRODUCT = appConfig.brand.productName;
  * What this deployment has, and what still needs setting up: one row each, with a pill saying
  * Ready, Not checked or Needs setup.
  *
+ * Drawn in two places: onboarding's Check your setup step, and Settings → Setup, where an admin
+ * comes back to it after setting a variable and restarting OpenBot.
+ *
  * The rows, their sentences and their fixes are the server's (see `lib/setup/queries.ts`): this
  * draws them, and holds the one thing only a browser can do, which is asking it to check again.
  * An admin is handed the page to open or the variables to set; a member is handed neither, because
@@ -61,8 +64,8 @@ export function SetupChecklist({
   openPage,
 }: {
   /**
-   * Opens one of the app's own screens. Onboarding has to be finished before any other page opens,
-   * so it carries the page to its last step and opens it from there.
+   * Opens one of the app's own screens. Settings opens it at once. Onboarding has to be finished
+   * before any other page opens, so it carries the page to its end and opens it from there.
    */
   openPage: (target: { label: string; path: string }) => void;
 }) {
