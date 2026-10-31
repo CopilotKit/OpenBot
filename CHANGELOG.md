@@ -92,6 +92,13 @@ The built-in safety rules hand paying, purchasing or moving money to you, but a 
 (such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
 rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
 
+### Empty fields no longer trip the safety rules
+
+The built-in safety rules matched on the names of fields a Bot left empty: writing only a note on a
+Shopify order was handed to you as money-moving because the action has a `billing_address` field the
+Bot never filled in. Field names now only count when the field actually holds something, so that
+note goes straight through.
+
 ### A computer run on a laptop can stay off the local network
 
 A managed computer listens on every network interface, which a container needs. Run straight on a
