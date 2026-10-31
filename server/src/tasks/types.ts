@@ -78,6 +78,11 @@ export type NewTask = {
   suggestionId: string | null;
   sourceApp: string | null;
   sourceLink: string | null;
+  /**
+   * The id the browser made for a Start on Tasks. A second task with the same one from the same
+   * person is never opened: the first is answered instead (`TaskStore.create`).
+   */
+  clientId?: string | null;
 };
 
 export class TaskNotFoundError extends Error {

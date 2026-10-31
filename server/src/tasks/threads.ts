@@ -32,6 +32,11 @@ import { plainFailure, type TaskStore } from "./store";
  * conversation, and running its turn there.
  */
 
+/** A Start with this `clientId` already opened its task. */
+class SameStart extends Error {
+  override name = "SameStart";
+}
+
 /**
  * Opens a task in a new conversation with the Bot, and finds that conversation again to run it.
  *
@@ -44,7 +49,12 @@ export function createTaskThreads(deps: {
   database: Pick<Database, "transaction">;
   store: Pick<
     TaskStore,
-    "create" | "locate" | "failedTurn" | "pendingQuestions" | "answerQuestions"
+    | "create"
+    | "byClientId"
+    | "locate"
+    | "failedTurn"
+    | "pendingQuestions"
+    | "answerQuestions"
   >;
   channels: Pick<ChannelStore, "create" | "signalBusy">;
   actorFor: (ownerUserId: string) => Promise<AgentActor>;
@@ -66,33 +76,55 @@ export function createTaskThreads(deps: {
       deps.store.answerQuestions(ownerUserId, ids),
     async open(input) {
       const actor = await deps.actorFor(input.ownerUserId);
+      // The same Start again: the task it opened, without a second conversation.
+      const again = input.clientId
+        ? await deps.store.byClientId(input.ownerUserId, input.clientId)
+        : null;
+      if (again) return again;
       /*
        * One transaction for both. `direct` tells a task's conversation by its task row, so a
        * conversation committed before its row could be taken for the person's own with the Bot by a
        * lookup that ran in between.
        */
-      return deps.database.transaction(async (transaction) => {
-        const channel = await deps.channels.create(
-          actor,
-          [input.agentId],
-          transaction,
-        );
-        const task = await deps.store.create(
-          {
-            ownerUserId: input.ownerUserId,
-            botId: input.agentId,
-            channelId: channel.id,
-            title: input.title,
-            why: input.why,
-            origin: input.origin,
-            suggestionId: input.suggestionId,
-            sourceApp: input.sourceApp,
-            sourceLink: input.sourceLink,
-          },
-          transaction,
-        );
-        return { id: task.id, channelId: task.channelId, title: task.title };
-      });
+      const opened = await deps.database
+        .transaction(async (transaction) => {
+          const channel = await deps.channels.create(
+            actor,
+            [input.agentId],
+            transaction,
+          );
+          const task = await deps.store.create(
+            {
+              ownerUserId: input.ownerUserId,
+              botId: input.agentId,
+              channelId: channel.id,
+              title: input.title,
+              why: input.why,
+              origin: input.origin,
+              suggestionId: input.suggestionId,
+              sourceApp: input.sourceApp,
+              sourceLink: input.sourceLink,
+              clientId: input.clientId ?? null,
+            },
+            transaction,
+          );
+          /*
+           * The same Start, sent at the same moment, opened the task first. Rolled back, so this one
+           * leaves no conversation behind, and answered with that task.
+           */
+          if (!task) throw new SameStart();
+          return { id: task.id, channelId: task.channelId, title: task.title };
+        })
+        .catch(async (error: unknown) => {
+          if (!(error instanceof SameStart) || !input.clientId) throw error;
+          const first = await deps.store.byClientId(
+            input.ownerUserId,
+            input.clientId,
+          );
+          if (!first) throw error;
+          return first;
+        });
+      return opened;
     },
     scope,
     failedTurn: (ownerUserId, taskId) =>

@@ -9,6 +9,7 @@ CREATE TABLE "tasks" (
 	"suggestion_id" text,
 	"source_app" text,
 	"source_link" text,
+	"client_id" text,
 	"resolved_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -22,4 +23,5 @@ ALTER TABLE "tasks" ADD CONSTRAINT "tasks_suggestion_id_proactive_suggestions_id
 CREATE INDEX "tasks_owner_created_idx" ON "tasks" USING btree ("owner_user_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "tasks_channel_idx" ON "tasks" USING btree ("channel_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "tasks_suggestion_idx" ON "tasks" USING btree ("suggestion_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "tasks_owner_client_idx" ON "tasks" USING btree ("owner_user_id","client_id");--> statement-breakpoint
 CREATE INDEX "work_items_owner_task_idx" ON "work_items" USING btree ("kind",("payload"->>'ownerUserId'),("payload"->>'taskId'));

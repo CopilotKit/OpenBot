@@ -22,7 +22,8 @@ import { proactiveSuggestions } from "./proactive";
  *
  * `channel_id` is the task's own conversation, made with it, one task per conversation, and the
  * task goes with it. `suggestion_id` is the suggestion it was started from: a suggestion is started
- * once, so it opens one task, and the task outlives the suggestion.
+ * once, so it opens one task, and the task outlives the suggestion. `client_id` is the id the
+ * browser made for a Start on Tasks, one per person, so a Start sent twice opens one task.
  */
 export const tasks = pgTable(
   "tasks",
@@ -46,6 +47,7 @@ export const tasks = pgTable(
     ),
     sourceApp: text("source_app"),
     sourceLink: text("source_link"),
+    clientId: text("client_id"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -59,6 +61,8 @@ export const tasks = pgTable(
     uniqueIndex("tasks_channel_idx").on(table.channelId),
     // Postgres keeps any number of nulls apart, so tasks asked for directly never collide.
     uniqueIndex("tasks_suggestion_idx").on(table.suggestionId),
+    // Nulls kept apart again: only a Start that sent an id is matched by it.
+    uniqueIndex("tasks_owner_client_idx").on(table.ownerUserId, table.clientId),
     check(
       "tasks_origin_check",
       sql`${table.origin} IN ('asked', 'suggestion')`,
