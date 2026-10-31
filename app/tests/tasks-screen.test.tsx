@@ -252,12 +252,12 @@ test("Tasks groups every task by what it needs, Needs you first, with Done folde
   await view.findByText("Reply to Rosa");
   expect(groupNames(view)).toEqual([
     "Needs you1",
-    "Working1",
     "Couldn't finish1",
     "Ready for review1",
+    "Working1",
     "Done1",
   ]);
-  expect(rows()).toEqual(["ask", "run", "broke", "read"]);
+  expect(rows()).toEqual(["ask", "broke", "read", "run"]);
   // What each one needs next, under its title.
   expect(view.getByText("Should I mention the price change?")).toBeTruthy();
   expect(view.getByText("Just started")).toBeTruthy();
@@ -310,6 +310,29 @@ test("the list folds away while the open task's computer is open beside it", asy
   expect(column()?.className).not.toContain("@4xl:flex");
 });
 
+test("the list's search narrows it to the tasks that have what was typed, Done included", async () => {
+  serve({
+    tasks: everyState,
+    suggestions: [suggestion({ id: "s-1", title: "Confirm the invoice date" })],
+  });
+  const { view, user } = draw();
+  await view.findByText("Reply to Rosa");
+  await user.type(
+    view.getByRole("textbox", { name: "Search tasks" }),
+    "invoice",
+  );
+  await waitFor(() => expect(rows()).toEqual(["done"]));
+  // A match in Done is shown, and suggestions are not tasks.
+  expect(view.getByText("Send the invoice")).toBeTruthy();
+  expect(view.queryByRole("region", { name: /Up next/ })).toBeNull();
+  await user.clear(view.getByRole("textbox", { name: "Search tasks" }));
+  await user.type(
+    view.getByRole("textbox", { name: "Search tasks" }),
+    "kiln repairs",
+  );
+  expect(await view.findByText("No matches")).toBeTruthy();
+});
+
 test("the keyboard moves through the list with ↓ ↑ and j k, Enter opens a task and Escape closes it on its row", async () => {
   serve({ tasks: everyState });
   const { view, router, user } = draw();
@@ -318,9 +341,9 @@ test("the keyboard moves through the list with ↓ ↑ and j k, Enter opens a ta
   await user.keyboard("j");
   expect(document.activeElement?.getAttribute("data-task-id")).toBe("ask");
   await user.keyboard("j");
-  expect(document.activeElement?.getAttribute("data-task-id")).toBe("run");
-  await user.keyboard("{ArrowDown}");
   expect(document.activeElement?.getAttribute("data-task-id")).toBe("broke");
+  await user.keyboard("{ArrowDown}");
+  expect(document.activeElement?.getAttribute("data-task-id")).toBe("read");
   await user.keyboard("k");
   await user.keyboard("{ArrowUp}");
   expect(document.activeElement?.getAttribute("data-task-id")).toBe("ask");
@@ -330,12 +353,12 @@ test("the keyboard moves through the list with ↓ ↑ and j k, Enter opens a ta
 
   await user.keyboard("{ArrowDown}{Enter}");
   expect(
-    await view.findByRole("heading", { name: "Open task run" }),
+    await view.findByRole("heading", { name: "Open task broke" }),
   ).toBeTruthy();
   await user.keyboard("{Escape}");
   await waitFor(() => expect(router.state.location.pathname).toBe("/tasks"));
   await waitFor(() =>
-    expect(document.activeElement?.getAttribute("data-task-id")).toBe("run"),
+    expect(document.activeElement?.getAttribute("data-task-id")).toBe("broke"),
   );
 });
 
@@ -376,7 +399,7 @@ test("a refresh of the list that fails keeps the tasks on screen, and says it co
   expect(
     await view.findByText("Couldn't refresh your tasks. Reload the page."),
   ).toBeTruthy();
-  expect(rows()).toEqual(["ask", "run", "broke", "read"]);
+  expect(rows()).toEqual(["ask", "broke", "read", "run"]);
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.getByRole("heading", { name: "Open task run" })).toBeTruthy();
 });
@@ -572,5 +595,52 @@ test("the sidebar has Tasks above Bots with how many need you, and keeps tasks' 
   // In the needs colour, as every other "needs you" mark is.
   expect(count.className).toContain("bg-status-needs-soft");
   expect(count.className).not.toContain("bg-primary");
+  await act(async () => {});
+});
+
+test("⌘K's search finds tasks too, each opening its task and saying where it stands", async () => {
+  serve({
+    tasks: [
+      task({ id: "ask", title: "Reply to Rosa", status: "needs_input" }),
+      task({ id: "run", title: "Draft the Q4 summary" }),
+    ],
+    channels: [conversation({ id: "chat", name: "Weekend plans" })],
+  });
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "maya",
+    name: "Maya Chen",
+    email: "maya@example.com",
+    role: "user",
+    onboarding: null,
+  });
+  const root = createRootRoute({
+    component: () => (
+      <SidebarProvider>
+        <AppSidebar />
+      </SidebarProvider>
+    ),
+  });
+  const router = createRouter({
+    routeTree: root,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup({ document });
+  await view.findByText("Weekend plans");
+  await user.type(
+    view.getByRole("textbox", { name: "Search conversations and tasks" }),
+    "rosa",
+  );
+  const found = await view.findByRole("link", {
+    name: "Reply to Rosa, Needs you",
+  });
+  expect(found.getAttribute("href")).toBe("/tasks/ask");
+  expect(view.queryByRole("link", { name: /Draft the Q4 summary/ })).toBeNull();
+  // A task found is a match, so the search does not say nothing matched.
+  expect(view.queryByText("No conversations match your search")).toBeNull();
   await act(async () => {});
 });

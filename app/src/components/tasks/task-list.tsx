@@ -1,4 +1,4 @@
-import { IconListCheck } from "@tabler/icons-react";
+import { IconListCheck, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type KeyboardEvent, useState } from "react";
@@ -15,7 +15,7 @@ import {
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { channelListQueryOptions } from "@/lib/channels/queries";
-import { type TaskItem, taskGroups } from "@/lib/tasks/groups";
+import { matchingTasks, type TaskItem, taskGroups } from "@/lib/tasks/groups";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { conversationFacts } from "@/lib/tasks/use-task";
 import { cn } from "@/lib/utils";
@@ -78,11 +78,18 @@ export function moveThroughRows(event: KeyboardEvent<HTMLElement>) {
 
 /**
  * The Tasks list: every task, grouped by what it needs from the person (`taskGroups`), then Up next.
- * Needs you comes first, then Working, Failed and Ready for review, each headed with how many. Done
- * starts folded. Each row is the Bot's orb, the task's title and the one line of what it needs next,
+ * Needs you comes first, then Couldn't finish, Ready for review and Working, each headed with how
+ * many. Done starts folded. The list's search narrows it to the tasks that have what was typed. Each row is the Bot's orb, the task's title and the one line of what it needs next,
  * and opens the task beside the list.
  */
-export function TaskList({ openTaskId }: { openTaskId?: string }) {
+export function TaskList({
+  openTaskId,
+  query = "",
+}: {
+  openTaskId?: string;
+  /** What the person typed in the list's search: only tasks that have it are listed. */
+  query?: string;
+}) {
   const tasks = useQuery(taskListQueryOptions());
   const inbox = useQuery(approvalInboxOptions());
   const roster = useInfiniteQuery(channelListQueryOptions());
@@ -101,8 +108,9 @@ export function TaskList({ openTaskId }: { openTaskId?: string }) {
   const rows = new Map(
     (roster.data ?? []).map((channel) => [channel.id, channel]),
   );
+  const searching = query.trim().length > 0;
   const groups = taskGroups({
-    tasks: tasks.data,
+    tasks: matchingTasks(tasks.data, query),
     conversation: (channelId) => conversationFacts(rows.get(channelId)),
     requests: inbox.data?.requests,
     questions: inbox.data?.questions,
@@ -120,7 +128,13 @@ export function TaskList({ openTaskId }: { openTaskId?: string }) {
           Couldn't refresh your tasks. Reload the page.
         </p>
       ) : null}
-      {groups.length === 0 ? (
+      {groups.length === 0 && searching ? (
+        <div className="px-2">
+          <PageEmpty icon={IconSearch} title="No matches">
+            No task has “{query.trim()}” in its title or latest line.
+          </PageEmpty>
+        </div>
+      ) : groups.length === 0 ? (
         <div className="px-2">
           <PageEmpty icon={IconListCheck} title="No tasks yet">
             Bots move bigger work into tasks of their own. Start one with New
@@ -130,10 +144,11 @@ export function TaskList({ openTaskId }: { openTaskId?: string }) {
       ) : (
         groups.map((group) => {
           const done = group.id === "resolved";
-          // The open task is never folded away out of sight.
+          // The open task, and a search's matches, are never folded away out of sight.
           const open =
             !done ||
             doneOpen ||
+            searching ||
             group.items.some((item) => item.task.id === openTaskId);
           return (
             <TaskSection
@@ -155,7 +170,8 @@ export function TaskList({ openTaskId }: { openTaskId?: string }) {
           );
         })
       )}
-      <UpNext bots={bots.data} />
+      {/* Suggestions aren't tasks yet, so a search of tasks leaves them out. */}
+      {searching ? null : <UpNext bots={bots.data} />}
     </div>
   );
 }

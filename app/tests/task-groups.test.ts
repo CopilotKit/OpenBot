@@ -97,11 +97,12 @@ const inbox = (
 ) => ({ enabled: true, rules: [], teamRules: [], requests, questions });
 
 test("the groups come in order, Needs you first and Done last, and an empty one is left out", () => {
+  // By what the person has to do: answer, try again or let go, read, then nothing yet, then nothing.
   expect(GROUP_ORDER).toEqual([
     "needs_input",
-    "working",
     "failed",
     "ready_for_review",
+    "working",
     "resolved",
   ]);
   const groups = taskGroups({
