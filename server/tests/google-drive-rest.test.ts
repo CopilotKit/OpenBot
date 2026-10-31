@@ -105,7 +105,11 @@ describe("the adapter is the transport the catalogue asks for", () => {
     expect(
       transportFor(
         accessFor(
-          { provenance: "first-party", url: "https://www.googleapis.com" },
+          {
+            provenance: "first-party",
+            url: "https://www.googleapis.com",
+            authScheme: null,
+          },
           entry,
         ).transport,
       ).callTool,
@@ -119,7 +123,11 @@ describe("the adapter is the transport the catalogue asks for", () => {
     expect(
       transportFor(
         accessFor(
-          { provenance: "custom", url: "https://mcp.example.com/mcp" },
+          {
+            provenance: "custom",
+            url: "https://mcp.example.com/mcp",
+            authScheme: null,
+          },
           null,
         ).transport,
       ).callTool,

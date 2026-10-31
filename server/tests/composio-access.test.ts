@@ -98,6 +98,25 @@ describe("accessFor", () => {
     });
   });
 
+  test("a server added by URL and marked with an Entra scope is MCP, on the asking person's own Microsoft sign-in", () => {
+    expect(
+      accessFor(
+        {
+          provenance: "custom",
+          url: "https://hr.example.com/mcp",
+          authScheme: null,
+          entraScope: "api://hr-api/.default",
+        },
+        null,
+      ),
+    ).toEqual({
+      transport: "mcp",
+      credential: "person-entra",
+      reachedAs: "person",
+      toolkit: null,
+    });
+  });
+
   test("Notion is MCP, on the asking person's own grant", () => {
     const notion = catalogueEntry("notion");
     expect(notion).not.toBeNull();

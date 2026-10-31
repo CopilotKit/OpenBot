@@ -218,6 +218,7 @@ export function mountServerRoutes({
       title?: unknown;
       url?: unknown;
       credentialId?: unknown;
+      entraScope?: unknown;
     } | null;
     if (
       typeof body?.id !== "string" ||
@@ -243,6 +244,16 @@ export function mountServerRoutes({
         400,
       );
     }
+    // Marks the server as reached as the signed-in person through Microsoft, with this scope.
+    if (
+      body.entraScope !== undefined &&
+      (typeof body.entraScope !== "string" || !body.entraScope.trim())
+    ) {
+      return context.json(
+        { error: "An Entra scope must be a non-empty string." },
+        400,
+      );
+    }
 
     try {
       const server = await store.addCustomServer({
@@ -253,7 +264,12 @@ export function mountServerRoutes({
           typeof body.credentialId === "string"
             ? body.credentialId.trim()
             : undefined,
+        entraScope:
+          typeof body.entraScope === "string"
+            ? body.entraScope.trim()
+            : undefined,
         by: actorEmail(context),
+        actorId: context.var.actor.id,
       });
       return context.json({ server });
     } catch (error) {

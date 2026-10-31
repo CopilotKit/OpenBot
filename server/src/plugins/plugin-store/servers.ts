@@ -58,6 +58,7 @@ import {
 /** Adding, removing, refreshing and listing MCP servers and brokered apps, and an app's account mode. */
 export function serverMethods(context: StoreContext) {
   const {
+    options,
     database,
     auditStore,
     credentials,
@@ -234,10 +235,40 @@ export function serverMethods(context: StoreContext) {
       title: string;
       url: string;
       credentialId?: string;
+      /**
+       * The Entra scope to reach this server with as the signed-in person, for example
+       * `api://hr-api/.default`. Absent, it is reached on `credentialId` as before.
+       */
+      entraScope?: string;
       by: string;
+      /**
+       * Who is adding it, by id. A server reached as the signed-in person is asked what it offers
+       * as the admin adding it, since there is no deployment credential to ask with.
+       */
+      actorId?: string;
     }): Promise<ServerRecord> {
       const refusal = customUrlRefusal(input.url);
       if (refusal) throw new CustomServerRefusedError(refusal);
+
+      const entraScope = input.entraScope?.trim() || undefined;
+      if (entraScope) {
+        if (!options.entra) {
+          throw new CustomServerRefusedError(
+            "Microsoft sign-in isn't set up, so a server can't be reached as the signed-in person. Set MICROSOFT_OAUTH_CLIENT_ID and MICROSOFT_OAUTH_CLIENT_SECRET first.",
+          );
+        }
+        // Each call carries the person's own token, so a deployment token here would never be sent.
+        if (input.credentialId?.trim()) {
+          throw new CustomServerRefusedError(
+            "A server reached as the signed-in person uses their Microsoft sign-in, so it takes no token.",
+          );
+        }
+        if (/\s/.test(entraScope) || entraScope.length > 256) {
+          throw new CustomServerRefusedError(
+            "Give one Entra scope, for example api://hr-api/.default.",
+          );
+        }
+      }
 
       // A custom server may not take a curated entry's slug. The slug prefixes tool names and is
       // what a grant and a policy rule are written against, so allowing a shadow would let a custom
@@ -401,6 +432,7 @@ export function serverMethods(context: StoreContext) {
           url: input.url,
           provenance: "custom",
           credentialId: credentialId ?? null,
+          entraScope: entraScope ?? null,
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -440,6 +472,8 @@ export function serverMethods(context: StoreContext) {
              * this endpoint does, and nothing asks it to.
              */
             ...(credentialId ? { credentialId } : {}),
+            // Re-adding says again how it is reached: marked, or back on the deployment's credential.
+            entraScope: entraScope ?? null,
             addedBy: input.by,
             updatedAt: new Date(),
           },
@@ -457,10 +491,14 @@ export function serverMethods(context: StoreContext) {
           // Named in the trail, because "who added a server nobody reviewed" is a question somebody
           // will ask and the answer should not require reading the catalogue of a past build.
           provenance: "custom",
+          ...(entraScope ? { reachedAs: "person", entraScope } : {}),
         },
       });
 
-      await this.refreshTools(input.id);
+      await this.refreshTools(
+        input.id,
+        entraScope ? (input.actorId ?? "") : undefined,
+      );
       const added = (await this.listServers()).find(
         (server) => server.id === input.id,
       );
@@ -2001,6 +2039,7 @@ export function serverMethods(context: StoreContext) {
           accountMode: toolkit
             ? (brokeredApps.get(row.url)?.accountMode ?? null)
             : row.accountMode,
+          entraScope: row.entraScope,
           sharedVendorConnected:
             toolkit !== null &&
             brokeredApps.get(row.url)?.accountMode === "shared" &&

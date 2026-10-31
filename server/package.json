@@ -39,6 +39,7 @@
     "eventsource": "3.0.7",
     "hono": "^4.10.0",
     "http-message-sig": "0.3.0",
+    "jose": "^6.2.10",
     "postgres": "^3.4.9",
     "rxjs": "7.8.1",
     "twilio": "5.13.0",

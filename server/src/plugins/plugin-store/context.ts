@@ -3,6 +3,10 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
 import type { Database } from "../../db/client";
 import {
+  type EntraRefusal,
+  EntraTokenRefusedError,
+} from "../../auth/entra-refusal";
+import {
   type CredentialExecutor,
   CredentialUnusableError,
   decryptCredentialForUse,
@@ -56,6 +60,22 @@ import {
   TokenRefusedError,
   type Transaction,
 } from "./model";
+
+/** What a person is told when Entra will not issue a token for them, in words they can act on. */
+function entraRefusal(reason: EntraRefusal, title: string): string {
+  switch (reason) {
+    case "no-sign-in":
+      return `${title} uses your Microsoft account, and you haven't signed in to OpenBot with Microsoft. Sign in with Microsoft and ask again.`;
+    case "sign-in-expired":
+      return `Your Microsoft sign-in has expired, so ${title} wasn't used. Sign in with Microsoft again and ask again.`;
+    case "no-consent":
+      return `An admin hasn't given OpenBot access to ${title} in Microsoft Entra. Ask an admin to grant it.`;
+    case "no-api":
+      return `OpenBot isn't set up in Microsoft Entra to reach ${title} as you. Ask an admin to expose OpenBot's API there.`;
+    case "refused":
+      return `Microsoft wouldn't let OpenBot reach ${title} as you. Try again, or ask an admin if it keeps happening.`;
+  }
+}
 
 /**
  * What every group of plugin store methods shares: the options it was made with, and the helpers
@@ -488,12 +508,18 @@ export function createStoreContext(options: PluginStoreOptions) {
    * complete by construction rather than by cleanup. The other two paths have nothing to cache: a
    * `deployment-token` is decrypted out of the vault per call, and a `brokered` key is never held
    * here at all.
+   *
+   * A `person-entra` server is the exception, by design: the token Entra issues for a person is kept
+   * in memory until a few minutes before it expires (`auth/entra.ts`), because Entra's own guidance
+   * is to reuse a token for its lifetime, and access there is withdrawn in Entra rather than here.
    */
   async function connectionTokenFor(
     row: {
       id: string;
       title: string;
       credentialId: string | null;
+      /** The Entra scope a `person-entra` server is reached with; see `mcpServers.entraScope`. */
+      entraScope?: string | null;
       /*
        * NO `authScheme` HERE, DELIBERATELY. The scheme that decides whether a brokered call needs a
        * connection row is the APP'S, read through `brokeredAppScheme` below — and this row's own
@@ -729,6 +755,38 @@ export function createStoreContext(options: PluginStoreOptions) {
        * DEPLOYMENT_ID unable to move the account a call lands in.
        */
       return { vendorUserId: connected.vendorUserId };
+    }
+
+    /*
+     * A server reached as the signed-in person through Microsoft: a token Entra issues for the
+     * person asking, from their own Microsoft sign-in, for this server's scope. Never the
+     * deployment's credential, for the reason the `person-oauth` branch below gives, so every way it
+     * cannot be theirs is a refusal naming what they or an admin can do about it.
+     */
+    if (access.credential === "person-entra") {
+      if (!actorId) {
+        throw new PluginRefusedError(
+          `${row.title} answers as the person asking, and this run is not attributed to anybody.`,
+          null,
+        );
+      }
+      if (!options.entra || !row.entraScope) {
+        throw new PluginRefusedError(
+          `${row.title} needs Microsoft sign-in, and it isn't set up. Ask an admin to set it up.`,
+          null,
+        );
+      }
+      try {
+        return { token: await options.entra.tokenFor(actorId, row.entraScope) };
+      } catch (error) {
+        if (error instanceof EntraTokenRefusedError) {
+          throw new PluginRefusedError(
+            entraRefusal(error.reason, row.title),
+            null,
+          );
+        }
+        throw error;
+      }
     }
 
     if (access.credential !== "person-oauth") {

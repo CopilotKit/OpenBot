@@ -75,7 +75,6 @@ server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matche
 server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
 server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"key" | "none" | "consent" | "unreadable", Cell>'.
 server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"nothing" | "answered" | "unreachable" | "complained", Cell>'.
-server/tests/composio-connections.test.ts: error TS2345: Argument of type '{ url: string; provenance: string; vendor: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
 server/tests/composio-connections.test.ts: error TS2769: No overload matches this call.
 server/tests/computer-client.test.ts: error TS2769: No overload matches this call.
 server/tests/computer-download-routes.test.ts: error TS2345: Argument of type '(actor: AuthenticatedActor, botId: string) => Promise<boolean>' is not assignable to parameter of type 'BotAccessCheck'.
@@ -131,8 +130,6 @@ server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but
 server/tests/enterprise-controls.integration.test.ts: error TS2345: Argument of type '(context: Parameters<Parameters<MiddlewareHandlerInterface<{ Variables: AppVariables; }, BlankSchema, "/">>[1]>[0], next: () => Promise<void>) => Promise<...>' is not assignable to parameter of type 'MiddlewareHandler<{ Variables: AppVariables; }>'.
 server/tests/enterprise-controls.integration.test.ts: error TS2345: Argument of type '(context: Parameters<Parameters<MiddlewareHandlerInterface<{ Variables: AppVariables; }, BlankSchema, "/">>[1]>[0], next: () => Promise<void>) => Promise<...>' is not assignable to parameter of type 'MiddlewareHandler<{ Variables: AppVariables; }>'.
 server/tests/enterprise-controls.integration.test.ts: error TS2769: No overload matches this call.
-server/tests/google-drive-rest.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
-server/tests/google-drive-rest.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
 server/tests/group-conversations.integration.test.ts: error TS2339: Property 'serverId' does not exist on type 'object'.
 server/tests/headless-components.integration.test.ts: error TS2352: Conversion of type 'BaseEvent' to type '{ delta: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 server/tests/headless-components.integration.test.ts: error TS2741: Property 'preconnect' is missing in type '(url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' but required in type 'typeof fetch'.
@@ -188,8 +185,6 @@ server/tests/plugin-store.integration.test.ts: error TS2339: Property 'payload' 
 server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '(string | null)[]' is not assignable to parameter of type 'string[]'.
 server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '(string | null)[]' is not assignable to parameter of type 'string[]'.
 server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
-server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
-server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
 server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '{ slug: string; title: string; by: string; }' is not assignable to parameter of type '{ slug: string; title: string; logo?: string | null | undefined; by: string; connection: BrokerConnection; }'.
 server/tests/plugin-store.integration.test.ts: error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
 server/tests/plugin-user-credential.integration.test.ts: error TS2322: Type '{ readSecret: (id: string) => Promise<{ encryptedValue: string; revokedAt: Date | null; }>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<...>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
