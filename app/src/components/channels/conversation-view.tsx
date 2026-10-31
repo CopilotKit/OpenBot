@@ -538,7 +538,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
-        <AiNotice />
+        <AiNotice botNames={agents.map((agent) => agent.name)} />
       </div>
     </div>
   );

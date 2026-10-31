@@ -40,9 +40,9 @@ afterAll(async () => {
 const notice = `${appConfig.brand.productName} is AI and can make mistakes.`;
 
 /** The notice, checked to come after the conversation's composer. */
-function under(container: HTMLElement) {
+function under(container: HTMLElement, words = notice) {
   const line = Array.from(container.querySelectorAll("p")).find(
-    (paragraph) => paragraph.textContent === notice,
+    (paragraph) => paragraph.textContent === words,
   );
   if (!line) throw new Error("no notice");
   const composer = container.querySelector('form[data-slot="composer"]');
@@ -80,5 +80,42 @@ test("a conversation with several Bots says so under its composer too", () => {
       <GroupChat channelId="g-1" />
     </QueryClientProvider>,
   );
-  expect(under(view.container).className).toContain("type-caption");
+  expect(
+    under(view.container, "Inbox is AI and can make mistakes.").className,
+  ).toContain("type-caption");
+});
+
+test("a conversation with one Bot names that Bot", () => {
+  const view = render(
+    <ConversationView
+      agents={[
+        { id: "general", name: "General Assistant", avatarSeed: "general" },
+      ]}
+      channelId="c-1"
+      messages={[]}
+      onSubmit={() => {}}
+    />,
+  );
+  under(view.container, "General Assistant is AI and can make mistakes.");
+});
+
+test("a conversation with several Bots says it of them all", () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  client.setQueryData(groupKeys.detail("g-2"), {
+    id: "g-2",
+    title: "Launch",
+    bots: [
+      { id: "inbox", name: "Inbox" },
+      { id: "research", name: "Research" },
+    ],
+    messages: [],
+  } as never);
+  const view = render(
+    <QueryClientProvider client={client}>
+      <GroupChat channelId="g-2" />
+    </QueryClientProvider>,
+  );
+  under(view.container, "These Bots are AI and can make mistakes.");
 });

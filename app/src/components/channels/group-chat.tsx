@@ -146,7 +146,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
             });
           }}
         />
-        <AiNotice />
+        <AiNotice botNames={bots.map((bot) => bot.name)} />
       </div>
     </div>
   );
