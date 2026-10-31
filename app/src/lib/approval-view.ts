@@ -304,6 +304,32 @@ export function describeApproval(
   return { title: title || toolRef, app, kind, fields, body, unshown };
 }
 
+/** How far "Always allow here" reaches, as `alwaysAllowReach` words it. */
+function reachOf(request: Pick<ApprovalRequest, "action">): {
+  where: string | null;
+  broad: boolean;
+} {
+  const { toolRef, scope, target } = request.action;
+  const server = serverOf(toolRef);
+  if (toolRef === PRIVATE_SHARE || server === "bot")
+    return { where: null, broad: false };
+  if (server === "host")
+    return {
+      where: `in ${display(record(target)?.displayName) ?? "this folder"}`,
+      broad: false,
+    };
+  // Every call to the app, whatever it sends and to whom.
+  if (server && !OWN_PREFIXES.has(server))
+    return { where: `in ${connectorName(server)}`, broad: true };
+  if (!scope || scope === "*") return { where: "anywhere", broad: true };
+  if (scope === "browser") return { where: "in its browser", broad: true };
+  if (scope === "workspace") return { where: "on its computer", broad: true };
+  return {
+    where: scope.includes("/") ? `in ${scope}` : `on ${scope}`,
+    broad: false,
+  };
+}
+
 /**
  * What "Always allow here" lets this Bot do from then on. The server saves the rule for this Bot,
  * this action and this place (`approvals/store.ts`), whatever the arguments, so a card that leads
@@ -313,27 +339,42 @@ export function describeApproval(
 export function alwaysAllowReach(
   request: Pick<ApprovalRequest, "action">,
 ): string {
-  const { toolRef, scope, target } = request.action;
+  const { toolRef } = request.action;
   if (toolRef === PRIVATE_SHARE)
     return "This Bot won't ask you again before sharing private information with these people.";
-  const server = serverOf(toolRef);
-  if (server === "bot")
+  if (serverOf(toolRef) === "bot")
     return "This Bot won't ask you again before asking that Bot, whatever it asks.";
-  const where =
-    server === "host"
-      ? `in ${display(record(target)?.displayName) ?? "this folder"}`
-      : server && !OWN_PREFIXES.has(server)
-        ? `in ${connectorName(server)}`
-        : !scope || scope === "*"
-          ? "anywhere"
-          : scope === "browser"
-            ? "in its browser"
-            : scope === "workspace"
-              ? "on its computer"
-              : scope.includes("/")
-                ? `in ${scope}`
-                : `on ${scope}`;
+  const { where } = reachOf(request);
   return `This Bot won't ask you again before doing this ${where}, whatever the details.`;
+}
+
+/**
+ * Whether "Always allow here" reaches past one site or one folder: anywhere, the Bot's whole
+ * browser or computer, or every call to an app. The card words it as a caution.
+ */
+export function alwaysAllowIsBroad(
+  request: Pick<ApprovalRequest, "action">,
+): boolean {
+  return reachOf(request).broad;
+}
+
+/**
+ * Why the Bot asked, with the rule named where the request says whose it is. The server words a
+ * rule's reason as "A rule asks before this kind of action." for every rule, and says in
+ * `policy.source` whether it was one of the person's own or one set for their team.
+ */
+export function policyReason(
+  request: Pick<ApprovalRequest, "action">,
+): string | null {
+  const policy = request.action.policy;
+  if (!policy?.reason) return null;
+  const owner =
+    policy.source === "personal_rule"
+      ? "One of your approval rules"
+      : policy.source === "team_rule"
+        ? "A rule set for your team"
+        : null;
+  return owner ? policy.reason.replace(/^A rule\b/, owner) : policy.reason;
 }
 
 /** Who decided, in the person's words, for the line under a decided card. */
