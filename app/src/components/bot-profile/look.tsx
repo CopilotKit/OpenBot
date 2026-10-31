@@ -127,7 +127,7 @@ export function LookSection({ agent }: { agent: AgentProfile }) {
                   {/* Chosen is a ring, not only a colour; focus is the ring every control here draws. */}
                   <span
                     aria-hidden
-                    className="block size-7 rounded-full ring-offset-4 ring-offset-card transition-[outline-color,box-shadow] duration-150 peer-checked:outline-2 peer-checked:outline-foreground peer-checked:outline-offset-2 peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
+                    className="block size-7 rounded-full ring-offset-4 ring-offset-card transition-[outline-color,box-shadow] duration-150 peer-checked:outline-2 peer-checked:outline-foreground peer-checked:outline-offset-2 peer-focus-visible:ring-3 peer-focus-visible:ring-ring"
                     style={{ background: swatchFill(option) }}
                   />
                 </label>

@@ -199,7 +199,8 @@ describe("contrast, checked in both themes", () => {
 
   /*
    * The focus rings this look draws with the ring colour alone, with no full-strength border beside
-   * them: the outline every element falls back on, and OpenMuse's header and tabs. Each is read at
+   * them: the outline every element falls back on, OpenMuse's header and tabs, and the colour
+   * swatches on a Bot's Look section, whose ring stands off the swatch over the card. Each is read at
    * the strength its class gives it, so a `/50` that halves the ring fails here.
    */
   const focusRings = [
@@ -208,6 +209,14 @@ describe("contrast, checked in both themes", () => {
       "skins/openmuse/frame.tsx",
       readFileSync(
         new URL("../src/skins/openmuse/frame.tsx", import.meta.url),
+        "utf8",
+      ),
+      /focus-visible:ring-ring(?:\/(\d+))?/g,
+    ],
+    [
+      "components/bot-profile/look.tsx",
+      readFileSync(
+        new URL("../src/components/bot-profile/look.tsx", import.meta.url),
         "utf8",
       ),
       /focus-visible:ring-ring(?:\/(\d+))?/g,
