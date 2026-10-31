@@ -16,11 +16,6 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/_app/tasks")({
@@ -117,21 +112,19 @@ function TasksLayout() {
             <SidebarToggle />
             <h1 className="type-sub truncate pl-1 font-semibold">Tasks</h1>
           </div>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  aria-label="New task"
-                  onClick={() => setAdding(true)}
-                  size="icon"
-                  variant="ghost"
-                />
-              }
-            >
-              <IconPlus />
-            </TooltipTrigger>
-            <TooltipContent side="bottom">New task</TooltipContent>
-          </Tooltip>
+          {/*
+           * Labelled, unlike the sidebar's + beside it, which starts a conversation: two bare +
+           * side by side read as one control.
+           */}
+          <Button
+            data-slot="new-task"
+            onClick={() => setAdding(true)}
+            size="sm"
+            variant="outline"
+          >
+            <IconPlus />
+            New task
+          </Button>
         </div>
         {/* The list's own search, on a row of its own above the list, as the sidebar's is. */}
         <div className="shrink-0 px-2 pt-2">
