@@ -714,8 +714,7 @@ test("a step held on its approval card waits for the person, named for what it w
   expect(within(steps).getByText("Send your email")).toBeDefined();
   expect(view.queryByText("Sending your email")).toBeNull();
   // Its card, beside the folded line, names the same action.
-  const card = view.getByRole("region", { name: "Waiting for your approval" });
-  expect(within(card).getByText("Send your email")).toBeDefined();
+  expect(view.getByRole("region", { name: "Send your email" })).toBeDefined();
 });
 
 test("a run of steps that has done nothing because one waits on its card says it waits for you", () => {
@@ -762,9 +761,7 @@ test("a run of steps that has done nothing because one waits on its card says it
   const summary = view.container.querySelector("summary");
   expect(summary?.textContent).toContain("waiting for you");
   expect(summary?.textContent).not.toContain("not done yet");
-  expect(
-    view.getByRole("region", { name: "Waiting for your approval" }),
-  ).toBeDefined();
+  expect(view.getByRole("region", { name: "Click on the page" })).toBeDefined();
 });
 
 test("while running, the line names the step in progress; opened, a step shows its inputs", () => {

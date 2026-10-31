@@ -42,22 +42,23 @@ export function InlineApproval({
       )
     : undefined;
   if (!request) return <>{fallback}</>;
-  if (request.status !== "pending") {
-    if (!decidedByPerson(request)) return <>{fallback}</>;
-    return (
-      <div className="space-y-2">
-        <ApprovalCard ran={ran} request={request} />
-        {fallback}
-      </div>
-    );
-  }
+  const waiting = request.status === "pending";
+  if (!waiting && !decidedByPerson(request)) return <>{fallback}</>;
+  /*
+   * One card in one place, waiting or folded, so deciding folds the card the person was on rather
+   * than drawing a new one: the card keeps their focus through the fold.
+   */
   return (
-    <ApprovalCard
-      busy={decision.isPending}
-      error={decision.error?.message ?? null}
-      onDecide={(choice) => decision.mutate({ id: request.id, choice })}
-      request={request}
-    />
+    <div className="space-y-2">
+      <ApprovalCard
+        busy={decision.isPending}
+        error={decision.error?.message ?? null}
+        onDecide={(choice) => decision.mutate({ id: request.id, choice })}
+        ran={ran}
+        request={request}
+      />
+      {waiting ? null : fallback}
+    </div>
   );
 }
 
