@@ -496,6 +496,16 @@ test("the + asks which Bot and what to do, starts with the default Bot, and open
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
 });
 
+test("New task is a labelled button, unlike the sidebar's bare + for a new conversation", async () => {
+  serve();
+  const { view } = draw();
+  await view.findByText("No tasks yet");
+  const button = view.getByRole("button", { name: "New task" });
+  // Its words are on the button, not only in a label a sighted person never sees.
+  expect(button.textContent).toBe("New task");
+  expect(button.hasAttribute("aria-label")).toBe(false);
+});
+
 test("a task the server refuses keeps the dialog open with the server's words", async () => {
   serve({
     writes: {
