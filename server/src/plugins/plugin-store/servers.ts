@@ -13,7 +13,12 @@ import {
   mcpTools,
   pluginGrants,
 } from "../../db/schema";
-import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
+import {
+  accessFor,
+  BROKERED_PROFILE,
+  brokeredProvenance,
+  toolkitOfFor,
+} from "../access";
 import { ownerGrantsOf } from "../app-access";
 import {
   type BrokerConnection,
@@ -25,6 +30,7 @@ import {
   catalogueEntry,
   classifyTool,
   customUrlRefusal,
+  labelledRead,
   resolveServerUrl,
   serverCredentialKind,
   tokenHeaderFor,
@@ -46,6 +52,7 @@ import {
   effectiveUrl,
   isDeploymentFault,
   iso,
+  MEMORY_TOOLS_SERVER,
   PluginInvariantError,
   type ServerAddress,
   type ServerRecord,
@@ -245,6 +252,18 @@ export function serverMethods(context: StoreContext) {
       if (catalogueEntry(input.id)) {
         throw new CustomServerRefusedError(
           `${input.id} is the name of a server this deployment already knows. Choose another.`,
+        );
+      }
+
+      /*
+       * Nor the name OpenBot's own memory tools are spelled under. Their refs are `memory/<tool>`,
+       * so a server at `memory` would list `memory/recall_personal_memory` beside them: two tools
+       * one name, and the one an admin typed could be taken for the person's own memory by
+       * anything that reads a ref.
+       */
+      if (input.id === MEMORY_TOOLS_SERVER) {
+        throw new CustomServerRefusedError(
+          `${input.id} is the name of OpenBot's own memory tools. Choose another.`,
         );
       }
 
@@ -1867,8 +1886,8 @@ export function serverMethods(context: StoreContext) {
       /*
        * Tools the vendor advertises that this deployment's write list does not name.
        *
-       * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
-       * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
+       * The mechanical half of reconciling a write list that stands alone against the live tool
+       * list. See {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
        * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
        * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
        *
@@ -1971,6 +1990,25 @@ export function serverMethods(context: StoreContext) {
       return rows.map((row) => {
         const entry = catalogueEntry(row.id);
         const toolkit = toolkitOfFor(brokerProvider, row.url);
+        /*
+         * WHOSE CREDENTIAL A CALL HERE GOES OUT ON, as `requireServer` resolves it for the call
+         * itself: off the app's own scheme and mode for a brokered row, so a duplicate row cannot
+         * say "the person's own" about a Shared app. A row this deployment cannot resolve is
+         * nobody's own; the call path refuses it anyway.
+         */
+        let ownCredential = false;
+        try {
+          ownCredential = accessFor(
+            toolkit
+              ? {
+                  ...row,
+                  authScheme: brokeredApps.get(row.url)?.authScheme ?? null,
+                  accountMode: brokeredApps.get(row.url)?.accountMode ?? null,
+                }
+              : row,
+            entry,
+          ).ownCredential;
+        } catch {}
         return {
           id: row.id,
           title: row.title,
@@ -2005,6 +2043,7 @@ export function serverMethods(context: StoreContext) {
             toolkit !== null &&
             brokeredApps.get(row.url)?.accountMode === "shared" &&
             deploymentHeld.has(toolkit),
+          ownCredential,
           ownerGrants: ownerGrantsOf({
             provider: toolkit ? brokerProvider : entry ? "catalogue" : "custom",
             authScheme: toolkit
@@ -2029,6 +2068,7 @@ export function serverMethods(context: StoreContext) {
                 ref,
                 effect: classifyTool(entry, tool.name, true, tool.effect),
                 destructive: tool.destructive,
+                labelledRead: labelledRead(entry, tool.name, tool),
                 grantedTo: grants.get(ref) ?? [],
               };
             }),

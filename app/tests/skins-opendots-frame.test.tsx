@@ -183,7 +183,7 @@ async function serve(path: string, init?: RequestInit): Promise<Response> {
     return Response.json({ memories: [] });
   }
   if (url.pathname === "/api/bots/attention") {
-    return Response.json({ bots: [] });
+    return Response.json({ bots: [], lastPingId: null });
   }
   const lifecycle = url.pathname.match(
     /^\/api\/bots\/([^/]+)\/(lifecycle|pause|resume)$/,

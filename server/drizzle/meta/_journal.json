@@ -491,6 +491,20 @@
       "when": 1793224884828,
       "tag": "0069_isolated_bots",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1793389129367,
+      "tag": "0070_proactive_check_ins",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1793403832932,
+      "tag": "0071_check_in_read_labels",
+      "breakpoints": true
     }
   ]
 }

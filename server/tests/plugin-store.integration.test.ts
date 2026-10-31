@@ -40,7 +40,7 @@ import {
 } from "../src/plugins/access";
 import type { BrokerConnection, ComposioBroker } from "../src/plugins/broker";
 import type { CatalogueEntry } from "../src/plugins/catalogue";
-import { catalogueEntry } from "../src/plugins/catalogue";
+import { catalogueEntry, classifyTool } from "../src/plugins/catalogue";
 import {
   type ComposioResult,
   useComposioClient,
@@ -3087,7 +3087,7 @@ describe("a dynamic client the vendor has evicted", () => {
    * the length of this test — see {@link withMockedNotionListing}, which also puts back what the
    * refresh overwrites. What is under test is what a real listing over the real protocol produces.
    */
-  test("a refresh names the advertised tools no write list covers", async () => {
+  test("a refresh of Notion names no silent read, because a tool its lists do not name is a write", async () => {
     await putClient(EVICTED);
     await connect();
     accepted = new Set([EVICTED.clientId]);
@@ -3139,9 +3139,14 @@ describe("a dynamic client the vendor has evicted", () => {
         )
     ).flatMap((row) => (row.payload as { tools?: string[] }).tools ?? []);
 
-    // The one the list does not name, and never the one it does.
-    expect(named).toContain(unlistedName);
-    expect(named).not.toContain("notion-create-pages");
+    /*
+     * Notion names its reads, so the tool neither list names is a write, offered to nobody as a
+     * read, and there is nothing for the reconciliation row to name.
+     */
+    expect(named).toEqual([]);
+    expect(classifyTool(catalogueEntry("notion"), unlistedName, true)).toBe(
+      "write",
+    );
   });
 
   /**
@@ -4047,9 +4052,16 @@ describe("a custom server may only be pointed at its own kind of credential", ()
  * read-only scope would fail here rather than start filing rows about Drive.
  */
 describe("advertised tools a write list does not name", () => {
-  test("a Notion tool absent from the write list is named, sorted", () => {
+  /** Notion as its entry stood before it named its reads: a write list alone, and no scope. */
+  const writeListOnly = (() => {
+    const notion = catalogueEntry("notion");
+    if (!notion) throw new Error("catalogue slug `notion` is gone");
+    return { ...notion, readTools: undefined };
+  })();
+
+  test("a tool absent from a write list that stands alone is named, sorted", () => {
     expect(
-      unlistedAdvertisedTools(catalogueEntry("notion"), [
+      unlistedAdvertisedTools(writeListOnly, [
         "notion-search",
         "notion-create-pages",
         "notion-fetch",
@@ -4059,8 +4071,19 @@ describe("advertised tools a write list does not name", () => {
 
   test("a write the list already names is not", () => {
     expect(
+      unlistedAdvertisedTools(writeListOnly, ["notion-create-pages"]),
+    ).toEqual([]);
+  });
+
+  /*
+   * Notion names its reads now, so a tool its lists do not name is a write, not a read nobody
+   * reviewed: there is no silent read left to name.
+   */
+  test("a vendor that names its reads is not reconciled here", () => {
+    expect(
       unlistedAdvertisedTools(catalogueEntry("notion"), [
-        "notion-create-pages",
+        "notion-search",
+        "notion-delete-comment",
       ]),
     ).toEqual([]);
   });
@@ -6015,6 +6038,7 @@ test("a catalogue entry declaring the broker's transport is refused, not dialled
     transport: "mcp",
     credential: "person-oauth",
     reachedAs: "person",
+    ownCredential: true,
     toolkit: null,
   });
 });

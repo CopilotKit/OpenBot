@@ -35,6 +35,7 @@ import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
+import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import {
   onTurnFinishedAway,
   turnFinishedAway,
@@ -71,6 +72,9 @@ const JOIN_DEADLINE_MS = 1500;
  * Backstop for a message typed before the runtime agent exists; it must not be discarded.
  */
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
+
+/** What a turn that never left the browser says, with the person's words back in the box. */
+const NOT_SENT = "Your message wasn't sent. Try again.";
 
 type ChannelActivitySignature = {
   agentId: string;
@@ -650,6 +654,8 @@ export function ChannelChat({
    */
   const turnFailure = useRef<string | null>(null);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
+  /** The reply this turn last told the roster about, so a later run of the turn says only what's new. */
+  const reportedReply = useRef<string | null>(null);
 
   /*
    * TWO DIFFERENT FACTS ABOUT ONE TURN, AND NEITHER OF THEM IS `agent.isRunning`.
@@ -766,6 +772,7 @@ export function ChannelChat({
 
     setRunError(null);
     turnFailure.current = null;
+    reportedReply.current = null;
     assistantMessagesBeforeRun.current = new Set(
       target.messages
         .filter((message) => message.role === "assistant")
@@ -818,13 +825,37 @@ export function ChannelChat({
       target.setMessages(repaired as typeof target.messages);
     }
 
+    // A wait the server already answered must not hold this message back. See the module.
+    releaseServerOwnedInterrupts(target);
+    /*
+     * Whether the run got past the agent's own checks and left the browser. One refused there (an
+     * interrupt something else still waits on) never reaches a subscriber's `onRunFailed`, and
+     * `copilotkit.runAgent` resolves as if it had answered, so without this the message was counted
+     * as sent: the box emptied, and the words were gone on the next reload.
+     */
+    let started = false;
+    const watching = target.subscribe({
+      onRunInitialized: () => {
+        started = true;
+      },
+    });
     setRunsInFlight((count) => count + 1);
     try {
       await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
         copilotkit.runAgent({ agent: target }),
       );
     } finally {
+      watching.unsubscribe();
       setRunsInFlight((count) => count - 1);
+    }
+    if (!started && turnFailure.current === null && awaitingReply.current) {
+      awaitingReply.current = false;
+      // It never left this browser, so it is not part of the conversation: the words go back in the box.
+      target.setMessages(
+        target.messages.filter((message) => existingMessageIds.has(message.id)),
+      );
+      turnFailure.current = NOT_SENT;
+      setRunError(NOT_SENT);
     }
 
     /*
@@ -930,17 +961,27 @@ export function ChannelChat({
       onRunFinishedEvent: () => {
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
-        if (!wasOurs) return;
+        /*
+         * EVERY RUN OF A TURN STILL GOING HERE, not only its first. A turn that touches the browser
+         * is several runs: the first ends on the call the browser answers (a click, a card waiting on
+         * the person) and has said nothing yet, and the answer comes in a later run of the same turn.
+         * Told only about the first, the roster kept the person's message as the last thing said, and
+         * a task's list read their own words as its outcome.
+         */
+        if (!wasOurs && turnsRef.current === 0) return;
 
         const reply = [...agent.messages]
           .reverse()
           .find(
             (message) =>
               message.role === "assistant" &&
-              !assistantMessagesBeforeRun.current.has(message.id),
+              !assistantMessagesBeforeRun.current.has(message.id) &&
+              typeof message.content === "string" &&
+              message.content.trim() !== "",
           );
-        const content = typeof reply?.content === "string" ? reply.content : "";
-        if (content) reportRef.current(content, runtimeAgentId);
+        if (!reply || reply.id === reportedReply.current) return;
+        reportedReply.current = reply.id;
+        reportRef.current(String(reply.content), runtimeAgentId);
       },
     });
     return () => subscription?.unsubscribe();

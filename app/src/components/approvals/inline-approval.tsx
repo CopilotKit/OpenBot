@@ -1,3 +1,4 @@
+import { approvalWords } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -5,6 +6,7 @@ import {
   type ApprovalDecision,
   approvalInboxOptions,
   decideApproval,
+  offersAlwaysAllow,
 } from "@/lib/approvals";
 
 /**
@@ -35,6 +37,7 @@ export function InlineApproval({
     : undefined;
   if (request?.status !== "pending") return <>{fallback}</>;
   const handOff = request.action.policy?.behaviour === "hand_off";
+  const words = approvalWords(request.action);
   const choices: [ApprovalDecision, string][] = handOff
     ? [
         ["handled", "I did it myself"],
@@ -42,7 +45,14 @@ export function InlineApproval({
       ]
     : [
         ["allow_once", "Allow once"],
-        ["allow_always", "Always allow here"],
+        ...(offersAlwaysAllow(request)
+          ? [
+              ["allow_always", "Always allow here"] as [
+                ApprovalDecision,
+                string,
+              ],
+            ]
+          : []),
         ["deny", "Deny"],
       ];
   return (
@@ -52,10 +62,7 @@ export function InlineApproval({
     >
       <p className="font-medium">
         {handOff ? "This needs you" : "Waiting for your approval"}:{" "}
-        {request.action.toolRef
-          .replace(/^computer_|^host\//, "")
-          .replaceAll("_", " ")}{" "}
-        on {request.action.scope}
+        {words.action} on {words.place}
       </p>
       {request.action.policy ? (
         <p className="text-muted-foreground">{request.action.policy.reason}</p>

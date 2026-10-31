@@ -24,3 +24,19 @@ test("native push opens only known screens and preserves canonical owner-scoped 
   ])
     expect(notificationDestination({ url })).toBeNull();
 });
+
+test("a ping opens the Needs you list, and a malformed Needs you link opens nothing", () => {
+  expect(notificationDestination({ url: "openbotmobile://needs-you" })).toEqual(
+    { pathname: "/needs-you", params: {} },
+  );
+  for (const url of [
+    "openbotmobile://needs-you/evil",
+    "openbotmobile://needs-you?channelId=c",
+    "openbotmobile://needs-you#top",
+    "openbotmobile://user:password@needs-you",
+    "openbotmobile://needs-you:8080",
+    "https://needs-you",
+    "openbotmobile://needs-yours",
+  ])
+    expect(notificationDestination({ url })).toBeNull();
+});

@@ -1,0 +1,2077 @@
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import { randomUUID } from "node:crypto";
+import {
+  type BaseEvent,
+  EventType,
+  HttpAgent,
+  type RunAgentInput,
+} from "@ag-ui/client";
+import { FIRING_FRAME } from "@openbot/shared/routine-firing";
+import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { Hono } from "hono";
+import { Observable } from "rxjs";
+import { createActivityStore } from "../src/activity/activity";
+import { installEnterpriseControls } from "../src/admin/controls";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
+import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
+import { createDatabase } from "../src/db/client";
+import { modelUsage } from "../src/db/schema/admin";
+import { agents, channels, users } from "../src/db/schema/core";
+import { deliveryOutbox } from "../src/db/schema/delivery";
+import { botLifecycle } from "../src/db/schema/lifecycle";
+import { mcpServers, mcpTools } from "../src/db/schema/plugins";
+import {
+  proactivePeople,
+  proactivePings,
+  proactiveRuns,
+  proactiveSettings,
+  proactiveSuggestions,
+} from "../src/db/schema/proactive";
+import { botTasks } from "../src/db/schema/tasks";
+import { workItems } from "../src/db/schema/work";
+import { createDeliveryRouter } from "../src/delivery/router";
+import { createDeliveryStore } from "../src/delivery/store";
+import { createMemoryStore } from "../src/memory/store";
+import { createPluginStore } from "../src/plugins/store";
+import type { ProactiveAdmin, TaskService } from "../src/proactive/contracts";
+import {
+  createProactiveEngine,
+  type ProactiveEngine,
+} from "../src/proactive/engine";
+import { proactiveInitiator } from "../src/proactive/restriction";
+import { createProactiveRoutes } from "../src/proactive/routes";
+import type { CheckInApp } from "../src/proactive/scope";
+import {
+  createProactiveStore,
+  type ProactiveStore,
+} from "../src/proactive/store";
+import {
+  ProactiveRefusedError,
+  type ProactiveSetting,
+} from "../src/proactive/types";
+import { CHECK_IN_OPENING } from "../src/proactive/window";
+import { createWorkQueue } from "../src/work/queue";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
+
+/*
+ * Check-ins and pings through the real path: real Postgres, the real proactive and delivery stores,
+ * the real work queue and the real headless turn runner. The model is the only fake: a scripted
+ * AG-UI agent that reads (the audit row a successful connector read writes) and calls the
+ * check-in's tools as a model would.
+ */
+
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+const suite = randomUUID().slice(0, 8);
+const owner = `check-in-owner-${suite}`;
+const inboxBot = `check-in-inbox-${suite}`;
+const calendarBot = `check-in-calendar-${suite}`;
+const mail = `check-in-mail-${suite}`;
+const listMessages = `${mail}/list_messages`;
+/** The name a model calls the read by, which the check-in maps back to its ref. */
+const READ_TOOL = `mcp__${mail}__list_messages`;
+/** The one app the inbox Bot can read, as the engine is told it. */
+const mailApp = [{ title: "Mail", refs: [listMessages] }];
+/** A second app, for a check-in that reads two and can reach only one. */
+const diary = `check-in-diary-${suite}`;
+const listEvents = `${diary}/list_events`;
+const inboxChannel = `check-in-inbox-channel-${suite}`;
+const calendarChannel = `check-in-calendar-channel-${suite}`;
+const taskChannel = `check-in-task-channel-${suite}`;
+const device = `check-in-device-${suite}`;
+
+const auditStore = createAuditStore(database);
+const plugins = createPluginStore({
+  brokerProvider: "composio",
+  database,
+  auditStore,
+  credentials: createCredentialStore(database),
+  encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+  callVendor: async () => ({ text: "[]", isError: false }),
+});
+const store = createProactiveStore(database);
+const memory = createMemoryStore(database);
+const queue = createWorkQueue(database);
+const deliveries = createDeliveryStore(database);
+const router = createDeliveryRouter({
+  store: deliveries,
+  queue,
+  owner: `delivery-${suite}`,
+  authoriseScope: async () => true,
+  scopeFor: async (ownerUserId, channelId, agentId) => ({
+    ownerUserId,
+    channelId,
+    agentId,
+    threadId: `${channelId}-thread`,
+  }),
+  runTurn: async () => ({ replyText: "" }),
+  providers: {},
+});
+const activity = createActivityStore(database);
+
+let inbox: ProactiveSetting;
+let calendar: ProactiveSetting;
+const FAR = new Date("2100-01-01T00:00:00Z");
+
+beforeAll(async () => {
+  await database
+    .insert(users)
+    .values({ id: owner, email: `${owner}@example.test` });
+  await database.insert(agents).values([
+    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
+    {
+      id: calendarBot,
+      name: "Calendar Bot",
+      type: "built_in",
+      configuration: {},
+    },
+  ]);
+  await database.insert(channels).values(
+    [inboxChannel, calendarChannel, taskChannel].map((id) => ({
+      id,
+      name: id,
+      description: "",
+    })),
+  );
+  await database.insert(mcpServers).values([
+    {
+      id: mail,
+      title: "Mail",
+      vendor: "Fixture",
+      url: "https://mail.example.test/mcp",
+      provenance: "custom",
+    },
+    {
+      id: diary,
+      title: "Calendar",
+      vendor: "Fixture",
+      url: "https://calendar.example.test/mcp",
+      provenance: "custom",
+    },
+  ]);
+  await database.insert(mcpTools).values([
+    {
+      serverId: mail,
+      name: "list_messages",
+      vendorName: "list_messages",
+      effect: "read",
+      inputSchema: {},
+    },
+    {
+      serverId: diary,
+      name: "list_events",
+      vendorName: "list_events",
+      effect: "read",
+      inputSchema: {},
+    },
+  ]);
+  await deliveries.registerDevice({
+    id: device,
+    ownerUserId: owner,
+    token: `ExponentPushToken[checkin${suite}]`,
+    projectId: randomUUID(),
+    platform: "ios",
+  });
+  inbox = await store.create(
+    owner,
+    { agentId: inboxBot, channelId: inboxChannel },
+    `inbox-thread-${suite}`,
+  );
+  calendar = await store.create(
+    owner,
+    { agentId: calendarBot, channelId: calendarChannel },
+    `calendar-thread-${suite}`,
+  );
+});
+
+/** Everything a test left behind, and every setting back to on, idle and not due. */
+async function reset() {
+  const settings = [inbox.id, calendar.id];
+  const outbox = await database
+    .select({ id: deliveryOutbox.id })
+    .from(deliveryOutbox)
+    .where(eq(deliveryOutbox.ownerUserId, owner));
+  if (outbox.length)
+    await database.delete(workItems).where(
+      and(
+        eq(workItems.kind, "delivery.outbound"),
+        inArray(
+          workItems.key,
+          outbox.map((row) => row.id),
+        ),
+      ),
+    );
+  await database
+    .delete(deliveryOutbox)
+    .where(eq(deliveryOutbox.ownerUserId, owner));
+  await database
+    .delete(workItems)
+    .where(
+      and(
+        eq(workItems.kind, "proactive.run"),
+        inArray(sql<string>`${workItems.payload}->>'settingId'`, settings),
+      ),
+    );
+  await database.delete(botTasks).where(eq(botTasks.ownerUserId, owner));
+  await database
+    .delete(proactiveSuggestions)
+    .where(eq(proactiveSuggestions.ownerUserId, owner));
+  await database
+    .delete(proactivePings)
+    .where(eq(proactivePings.ownerUserId, owner));
+  await database
+    .delete(proactivePeople)
+    .where(eq(proactivePeople.ownerUserId, owner));
+  await database
+    .delete(proactiveRuns)
+    .where(eq(proactiveRuns.ownerUserId, owner));
+  await database
+    .delete(botLifecycle)
+    .where(eq(botLifecycle.ownerUserId, owner));
+  await database
+    .update(users)
+    .set({ preferences: sql`${users.preferences} - 'proactive'` })
+    .where(eq(users.id, owner));
+  await database
+    .update(proactiveSettings)
+    .set({
+      enabled: true,
+      intervalMinutes: 60,
+      focus: "",
+      nextRunAt: FAR,
+      lastRunAt: null,
+      lastStatus: "idle",
+      lastError: null,
+    })
+    .where(inArray(proactiveSettings.id, settings));
+}
+beforeEach(reset);
+
+afterAll(async () => {
+  await reset();
+  await database.delete(users).where(eq(users.id, owner));
+  await database
+    .delete(agents)
+    .where(inArray(agents.id, [inboxBot, calendarBot]));
+  await database
+    .delete(channels)
+    .where(inArray(channels.id, [inboxChannel, calendarChannel, taskChannel]));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, [mail, diary]));
+  await database.$client.close();
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * The scripted model.
+ * ---------------------------------------------------------------------------------------------- */
+
+function lifecycle(input: RunAgentInput, body: BaseEvent[]): BaseEvent[] {
+  return [
+    {
+      type: EventType.RUN_STARTED,
+      threadId: input.threadId,
+      runId: input.runId,
+    },
+    ...body,
+    {
+      type: EventType.RUN_FINISHED,
+      threadId: input.threadId,
+      runId: input.runId,
+    },
+  ] as BaseEvent[];
+}
+function toolCall(name: string, args: unknown, id: string): BaseEvent[] {
+  return [
+    {
+      type: EventType.TOOL_CALL_START,
+      toolCallId: id,
+      toolCallName: name,
+      parentMessageId: `m-${id}`,
+    },
+    {
+      type: EventType.TOOL_CALL_ARGS,
+      toolCallId: id,
+      delta: JSON.stringify(args),
+    },
+    { type: EventType.TOOL_CALL_END, toolCallId: id },
+  ] as BaseEvent[];
+}
+function reply(text: string): BaseEvent[] {
+  return [
+    {
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "reply",
+      role: "assistant",
+    },
+    { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "reply", delta: text },
+    { type: EventType.TEXT_MESSAGE_END, messageId: "reply" },
+  ] as BaseEvent[];
+}
+
+/** The audit row a successful connector read writes for this check-in: the read, as it happens. */
+async function readMail(runId: string) {
+  await auditStore.insert({
+    eventType: "mcp.call_succeeded",
+    targetType: "mcp_tool",
+    targetId: listMessages,
+    actorUserId: owner,
+    initiator: proactiveInitiator(runId),
+    payload: {},
+  });
+}
+
+/**
+ * The audit row a connector call writes when it fails: the app is down, refused the account, or
+ * answered with an error. Written by the plugin store as the call happens, as a read's is.
+ */
+async function failRead(runId: string, ref = listMessages) {
+  await auditStore.insert({
+    eventType: "mcp.call_failed",
+    targetType: "mcp_tool",
+    targetId: ref,
+    actorUserId: owner,
+    initiator: proactiveInitiator(runId),
+    payload: { failure: "connect ECONNREFUSED 127.0.0.1:443" },
+  });
+}
+
+/**
+ * What the model does in one check-in: its first answer, then its answer once the tools it called
+ * have answered. Every check-in's turn ends with one line, as the instruction asks.
+ */
+type Model = (
+  input: RunAgentInput,
+  afterTools: boolean,
+) => Promise<BaseEvent[]>;
+
+const quiet: Model = async () => reply("Looked at the inbox. Nothing new.");
+
+type Call = { name: string; args: Record<string, unknown> };
+
+/** A model that reads the mail, then makes these calls, then says what it looked at. */
+function calling(
+  calls: Call[],
+  options: { read?: boolean; afterTools?: () => Promise<void> } = {},
+): Model {
+  return async (input, afterTools) => {
+    if (afterTools) {
+      await options.afterTools?.();
+      return reply("Read the inbox since the last check-in.");
+    }
+    if (options.read !== false) await readMail(input.runId);
+    return calls.flatMap((call, index) =>
+      toolCall(call.name, call.args, `${input.runId}-${index}`),
+    );
+  };
+}
+const raise = (title: string, detail: string, extra = {}): Call => ({
+  name: "suggest_next_step",
+  args: { title, detail, sourceTool: READ_TOOL, ...extra },
+});
+
+/** What the tools answered in a check-in, by the model's call order. */
+function answers(requests: RunAgentInput[]): string[] {
+  const last = requests.at(-1);
+  return (last?.messages ?? [])
+    .filter((message) => message.role === "tool")
+    .map((message) => String(message.content));
+}
+
+const runner: RunnerLike = {
+  run: ({ agent, input }) =>
+    new Observable((subscriber) => {
+      agent
+        .runAgent(input, { onEvent: ({ event }) => subscriber.next(event) })
+        .then(
+          () => subscriber.complete(),
+          (error) => subscriber.error(error),
+        );
+    }),
+  stop: async () => true,
+};
+
+/**
+ * One replica's engine, over the shared database, with the scripted model. `requests` is every call
+ * the model received; `turns` every check-in turn started.
+ */
+function replica(
+  options: {
+    model?: Model;
+    admin?: ProactiveAdmin;
+    tasks?: Pick<TaskService, "startFromItem">;
+    readableApps?: (
+      ownerUserId: string,
+      agentId: string,
+    ) => Promise<CheckInApp[]>;
+    denied?: string[];
+    reachable?: boolean;
+    /** Its own connection pool, as another replica has. */
+    store?: ProactiveStore;
+  } = {},
+) {
+  const requests: RunAgentInput[] = [];
+  const turns: { threadId: string; instruction: string; runId?: string }[] = [];
+  let engine: ProactiveEngine | undefined;
+  const turn = createTurnRunner({
+    admission: serverTurnAdmission,
+    intelligence: {
+      getOrCreateThread: async () => undefined,
+      getThreadMessages: async () => ({ messages: [] }),
+      ɵacquireThreadLock: async () => undefined,
+      ɵrenewThreadLock: async () => undefined,
+      ɵcleanupThreadLock: async () => undefined,
+    },
+    runner,
+    buildAgentFor: async () =>
+      new HttpAgent({
+        agentId: "bot",
+        url: "https://agent.example/ag-ui",
+        fetch: async (_url, init) => {
+          const input = JSON.parse(String(init?.body)) as RunAgentInput;
+          requests.push(input);
+          const afterTools = input.messages.some(
+            (message) => message.role === "tool",
+          );
+          const events = lifecycle(
+            input,
+            await (options.model ?? quiet)(input, afterTools),
+          );
+          return new Response(
+            events
+              .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+              .join(""),
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        },
+      }),
+    toolsForTurn: (input) => (engine as ProactiveEngine).toolsForTurn(input),
+  });
+  engine = createProactiveEngine({
+    store: options.store ?? store,
+    memory,
+    queue,
+    owner: `replica-${randomUUID()}`,
+    runTurn: async (input) => {
+      turns.push(input);
+      return turn(input);
+    },
+    resolveScope: async (ownerUserId, channelId, agentId) =>
+      options.reachable !== false &&
+      ownerUserId === owner &&
+      [inboxChannel, calendarChannel].includes(channelId)
+        ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
+        : null,
+    attention: router,
+    ...(options.admin ? { admin: options.admin } : {}),
+    ...(options.tasks ? { tasks: options.tasks } : {}),
+    ...(options.readableApps ? { readableApps: options.readableApps } : {}),
+    catalogue: plugins,
+    deniedToolNames: async () => options.denied ?? [],
+    mintThreadId: () => `check-in-thread-${randomUUID()}`,
+  });
+  return { engine, requests, turns };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Reading what happened.
+ * ---------------------------------------------------------------------------------------------- */
+
+const due = (setting: ProactiveSetting) =>
+  database
+    .update(proactiveSettings)
+    .set({ nextRunAt: new Date(Date.now() - 1_000) })
+    .where(eq(proactiveSettings.id, setting.id));
+const runsOf = (setting: ProactiveSetting) => store.runs(setting.id);
+const itemsOf = () =>
+  database
+    .select()
+    .from(proactiveSuggestions)
+    .where(eq(proactiveSuggestions.ownerUserId, owner))
+    .orderBy(proactiveSuggestions.createdAt);
+const pingsOf = () =>
+  database
+    .select()
+    .from(proactivePings)
+    .where(eq(proactivePings.ownerUserId, owner))
+    .orderBy(proactivePings.createdAt);
+const outboxOf = () =>
+  database
+    .select()
+    .from(deliveryOutbox)
+    .where(eq(deliveryOutbox.ownerUserId, owner));
+const slotOf = async () =>
+  (
+    await database
+      .select()
+      .from(proactivePeople)
+      .where(eq(proactivePeople.ownerUserId, owner))
+  )[0] ?? null;
+/** The person's slot, taken `minutesAgo` minutes ago. */
+async function pingedMinutesAgo(minutesAgo: number) {
+  const at = new Date(Date.now() - minutesAgo * 60_000);
+  await database
+    .insert(proactivePeople)
+    .values({ ownerUserId: owner, lastPingedAt: at })
+    .onConflictDoUpdate({
+      target: proactivePeople.ownerUserId,
+      set: { lastPingedAt: at },
+    });
+}
+/** An open item as an earlier check-in left it. */
+async function openItem(
+  setting: ProactiveSetting,
+  title: string,
+  extra: Partial<typeof proactiveSuggestions.$inferInsert> = {},
+) {
+  return store.addSuggestion({
+    ownerUserId: owner,
+    agentId: setting.agentId,
+    settingId: setting.id,
+    runId: `earlier-${randomUUID()}`,
+    title,
+    detail: `${title}. They asked this morning.`,
+    sourceApp: "Mail",
+    sourceRef: listMessages,
+    sourceLink: null,
+    ...extra,
+  });
+}
+/** An item the person hid `days` days ago. */
+async function hiddenDaysAgo(
+  setting: ProactiveSetting,
+  title: string,
+  days: number,
+) {
+  const item = await openItem(setting, title);
+  await database
+    .update(proactiveSuggestions)
+    .set({
+      status: "dismissed",
+      resolvedAt: new Date(Date.now() - days * 86_400_000),
+    })
+    .where(eq(proactiveSuggestions.id, item.id));
+  return item;
+}
+async function seedRuns(
+  setting: ProactiveSetting,
+  runs: {
+    outcome: "quiet" | "raised" | "failed" | "skipped";
+    hoursAgo: number;
+  }[],
+) {
+  if (!runs.length) return;
+  await database.insert(proactiveRuns).values(
+    runs.map((run) => {
+      const startedAt = new Date(Date.now() - run.hoursAgo * 3_600_000);
+      return {
+        id: randomUUID(),
+        settingId: setting.id,
+        ownerUserId: owner,
+        agentId: setting.agentId,
+        trigger: "schedule" as const,
+        outcome: run.outcome,
+        skipReason: run.outcome === "skipped" ? ("busy" as const) : null,
+        startedAt,
+        finishedAt: new Date(startedAt.getTime() + 30_000),
+      };
+    }),
+  );
+}
+/**
+ * Move a check-in back, as if it started `hoursAgo` hours ago, so the windows of runs made a moment
+ * apart are told apart by more than the second they share. Returns the Unix time the window names.
+ */
+async function ranHoursAgo(run: { id: string } | undefined, hoursAgo: number) {
+  const startedAt = new Date(Date.now() - hoursAgo * 3_600_000);
+  await database
+    .update(proactiveRuns)
+    .set({ startedAt, finishedAt: new Date(startedAt.getTime() + 30_000) })
+    .where(eq(proactiveRuns.id, run?.id as string));
+  return Math.floor(startedAt.getTime() / 1000);
+}
+const afterOf = (instruction: string | undefined) =>
+  Number(instruction?.match(/\(Unix time (\d+)\)/)?.[1] ?? Number.NaN);
+
+/** `/api/proactive` over one replica's engine, signed in as the owner. */
+function routes(engine: ProactiveEngine) {
+  const requireUser = async (
+    context: { set: (key: string, value: unknown) => void },
+    next: () => Promise<void>,
+  ) => {
+    context.set("actor", { id: owner, email: `${owner}@example.test` });
+    await next();
+  };
+  return new Hono().route(
+    "/api/proactive",
+    createProactiveRoutes(store, engine, requireUser as never),
+  );
+}
+/** The setting's last check-in as the Bot's check-ins read it: how it ended, and why in plain words. */
+async function lastRunOf(engine: ProactiveEngine, setting = inbox) {
+  const { settings } = (await (
+    await routes(engine).request("http://t/api/proactive/settings")
+  ).json()) as {
+    settings: { id: string; lastRun: Record<string, unknown> | null }[];
+  };
+  return settings.find((entry) => entry.id === setting.id)?.lastRun;
+}
+/** The model's own message in a check-in's first request: what the turn was asked. */
+const askedOf = (request: RunAgentInput | undefined) =>
+  String(
+    request?.messages.find((message) => message.role === "user")?.content ?? "",
+  );
+
+/* ------------------------------------------------------------------------------------------------
+ * The tests.
+ * ---------------------------------------------------------------------------------------------- */
+
+describe("a check-in", () => {
+  test("that finds nothing writes one quiet run row and nothing else: no item, no ping, no delivery, no second turn", async () => {
+    // Hourly unless the person chose otherwise.
+    expect(inbox.intervalMinutes).toBe(60);
+    await due(inbox);
+    const { engine, requests, turns } = replica({ model: quiet });
+    await engine.sweep();
+
+    const runs = await runsOf(inbox);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      outcome: "quiet",
+      trigger: "schedule",
+      itemsRaised: 0,
+      skipReason: null,
+    });
+    expect(runs[0]?.finishedAt).toBeInstanceOf(Date);
+    // A thread of its own, never the setting's.
+    expect(runs[0]?.threadId).toStartWith("check-in-thread-");
+    expect(turns.map((entry) => entry.threadId)).toEqual([
+      runs[0]?.threadId as string,
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(await itemsOf()).toEqual([]);
+    expect(await pingsOf()).toEqual([]);
+    expect(await outboxOf()).toEqual([]);
+    expect(await slotOf()).toBeNull();
+    // Due again an interval later, not sooner.
+    const [after] = await database
+      .select()
+      .from(proactiveSettings)
+      .where(eq(proactiveSettings.id, inbox.id));
+    expect(after?.nextRunAt.getTime()).toBeGreaterThan(
+      Date.now() + 55 * 60_000,
+    );
+    expect(after?.lastStatus).toBe("succeeded");
+  });
+
+  test("a model asking for a write tool is refused, while what it raises is kept with its source and pinged", async () => {
+    await due(inbox);
+    const { engine, requests } = replica({
+      denied: [`mcp__${mail}__send_message`],
+      model: calling([
+        { name: `mcp__${mail}__send_message`, args: { to: "dana" } },
+        raise(
+          "Reply to Dana about Friday",
+          "Dana asked whether Friday's review still stands.\n\nNext: confirm the time.",
+          { sourceLink: "https://mail.example.test/m/1" },
+        ),
+      ]),
+    });
+    await engine.sweep();
+
+    expect(requests[0]?.tools.map((tool) => tool.name)).toEqual([
+      "suggest_next_step",
+      "clear_next_step",
+      "form_memory",
+    ]);
+    const [refusal, raised] = answers(requests);
+    expect(refusal).toStartWith("Refused.");
+    expect(raised).toContain("suggested");
+    const [item] = await itemsOf();
+    expect(item).toMatchObject({
+      agentId: inboxBot,
+      title: "Reply to Dana about Friday",
+      sourceApp: "Mail",
+      sourceRef: listMessages,
+      sourceLink: "https://mail.example.test/m/1",
+      dedupeKey: "reply to dana about friday",
+      status: "open",
+    });
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "raised",
+      itemsRaised: 1,
+      reads: 1,
+    });
+    const [ping] = await pingsOf();
+    expect(ping).toMatchObject({ itemCount: 1 });
+    expect(ping?.text).toBe(
+      [
+        "One thing needs you",
+        "• Inbox Bot: Reply to Dana about Friday. Dana asked whether Friday's review still stands. (from Mail)",
+        "Start or hide it in OpenBot.",
+      ].join("\n"),
+    );
+    expect(ping?.pushBody).toBe("Inbox Bot: Reply to Dana about Friday");
+    expect(ping?.offeredAt).toBeInstanceOf(Date);
+    expect(item?.pingId).toBe(ping?.id as string);
+    // Delivered as a ping: the person's one phone, titled for them, filed under the Bot's conversation.
+    const outbox = await outboxOf();
+    expect(
+      outbox.map((row) => [row.transport, row.kind, row.dedupeKey, row.text]),
+    ).toEqual([
+      [
+        "push",
+        "attention",
+        `attention:${ping?.id}:device:${device}`,
+        "One thing needs you\nInbox Bot: Reply to Dana about Friday",
+      ],
+    ]);
+    expect(outbox[0]?.channelId).toBe(inboxChannel);
+  });
+
+  test("a memory is formed only from a read the check-in actually made", async () => {
+    await due(inbox);
+    const content = `Leads the billing migration ${suite}`;
+    const { engine, requests } = replica({
+      model: calling([
+        {
+          name: "form_memory",
+          args: { content, sourceTool: `mcp__${mail}__create_draft` },
+        },
+        { name: "form_memory", args: { content, sourceTool: READ_TOOL } },
+      ]),
+    });
+    await engine.sweep();
+    const [unread, formed] = answers(requests);
+    expect(unread).toStartWith("Refused.");
+    expect(formed).not.toStartWith("Refused.");
+    const [row] = (await memory.list(owner)).filter(
+      (entry) => entry.content === content,
+    );
+    expect(row).toMatchObject({
+      formedBy: "bot",
+      formedByAgentId: inboxBot,
+      sourceApp: "Mail",
+      sourceRef: listMessages,
+      reviewState: "unreviewed",
+    });
+    await memory.remove(owner, row?.id as string);
+  });
+});
+
+describe("the gates, before any model call", () => {
+  test("a person who turned check-ins off is never claimed, and a Run now is skipped as off_person", async () => {
+    await database
+      .update(users)
+      .set({
+        preferences: sql`${users.preferences} || '{"proactive":"off"}'::jsonb`,
+      })
+      .where(eq(users.id, owner));
+    await due(inbox);
+    const { engine, requests } = replica();
+    await engine.sweep();
+    expect(await runsOf(inbox)).toEqual([]);
+    // Not claimed, so it is still due the moment they turn check-ins back on.
+    expect((await store.get(owner, inbox.id)).nextRunAt.getTime()).toBeLessThan(
+      Date.now(),
+    );
+    // Run now is skipped at once and says why, rather than queueing a check-in that would be.
+    expect(await engine.runNow(owner, inbox.id)).toEqual({
+      queued: false,
+      skipped: "off_person",
+      why: "You turned off check-ins for all your Bots.",
+    });
+    await engine.sweep();
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "skipped", skipReason: "off_person", trigger: "run_now" },
+    ]);
+    expect(requests).toEqual([]);
+  });
+
+  test("a Bot the person paused is never claimed, and a Run now is skipped as paused", async () => {
+    await database
+      .insert(botLifecycle)
+      .values({ ownerUserId: owner, agentId: inboxBot, pausedAt: new Date() });
+    await due(inbox);
+    const { engine, requests } = replica();
+    await engine.sweep();
+    expect(await runsOf(inbox)).toEqual([]);
+    await engine.runNow(owner, inbox.id);
+    await engine.sweep();
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "skipped", skipReason: "paused" },
+    ]);
+    expect(requests).toEqual([]);
+  });
+
+  test("an admin who turned check-ins off skips every check-in as off_admin", async () => {
+    await due(inbox);
+    const asked: string[] = [];
+    const { engine, requests } = replica({
+      admin: {
+        proactiveAllowed: async (person) => {
+          asked.push(person);
+          return false;
+        },
+        proactiveDailyRuns: async () => 24,
+      },
+    });
+    await engine.sweep();
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "skipped", skipReason: "off_admin" },
+    ]);
+    expect(asked).toContain(owner);
+    expect(requests).toEqual([]);
+  });
+
+  test("a Bot that used its day's check-ins is skipped as capped: 24 a day by default, skipped ones not counted", async () => {
+    await seedRuns(inbox, [
+      ...Array.from({ length: 23 }, (_, index) => ({
+        outcome: "quiet" as const,
+        hoursAgo: index + 0.5,
+      })),
+      { outcome: "skipped", hoursAgo: 1 },
+      { outcome: "quiet", hoursAgo: 25 },
+    ]);
+    await due(inbox);
+    const first = replica();
+    await first.engine.sweep();
+    // 23 in the last day, so this one runs: the 24th.
+    expect(first.requests).toHaveLength(1);
+    await due(inbox);
+    const second = replica();
+    await second.engine.sweep();
+    expect(second.requests).toEqual([]);
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "skipped",
+      skipReason: "capped",
+    });
+    // An admin's own number for this Bot wins.
+    await due(inbox);
+    const raised = replica({
+      admin: {
+        proactiveAllowed: async () => true,
+        proactiveDailyRuns: async (agentId) => (agentId === inboxBot ? 30 : 1),
+      },
+    });
+    await raised.engine.sweep();
+    expect(raised.requests).toHaveLength(1);
+  });
+
+  test("a conversation the person can no longer reach is skipped as unreachable", async () => {
+    await due(inbox);
+    const { engine, requests } = replica({ reachable: false });
+    await engine.sweep();
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "skipped", skipReason: "unreachable" },
+    ]);
+    expect((await store.get(owner, inbox.id)).lastStatus).toBe("error");
+    expect(requests).toEqual([]);
+  });
+
+  test("a Bot that can read none of the person's apps is skipped as no_sources, and the model is never called", async () => {
+    await due(inbox);
+    const asked: string[] = [];
+    const nothing = replica({
+      readableApps: async (person, agentId) => {
+        asked.push(`${person}:${agentId}`);
+        return [];
+      },
+    });
+    await nothing.engine.sweep();
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "skipped", skipReason: "no_sources" },
+    ]);
+    expect(asked).toEqual([`${owner}:${inboxBot}`]);
+    expect(nothing.requests).toEqual([]);
+    await due(inbox);
+    const mailOnly = replica({ readableApps: async () => mailApp });
+    await mailOnly.engine.sweep();
+    expect(mailOnly.requests).toHaveLength(1);
+  });
+
+  test("a check-in already running is skipped as busy, and one a stopped replica left running is closed after its lease", async () => {
+    const stuck = randomUUID();
+    await database.insert(proactiveRuns).values({
+      id: stuck,
+      settingId: inbox.id,
+      ownerUserId: owner,
+      agentId: inboxBot,
+      trigger: "schedule",
+    });
+    await due(inbox);
+    const busy = replica();
+    await busy.engine.sweep();
+    expect(busy.requests).toEqual([]);
+    expect(
+      (await runsOf(inbox)).map((run) => [run.outcome, run.skipReason]),
+    ).toContainEqual(["skipped", "busy"]);
+
+    // Eleven minutes on, the replica that started it is plainly gone.
+    await database
+      .update(proactiveRuns)
+      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(proactiveRuns.id, stuck));
+    await due(inbox);
+    const next = replica();
+    await next.engine.sweep();
+    const runs = await runsOf(inbox);
+    expect(runs.find((run) => run.id === stuck)).toMatchObject({
+      outcome: "failed",
+    });
+    expect(runs[0]).toMatchObject({ outcome: "quiet" });
+    expect(next.requests).toHaveLength(1);
+  });
+});
+
+describe("the window", () => {
+  test("the first check-in reads the last day; after a quiet or raised one, since it started; after a failed one, since the last one that read everything", async () => {
+    const dayBack = () => Math.floor((Date.now() - 86_400_000) / 1000);
+
+    await due(inbox);
+    const first = replica();
+    await first.engine.sweep();
+    expect(
+      Math.abs(afterOf(first.turns[0]?.instruction) - dayBack()),
+    ).toBeLessThan(5);
+    expect(first.turns[0]?.instruction).toContain(
+      "the last day, because no earlier check-in finished",
+    );
+    const [quietRun] = await runsOf(inbox);
+
+    await due(inbox);
+    const second = replica({
+      model: calling([
+        raise("Send the venue deposit", "The hold ends Friday."),
+      ]),
+    });
+    await second.engine.sweep();
+    expect(afterOf(second.turns[0]?.instruction)).toBe(
+      Math.floor((quietRun?.startedAt.getTime() ?? 0) / 1000),
+    );
+    expect(second.turns[0]?.instruction).toContain("when you last checked in");
+    const [raisedRun] = await runsOf(inbox);
+    expect(raisedRun?.outcome).toBe("raised");
+
+    await due(inbox);
+    const third = replica();
+    await third.engine.sweep();
+    expect(afterOf(third.turns[0]?.instruction)).toBe(
+      Math.floor((raisedRun?.startedAt.getTime() ?? 0) / 1000),
+    );
+
+    // A check-in whose turn fails never moves the window: the next one reads from the last good one.
+    await ranHoursAgo(quietRun, 4);
+    await ranHoursAgo(raisedRun, 3);
+    const thirdStarted = await ranHoursAgo((await runsOf(inbox))[0], 2);
+    await due(inbox);
+    const failing = replica({
+      model: async () => {
+        throw new Error("model went away");
+      },
+    });
+    await failing.engine.sweep();
+    const [failedRun] = await runsOf(inbox);
+    expect(failedRun).toMatchObject({ outcome: "failed" });
+    await ranHoursAgo(failedRun, 1);
+    expect((await store.get(owner, inbox.id)).lastStatus).toBe("error");
+    await due(inbox);
+    const after = replica();
+    await after.engine.sweep();
+    expect(afterOf(after.turns[0]?.instruction)).toBe(thirdStarted);
+  });
+});
+
+describe("how a check-in ends", () => {
+  /** A model that reads the inbox, raises nothing and ends without a word, as models do on a quiet hour. */
+  const readsAndSaysNothing: Model = async (input) => {
+    await readMail(input.runId);
+    return [];
+  };
+
+  test("one that read, found nothing new and said nothing is quiet, and the next one reads only from it", async () => {
+    await due(inbox);
+    const silent = replica({ model: readsAndSaysNothing });
+    await silent.engine.sweep();
+    const [run] = await runsOf(inbox);
+    expect(run).toMatchObject({
+      outcome: "quiet",
+      reads: 1,
+      itemsRaised: 0,
+      error: null,
+    });
+    const started = await ranHoursAgo(run, 1);
+    expect((await store.get(owner, inbox.id)).lastStatus).toBe("succeeded");
+    expect(await lastRunOf(silent.engine)).toMatchObject({
+      outcome: "quiet",
+      why: null,
+    });
+
+    // The next check-in reads what is new since that one, not the whole last day again.
+    await due(inbox);
+    const next = replica();
+    await next.engine.sweep();
+    expect(afterOf(next.turns[0]?.instruction)).toBe(started);
+  });
+
+  test("one that raised something and then said nothing raised it; one that read nothing and said nothing still couldn't finish", async () => {
+    await due(inbox);
+    await replica({
+      model: async (input, afterTools) =>
+        afterTools
+          ? []
+          : calling([raise("Send the venue deposit", "The hold ends Friday.")])(
+              input,
+              false,
+            ),
+    }).engine.sweep();
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "raised",
+      itemsRaised: 1,
+      error: null,
+    });
+    expect(await pingsOf()).toHaveLength(1);
+
+    // Nothing read and nothing said: that turn checked nothing, so its empty end is still a failure.
+    await due(inbox);
+    const empty = replica({ model: async () => [] });
+    await empty.engine.sweep();
+    expect((await runsOf(inbox))[0]).toMatchObject({ outcome: "failed" });
+    expect(await lastRunOf(empty.engine)).toMatchObject({
+      outcome: "failed",
+      why: "Couldn't finish: the run ended without a reply.",
+    });
+  });
+
+  test("one that couldn't reach an app is failed and says so; the next reads from the last one that read everything, so a request that arrived meanwhile is raised", async () => {
+    await due(inbox);
+    await replica({ model: calling([]) }).engine.sweep();
+    const [good] = await runsOf(inbox);
+    expect(good?.outcome).toBe("quiet");
+    const goodStarted = await ranHoursAgo(good, 3);
+    let hoursAgo = 2;
+
+    // Mail is down: every read fails. Whether the model says so or says nothing, nothing was checked.
+    for (const model of [
+      async (input: RunAgentInput) => {
+        await failRead(input.runId);
+        return reply("Couldn't open the inbox.");
+      },
+      async (input: RunAgentInput) => {
+        await failRead(input.runId);
+        return [];
+      },
+    ]) {
+      await due(inbox);
+      const down = replica({ model });
+      await down.engine.sweep();
+      const [run] = await runsOf(inbox);
+      expect(run).toMatchObject({
+        outcome: "failed",
+        reads: 0,
+        itemsRaised: 0,
+      });
+      await ranHoursAgo(run, hoursAgo--);
+      expect((await store.get(owner, inbox.id)).lastStatus).toBe("error");
+      expect(await lastRunOf(down.engine)).toMatchObject({
+        outcome: "failed",
+        why: "Couldn't reach Mail. The next check-in will try again.",
+      });
+    }
+
+    // Mail is back. What arrived while it was down is inside the window, and is raised.
+    await due(inbox);
+    const back = replica({
+      model: calling([
+        raise(
+          "Sign off the Q3 audit letter",
+          "The auditors need your sign-off by noon tomorrow.",
+        ),
+      ]),
+    });
+    await back.engine.sweep();
+    expect(afterOf(back.turns[0]?.instruction)).toBe(goodStarted);
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "raised",
+      itemsRaised: 1,
+      error: null,
+    });
+    expect((await itemsOf()).map((item) => item.title)).toEqual([
+      "Sign off the Q3 audit letter",
+    ]);
+  });
+
+  test("a lookup that failed after the app answered is not an app that was down; one app down while another raised keeps the window from before it", async () => {
+    // The list answered and one message it named could not be fetched: Mail was reached.
+    await due(inbox);
+    await replica({
+      model: async (input) => {
+        await readMail(input.runId);
+        await failRead(input.runId, `${mail}/get_message`);
+        return reply("Read the inbox. One message would not open.");
+      },
+    }).engine.sweep();
+    const [reached] = await runsOf(inbox);
+    expect(reached).toMatchObject({ outcome: "quiet", error: null });
+    const reachedStarted = await ranHoursAgo(reached, 2);
+
+    // Mail answered and raised something; the calendar did not answer at all.
+    await due(inbox);
+    const raising = calling([
+      raise("Send the venue deposit", "The hold ends Friday."),
+    ]);
+    const down = replica({
+      model: async (input, afterTools) => {
+        if (!afterTools) await failRead(input.runId, listEvents);
+        return raising(input, afterTools);
+      },
+    });
+    await down.engine.sweep();
+    const [partly] = await runsOf(inbox);
+    expect(partly).toMatchObject({ outcome: "raised", itemsRaised: 1 });
+    expect(await lastRunOf(down.engine)).toMatchObject({
+      outcome: "raised",
+      why: null,
+    });
+    await ranHoursAgo(partly, 1);
+
+    // The calendar's news since then is still to be read: the window opens from before that run.
+    await due(inbox);
+    const next = replica();
+    await next.engine.sweep();
+    expect(afterOf(next.turns[0]?.instruction)).toBe(reachedStarted);
+  });
+});
+
+describe("what a check-in may raise", () => {
+  test("an item without a source read in this check-in is refused", async () => {
+    await due(inbox);
+    const { engine, requests } = replica({
+      model: calling(
+        [
+          raise("Reply to Dana", "Dana asked about Friday."),
+          {
+            name: "suggest_next_step",
+            args: { title: "Reply to Sam", detail: "Sam asked for the spec." },
+          },
+        ],
+        { read: false },
+      ),
+    });
+    await engine.sweep();
+    const [unread, unsourced] = answers(requests);
+    expect(unread).toStartWith("Refused.");
+    expect(unread).toContain("needs a source");
+    expect(unsourced).toStartWith("Refused.");
+    expect(await itemsOf()).toEqual([]);
+    expect((await runsOf(inbox))[0]).toMatchObject({ outcome: "quiet" });
+  });
+
+  test("repeats are refused by title or link against open items, open tasks and what was hidden in 30 days; hidden 31 days ago may return", async () => {
+    const open = await openItem(
+      inbox,
+      "Reply to Rosa about the glaze substitute",
+    );
+    await openItem(inbox, "Answer the supplier", {
+      sourceLink: "https://Mail.example.test/m/7/",
+    });
+    await database.insert(botTasks).values({
+      id: randomUUID(),
+      ownerUserId: owner,
+      agentId: inboxBot,
+      channelId: taskChannel,
+      title: "Book the kiln technician",
+      origin: "check_in",
+    });
+    await hiddenDaysAgo(inbox, "Renew the market stall", 29);
+    await hiddenDaysAgo(inbox, "Order more clay", 31);
+    const started = await openItem(inbox, "Pay the studio rent");
+    await store.resolveSuggestion(owner, started.id, "started");
+    // Another of the person's Bots raised this one: it is a repeat, but this Bot is never told of it.
+    await openItem(calendar, "Confirm the class schedule");
+
+    await due(inbox);
+    const { engine, requests, turns } = replica({
+      model: calling([
+        raise("reply to Rosa about the glaze  substitute.", "Again."),
+        raise("A different wording", "Same mail.", {
+          sourceLink: "https://mail.example.test/m/7",
+        }),
+        raise("book the kiln technician!", "Again."),
+        raise("Renew the market stall", "Again."),
+        raise("Order more clay", "The bags ran out this week."),
+        raise("Confirm the class schedule", "Students asked."),
+      ]),
+    });
+    await engine.sweep();
+
+    const instruction = turns[0]?.instruction ?? "";
+    expect(instruction).toContain(
+      `- "Reply to Rosa about the glaze substitute" (id: ${open.id})`,
+    );
+    expect(instruction).toContain(
+      'They already have tasks open for these. Do not raise them again:\n- "Book the kiln technician"',
+    );
+    expect(instruction).toContain(
+      'They hid these in the last 30 days. Do not raise these, or things like them:\n- "Renew the market stall" (from Mail)',
+    );
+    expect(instruction).not.toContain("Order more clay");
+    expect(instruction).toContain(
+      'They started these in the last 30 days, so this is the kind of thing they act on:\n- "Pay the studio rent"',
+    );
+    expect(instruction).not.toContain("Confirm the class schedule");
+
+    const results = answers(requests);
+    expect(
+      results.slice(0, 4).every((text) => text.startsWith("Refused.")),
+    ).toBe(true);
+    expect(results[0]).toContain("already raised and still open");
+    expect(results[1]).toContain('"Answer the supplier" is already raised');
+    expect(results[2]).toContain("already have a task");
+    expect(results[3]).toContain("They hid");
+    expect(results[4]).toContain("suggested");
+    expect(results[5]).toBe(
+      "Refused. Another of their Bots already raised this, and it is still open. Do not raise it again.",
+    );
+    const raised = (await itemsOf()).filter(
+      (item) => item.agentId === inboxBot && item.status === "open",
+    );
+    expect(raised.map((item) => item.title).sort()).toEqual([
+      "Answer the supplier",
+      "Order more clay",
+      "Reply to Rosa about the glaze substitute",
+    ]);
+  });
+
+  test("two check-ins racing for one Bot cannot both open the same item", async () => {
+    const elsewhere = createDatabase(testDatabaseUrl(), TEST_POOL);
+    try {
+      const other = createProactiveStore(elsewhere);
+      const item = (title: string) => ({
+        ownerUserId: owner,
+        agentId: inboxBot,
+        settingId: inbox.id,
+        runId: randomUUID(),
+        title,
+        detail: "Sam asked for the spec.",
+        sourceApp: "Mail",
+        sourceRef: listMessages,
+        sourceLink: null,
+      });
+      const results = await Promise.allSettled([
+        store.addSuggestion(item("Reply to Sam")),
+        other.addSuggestion(item("reply to sam.")),
+      ]);
+      expect(
+        results.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      const [refused] = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      expect(refused?.reason).toBeInstanceOf(ProactiveRefusedError);
+      expect(await itemsOf()).toHaveLength(1);
+    } finally {
+      await elsewhere.$client.close();
+    }
+  });
+
+  test("clear_next_step clears only this setting's open items", async () => {
+    const mine = await openItem(inbox, "Reply to Dana");
+    const theirs = await openItem(calendar, "Move the standup");
+    const decided = await openItem(inbox, "Archive old threads");
+    await store.resolveSuggestion(owner, decided.id, "dismissed");
+    await due(inbox);
+    const clear = (suggestionId: string) => ({
+      name: "clear_next_step",
+      args: { suggestionId, why: "Dana answered it herself." },
+    });
+    const { engine, requests } = replica({
+      model: calling([
+        clear(theirs.id),
+        clear(decided.id),
+        clear("not-an-item"),
+        clear(mine.id),
+      ]),
+    });
+    await engine.sweep();
+    const results = answers(requests);
+    expect(
+      results.slice(0, 3).every((text) => text.startsWith("Refused.")),
+    ).toBe(true);
+    expect(results[3]).toContain(mine.id);
+    const byId = new Map((await itemsOf()).map((item) => [item.id, item]));
+    expect(byId.get(mine.id)?.status).toBe("superseded");
+    expect(byId.get(theirs.id)?.status).toBe("open");
+    expect(byId.get(decided.id)?.status).toBe("dismissed");
+    // Clearing is not raising.
+    expect((await runsOf(inbox))[0]).toMatchObject({ outcome: "quiet" });
+  });
+});
+
+describe("one thing, once, whichever of the person's Bots finds it", () => {
+  const link = "https://requests.example.test/requests/r-late2";
+  const ANOTHER_OPEN =
+    "Refused. Another of their Bots already raised this, and it is still open. Do not raise it again.";
+
+  test("the same request found by two of the person's Bots is raised and pinged once; hidden, none of their Bots raises it again", async () => {
+    await due(inbox);
+    await replica({
+      model: calling([
+        raise(
+          "Sign off the Q3 audit letter",
+          "The auditors need your sign-off by noon tomorrow.",
+          { sourceLink: link },
+        ),
+      ]),
+    }).engine.sweep();
+
+    // The calendar Bot reads the same source and finds the same request: in its own words, and by title.
+    await due(calendar);
+    const second = replica({
+      model: calling([
+        raise("Sign the Q3 audit letter by noon", "Dana asked.", {
+          sourceLink: link,
+        }),
+        raise("sign off the Q3 audit letter.", "Dana asked."),
+      ]),
+    });
+    await second.engine.sweep();
+    expect(answers(second.requests)).toEqual([ANOTHER_OPEN, ANOTHER_OPEN]);
+    // The other Bot's item is never put in this one's instruction.
+    expect(second.turns[0]?.instruction).not.toContain("Q3 audit letter");
+    expect((await runsOf(calendar))[0]).toMatchObject({
+      outcome: "quiet",
+      itemsRaised: 0,
+    });
+
+    const open = await store.suggestions(owner);
+    expect(open.map((item) => [item.agentId, item.title])).toEqual([
+      [inboxBot, "Sign off the Q3 audit letter"],
+    ]);
+    const counts = await activity.attention(owner);
+    expect(counts.reduce((total, bot) => total + bot.items, 0)).toBe(1);
+    const pings = await pingsOf();
+    expect(pings.map((ping) => ping.itemCount)).toEqual([1]);
+
+    // Hidden where the inbox Bot raised it, it is refused to every one of the person's Bots.
+    await replica().engine.dismiss(owner, open[0]?.id as string);
+    for (const [setting, refusal] of [
+      [
+        calendar,
+        "Refused. They hid this when another of their Bots raised it. Do not raise it, or anything like it, again.",
+      ],
+      [
+        inbox,
+        'Refused. They hid "Sign off the Q3 audit letter". Do not raise it, or anything like it, again.',
+      ],
+    ] as const) {
+      await due(setting);
+      const again = replica({
+        model: calling([
+          raise("Sign the Q3 audit letter", "Still waiting on it.", {
+            sourceLink: link,
+          }),
+        ]),
+      });
+      await again.engine.sweep();
+      expect(answers(again.requests)).toEqual([refusal]);
+    }
+    expect(await store.suggestions(owner)).toEqual([]);
+  });
+
+  test("two of the person's Bots raising the same thing at once, on two replicas, open it once", async () => {
+    // Both check-ins ask to raise it before either has: as when two Bots check in the same minute.
+    let arrived = 0;
+    let release: () => void = () => {};
+    const together = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const model: Model = async (input, afterTools) => {
+      if (afterTools) return reply("Read the inbox since the last check-in.");
+      await readMail(input.runId);
+      arrived += 1;
+      if (arrived === 2) release();
+      await together;
+      return toolCall(
+        "suggest_next_step",
+        {
+          title: "Sign off the Q3 audit letter",
+          detail: "The auditors need your sign-off by noon tomorrow.",
+          sourceTool: READ_TOOL,
+          sourceLink: link,
+        },
+        `${input.runId}-0`,
+      );
+    };
+    const elsewhere = createDatabase(testDatabaseUrl(), TEST_POOL);
+    try {
+      const first = replica({ model });
+      const second = replica({ model, store: createProactiveStore(elsewhere) });
+      await first.engine.runNow(owner, inbox.id);
+      await second.engine.runNow(owner, calendar.id);
+      await Promise.all([first.engine.sweep(), second.engine.sweep()]);
+
+      const said = [
+        ...answers(first.requests),
+        ...answers(second.requests),
+      ].sort();
+      expect(said).toHaveLength(2);
+      expect(said.filter((text) => text === ANOTHER_OPEN)).toHaveLength(1);
+      expect(
+        (await store.suggestions(owner)).map((item) => item.title),
+      ).toEqual(["Sign off the Q3 audit letter"]);
+    } finally {
+      await elsewhere.$client.close();
+    }
+  });
+});
+
+describe("the ping", () => {
+  test("two replicas finishing check-ins for two Bots of one person together send exactly one ping, folding both Bots' items", async () => {
+    // Both check-ins have raised their item before either finishes, as when they end in the same second.
+    let arrived = 0;
+    let release: () => void = () => {};
+    const together = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const meet = async () => {
+      arrived += 1;
+      if (arrived === 2) release();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        together,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(new Error("The other replica never ran its check-in.")),
+            10_000,
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
+    };
+    // Whichever replica claims whichever Bot's check-in, each Bot raises its own item.
+    const byBot: Record<string, Model> = {
+      [inboxBot]: calling(
+        [raise("Reply to Dana about Friday", "Dana asked about Friday.")],
+        { afterTools: meet },
+      ),
+      [calendarBot]: calling(
+        [raise("Move the standup", "The room is double-booked tomorrow.")],
+        { afterTools: meet },
+      ),
+    };
+    const model: Model = async (input, afterTools) => {
+      const [run] = await database
+        .select({ agentId: proactiveRuns.agentId })
+        .from(proactiveRuns)
+        .where(eq(proactiveRuns.id, input.runId));
+      return (byBot[run?.agentId ?? ""] ?? quiet)(input, afterTools);
+    };
+    const first = replica({ model });
+    const second = replica({ model });
+    await first.engine.runNow(owner, inbox.id);
+    await second.engine.runNow(owner, calendar.id);
+    await Promise.all([first.engine.sweep(), second.engine.sweep()]);
+
+    expect(first.turns).toHaveLength(1);
+    expect(second.turns).toHaveLength(1);
+    const pings = await pingsOf();
+    expect(pings).toHaveLength(1);
+    const [ping] = pings;
+    expect(ping?.itemCount).toBe(2);
+    expect(ping?.text).toStartWith("2 things need you\n");
+    expect(ping?.text).toContain(
+      "• Inbox Bot: Reply to Dana about Friday. Dana asked about Friday. (from Mail)",
+    );
+    expect(ping?.text).toContain(
+      "• Calendar Bot: Move the standup. The room is double-booked tomorrow. (from Mail)",
+    );
+    expect(ping?.text).toEndWith("Start or hide them in OpenBot.");
+    expect((await itemsOf()).every((item) => item.pingId === ping?.id)).toBe(
+      true,
+    );
+    expect(await outboxOf()).toHaveLength(1);
+    expect((await slotOf())?.lastPingedAt).toBeInstanceOf(Date);
+  });
+
+  test("an item raised within the hour waits, listed at once; when the hour passes the next pass sends one ping folding everything waiting", async () => {
+    await pingedMinutesAgo(20);
+    await due(inbox);
+    await replica({
+      model: calling([raise("Reply to Dana", "Dana asked about Friday.")]),
+    }).engine.sweep();
+    await due(calendar);
+    await replica({
+      model: calling([raise("Move the standup", "The room is taken.")]),
+    }).engine.sweep();
+    expect(await pingsOf()).toEqual([]);
+    expect(await outboxOf()).toEqual([]);
+    // Waiting, and already on the person's list.
+    expect(
+      (await store.suggestions(owner)).map((item) => [item.title, item.pingId]),
+    ).toEqual([
+      ["Move the standup", null],
+      ["Reply to Dana", null],
+    ]);
+
+    // Another pass inside the hour sends nothing.
+    await replica().engine.sweep();
+    expect(await pingsOf()).toEqual([]);
+
+    await pingedMinutesAgo(61);
+    const pass = replica();
+    await pass.engine.sweep();
+    const [ping] = await pingsOf();
+    expect(ping?.itemCount).toBe(2);
+    expect(await outboxOf()).toHaveLength(1);
+    // The pass is not a check-in: no model call.
+    expect(pass.requests).toEqual([]);
+    await replica().engine.sweep();
+    expect(await pingsOf()).toHaveLength(1);
+  });
+
+  test("a ping written but never offered (the replica stopped after its commit) is offered by a later pass, once", async () => {
+    await openItem(inbox, "Reply to Dana");
+    // The replica took the slot and wrote the ping, then stopped before delivery.
+    const ping = await store.pings.take(owner);
+    expect(ping?.items.map((item) => item.agentName)).toEqual(["Inbox Bot"]);
+    expect(await outboxOf()).toEqual([]);
+
+    // Too fresh to be another replica's business yet.
+    await replica().engine.sweep();
+    expect(await outboxOf()).toEqual([]);
+
+    await database
+      .update(proactivePings)
+      .set({ createdAt: new Date(Date.now() - 2 * 60_000) })
+      .where(eq(proactivePings.id, ping?.pingId as string));
+    await replica().engine.sweep();
+    expect(await outboxOf()).toHaveLength(1);
+    expect((await pingsOf())[0]?.offeredAt).toBeInstanceOf(Date);
+    await replica().engine.sweep();
+    expect(await outboxOf()).toHaveLength(1);
+
+    // Offered again all the same (a replica that stopped after delivery, before marking it): still one send.
+    await database
+      .update(proactivePings)
+      .set({ offeredAt: null })
+      .where(eq(proactivePings.id, ping?.pingId as string));
+    await replica().engine.sweep();
+    expect(await outboxOf()).toHaveLength(1);
+    expect(await pingsOf()).toHaveLength(1);
+  });
+
+  test("items started, hidden or cleared before the ping are not in it", async () => {
+    const kept = await openItem(inbox, "Reply to Dana");
+    const started = await openItem(inbox, "Pay the rent");
+    const hidden = await openItem(inbox, "Archive old threads");
+    const cleared = await openItem(inbox, "Answer the supplier");
+    await store.resolveSuggestion(owner, started.id, "started");
+    await store.resolveSuggestion(owner, hidden.id, "dismissed");
+    await store.clearSuggestion(inbox.id, cleared.id);
+
+    await replica().engine.sweep();
+    const [ping] = await pingsOf();
+    expect(ping?.itemCount).toBe(1);
+    expect(ping?.text).toContain("Reply to Dana");
+    for (const title of [
+      "Pay the rent",
+      "Archive old threads",
+      "Answer the supplier",
+    ])
+      expect(ping?.text).not.toContain(title);
+    const byId = new Map((await itemsOf()).map((item) => [item.id, item]));
+    expect(byId.get(kept.id)?.pingId).toBe(ping?.id as string);
+    expect(byId.get(hidden.id)?.pingId).toBeNull();
+  });
+
+  test("a Bot set to notify nothing never holds the slot: its items stay listed and are never pinged", async () => {
+    await database
+      .insert(botLifecycle)
+      .values({ ownerUserId: owner, agentId: inboxBot, notify: "none" });
+    await openItem(inbox, "Reply to Dana");
+    await replica().engine.sweep();
+    expect(await pingsOf()).toEqual([]);
+    expect((await slotOf())?.lastPingedAt ?? null).toBeNull();
+    expect(await store.suggestions(owner)).toHaveLength(1);
+
+    await openItem(calendar, "Move the standup");
+    await replica().engine.sweep();
+    const [ping] = await pingsOf();
+    expect(ping?.itemCount).toBe(1);
+    expect(ping?.text).toContain("Calendar Bot: Move the standup");
+    expect(ping?.text).not.toContain("Reply to Dana");
+  });
+
+  test("nobody is pinged while they or an admin have check-ins turned off", async () => {
+    await openItem(inbox, "Reply to Dana");
+    await replica({
+      admin: {
+        proactiveAllowed: async () => false,
+        proactiveDailyRuns: async () => 24,
+      },
+    }).engine.sweep();
+    expect(await pingsOf()).toEqual([]);
+
+    await database
+      .update(users)
+      .set({
+        preferences: sql`${users.preferences} || '{"proactive":"off"}'::jsonb`,
+      })
+      .where(eq(users.id, owner));
+    await replica().engine.sweep();
+    expect(await pingsOf()).toEqual([]);
+    expect(await outboxOf()).toEqual([]);
+  });
+
+  test("the ping lists five items, then how many more, and the push stays short, a line per item naming its Bot", async () => {
+    const titles = Array.from(
+      { length: 7 },
+      (_, index) =>
+        `Reply to the thread about the quarterly plan, part ${index + 1}`,
+    );
+    for (const title of titles) await openItem(inbox, title);
+    const ping = await store.pings.take(owner);
+    const lines = ping?.text.split("\n") ?? [];
+    expect(lines[0]).toBe("7 things need you");
+    expect(lines.filter((line) => line.startsWith("• "))).toHaveLength(5);
+    expect(lines).toContain("and 2 more");
+    expect(Array.from(ping?.pushBody ?? "").length).toBeLessThanOrEqual(200);
+    // The push's title says how many (delivery titles it); its body names each item's Bot.
+    expect(ping?.pushBody).toStartWith(
+      `Inbox Bot: ${titles[0]}\nInbox Bot: ${titles[1]}\n`,
+    );
+    expect(ping?.pushBody).toEndWith("…");
+  });
+});
+
+describe("Start and Hide", () => {
+  test("Start makes the item a task, once; a task that could not be opened leaves it open; Hide is remembered", async () => {
+    const item = await openItem(inbox, "Reply to Dana");
+    // Without the tasks module, Start is refused and the item stays as it was.
+    await expect(replica().engine.start(owner, item.id)).rejects.toBeInstanceOf(
+      ProactiveRefusedError,
+    );
+    expect((await store.suggestion(owner, item.id)).status).toBe("open");
+
+    const opened: string[] = [];
+    let failNext = true;
+    const { engine } = replica({
+      tasks: {
+        startFromItem: async ({ ownerUserId, item: started }) => {
+          if (failNext) {
+            failNext = false;
+            throw new Error("The conversation could not be made.");
+          }
+          opened.push(`${ownerUserId}:${started.id}:${started.title}`);
+          return { id: `task-${started.id}`, channelId: taskChannel };
+        },
+      },
+    });
+    await expect(engine.start(owner, item.id)).rejects.toThrow(
+      "The conversation could not be made.",
+    );
+    expect((await store.suggestion(owner, item.id)).status).toBe("open");
+
+    const result = await engine.start(owner, item.id);
+    expect(result.task).toEqual({
+      id: `task-${item.id}`,
+      channelId: taskChannel,
+    });
+    expect(result.suggestion.status).toBe("started");
+    expect(opened).toEqual([`${owner}:${item.id}:Reply to Dana`]);
+    await expect(engine.start(owner, item.id)).rejects.toBeInstanceOf(
+      ProactiveRefusedError,
+    );
+    expect(opened).toHaveLength(1);
+
+    const other = await openItem(inbox, "Archive old threads");
+    expect((await engine.dismiss(owner, other.id)).status).toBe("dismissed");
+    expect(await store.suggestions(owner)).toEqual([]);
+  });
+});
+
+describe("what needs the person", () => {
+  test("attention counts each Bot's open items, and names the person's newest ping", async () => {
+    await openItem(inbox, "Reply to Dana");
+    await openItem(inbox, "Answer the supplier");
+    const hidden = await openItem(calendar, "Move the standup");
+    await store.resolveSuggestion(owner, hidden.id, "dismissed");
+    expect(await activity.lastPing(owner)).toBeNull();
+    const counts = await activity.attention(owner);
+    expect(counts.find((row) => row.agentId === inboxBot)?.items).toBe(2);
+    expect(counts.find((row) => row.agentId === calendarBot)).toBeUndefined();
+
+    const ping = await store.pings.take(owner);
+    expect(await activity.lastPing(owner)).toBe(ping?.pingId as string);
+  });
+});
+
+describe("the item routes", () => {
+  test("settings say whether an admin left check-ins on; items carry their source and ping; Start answers with the task", async () => {
+    const admin = (allowed: boolean): ProactiveAdmin => ({
+      proactiveAllowed: async () => allowed,
+      proactiveDailyRuns: async () => 24,
+    });
+    const off = routes(replica({ admin: admin(false) }).engine);
+    expect(
+      await (await off.request("http://t/api/proactive/settings")).json(),
+    ).toMatchObject({ allowed: false });
+
+    const item = await openItem(inbox, "Reply to Dana", {
+      sourceLink: "https://mail.example.test/m/1",
+    });
+    const ping = await store.pings.take(owner);
+    const app = routes(
+      replica({
+        admin: admin(true),
+        tasks: {
+          startFromItem: async ({ item: started }) => ({
+            id: `task-${started.id}`,
+            channelId: taskChannel,
+          }),
+        },
+      }).engine,
+    );
+    const settings = (await (
+      await app.request("http://t/api/proactive/settings")
+    ).json()) as { allowed: boolean; settings: { id: string }[] };
+    expect(settings.allowed).toBe(true);
+    expect(settings.settings.map((row) => row.id).sort()).toEqual(
+      [inbox.id, calendar.id].sort(),
+    );
+
+    const { suggestions } = (await (
+      await app.request("http://t/api/proactive/suggestions")
+    ).json()) as { suggestions: Record<string, unknown>[] };
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      id: item.id,
+      title: "Reply to Dana",
+      sourceApp: "Mail",
+      sourceRef: listMessages,
+      sourceLink: "https://mail.example.test/m/1",
+      pingId: ping?.pingId,
+      status: "open",
+    });
+    expect(suggestions[0]).not.toHaveProperty("dedupeKey");
+
+    const started = await app.request(
+      `http://t/api/proactive/suggestions/${item.id}/start`,
+      { method: "POST" },
+    );
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({
+      suggestion: { id: item.id, status: "started" },
+      task: { id: `task-${item.id}`, channelId: taskChannel },
+    });
+    const again = await app.request(
+      `http://t/api/proactive/suggestions/${item.id}/start`,
+      { method: "POST" },
+    );
+    expect(again.status).toBe(400);
+  });
+});
+
+describe("changing a Bot's check-ins", () => {
+  const app = () => routes(replica().engine);
+  const patch = (body: Record<string, unknown>) =>
+    app().request(`http://t/api/proactive/settings/${inbox.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const minutesOut = async () =>
+    ((await store.get(owner, inbox.id)).nextRunAt.getTime() - Date.now()) /
+    60_000;
+
+  test("a change changes only what was sent: off stays off until turned on, and nothing runs at once", async () => {
+    expect(
+      (await patch({ intervalMinutes: 240, focus: "Supplier invoices" }))
+        .status,
+    ).toBe(200);
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: true,
+      intervalMinutes: 240,
+      focus: "Supplier invoices",
+    });
+    // A new interval while on brings the next check-in no later than one new interval out.
+    expect(await minutesOut()).toBeGreaterThan(239);
+    expect(await minutesOut()).toBeLessThanOrEqual(240);
+
+    // Turned off: how often and what to look for are kept.
+    await patch({ enabled: false });
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: false,
+      intervalMinutes: 240,
+      focus: "Supplier invoices",
+    });
+    // How often, changed while off: still off, the focus still there, and nothing runs.
+    await patch({ intervalMinutes: 720 });
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: false,
+      intervalMinutes: 720,
+      focus: "Supplier invoices",
+    });
+    const idle = replica();
+    await idle.engine.sweep();
+    expect(idle.requests).toEqual([]);
+    expect(await runsOf(inbox)).toEqual([]);
+
+    // Turned on: the first check-in is one interval out, never at once.
+    await patch({ enabled: true });
+    expect(await store.get(owner, inbox.id)).toMatchObject({
+      enabled: true,
+      intervalMinutes: 720,
+      focus: "Supplier invoices",
+    });
+    expect(await minutesOut()).toBeGreaterThan(719);
+    await idle.engine.sweep();
+    expect(idle.requests).toEqual([]);
+    // Turning on again while on moves nothing.
+    const due = (await store.get(owner, inbox.id)).nextRunAt.getTime();
+    await patch({ enabled: true });
+    expect((await store.get(owner, inbox.id)).nextRunAt.getTime()).toBe(due);
+
+    // Run now is how a check-in runs at once.
+    expect(await idle.engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    await idle.engine.sweep();
+    expect(idle.requests).toHaveLength(1);
+    expect(await runsOf(inbox)).toMatchObject([
+      { outcome: "quiet", trigger: "run_now" },
+    ]);
+  });
+
+  test("turning check-ins on for a Bot schedules its first check-in an interval out", async () => {
+    const third = `check-in-third-${suite}`;
+    await database.insert(agents).values({
+      id: third,
+      name: "Third Bot",
+      type: "built_in",
+      configuration: {},
+    });
+    try {
+      const created = await app().request("http://t/api/proactive/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agentId: third,
+          channelId: inboxChannel,
+          intervalMinutes: 240,
+        }),
+      });
+      expect(created.status).toBe(201);
+      const { setting } = (await created.json()) as {
+        setting: { id: string; nextRunAt: string; enabled: boolean };
+      };
+      expect(setting.enabled).toBe(true);
+      const out = (Date.parse(setting.nextRunAt) - Date.now()) / 60_000;
+      expect(out).toBeGreaterThan(239);
+      expect(out).toBeLessThanOrEqual(240);
+    } finally {
+      await database.delete(agents).where(eq(agents.id, third));
+    }
+  });
+});
+
+describe("Run now", () => {
+  const press = (engine: ProactiveEngine) =>
+    routes(engine).request(`http://t/api/proactive/settings/${inbox.id}/run`, {
+      method: "POST",
+    });
+  const nothingToRead =
+    "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.";
+
+  test("after a skip it is tried again, saying plainly why it can't, and the Bot's check-ins show the last one and why", async () => {
+    let readable: CheckInApp[] = [];
+    const { engine, requests } = replica({
+      readableApps: async () => readable,
+    });
+    expect(await lastRunOf(engine)).toBeNull();
+
+    // Nothing this Bot can read: skipped at once, and said.
+    for (const _ of [1, 2]) {
+      const answer = await press(engine);
+      expect(answer.status).toBe(200);
+      expect(await answer.json()).toEqual({
+        queued: false,
+        skipped: "no_sources",
+        why: nothingToRead,
+      });
+    }
+    // Pressed again straight after the skip, it was tried again, not silently nothing.
+    expect(
+      (await runsOf(inbox)).map((run) => [
+        run.outcome,
+        run.skipReason,
+        run.trigger,
+      ]),
+    ).toEqual([
+      ["skipped", "no_sources", "run_now"],
+      ["skipped", "no_sources", "run_now"],
+    ]);
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "skipped",
+      skipReason: "no_sources",
+      trigger: "run_now",
+      why: nothingToRead,
+    });
+    expect(requests).toEqual([]);
+
+    // Once it can read an app, the next Run now runs.
+    readable = mailApp;
+    expect(await (await press(engine)).json()).toEqual({ queued: true });
+    await engine.sweep();
+    expect(requests).toHaveLength(1);
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "quiet",
+      trigger: "run_now",
+      why: null,
+    });
+
+    // Within ten minutes of a check-in that ran, it is refused, and says when to try again.
+    const refused = await press(engine);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({
+      error:
+        "This Bot checked in less than ten minutes ago. Try again in 10 minutes.",
+    });
+  });
+
+  test("a Run now skipped when it came up can be pressed again at once, and runs", async () => {
+    let readable = mailApp;
+    const { engine, requests } = replica({
+      readableApps: async () => readable,
+    });
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    // Nothing to read by the time the sweep takes it: skipped there.
+    readable = [];
+    await engine.sweep();
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "skipped",
+      skipReason: "no_sources",
+      trigger: "run_now",
+    });
+    expect(requests).toEqual([]);
+    // Pressed again within the ten minutes: queued and run, never a silent nothing.
+    readable = mailApp;
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    await engine.sweep();
+    expect(requests).toHaveLength(1);
+    expect(await lastRunOf(engine)).toMatchObject({ outcome: "quiet" });
+  });
+
+  test("pressed twice before it runs, it runs once; a check-in that failed says so plainly", async () => {
+    const { engine, requests } = replica({
+      model: async () => {
+        throw new Error("upstream 503 from the provider");
+      },
+    });
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
+    const queued = await database
+      .select()
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, "proactive.run"),
+          sql`${workItems.payload}->>'settingId' = ${inbox.id}`,
+        ),
+      );
+    expect(queued).toHaveLength(1);
+    await engine.sweep();
+    await engine.sweep();
+    expect(requests).toHaveLength(1);
+    expect(await lastRunOf(engine)).toMatchObject({
+      outcome: "failed",
+      why: "Couldn't finish: a service didn't answer.",
+    });
+  });
+});
+
+describe("what a check-in costs and how it is asked", () => {
+  test("a check-in is put to the model as a check-in, never as a routine firing: on its schedule, or because the person asked", async () => {
+    await due(inbox);
+    const scheduled = replica({ readableApps: async () => mailApp });
+    await scheduled.engine.sweep();
+    const asked = askedOf(scheduled.requests[0]);
+    expect(asked).toStartWith(CHECK_IN_OPENING.schedule);
+    expect(asked).not.toContain(FIRING_FRAME[0]);
+    expect(asked).toContain(
+      "It is not a request to set up, list or change a routine or a schedule",
+    );
+    /*
+     * What a check-in is for, asked of the apps the person connected and named: something they
+     * need to do and probably don't know about yet, raised only then, otherwise silence. Ahead of
+     * the window, the repeats and the read-only rule, which all still follow.
+     */
+    expect(asked).toContain(
+      "Your one question: is there something your person needs to do that they probably don't know about yet? Look for it in what they have connected: Mail. Raise only that. If there is nothing like that, stay silent.",
+    );
+    expect(asked.indexOf("Your one question:")).toBeLessThan(
+      asked.indexOf("Look only at what is new since"),
+    );
+    expect(asked).toContain("Nothing you raised before is still open.");
+    expect(asked).toContain("You can only read in this run.");
+    expect(asked).toContain("naming the tool you read the evidence with");
+
+    await database
+      .update(proactiveRuns)
+      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(proactiveRuns.settingId, inbox.id));
+    const pressed = replica();
+    await pressed.engine.runNow(owner, inbox.id);
+    await pressed.engine.sweep();
+    const askedNow = askedOf(pressed.requests[0]);
+    expect(askedNow).toStartWith(CHECK_IN_OPENING.run_now);
+    expect(askedNow).not.toContain(FIRING_FRAME[0]);
+  });
+
+  test("a check-in that reached the model leaves one model usage row; one skipped before it leaves none", async () => {
+    const controls = await installEnterpriseControls({
+      database,
+      databaseUrl: testDatabaseUrl(),
+      auditStore,
+      builtInModel: "openai/gpt-check-in",
+      env: {},
+    });
+    const usage = () =>
+      database.select().from(modelUsage).where(eq(modelUsage.userId, owner));
+    try {
+      await due(inbox);
+      const nothing = replica({ readableApps: async () => [] });
+      await nothing.engine.sweep();
+      expect(await usage()).toEqual([]);
+
+      await due(inbox);
+      const { engine } = replica();
+      await engine.sweep();
+      const [run] = (await runsOf(inbox)).filter(
+        (row) => row.outcome === "quiet",
+      );
+      expect(await usage()).toMatchObject([
+        {
+          agentId: inboxBot,
+          threadId: run?.threadId,
+          runId: run?.id,
+          model: "openai/gpt-check-in",
+          source: "configured",
+          allowed: true,
+        },
+      ]);
+    } finally {
+      await database.delete(modelUsage).where(eq(modelUsage.userId, owner));
+      await controls.stop();
+    }
+  });
+});

@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Sixteen things change for an existing deployment:
+**Before upgrading.** Seventeen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -77,6 +77,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+- Bots now check in on their own and tell a person when something needs them (below). It is on by
+  default for every Bot a person has talked to. Migrations `0070_proactive_check_ins` and
+  `0071_check_in_read_labels` add its tables. Admin → Check-ins turns it off for everyone.
+
+### Bots tell you when something needs you
+
+A Bot a person has talked to now checks what that person connected (any app or server they
+connected with their own account), quietly and at most once an hour, and only reads. When it finds
+something that needs the person, it says why and where it came from, and the person hears about it
+at most once an hour, with every Bot's items in one message: in the app (Needs you, a badge and a
+browser notification), by phone push, and on Slack, Teams or SMS where the person already talks to
+a Bot. Nothing is sent when nothing needs them. Start turns an item into a task that asks before
+every send or change; Hide keeps it from coming back for 30 days. A person turns it off in Settings
+→ Notifications and chooses where these go under "Something needs you"; an admin turns it off for
+everyone, changes the daily limit (24 check-ins per Bot) and sees how often items are started under
+Admin → Check-ins.
 
 ### A computer closes browsers nobody is using when its memory runs high
 

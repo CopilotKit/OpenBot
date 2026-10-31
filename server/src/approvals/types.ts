@@ -38,7 +38,13 @@ export type ApprovalPolicyOutcome = {
     | "auto_review"
     | "default"
     /** The person already declined this action, or an equivalent, earlier in this conversation. */
-    | "person_declined";
+    | "person_declined"
+    /**
+     * A task started from a check-in item: every change it makes asks first, whatever the person's
+     * "Ask before making changes" says (tasks/turn.ts). Kept apart from `default` so turning that
+     * switch off, or saving an allow rule, never withdraws what a task is waiting on.
+     */
+    | "task";
   reason: string;
   ruleId?: string;
   review?: {
@@ -65,6 +71,13 @@ export type ApprovalCandidate = {
   args: unknown;
   target?: unknown;
   continuation?: ApprovalContinuation;
+  /**
+   * A read with the trust a check-in gives it: a tool on an app the person connected with their own
+   * account, whose server says it only reads (`labelledRead` in plugins/catalogue.ts). Chat goes on
+   * judging a call by `effect`; in a task's conversation this is the one kind of call that runs
+   * without asking. Not part of what the person approves, so not in the action's digest.
+   */
+  ownConnectionRead?: true;
 };
 export type ApprovalAction = ApprovalCandidate & {
   runId: string;
@@ -215,8 +228,22 @@ export type ApprovalStore = {
   finish(ownerUserId: string, id: string): Promise<void>;
   rules(ownerUserId: string): Promise<ApprovalRule[]>;
   revoke(ownerUserId: string, id: string): Promise<void>;
+  /**
+   * Whether this thread is the conversation of a task the person started from a check-in item,
+   * where every change asks first. Absent where there are no tasks.
+   */
+  asksEveryChange?(ownerUserId: string, threadId: string): Promise<boolean>;
   policy?: ApprovalPolicyStore;
 };
+/**
+ * Whether an approval may be answered with a standing rule ("Always allow here"). Not one a task
+ * started from a check-in raised: those ask before every change whatever the person's rules say
+ * (`TASK_ASKS` in service.ts), so a rule saved from one would be ignored the next time and only
+ * mislead. Allow once and Deny stay.
+ */
+export function offersStandingRule(action: Pick<ApprovalAction, "policy">) {
+  return action.policy?.source !== "task";
+}
 export class ApprovalRefusedError extends Error {
   constructor(message: string) {
     super(message);

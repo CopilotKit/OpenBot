@@ -58,6 +58,8 @@ export type ApprovalInbox = {
       scope: string;
       args: unknown;
       target?: unknown;
+      /** Why it asked. A check-in task's approval (`source` "task") offers no standing rule. */
+      policy?: { source: string; reason: string };
     };
   }[];
   questions?: {
@@ -78,6 +80,40 @@ export type Bot = {
   canManage: boolean;
 };
 export type BotLifecycle = { paused: boolean; pausedAt: string | null };
+/**
+ * Something a Bot's check-in found that needs the person, as `GET /api/proactive/suggestions` lists
+ * it (open ones only). `detail` says why it was raised; `sourceApp` is the app it was read in.
+ */
+export type CheckInItem = {
+  id: string;
+  agentId: string;
+  title: string;
+  detail: string;
+  sourceApp: string | null;
+  sourceLink: string | null;
+  createdAt: string;
+};
+/** What `POST /api/proactive/suggestions/:id/start` made of an item: a task in its own conversation. */
+export type StartedItem = { task: { id: string; channelId: string } };
+export type TaskStatus =
+  | "needs_input"
+  | "working"
+  | "resolved"
+  | "failed"
+  | "ready_for_review";
+/** A task started from an item, as `GET /api/tasks` lists it. */
+export type BotTask = {
+  id: string;
+  agentId: string;
+  channelId: string;
+  title: string;
+  status: TaskStatus;
+  /** Why its turn couldn't finish, while failed. */
+  failure: string | null;
+  /** The last thing said in its conversation. */
+  next: string | null;
+  updatedAt: string;
+};
 export type RoutineStatus =
   | "running"
   | "succeeded"

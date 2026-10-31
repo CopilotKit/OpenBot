@@ -17,11 +17,20 @@ export type Reachability = {
     optedOutAt?: string | null;
   }[];
   devices: { id: string; platform: "ios" | "android"; enabled: boolean }[];
+  /** The server's `delivery_outbox` rows (server/src/delivery/types.ts), newest first. */
   deliveries: {
     id: string;
-    transport: string;
-    kind: string;
-    state: string;
+    transport: "slack" | "teams" | "sms" | "push";
+    kind: "reply" | "question" | "approval" | "attention";
+    state:
+      | "queued"
+      | "running"
+      | "accepted"
+      | "sent"
+      | "delivered"
+      | "failed"
+      | "unknown"
+      | "opted_out";
     error: string | null;
     createdAt: string;
   }[];

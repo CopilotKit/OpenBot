@@ -21,6 +21,7 @@ export * from "./recorder";
 export * from "./responsibilities";
 export * from "./scim";
 export * from "./shared-use";
+export * from "./tasks";
 export * from "./team-bots";
 export * from "./voice";
 export * from "./work";

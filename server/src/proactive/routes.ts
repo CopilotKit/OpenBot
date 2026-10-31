@@ -1,11 +1,72 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppVariables } from "../auth/guards";
+import { plainFailure } from "../tasks/state";
 import type { ProactiveEngine } from "./engine";
-import type { ProactiveStore } from "./store";
-import { ProactiveNotFoundError, ProactiveRefusedError } from "./types";
+import {
+  type ProactiveRunRow,
+  type ProactiveStore,
+  STOPPED_BEFORE_FINISHING,
+  unreachedApps,
+} from "./store";
+import {
+  ProactiveNotFoundError,
+  ProactiveRefusedError,
+  type ProactiveSuggestion,
+  SKIPPED_BECAUSE,
+} from "./types";
 
-/** `/api/proactive`: a person's background-research settings and the suggestions they produced. */
+/**
+ * An item as the person's app reads it (`SuggestionPayload` once it is JSON). Its normalized title
+ * is the repeat check's business, not theirs.
+ */
+function payloadOf({ dedupeKey: _, ...item }: ProactiveSuggestion) {
+  return item;
+}
+
+/** "Mail", "Mail and Calendar", "Mail, Calendar and Drive". */
+function listed(apps: readonly string[]) {
+  return apps.length <= 1
+    ? (apps[0] ?? "")
+    : `${apps.slice(0, -1).join(", ")} and ${apps.at(-1)}`;
+}
+
+/**
+ * Why a check-in couldn't finish, in one plain sentence. An app it could not reach is named, since
+ * that is what the person can do something about; the next check-in reads what it missed.
+ */
+function failedBecause(error: string | null) {
+  const apps = unreachedApps(error);
+  if (apps)
+    return `Couldn't reach ${listed(apps)}. The next check-in will try again.`;
+  return `Couldn't finish: ${plainFailure(error === STOPPED_BEFORE_FINISHING ? null : error)}.`;
+}
+
+/**
+ * A setting's newest check-in as the person reads it (`LastCheckInPayload`): how it ended and, for
+ * one that was skipped or couldn't finish, why, in one plain sentence. Never the error itself, which
+ * is an operator's and can be a status code or a stack: the same plain words a task uses.
+ */
+function lastRunOf(run: ProactiveRunRow | undefined) {
+  if (!run) return null;
+  const why =
+    run.outcome === "skipped" && run.skipReason
+      ? SKIPPED_BECAUSE[run.skipReason]
+      : run.outcome === "failed"
+        ? failedBecause(run.error)
+        : null;
+  return {
+    outcome: run.outcome,
+    trigger: run.trigger,
+    skipReason: run.skipReason,
+    why,
+    itemsRaised: run.itemsRaised,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+  };
+}
+
+/** `/api/proactive`: a person's check-in settings and the items their Bots raised. */
 export function createProactiveRoutes(
   store: ProactiveStore,
   engine: ProactiveEngine,
@@ -27,13 +88,24 @@ export function createProactiveRoutes(
       }),
     );
     return context.json(
-      { error: "Background research is unavailable. Try again." },
+      { error: "Check-ins aren't available right now. Try again." },
       503,
     );
   });
-  routes.get("/settings", async (context) =>
-    context.json({ settings: await store.list(context.var.actor.id) }),
-  );
+  routes.get("/settings", async (context) => {
+    const [settings, runs, allowed] = await Promise.all([
+      store.list(context.var.actor.id),
+      store.latestRuns(context.var.actor.id),
+      engine.allowed(context.var.actor.id),
+    ]);
+    return context.json({
+      settings: settings.map((setting) => ({
+        ...setting,
+        lastRun: lastRunOf(runs.get(setting.id)),
+      })),
+      allowed,
+    });
+  });
   routes.post("/settings", async (context) =>
     context.json(
       {
@@ -65,22 +137,22 @@ export function createProactiveRoutes(
   });
   routes.get("/suggestions", async (context) =>
     context.json({
-      suggestions: await store.suggestions(context.var.actor.id),
-    }),
-  );
-  routes.post("/suggestions/:id/start", async (context) =>
-    context.json({
-      suggestion: await engine.start(
-        context.var.actor.id,
-        context.req.param("id"),
+      suggestions: (await store.suggestions(context.var.actor.id)).map(
+        payloadOf,
       ),
     }),
   );
+  routes.post("/suggestions/:id/start", async (context) => {
+    const { suggestion, task } = await engine.start(
+      context.var.actor.id,
+      context.req.param("id"),
+    );
+    return context.json({ suggestion: payloadOf(suggestion), task });
+  });
   routes.post("/suggestions/:id/dismiss", async (context) =>
     context.json({
-      suggestion: await engine.dismiss(
-        context.var.actor.id,
-        context.req.param("id"),
+      suggestion: payloadOf(
+        await engine.dismiss(context.var.actor.id, context.req.param("id")),
       ),
     }),
   );

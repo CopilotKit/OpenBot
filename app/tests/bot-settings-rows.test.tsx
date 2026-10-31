@@ -91,7 +91,7 @@ function serving(
       });
     }
     if (url === "/api/proactive/settings") {
-      return Response.json({ settings: [] });
+      return Response.json({ settings: [], allowed: true });
     }
     if (url === "/api/approvals") {
       return Response.json({

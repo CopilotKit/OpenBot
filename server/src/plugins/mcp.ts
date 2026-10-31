@@ -210,6 +210,15 @@ export type ListedTool = McpTool & {
   effect?: "read" | "write";
   /** Whether the vendor marked it as destroying something. */
   destructive?: boolean;
+  /**
+   * Whether the server marked it read-only (`annotations.readOnlyHint`), recorded as said.
+   *
+   * NOT AN EFFECT, and never folded into `effect`: that field decides whether chat asks first, and
+   * {@link declaredEffect} explains why a read-only hint is not believed there. This is read only by
+   * a check-in, and only for an app the person connected with their own account (see
+   * `labelledRead` in `catalogue.ts`).
+   */
+  declaredRead?: boolean;
   /** The vendor's version string, when calling the action requires one. */
   version?: string;
 };
@@ -408,7 +417,12 @@ export const listNeedsCredential = true;
  * an answer is a server an administrator added by URL, which has no reviewed list behind it and
  * whose every tool is a write for exactly that reason — and there, believing it means letting an
  * arbitrary server declare its own tools harmless and be believed. Zero accuracy gained, one
- * fail-open introduced, so it is not read at all.
+ * fail-open introduced, so it is not read here.
+ *
+ * IT IS RECORDED BESIDE THE EFFECT, as {@link ListedTool.declaredRead}, for one reader with a
+ * different question: a check-in, which may call a tool only when it says it only reads, and only on
+ * an app the person connected with their own account. That reader never changes what this function
+ * answers for chat.
  *
  * `destructiveHint` is taken on presence of `true` only, never inverted. The specification gives it
  * a default of true when a tool is not read-only, and applying that default would reclassify every
@@ -425,6 +439,19 @@ function declaredEffect(annotations: ToolAnnotations | undefined) {
   return { effect: "write", destructive: true } as const;
 }
 
+/**
+ * The server's `readOnlyHint`, as it said it, for a check-in to read (see {@link ListedTool}).
+ *
+ * Only an explicit `true` counts, and never beside `destructiveHint: true`: a listing that says both
+ * contradicts itself, and {@link declaredEffect} already reads it as destructive.
+ */
+function declaredRead(annotations: ToolAnnotations | undefined) {
+  return annotations?.readOnlyHint === true &&
+    annotations.destructiveHint !== true
+    ? ({ declaredRead: true } as const)
+    : {};
+}
+
 /** What this server says it offers, right now. */
 export async function listTools(connection: Connection): Promise<ListedTool[]> {
   return withClient(connection, async (client) => {
@@ -436,6 +463,7 @@ export async function listTools(connection: Connection): Promise<ListedTool[]> {
       description: tool.description ?? "",
       inputSchema: (tool.inputSchema ?? {}) as Record<string, unknown>,
       ...declaredEffect(tool.annotations),
+      ...declaredRead(tool.annotations),
     }));
   });
 }

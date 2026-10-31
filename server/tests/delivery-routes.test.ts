@@ -32,6 +32,8 @@ function fixture(
     converse?: ConverseResult;
     bound?: boolean;
     identity?: IdentityAdapter;
+    /** Why the gate asked, as the stored request carries it; "task" for a check-in task's. */
+    policySource?: string;
   } = {},
 ) {
   const calls: unknown[] = [];
@@ -124,6 +126,16 @@ function fixture(
               effect: "write",
               threadId: "canonical",
               args: { url: "https://example.com" },
+              ...(options.policySource
+                ? {
+                    policy: {
+                      behaviour: "ask" as const,
+                      source: options.policySource as "task",
+                      reason:
+                        "Tasks started from a check-in ask before every change.",
+                    },
+                  }
+                : {}),
             },
           };
         },
@@ -476,6 +488,44 @@ test("bound sender runs the canonical turn and an approval becomes an OpenTag ca
     },
   });
   expect(result.events.at(-1)).toMatchObject({ type: "RUN_FINISHED" });
+});
+test("a check-in task's approval becomes a card without Always allow, and an older card's Always is once", async () => {
+  const f = fixture({
+    policySource: "task",
+    converse: {
+      kind: "waiting",
+      binding: bound,
+      inboxId: "in1",
+      replyText: "",
+      extras: { approvals: [APPROVAL], questions: [] },
+    },
+  });
+  const result = await run(f, {
+    context: [sender()],
+    messages: [{ id: "m9", role: "user", content: "<@UBOT> open example.com" }],
+  });
+  const card = result.events.find(
+    (e) => e.type === "CUSTOM" && e.name === "on_interrupt",
+  );
+  expect(card.value.__copilotkit_interrupt_value__.args).toMatchObject({
+    action: "Research Bot: browser/navigate",
+    allow_always: false,
+  });
+  const resumed = await run(f, {
+    forwardedProps: {
+      command: {
+        resume: {
+          "0f8fad5bd9cb469fa16570867728950e": {
+            confirmed: true,
+            always: true,
+            by: "slack:T1:U1",
+          },
+        },
+      },
+    },
+  });
+  expect(said(resumed.events)).toContain("Allowed once");
+  expect(f.decisions).toEqual([["owner", APPROVAL, "allow_once"]]);
 });
 test("in a conversation others may read, the answer goes to the owner privately", async () => {
   const f = fixture({

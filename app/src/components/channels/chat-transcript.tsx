@@ -61,7 +61,7 @@ import type { CardPlace } from "@/lib/copilot/carry-on";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { readToolName } from "@/lib/plugins/tool-name";
+import { readToolName } from "@openbot/shared/tool-name";
 import {
   asText,
   forDisplay,

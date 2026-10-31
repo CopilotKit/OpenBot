@@ -29,6 +29,7 @@ import {
   isCapability,
 } from "./capabilities";
 import { ACTION_RECORD_RETENTION_DAYS, enterpriseControls } from "./controls";
+import { parseMetricsDays, proactiveMetrics } from "./proactive-metrics";
 import type { EnterpriseSettings } from "./settings-store";
 
 /**
@@ -82,6 +83,7 @@ const networkInput = z.strictObject({
 
 const MODEL = z.string().trim().min(1).max(200);
 const SERVER = z.string().trim().min(1).max(200);
+const DAILY_RUNS_ERROR = "Enter a whole number of check-ins from 1 to 1440.";
 
 const settingInputs: {
   [K in keyof EnterpriseSettings]: z.ZodType<EnterpriseSettings[K]>;
@@ -98,6 +100,16 @@ const settingInputs: {
     servers: z.array(SERVER).max(500),
   }),
   skillSharing: z.boolean(),
+  /*
+   * At least one. Stopping check-ins altogether is the Check-ins switch, which tells the people it
+   * covers that an admin turned them off; a cap of none would tell them their Bot used its day. At
+   * most one a minute, the sweep's own pace.
+   */
+  proactiveDailyRuns: z
+    .number({ error: DAILY_RUNS_ERROR })
+    .int({ error: DAILY_RUNS_ERROR })
+    .min(1, { error: DAILY_RUNS_ERROR })
+    .max(1440, { error: DAILY_RUNS_ERROR }),
 };
 
 export function createEnterpriseAdminRoutes(
@@ -446,6 +458,46 @@ export function createEnterpriseAdminRoutes(
         stopped: [],
         skipped: "another server is sweeping, or the sweep is off",
       },
+    );
+  });
+
+  return routes;
+}
+
+/**
+ * `/api/admin/proactive`: the numbers behind Admin, Check-ins (`proactive-metrics.ts`). Admins only.
+ * The switch and the daily cap it shows are enterprise controls, changed through the routes above
+ * (`PUT /api/admin/enterprise/capabilities` with `proactive`, and
+ * `PUT /api/admin/enterprise/settings/proactiveDailyRuns`), so they are audited like every other.
+ */
+export function createProactiveAdminRoutes(
+  requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+) {
+  const routes = new Hono<{ Variables: AppVariables }>();
+  routes.use("*", requireUser);
+
+  routes.get("/", async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const controls = enterpriseControls();
+    if (!controls)
+      return context.json(
+        { error: "Enterprise controls are not running on this server." },
+        503,
+      );
+    const parsed = parseMetricsDays(context.req.query("days") ?? null);
+    if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    // Sequential: see the note in controls.ts about concurrent statements on one connection.
+    const capabilityRows = await controls.store.capabilityRows();
+    const admins = await controls.store.adminIds();
+    const settings = await controls.store.settings();
+    return context.json(
+      await proactiveMetrics(controls.deps.database, {
+        days: parsed.days,
+        dailyRuns: settings.proactiveDailyRuns,
+        capabilityRows,
+        admins,
+      }),
     );
   });
 

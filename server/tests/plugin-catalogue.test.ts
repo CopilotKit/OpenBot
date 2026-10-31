@@ -6,6 +6,7 @@ import {
   classifyTool,
   customUrlRefusal,
   hostAdmissible,
+  labelledRead,
   resolveServerUrl,
   serverCredentialKind,
 } from "../src/plugins/catalogue";
@@ -249,6 +250,89 @@ describe("Notion", () => {
     }
     expect(classifyTool(entry, "notion-search", true)).toBe("read");
     expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+  });
+
+  test("names its reads, so a tool Notion adds later is a write until it is listed", () => {
+    /*
+     * Each of these is on Notion's published tool list (2026-10-30) and on neither of this entry's
+     * lists until now, so each was offered to a Bot as a read: a delete, a comment edit, a calendar
+     * event and an agent session. An advertised name the read list omits is a write.
+     */
+    for (const name of [
+      "notion-delete-pages",
+      "notion-update-comment",
+      "notion-calendar-create-events",
+      "notion-spawn-session",
+      "notion-a-tool-added-next-year",
+    ])
+      expect(classifyTool(entry, name, true)).toBe("write");
+    expect(entry?.readTools).toContain("notion-fetch");
+    expect(entry?.readTools).toContain("notion-query-data-sources");
+    for (const name of entry?.readTools ?? [])
+      expect(classifyTool(entry, name, true)).toBe("read");
+    // No name is on both lists.
+    expect(
+      entry?.readTools?.filter((name) => entry.writeTools.includes(name)),
+    ).toEqual([]);
+  });
+});
+
+describe("what a check-in may call: the tool's own read-only label", () => {
+  const notion = catalogueEntry("notion");
+  const nothing = { effect: null, destructive: false, declaredRead: false };
+
+  test("a reviewed read is one, and the server's own readOnlyHint makes one of a tool nobody listed", () => {
+    expect(labelledRead(notion, "notion-search", nothing)).toBe(true);
+    expect(
+      labelledRead(notion, "notion-a-new-reader", {
+        ...nothing,
+        declaredRead: true,
+      }),
+    ).toBe(true);
+    // A server added by URL, labelled read-only by the server itself.
+    expect(
+      labelledRead(null, "list_notes", { ...nothing, declaredRead: true }),
+    ).toBe(true);
+    // A broker's own read label, as Composio and Arcade record it.
+    expect(
+      labelledRead(null, "GMAIL_FETCH_EMAILS", { ...nothing, effect: "read" }),
+    ).toBe(true);
+  });
+
+  test("no label is no read; a destructive label or a reviewed write always wins", () => {
+    expect(labelledRead(null, "list_notes", nothing)).toBe(false);
+    expect(labelledRead(notion, "notion-a-new-tool", nothing)).toBe(false);
+    expect(
+      labelledRead(null, "GMAIL_SEND_EMAIL", { ...nothing, effect: "write" }),
+    ).toBe(false);
+    expect(
+      labelledRead(notion, "notion-fetch", {
+        effect: "write",
+        destructive: true,
+        declaredRead: true,
+      }),
+    ).toBe(false);
+    expect(
+      labelledRead(null, "purge", {
+        effect: "read",
+        destructive: true,
+        declaredRead: true,
+      }),
+    ).toBe(false);
+    expect(
+      labelledRead(notion, "notion-update-page", {
+        ...nothing,
+        declaredRead: true,
+      }),
+    ).toBe(false);
+  });
+
+  test("chat's answer is not changed by the label: a server's readOnlyHint is still a write there", () => {
+    // `classifyTool` never sees the hint, so chat goes on asking first exactly as it did.
+    expect(classifyTool(null, "list_notes", true, null)).toBe("write");
+    expect(classifyTool(notion, "notion-a-new-reader", true, null)).toBe(
+      "write",
+    );
   });
 });
 

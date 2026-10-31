@@ -43,6 +43,7 @@ import {
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
 import { agentProfiles, agents } from "../db/schema";
+import type { ProactiveAdmin } from "../proactive/contracts";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
 import type { WebBotAuth } from "../web-bot-auth";
@@ -51,12 +52,14 @@ import {
   type Capability,
   type CapabilityRow,
   capabilityRefusal,
+  DEFAULT_CAPABILITIES,
   type Member,
   resolveAllCapabilities,
   resolveCapability,
 } from "./capabilities";
 import {
   createEnterpriseStore,
+  DEFAULT_ENTERPRISE_SETTINGS,
   ENTERPRISE_TOPIC,
   type EnterpriseSettings,
   type EnterpriseStore,
@@ -921,6 +924,53 @@ export function auditRoutineStore<T extends RoutineLike>(
 /* ------------------------------ headless turns ------------------------------ */
 
 /**
+ * One usage row for a headless turn that reached the model, as the gate writes one for each browser
+ * run (`gate.ts`): the configured model for a built-in Bot, `unknown` for a remote one, which chooses
+ * its own and was not watched here.
+ *
+ * Without it a turn nobody started from the browser served a model and left no row, so an admin
+ * reading usage never saw what background check-ins cost. Called only once the turn was admitted, so
+ * a turn the allowlist refused keeps the one refused row `headlessTurnRefusal` wrote for it. A failed
+ * write is logged and never fails the turn, as the gate's is.
+ */
+export async function recordHeadlessUsage(input: {
+  ownerUserId: string;
+  agentId: string;
+  threadId: string;
+  runId: string;
+}): Promise<void> {
+  const controls = installed;
+  if (!controls) return;
+  try {
+    const [row] = await controls.deps.database
+      .select({ type: agents.type })
+      .from(agents)
+      .where(eq(agents.id, input.agentId))
+      .limit(1);
+    const model =
+      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+    // A model nobody named is allowed only while there is no list, as the gate records it.
+    const listed = controls.snapshot()?.settings.modelAllowlist?.enabled;
+    await controls.store.recordModelUsage({
+      userId: input.ownerUserId,
+      agentId: input.agentId,
+      threadId: input.threadId,
+      runId: input.runId,
+      model: model ?? `remote:${input.agentId}`,
+      source: model ? "configured" : "unknown",
+      allowed: model !== undefined || !listed,
+    });
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "model-usage-write-failed",
+        error: String(error),
+      }),
+    );
+  }
+}
+
+/**
  * Whether a turn nobody started from the browser may run, and the sentence to refuse it with.
  *
  * The HTTP gate (`gate.ts`) applies "Use Bots" and the model allowlist to a browser run. Routines,
@@ -979,3 +1029,55 @@ export async function headlessTurnRefusal(input: {
     return "This deployment's enterprise controls could not be checked, so the Bot did not run.";
   }
 }
+
+/* ------------------------------ check-ins ------------------------------ */
+
+/**
+ * The admin's say over check-ins, as the proactive engine asks it before any model call
+ * (`proactive/engine.ts`): the "Check-ins" switch for this person, and how many check-ins a Bot may
+ * run for one person in a day.
+ *
+ * Both read fresh, never from the snapshot, as every asynchronous check here does: a switch an admin
+ * flipped a second ago stops the next check-in on every replica. Without the controls installed (a
+ * script, a test that never installs them) the defaults stand, which is check-ins on and 24 a day.
+ * A switch that can't be read refuses, as every other one does, and says so in the log: a check-in
+ * then is skipped, never run unchecked.
+ */
+export const proactiveAdmin: ProactiveAdmin = {
+  async proactiveAllowed(ownerUserId) {
+    const controls = installed;
+    if (!controls) return DEFAULT_CAPABILITIES.proactive;
+    return controls
+      .capabilityFor(ownerUserId, "proactive")
+      .catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            type: "proactive-capability-read-failed",
+            userId: ownerUserId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return false;
+      });
+  },
+  /*
+   * One number for every Bot: the cap is per Bot, so a person with five Bots gets five Bots' worth,
+   * and the admin sets how many each may use.
+   */
+  async proactiveDailyRuns(_agentId) {
+    const controls = installed;
+    if (!controls) return DEFAULT_ENTERPRISE_SETTINGS.proactiveDailyRuns;
+    return controls.store
+      .settings()
+      .then((settings) => settings.proactiveDailyRuns)
+      .catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            type: "proactive-daily-runs-read-failed",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return 0;
+      });
+  },
+};

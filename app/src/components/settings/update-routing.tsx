@@ -34,6 +34,11 @@ const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
     title: "Questions",
     description: "Things a Bot asked you and is waiting on.",
   },
+  attention: {
+    title: "Something needs you",
+    description:
+      "What your Bots' check-ins found, at most once an hour, every Bot in one message.",
+  },
 };
 
 const TRANSPORTS: { id: UpdateTransport; label: string }[] = [
