@@ -70,19 +70,23 @@ type StepId = keyof typeof STEP_NUMBER;
 const isStepId = (value: unknown): value is StepId =>
   typeof value === "string" && Object.hasOwn(STEP_NUMBER, value);
 
+/** Where Skip intro lands: the first step after the intro. */
+const AFTER_INTRO: StepId = "setup";
+
 /** The step a stored number names, or null for "not started" and for a number no step has. */
 function stepForNumber(step: number | undefined): StepId | null {
   const found = Object.entries(STEP_NUMBER).find(([, at]) => at === step);
   return found ? (found[0] as StepId) : null;
 }
 
+/** Pages a step other than the checklist can carry to the end, by what they're called. */
+const STEP_PAGES: Record<string, string> = { "/admin/plugins": "Plugins" };
+
 /**
  * A page of this app, and nothing else: a path, never another origin, a scheme, a query or a walk
- * upward. What a checklist link opens once onboarding is done, carried in the address as `?open=`
- * so a reload on the name step keeps it.
+ * upward. What a link on a step opens once onboarding is done, carried in the address as `?open=`
+ * so a reload keeps it.
  */
-/** Pages a step other than the checklist can carry through the name step, by what they're called. */
-const STEP_PAGES: Record<string, string> = { "/admin/plugins": "Plugins" };
 
 const isAppPath = (value: unknown): value is string =>
   typeof value === "string" &&
@@ -174,7 +178,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
    * WHERE SOMEBODY IS LIVES IN THE ADDRESS. `?step=<id>` is the step on screen, so a reload stays
    * on it, browser Back and Forward walk the steps, and a consent started on a step comes back to
    * it (`?step=apps`; see `connectedAccountsUrlFor` on the server). `?connected=failed` says that
-   * consent did not go through, and is dropped once read. `?open=` is the page a checklist link
+   * consent did not go through, and is dropped once read. `?open=` is the page a link on a step
    * asked for, opened once the name step finishes. Anything else is ignored.
    */
   validateSearch: (
@@ -388,24 +392,27 @@ function RouteComponent() {
    * CONTINUE PUSHES, AND BACK RETURNS THROUGH HISTORY WHEN IT CAN. Continue adds an entry carrying
    * the step it was pressed on, so browser Back walks back a step. The frame's Back pops that entry
    * when it was pushed from the step behind, and otherwise (arriving by a link, say) replaces this
-   * entry with the step behind, so history never holds the same step twice in a row. A page a
-   * checklist link asked for rides along to the name step, and only there.
+   * entry with the step behind, so history never holds the same step twice in a row. A page a link
+   * on a step asked for rides along on every step after it, and opens at the end.
    */
   const cameFrom = (location.state as OnboardingEntry).onboardingFrom;
   const move = (
     to: string,
     way: "forward" | "back",
-    open: string | undefined = undefined,
+    open: string | undefined = search.open,
   ) => {
     if (!isStepId(to)) return;
     setFailedOn(null);
-    // Skip intro pushes Apps directly. Back follows that actual path, including after reload.
+    /*
+     * Skip intro, a pick from the list and a consent's return can push a step from further back
+     * than the one before it. Back follows that actual path, including after a reload.
+     */
+    const ids = steps.map((step) => step.id);
+    const at = ids.indexOf(current);
+    const from = isStepId(cameFrom) ? ids.indexOf(cameFrom) : -1;
     if (
       way === "back" &&
-      (cameFrom === to ||
-        (current === "apps" &&
-          isStepId(cameFrom) &&
-          STEP_NUMBER[cameFrom] < STEP_NUMBER.apps))
+      (cameFrom === to || (to === ids[at - 1] && from !== -1 && from < at))
     ) {
       router.history.back();
       return;
@@ -414,7 +421,7 @@ function RouteComponent() {
       way === "forward" ? { onboardingFrom: current } : {};
     navigate({
       to: "/onboarding",
-      search: { step: to, open: to === "name" ? open : undefined },
+      search: { step: to, open },
       replace: way === "back",
       state,
     });
@@ -422,7 +429,7 @@ function RouteComponent() {
 
   /*
    * THE WAY OUT IS THE NAME STEP'S GET STARTED. It saves the name, then completion is saved, then
-   * the orb plays its finish, the page fades, and the app opens: home, or the page a checklist link
+   * the orb plays its finish, the page fades, and the app opens: home, or the page a link on a step
    * asked for. The promise Get started waits on lasts until the fade, so its button says Saving…
    * and stays pressed the whole way out. A completion that fails is said by the form, under it.
    */
@@ -467,7 +474,7 @@ function RouteComponent() {
   } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
   const notify = useNotifyStep(defaultAgentProfile(agents)?.name ?? PRODUCT);
-  // The checklist's answer names the page a carried link opens, so the name step can say which.
+  // The checklist's answer names the page a carried link opens, so each step after it can say which.
   const { data: checklist } = useQuery({
     ...setupChecklistQueryOptions(),
     enabled: search.open !== undefined,
@@ -503,24 +510,52 @@ function RouteComponent() {
         </Button>
       </div>
     ) : undefined;
-  const intro: OnboardingStep[] = [
+  /*
+   * Skip intro on every intro step but the last, where it would only do what Continue does.
+   */
+  const introSteps = [
     welcome,
     computer,
     team,
     approval,
     ...(capabilities?.localEvaluation ? [selfhost] : []),
-  ].map((step) => ({
+  ];
+  const intro: OnboardingStep[] = introSteps.map((step, at) => ({
     ...step,
     primaryDisabled: !capabilities,
     notice: capabilitiesFailed,
-    secondary: { label: "Skip intro", onClick: () => move("apps", "forward") },
+    secondary:
+      at < introSteps.length - 1
+        ? { label: "Skip intro", onClick: () => move(AFTER_INTRO, "forward") }
+        : undefined,
   }));
+  /*
+   * A link on a step that opens another page carries it to the end and moves on to the next step:
+   * onboarding can't stay open behind another page, and jumping to the name step would skip the
+   * steps between.
+   */
+  const carryOn = (from: StepId, target: { path: string }) => {
+    const ids = steps.map((step) => step.id);
+    move(ids[ids.indexOf(from) + 1] ?? "name", "forward", target.path);
+  };
   const steps: OnboardingStep[] = [
     ...intro,
     /*
-     * Two optional steps, before the checklist. Continue and Not now both move on, and Not now
-     * writes nothing; the checklist after them says what is left to set up.
+     * The checklist first, so an empty app list on the next step has already been explained. Then
+     * two optional steps: Continue and Not now both move on, and Not now writes nothing.
      */
+    {
+      id: "setup",
+      title: "Check your setup",
+      intro: () => (
+        <StepIntro title="Check your setup">
+          <p>See what's ready and what still needs setting up.</p>
+        </StepIntro>
+      ),
+      demo: () => (
+        <SetupChecklist openPage={(target) => carryOn("setup", target)} />
+      ),
+    },
     {
       id: "apps",
       title: "Connect apps",
@@ -536,7 +571,7 @@ function RouteComponent() {
         <ConnectAppsStep
           failed={failedOn === "apps"}
           leaveFor={(url, app) => leaveForConsent("apps", url, app)}
-          openPage={(target) => move("name", "forward", target.path)}
+          openPage={(target) => carryOn("apps", target)}
           returned={returnedApp}
         />
       ),
@@ -545,32 +580,12 @@ function RouteComponent() {
     },
     notify,
     {
-      id: "setup",
-      title: "Check your setup",
-      intro: () => (
-        <StepIntro title="Check your setup">
-          <p>See what's ready and what still needs setting up.</p>
-        </StepIntro>
-      ),
-      demo: () => (
-        <SetupChecklist
-          // Onboarding cannot stay open behind another page, so a link goes through the name step.
-          openPage={(target) => move("name", "forward", target.path)}
-        />
-      ),
-    },
-    {
       id: "name",
       title: "Your name",
       intro: () => <OnboardingNameStep onSaved={finish} />,
       demo: () => <OnboardingNameOrb finished={finished} size={128} />,
       demoFirst: true,
       ownAction: true,
-      notice: openLabel ? (
-        <p className="type-sub text-center text-muted-foreground lg:text-left">
-          {openLabel} opens once you get started.
-        </p>
-      ) : undefined,
     },
   ];
 
@@ -614,7 +629,15 @@ function RouteComponent() {
     >
       {waiting ? null : (
         <OnboardingWizard
-          onMove={(to, way) => move(to, way, search.open)}
+          // A page carried from an earlier step is said on every step after it.
+          notice={
+            openLabel ? (
+              <p className="type-sub text-center text-muted-foreground lg:text-left">
+                {openLabel} opens once you get started.
+              </p>
+            ) : undefined
+          }
+          onMove={(to, way) => move(to, way)}
           stepId={current}
           steps={steps}
         />
