@@ -379,18 +379,27 @@ address and a `.local` name are what this flag is mostly used for, and anybody o
 the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
 it.
 
-**A single-user deployment has its own identity at Composio.** Composio keeps accounts apart by a
-user id OpenBot sends, and the one person of every single-user deployment is `dev-local-user`, so
-two of them on the same `COMPOSIO_API_KEY` used to share one set of connected accounts. Now each is
-given its own Composio user id, `dev-local-user:` and a random part, at its first start with a
-Composio key, and keeps it in its database (the `brokered_identities` table), so it is the same
-after a restart and on every replica. Only the name at Composio changes: threads, memory and
-everything else stay with `dev-local-user`. A deployment that already has Composio connections
-under `dev-local-user` (any `brokered_connections` row for Composio whose `vendor_user_id` is
-`dev-local-user`) keeps using that id, so nothing is disconnected and nobody reconnects; it gets its
-own id at the first start after its last such connection is disconnected. A deployment that signs
-people in is unchanged, and so is Arcade. To see the id in use, run
-`select vendor_user_id from brokered_identities where provider = 'composio'`; no row means
+**A single-user deployment has its own identity at Composio or Arcade.** Both keep accounts apart
+by a user id OpenBot sends, and the one person of every single-user deployment is `dev-local-user`,
+so two of them on the same `COMPOSIO_API_KEY` or `ARCADE_API_KEY` used to share one set of
+connections: one deployment's Gmail, or its consent to Google, was used by the other, and a
+disconnect in one ended it for both. Now each is given its own user id at its broker,
+`dev-local-user:` and a random part, at its first start with that broker's key, and keeps it in its
+database (the `brokered_identities` table, one row per broker), so it is the same after a restart
+and on every replica. Only the name at the broker changes: threads, memory and everything else stay
+with `dev-local-user`.
+
+Whether a deployment already holds connections under `dev-local-user` is read from its own records
+and never asked of the broker, whose answer would include every other deployment on the key. The
+record is any `brokered_connections` row for the active broker whose `user_id` and `vendor_user_id`
+are both `dev-local-user`. Composio writes that row when an account is connected or confirmed, and
+Arcade when a consent comes back through the verifier or a page confirms a connection Arcade holds.
+A deployment with such a row keeps using `dev-local-user`, so nothing is disconnected and nobody
+reconnects; it gets its own id at the first start after its last such connection is disconnected. A
+deployment with none gets its own id at once. On Arcade that includes one whose consents were given
+at Arcade without coming back through this deployment, which approves its apps once more under the
+new id. A deployment that signs people in is unchanged. To see the id in use, run
+`select provider, vendor_user_id from brokered_identities`; no row for the active broker means
 `dev-local-user`. That is also the `--user` to give `bun run composio:smoke`.
 
 **`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an

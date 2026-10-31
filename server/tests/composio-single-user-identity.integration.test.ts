@@ -23,7 +23,6 @@ import {
   mcpServers,
   mcpTools,
 } from "../src/db/schema";
-import { createArcadeClient } from "../src/plugins/arcade-adapter";
 import { useComposioClient } from "../src/plugins/composio";
 import {
   buildComposioClient,
@@ -626,23 +625,12 @@ describe("a single-user deployment's Composio name", () => {
     expect(await one.select().from(brokeredIdentities)).toHaveLength(1);
   });
 
-  test("is not given to a deployment that signs people in, runs Arcade, or has no broker", async () => {
+  test("is not given to a deployment that signs people in, or has no broker", async () => {
     const database = open(await freshDatabase());
     expect(
       await ensureSingleUserIdentity(database, {
         singleUser: false,
         broker: composioWired(composioProject()),
-      }),
-    ).toBeNull();
-    // Arcade's grants have no row here to say whether any are held under `dev-local-user`.
-    expect(
-      await ensureSingleUserIdentity(database, {
-        singleUser: true,
-        broker: {
-          provider: "arcade",
-          grantIsLocal:
-            createArcadeClient("arcade-test-key").broker.grantIsLocal,
-        },
       }),
     ).toBeNull();
     expect(

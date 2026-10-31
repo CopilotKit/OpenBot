@@ -518,15 +518,16 @@ export const brokeredConnections = pgTable(
  * A person is filed under their own `users.id` everywhere else (see `personAccount`), and that is
  * only safe because the id is theirs alone. The single-user actor's is not: every single-user
  * deployment signs its one person in as `dev-local-user`, so every one of them sharing a Composio
- * key was one Composio user. One deployment's Gmail was listed and used by another, a disconnect in
- * one ended the account for both, and a call naming no account ran in whichever of them connected
- * last. So a single-user deployment's own name is minted once, `dev-local-user:<random>`, and kept
- * here, where every replica and every restart reads the same one. The local id is unchanged, so
- * threads, memory and everything else stay attached to `dev-local-user`.
+ * or Arcade key was one user there. One deployment's Gmail was listed and used by another, a
+ * disconnect in one ended the account for both, and a call naming no account ran in whichever of
+ * them connected last. So a single-user deployment's own name is minted once per broker,
+ * `dev-local-user:<random>`, and kept here, where every replica and every restart reads the same
+ * one. The local id is unchanged, so threads, memory and everything else stay attached to
+ * `dev-local-user`.
  *
  * NO ROW MEANS THE PERSON'S OWN ID, which is every signed-in person and also a single-user
- * deployment that already held Composio accounts under `dev-local-user` when this table arrived:
- * nothing is written for it, so those accounts keep working and nobody reconnects. See
+ * deployment that already held grants under `dev-local-user` at that broker when its name was first
+ * asked for: nothing is written for it, so those grants keep working and nobody reconnects. See
  * `ensureSingleUserIdentity` in `plugins/single-user-identity.ts`, the only writer.
  *
  * NO KEY TO `users`, for the reason `brokered_connections.user_id` has none: the name has to

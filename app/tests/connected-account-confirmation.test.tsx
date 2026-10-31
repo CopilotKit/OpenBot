@@ -290,11 +290,9 @@ test("the sibling list is not drawn once there is no account for a Disconnect to
   const view = renderScreen();
   /*
    * WAITED ON AS A RENDER SIGNAL AND NOT AS THE SUBJECT: this case is about the sibling list and
-   * the read behind it. It used to wait on "Connect", which this deployment no longer draws —
-   * Arcade authorizes per action, so the row withholds a whole-app Connect that could only reach
-   * the adapter's refusal. The row's disconnected state is what is being waited for either way.
+   * the read behind it. The row's disconnected state, and its Connect, are what is waited for.
    */
-  await view.findByText("Approved per action");
+  await view.findByRole("button", { name: "Connect" });
   expect(view.container.textContent).not.toContain("googledocs");
   expect(siblingReads.length).toBe(0);
 });
@@ -366,12 +364,19 @@ test("a disconnected Composio page renders its sentences verbatim", async () => 
   expect(text).toContain(DISCONNECTED);
 });
 
-test("a disconnected Arcade page points at the action list, not at a Connect it does not draw", async () => {
+test("a disconnected Arcade page offers Connect for the whole app, and the action list too", async () => {
+  /*
+   * ARCADE'S APPS CONNECT AS COMPOSIO'S DO. The page used to draw "Approved per action" in place of
+   * Connect, because Arcade's adapter refused a consent with no action on it; Connect now asks
+   * Arcade for everything the app's actions need. The action list underneath stays, for somebody
+   * who wants to approve less.
+   */
   install({ provider: "arcade", connected: false });
   const view = renderScreen();
-  await view.findByText("Approved per action");
+  await view.findByRole("button", { name: "Connect" });
+  expect(view.queryByText("Approved per action")).toBeNull();
   expect(view.container.textContent).toContain(
-    "No Bot can use this as you. Authorize the actions you want below.",
+    "No Bot can use this as you. Connecting takes you to Gmail to approve access. You can also authorize only the actions you want below.",
   );
 });
 

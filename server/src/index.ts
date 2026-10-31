@@ -1004,10 +1004,10 @@ if (providerConfiguration.kind === "ambiguous") {
 const sharedUseStore = createSharedUseStore(database, brokerProvider);
 
 /*
- * A single-user deployment's own name at Composio, settled before the store resolves anybody's
- * account. Every single-user deployment's person is `dev-local-user`, so without this every one of
- * them on the same Composio key shared one set of accounts. One that already holds accounts under
- * that name keeps it. See `ensureSingleUserIdentity`.
+ * A single-user deployment's own name at its broker, Composio or Arcade, settled before the store
+ * resolves anybody's account. Every single-user deployment's person is `dev-local-user`, so without
+ * this every one of them on the same broker key shared one set of grants. One that already holds
+ * grants under that name keeps it. See `ensureSingleUserIdentity`.
  */
 await ensureSingleUserIdentity(database, {
   singleUser: config.singleUser,

@@ -39,8 +39,10 @@ const toolOf = (toolkit: string, i: number) => ({
 });
 
 describe("createArcadeClient", () => {
-  test("declares its grant is held by the vendor", () => {
-    expect(createArcadeClient("never-dialled").broker.grantIsLocal).toBe(false);
+  test("declares its grants are recorded here, as Composio's are", () => {
+    // A Bot's call needs the row a consent writes, and a single-user deployment's own name at
+    // Arcade is decided from those rows. See `ensureSingleUserIdentity`.
+    expect(createArcadeClient("never-dialled").broker.grantIsLocal).toBe(true);
   });
 
   test("constructing it opens no socket and sends no request", () => {

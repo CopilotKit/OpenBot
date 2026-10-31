@@ -10,6 +10,7 @@ import {
   vendorStatusOf,
 } from "./arcade";
 import {
+  BrokerAccountHeldError,
   type BrokerApp,
   type BrokerConnection,
   BrokerRefusalError,
@@ -1467,6 +1468,137 @@ async function authProvidersNamedBy(
 }
 
 /**
+ * The auth requirement a whole-app consent sends: which provider the app's actions sign in with,
+ * as they publish it, and every scope any of them asks for. The shape `auth.authorize` takes.
+ */
+type WholeAppRequirement = {
+  id?: string;
+  provider_id?: string;
+  provider_type?: string;
+  oauth2: { scopes: string[] };
+};
+
+/** One name field of a requirement: absent, its text, or `null` where it is present and not text. */
+const requirementName = (value: unknown): string | undefined | null =>
+  value === undefined || value === null ? undefined : (textOf(value) ?? null);
+
+const unreadableRequirement = (toolkit: string) =>
+  new BrokerRefusalError(
+    `OpenBot couldn't read what one of ${toolkit}'s actions asks for, so ${toolkit} can't be connected all at once. Nothing was asked of your account. Authorize the actions you want in Connections.`,
+  );
+
+/**
+ * What one consent for a WHOLE app asks Arcade for: the authorization requirement its actions
+ * publish, carrying every scope any of them needs.
+ *
+ * COMPOSIO'S CONNECT, ON ARCADE. A Composio app is connected once, through the auth config it was
+ * turned on with, and then every action runs. Arcade grants per action, and its own way to authorize
+ * a person for all of an app at once is `auth.authorize` with an auth requirement and a scope list
+ * (the SDK's `auth.start` is that call). So the requirement is READ OFF THE APP'S LISTING, as every
+ * other fact in this file is: the `id`, `provider_id` and `provider_type` its actions publish in
+ * `requirements.authorization`, which is what `tools.authorize` asks for one action at a time, with
+ * the union of their scopes.
+ *
+ * ONE REQUIREMENT, AND NEVER A GUESS AT WHICH. An action that asks for no authorization adds
+ * nothing. Actions naming two different requirements cannot be one consent, and a block this
+ * deployment cannot read might name either, so both refuse and send the person to the action list,
+ * where each action is authorized on its own. An app none of whose actions asks for anything has
+ * nothing to connect. Each is a {@link BrokerRefusalError}, because the mint route reads an authored
+ * refusal as DEFINITE: nothing was minted, so the attempt it claimed is freed at once.
+ *
+ * NO `user_id` IS SENT AND `requirements.met` IS NOT READ, for `grantStateOf`'s reason: what an app
+ * asks for is the same for everybody.
+ */
+async function wholeAppRequirementOf(
+  client: Arcade,
+  toolkit: string,
+): Promise<WholeAppRequirement> {
+  const named = new Map<string, Omit<WholeAppRequirement, "oauth2">>();
+  const scopes = new Set<string>();
+  for await (const item of pagedItems({
+    pageSize: CATALOGUE_PAGE_SIZE,
+    maxPages: CATALOGUE_MAX_PAGES,
+    concurrency: CATALOGUE_CONCURRENCY,
+    page: (offset) =>
+      vendorCall(`the action listing for ${toolkit}`, () =>
+        client.tools.list({ toolkit, limit: CATALOGUE_PAGE_SIZE, offset }),
+      ),
+    malformed: `Arcade did not answer with an action list for ${toolkit}, so what connecting it asks for could not be read.`,
+    unending: `Arcade's action list for ${toolkit} never ended after ${CATALOGUE_MAX_PAGES} pages, so what connecting it asks for is not trusted.`,
+    incomplete: (seen, total) =>
+      `Arcade listed ${seen} of ${total} actions for ${toolkit}, so what connecting it asks for could not be read in full.`,
+    unreadableTotal: (shown) =>
+      `Arcade reported the action list for ${toolkit} with a total_count of ${shown}, which is not a count, so whether what connecting it asks for was read in full is not known.`,
+  })) {
+    const read = authorizationRequirementOf(item);
+    if (read.kind === "none") continue;
+    if (read.kind === "unreadable") throw unreadableRequirement(toolkit);
+    const id = requirementName(read.authorization.id);
+    const providerId = requirementName(read.authorization.provider_id);
+    const providerType = requirementName(read.authorization.provider_type);
+    if (id === null || providerId === null || providerType === null) {
+      throw unreadableRequirement(toolkit);
+    }
+    const asked = requiredScopesOf(item);
+    if (asked.kind === "unreadable") throw unreadableRequirement(toolkit);
+    for (const scope of asked.scopes) scopes.add(scope);
+    named.set(JSON.stringify([id, providerId, providerType]), {
+      ...(id ? { id } : {}),
+      ...(providerId ? { provider_id: providerId } : {}),
+      ...(providerType ? { provider_type: providerType } : {}),
+    });
+  }
+  if (named.size === 0) {
+    throw new BrokerRefusalError(
+      `${toolkit} doesn't ask for any account, so there's nothing to connect. Bots that can use it already work.`,
+    );
+  }
+  if (named.size > 1) {
+    throw new BrokerRefusalError(
+      `${toolkit}'s actions sign in to more than one account, so they can't all be connected at once. Authorize the actions you want in Connections.`,
+    );
+  }
+  const [requirement] = named.values();
+  // Arcade takes a requirement by `id` or by `provider_id`, and one naming neither names nothing.
+  if (!requirement?.id && !requirement?.provider_id) {
+    throw unreadableRequirement(toolkit);
+  }
+  return { ...requirement, oauth2: { scopes: [...scopes].sort() } };
+}
+
+/**
+ * The whole-app mint: the requirement read, then `auth.authorize` under this account's own name.
+ *
+ * A FAILURE TO READ THE REQUIREMENT IS A REFUSAL, NEVER AN UNCERTAIN MINT. Nothing has been asked of
+ * Arcade's authorization endpoint until the listing is read, so whatever stops the read cannot have
+ * started a flow. Left as the listing's own error, an outage there would read to the mint route as
+ * "the vendor may have created a flow", and the person's attempt would be held for its fifteen
+ * minutes over nothing.
+ */
+async function authorizeWholeApp(
+  client: Arcade,
+  vendorUserId: string,
+  toolkit: string,
+) {
+  let requirement: WholeAppRequirement;
+  try {
+    requirement = await wholeAppRequirementOf(client, toolkit);
+  } catch (error) {
+    if (error instanceof BrokerRefusalError) throw error;
+    throw new BrokerRefusalError(
+      `Couldn't read what connecting ${toolkit} asks for, so nothing was started. Try again in a moment.`,
+      { cause: error },
+    );
+  }
+  return vendorCall(`the authorization for ${toolkit}`, () =>
+    client.auth.authorize({
+      auth_requirement: requirement,
+      user_id: vendorUserId,
+    }),
+  );
+}
+
+/**
  * The Arcade client, in the shape `createComposioClient` returns. `new Arcade({ apiKey })` opens no
  * socket and sends no request, so tests replace the SDK's PROTOTYPE methods before calling this.
  *
@@ -1527,7 +1659,20 @@ export function createArcadeClient(apiKey: string): {
       ),
   };
   const broker: ConnectedAppBroker = {
-    grantIsLocal: false,
+    /*
+     * RECORDED HERE, AS COMPOSIO'S ARE. A grant made through this deployment writes its
+     * `brokered_connections` row when the verifier completes it, the confirm a page runs on load
+     * writes or clears it from what Arcade answers, and a disconnect or an offboarding ends it here
+     * after ending it at Arcade. So a Bot's call needs that row first, exactly as on Composio, and
+     * Arcade still checks the action itself on every call.
+     *
+     * IT USED TO BE `false`, and a call went out with no row behind it. That left this deployment
+     * with no record of whom it had asked Arcade to act for, which is what kept a single-user
+     * deployment's own name (`ensureSingleUserIdentity`) from reaching Arcade: with nothing here to
+     * say whether grants were held under `dev-local-user`, every single-user OpenBot on one key went
+     * on sharing them.
+     */
+    grantIsLocal: true,
     listApps: () => listApps(client),
     // 5.3: no auth config per app. Arcade's equivalent is an auth provider registered once in the
     // dashboard for the whole project, so there is nothing to create or delete here.
@@ -1563,12 +1708,16 @@ export function createArcadeClient(apiKey: string): {
     },
     // The mint. Stays a TOP-LEVEL member: the Composio connect flow calls it from routes.ts, so it
     // cannot move behind the nullable `authorizations` sub-surface.
-    authorize: async ({ account, action }) => {
-      if (!action) {
-        throw new BrokerRefusalError(
-          "Arcade grants per action, so an authorization needs the action it is for and none was given.",
-        );
-      }
+    //
+    // ONE ACTION, OR THE WHOLE APP. With an action this is the per-action Authorize on an app's
+    // action list, minted through `tools.authorize` for exactly that action. With none it is
+    // Connect, which Composio's apps have always had and Arcade's now have too: one consent for
+    // everything the app's actions ask for, read off its own listing by
+    // {@link wholeAppRequirementOf} and minted through `auth.authorize`. Both come back through the
+    // same verifier, which records the connection here.
+    authorize: async ({ account, toolkit, action }) => {
+      const subject = action || toolkit;
+      const press = action ? "Authorize" : "Connect";
       // NEVER SEND `next_uri`. THIS LOOKS LIKE A BUG AND IS A MEASUREMENT. The SDK declares the
       // field (`ToolAuthorizeParams.next_uri`), but against the live API it refuses EVERY value and
       // the mint answers `500 "error starting authorization challenge: invalid next URI"`: an app
@@ -1587,13 +1736,15 @@ export function createArcadeClient(apiKey: string): {
       // `null`, has `answer === null` wearing `AuthorizationResponse`, and the `status` read below
       // would raise a bare `TypeError` rather than the sentence this route shows somebody.
       const answer = requireBody(
-        `the authorization for ${action}`,
-        await vendorCall(`the authorization for ${action}`, () =>
-          client.tools.authorize({
-            tool_name: action,
-            user_id: account.vendorUserId,
-          }),
-        ),
+        `the authorization for ${subject}`,
+        action
+          ? await vendorCall(`the authorization for ${action}`, () =>
+              client.tools.authorize({
+                tool_name: action,
+                user_id: account.vendorUserId,
+              }),
+            )
+          : await authorizeWholeApp(client, account.vendorUserId, toolkit),
       );
       // WHAT THE VENDOR SAID ABOUT THIS AUTHORIZATION, READ BEFORE ITS URL IS READ AS A NEXT STEP.
       // `tools.authorize` does not only answer "go to this screen": it answers `completed` for an
@@ -1627,15 +1778,27 @@ export function createArcadeClient(apiKey: string): {
       const read = vendorStatusOf(answer.status);
       if (read.kind === "unreadable") {
         throw new BrokerRefusalError(
-          `Arcade answered this account's authorization for ${action} with ${read.shape} where its status belongs, so whether a consent screen is the next step could not be read and nobody was sent anywhere. Press Authorize again to start a fresh one.`,
+          `Arcade answered this account's authorization for ${subject} with ${read.shape} where its status belongs, so whether a consent screen is the next step could not be read and nobody was sent anywhere. Press ${press} again to start a fresh one.`,
         );
       }
       const status = read.kind === "text" ? read.text : undefined;
+      /*
+       * A WHOLE-APP CONSENT ARCADE ALREADY HOLDS IS COMPOSIO'S HELD ACCOUNT, AND IS ANSWERED AS ONE.
+       * `completed` on a Connect means this account already allows everything the app asks for,
+       * which is the state {@link BrokerAccountHeldError} names: the vendor holds it and this
+       * deployment may have no row. The connect route records it through the confirm, as it does
+       * for Composio, rather than telling somebody to reload a page that would still say Connect.
+       */
+      if (status === "completed" && !action) {
+        throw new BrokerAccountHeldError(
+          `Your account already allows everything ${toolkit} asks for, so nobody was sent to a consent screen.`,
+        );
+      }
       if (status !== undefined && !MINT_AWAITS_CONSENT_STATUSES.has(status)) {
         throw new BrokerRefusalError(
           status === "completed"
-            ? `Arcade answered that this account's authorization for ${action} is already completed, so nobody was sent to a consent screen. Reload this page: the grant it is reporting is already in place.`
-            : `Arcade answered that this account's authorization for ${action} is "${status}" rather than one waiting for consent, so nobody was sent anywhere and nothing was connected. Press Authorize again to start a fresh one.`,
+            ? `Arcade answered that this account's authorization for ${subject} is already completed, so nobody was sent to a consent screen. Reload this page: the grant it is reporting is already in place.`
+            : `Arcade answered that this account's authorization for ${subject} is "${status}" rather than one waiting for consent, so nobody was sent anywhere and nothing was connected. Press ${press} again to start a fresh one.`,
         );
       }
       // The url is a bearer capability: it goes back to the caller and nowhere else.

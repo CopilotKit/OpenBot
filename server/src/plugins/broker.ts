@@ -496,8 +496,12 @@ export type ConnectedAppBroker = {
    * provider would mean finding every such comparison by hand. A property on the seam makes the
    * answer one value per broker and makes a new broker declare it or fail to type-check.
    *
-   * TRUE for Composio, whose connection rows and grants live in this deployment's own tables. That
-   * is the behaviour it always had, made explicit here rather than changed.
+   * TRUE for both brokers. Composio's connection rows have always lived in this deployment's own
+   * tables. Arcade's did too, once a consent came back through the verifier, but its broker used to
+   * declare `false` and its calls went out with no row behind them; it now records and requires the
+   * row exactly as Composio does, so Bot calls, the single-user identity and offboarding all read one
+   * kind of record. A broker that declared `false` would still be gated as the comment at
+   * `connectionTokenFor` sets out.
    */
   grantIsLocal: boolean;
   /**
@@ -693,6 +697,10 @@ export type ConnectedAppBroker = {
      * OPTIONAL, AND IGNORABLE. An adapter whose vendor grants per app, as Composio does, has no use
      * for it and drops it without throwing: handing an action to a broker that cannot use it is
      * not an error, and a caller need not know which kind of broker it holds to call this.
+     *
+     * ABSENT, IT IS A CONSENT FOR THE WHOLE APP, which is what Connect asks for on every broker. A
+     * vendor that grants per action, as Arcade does, then asks for everything the app's actions
+     * need in one consent; see `authorize` in `./arcade-adapter`.
      *
      * `returnUrl` ABOVE STAYS REQUIRED ON THE SEAM EVEN SO. An adapter whose vendor answers with
      * its own return leg may ignore it, but the seam does not relax for that: the next adapter
