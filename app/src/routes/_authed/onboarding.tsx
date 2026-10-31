@@ -204,9 +204,9 @@ export const Route = createFileRoute("/_authed/onboarding")({
 
 const welcome: OnboardingStep = {
   id: "welcome",
-  title: "Welcome",
+  title: `Welcome to ${PRODUCT}`,
   intro: () => (
-    <StepIntro title={`Welcome to ${PRODUCT}`}>
+    <StepIntro>
       <p>
         Ask for what you need in plain words. A Bot takes it from there and
         tells you when it's done.
@@ -218,9 +218,9 @@ const welcome: OnboardingStep = {
 
 const computer: OnboardingStep = {
   id: "computer",
-  title: "A browser and files of its own",
+  title: "Each Bot has its own browser and files",
   intro: () => (
-    <StepIntro title="Each Bot has its own browser and files">
+    <StepIntro>
       <p>
         It opens a browser, reads pages and works with files on a computer
         OpenBot runs for you, so yours stays yours.
@@ -232,9 +232,9 @@ const computer: OnboardingStep = {
 
 const team: OnboardingStep = {
   id: "team",
-  title: "Your team of Bots",
+  title: "Pick a Bot or make your own",
   intro: () => (
-    <StepIntro title="Pick a Bot or make your own">
+    <StepIntro>
       <p>
         Each Bot has its own job. Hand work to the one that fits, or make a new
         one whenever you need it.
@@ -251,9 +251,9 @@ const team: OnboardingStep = {
  */
 const approval: OnboardingStep = {
   id: "approval",
-  title: "You decide what it asks",
+  title: "You decide what it asks about",
   intro: () => (
-    <StepIntro title="You decide what it asks about">
+    <StepIntro>
       <p>
         Paying for things and changing account security are always left to you.
         For everything else, turn on Ask before making changes in Settings, or
@@ -273,7 +273,7 @@ const approval: OnboardingStep = {
  */
 const selfhost: OnboardingStep = {
   id: "selfhost",
-  title: "Running it yourself",
+  title: "It runs on your machine",
   intro: () => (
     <StepIntro
       after={
@@ -293,7 +293,6 @@ const selfhost: OnboardingStep = {
           Talk to an engineer
         </a>
       }
-      title="It runs on your machine"
     >
       {/*
        * Said as it is: files and Bot settings stay here, but every request goes to the model
@@ -548,7 +547,7 @@ function RouteComponent() {
       id: "setup",
       title: "Check your setup",
       intro: () => (
-        <StepIntro title="Check your setup">
+        <StepIntro>
           <p>See what's ready and what still needs setting up.</p>
           {/* Its fixes end in a restart, after which onboarding is over: say where it lives. */}
           {mayOpenSetup(me.data, capabilities) ? (
@@ -562,9 +561,9 @@ function RouteComponent() {
     },
     {
       id: "apps",
-      title: "Connect apps",
+      title: "Connect your apps",
       intro: () => (
-        <StepIntro title="Connect your apps">
+        <StepIntro>
           <p>
             Connect the accounts your Bots use as you. You can connect more
             later in Connections.
@@ -585,7 +584,7 @@ function RouteComponent() {
     notify,
     {
       id: "name",
-      title: "Your name",
+      title: "What should we call you?",
       intro: () => <OnboardingNameStep onSaved={finish} />,
       demo: () => <OnboardingNameOrb finished={finished} size={128} />,
       demoFirst: true,

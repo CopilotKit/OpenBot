@@ -124,11 +124,8 @@ export function OnboardingNameStep({
           onSaved={onSaved}
         />
       }
-      title="Let's get to it."
     >
-      <p>
-        What should we call you? You can change your name later in Settings.
-      </p>
+      <p>You can change your name later in Settings.</p>
     </StepIntro>
   );
 }

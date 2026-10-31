@@ -1,6 +1,6 @@
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { OnboardingFrame } from "./onboarding-frame";
+import { OnboardingFrame, StepTitle } from "./onboarding-frame";
 
 /**
  * One step: an id that outlives the list changing around it, its name in the step list, its words
@@ -9,7 +9,7 @@ import { OnboardingFrame } from "./onboarding-frame";
  *
  * TWO HALVES, BECAUSE A DESKTOP SHOWS THEM SIDE BY SIDE. `intro` is the step's heading (an `h1`),
  * its sentence and any control that belongs with them; `demo` is what it shows. From `lg` up the
- * intro sits under the step list on the left and the demo fills the right; below, the demo follows
+ * intro sits on the left and the demo fills the right; below, the demo follows
  * the intro, or comes first where `demoFirst` says so (the name step, under its orb).
  *
  * The buttons are the frame's, so a step describes them rather than drawing them: the primary's
@@ -20,7 +20,10 @@ import { OnboardingFrame } from "./onboarding-frame";
  */
 export type OnboardingStep = {
   id: string;
-  /** The step's name in the step list: short, a few words. */
+  /**
+   * The step's name: its heading, and its name in the list of steps, so the two always match. A
+   * `StepIntro` without a `title` of its own draws this.
+   */
   title: string;
   intro: () => ReactNode;
   demo?: () => ReactNode;
@@ -225,7 +228,9 @@ export function OnboardingWizard({
           index={index}
           intro={
             <Pane attribute="data-step" direction={direction} stepId={step?.id}>
-              {step?.intro()}
+              <StepTitle.Provider value={step?.title}>
+                {step?.intro()}
+              </StepTitle.Provider>
             </Pane>
           }
           notice={

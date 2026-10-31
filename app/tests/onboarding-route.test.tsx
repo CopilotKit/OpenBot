@@ -246,6 +246,13 @@ const back = (view: ReturnType<typeof render>) => {
   if (!found) throw new Error("no Back");
   return found;
 };
+/** The desktop's list of steps, opened from "Step N of M" above the heading. */
+const openSteps = async (view: ReturnType<typeof render>) => {
+  fireEvent.click(
+    view.container.querySelector("[data-onboarding-steps]") as HTMLElement,
+  );
+  return view.findByRole("navigation", { name: "Onboarding steps" });
+};
 /** Continue, once the deployment's answer has let it be pressed. */
 const continueButton = async (view: ReturnType<typeof render>) => {
   const button = await view.findByRole("button", { name: "Continue" });
@@ -278,23 +285,24 @@ test("the steps run welcome, computer, team, approval, setup, apps, notify, name
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
-  const list = view.getByRole("navigation", { name: "Onboarding steps" });
+  const list = await openSteps(view);
   await waitFor(() =>
     expect(
       within(list)
         .getAllByRole("listitem")
         .map((item) => item.textContent?.replace(/^\d/, "")),
     ).toEqual([
-      "Welcome",
-      "A browser and files of its own",
-      "Your team of Bots",
-      "You decide what it asks",
+      "Welcome to OpenBot",
+      "Each Bot has its own browser and files",
+      "Pick a Bot or make your own",
+      "You decide what it asks about",
       "Check your setup",
-      "Connect apps",
+      "Connect your apps",
       "Get notified",
-      "Your name",
+      "What should we call you?",
     ]),
   );
+  fireEvent.keyDown(list, { key: "Escape" });
   for (const next of [
     "Each Bot has its own browser and files",
     "Pick a Bot or make your own",
@@ -307,6 +315,45 @@ test("the steps run welcome, computer, team, approval, setup, apps, notify, name
   await heading(view, "Check your setup");
   fireEvent.click(await continueButton(view));
   await heading(view, "Connect your apps");
+});
+
+test("on every step, its name in the list of steps is its heading", async () => {
+  localEvaluation = true;
+  const view = open("/onboarding?step=welcome");
+  await heading(view, "Welcome to OpenBot");
+  await waitFor(() =>
+    expect(view.getByRole("progressbar").getAttribute("aria-valuemax")).toBe(
+      "9",
+    ),
+  );
+
+  const seen: string[] = [];
+  for (;;) {
+    const h1 = view.container.querySelector(
+      `[data-step="${searchOf(view).step}"] h1`,
+    );
+    const list = await openSteps(view);
+    const current = list.querySelector('[aria-current="step"]');
+    expect(current?.textContent?.replace(/^\d/, "")).toBe(
+      h1?.textContent ?? "",
+    );
+    seen.push(h1?.textContent ?? "");
+    fireEvent.keyDown(list, { key: "Escape" });
+    await waitFor(() =>
+      expect(
+        view.queryByRole("navigation", { name: "Onboarding steps" }),
+      ).toBeNull(),
+    );
+    if (searchOf(view).step === "name") break;
+    const step = searchOf(view).step;
+    fireEvent.click(
+      step === "apps" || step === "notify"
+        ? view.getByRole("button", { name: "Not now" })
+        : await continueButton(view),
+    );
+    await waitFor(() => expect(searchOf(view).step).not.toBe(step));
+  }
+  expect(seen).toHaveLength(9);
 });
 
 test("Continue and Back start the new step's picture at the top of its pane", async () => {
@@ -377,19 +424,19 @@ test("on a desktop, a step already passed can be picked from the list", async ()
   const view = open("/onboarding?step=approval");
   await heading(view, "You decide what it asks about");
 
-  const list = view.getByRole("navigation", { name: "Onboarding steps" });
-  expect(within(list).queryByRole("button", { name: /Connect apps/ })).toBe(
-    null,
-  );
+  const list = await openSteps(view);
+  expect(
+    within(list).queryByRole("button", { name: /Connect your apps/ }),
+  ).toBe(null);
   fireEvent.click(within(list).getByRole("button", { name: /Welcome/ }));
 
   expect(await heading(view, "Welcome to OpenBot")).toBeTruthy();
   expect(searchOf(view).step).toBe("welcome");
   // It has seen the approval step, so the list leads back to it.
   fireEvent.click(
-    within(
-      view.getByRole("navigation", { name: "Onboarding steps" }),
-    ).getByRole("button", { name: /You decide what it asks/ }),
+    within(await openSteps(view)).getByRole("button", {
+      name: /You decide what it asks/,
+    }),
   );
   expect(await heading(view, "You decide what it asks about")).toBeTruthy();
 });
@@ -488,7 +535,7 @@ test("the failed line goes once the person moves on, and doesn't come back with 
 
 test("Get started on the name step saves the name, finishes, plays the orb's finish, then opens the app", async () => {
   const view = open("/onboarding?step=name");
-  await heading(view, "Let's get to it.");
+  await heading(view, "What should we call you?");
   // The name step's own form carries the way out; the frame draws no Continue.
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   // Under the orb: on a phone the picture comes first.
@@ -535,7 +582,7 @@ test("a checklist link moves on, says on every step after it what opens, and ope
     view.getByText("Credentials opens once you get started."),
   ).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Not now" }));
-  await heading(view, "Let's get to it.");
+  await heading(view, "What should we call you?");
   expect(searchOf(view)).toEqual({ step: "name", open: "/admin/credentials" });
   expect(
     view.getByText("Credentials opens once you get started."),
@@ -586,7 +633,7 @@ test("a member isn't pointed at a Settings page they don't get", async () => {
 test("a page to open that isn't one of this app's is dropped", async () => {
   const view = open("/onboarding?step=name&open=https%3A%2F%2Fevil.test");
 
-  await heading(view, "Let's get to it.");
+  await heading(view, "What should we call you?");
   expect(searchOf(view).open).toBeUndefined();
 });
 
