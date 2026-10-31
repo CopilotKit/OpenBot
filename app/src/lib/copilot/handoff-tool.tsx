@@ -2,7 +2,7 @@ import { useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { HANDED_OVER } from "@/lib/copilot/markers";
-import { saidItWentAhead } from "@/lib/plugins/tool-result";
+import { saidItWentAhead, toolResultHeldBack } from "@/lib/plugins/tool-result";
 
 /**
  * How a Bot handing work to another Bot reads in the transcript.
@@ -42,12 +42,27 @@ export function HandoffTool() {
     render: ({ parameters: given, result, status }) => {
       const asked = given?.bot?.trim();
       const running = status !== "complete" && result === undefined;
+      /*
+       * The person holding it back is neither a hand-off nor a boundary: declined on its card, or
+       * not asked again because the same request still waits. Named for what it would have done.
+       */
+      const heldBack =
+        typeof result === "string" ? toolResultHeldBack(result) : null;
+      const label = heldBack
+        ? asked
+          ? `Ask ${asked}`
+          : "Ask another Bot"
+        : asked
+          ? `Asked ${asked}`
+          : "Asked another Bot";
       return (
         <ToolLine
-          label={asked ? `Asked ${asked}` : "Asked another Bot"}
+          label={label}
           detail={given?.task}
           running={running}
-          refused={!running && refused(result)}
+          declined={heldBack === "declined"}
+          notYet={heldBack === "alreadyWaiting"}
+          refused={!running && !heldBack && refused(result)}
         >
           {/*
            * The parts, kept as parts. The asking model was made to name them so the receiving one
@@ -66,7 +81,8 @@ export function HandoffTool() {
                 Wanted back: {given.expecting}
               </p>
             ) : null}
-            {typeof result === "string" ? (
+            {/* Words written for the Bot about the person's decision stay out. */}
+            {typeof result === "string" && !heldBack ? (
               <p className="text-muted-foreground">{result}</p>
             ) : null}
           </div>

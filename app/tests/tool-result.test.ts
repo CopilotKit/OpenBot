@@ -178,6 +178,23 @@ describe("telling a call the person held back from one a boundary refused", () =
       expect(toolResultHeldBack(result)).toBe("alreadyWaiting");
   });
 
+  test("a hand-off to another Bot that was not sent is read past its lead-in", () => {
+    expect(
+      toolResultHeldBack(
+        JSON.stringify(`That handoff was not sent: ${DECLINED}`),
+      ),
+    ).toBe("declined");
+    expect(
+      toolResultHeldBack(`That handoff was not sent: ${ALREADY_WAITING}`),
+    ).toBe("alreadyWaiting");
+    // A hand-off a boundary refused is not the person's decision.
+    expect(
+      toolResultHeldBack(
+        "That handoff was not sent: research is not in this workspace.",
+      ),
+    ).toBeNull();
+  });
+
   test("a refusal, a failure, a result and a call still running are none of these", () => {
     expect(toolResultHeldBack("Refused. The rule says no.")).toBeNull();
     expect(
