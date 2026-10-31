@@ -452,13 +452,15 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     fireEvent.click(await view.findByRole("tab", { name: "Active" }));
     const needs = await view.findByRole("region", { name: "Needs input" });
     expect(within(needs).getByText("Needs input")).toBeTruthy();
-    expect(await within(needs).findByText(/Inbox Bot wants to/)).toBeTruthy();
+    // The action in words, and which Bot asks, on OpenBot's own approval card.
+    expect(await within(needs).findByText("Send your email")).toBeTruthy();
+    expect(within(needs).getByText(/^Inbox Bot · Gmail/)).toBeTruthy();
     expect(within(needs).queryByText(/drive\/share/)).toBeNull();
     expect(
       within(needs).getByText(/Which kiln should I book the repair for\?/),
     ).toBeTruthy();
     // OpenBot's list always shows what the action would send.
-    expect(within(needs).getByText(/Thursday at 10 works\./)).toBeTruthy();
+    expect(within(needs).getByText("Thursday at 10 works.")).toBeTruthy();
     expect(
       await view.findByText("Keep the support inbox at zero"),
     ).toBeTruthy();
@@ -562,9 +564,11 @@ describe("the frame carries the deployment's brand, not OpenDuet's", () => {
     const menu = view.getByRole("dialog");
     expect(within(menu).getByText(appConfig.brand.productName)).toBeTruthy();
     expect(readable()).not.toContain("OpenDuet");
-    // OpenBot's own orb, as sign-in and onboarding draw it, and no drawing of OpenDuet's.
+    // OpenBot's own orb, as sign-in and onboarding draw it, in OpenBot's violet.
     expect(orb.querySelector(".agent-orb")).not.toBeNull();
-    expect(orb.querySelector("canvas")).toBeNull();
+    expect(
+      orb.querySelector('.agent-orb[data-palette="violet"]'),
+    ).not.toBeNull();
   });
 
   test("Tasks names nothing as OpenDuet either", async () => {

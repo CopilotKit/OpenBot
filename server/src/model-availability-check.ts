@@ -88,6 +88,18 @@ export function modelCheckOutcome(input: {
   };
 }
 
+/**
+ * Whether a configured base URL is just the provider's own API, written out. A deployment may well
+ * spell it out, and the provider's own lookup vouches for its own address as well as for none.
+ */
+function isProvidersOwn(provider: Provider, base: string): boolean {
+  try {
+    return new URL(ENDPOINTS[provider]("m")).host === new URL(base.trim()).host;
+  } catch {
+    return false;
+  }
+}
+
 /** Ask once and log what was found. Resolves either way and never throws. */
 export async function reportModelAvailability(options: {
   provider: Provider;
@@ -107,7 +119,8 @@ export async function reportModelAvailability(options: {
     provider === "anthropic"
       ? environment.ANTHROPIC_BASE_URL
       : environment.OPENAI_BASE_URL;
-  if (customBase?.trim()) return { kind: "skipped" };
+  if (customBase?.trim() && !isProvidersOwn(provider, customBase))
+    return { kind: "skipped" };
 
   let outcome: ModelCheckOutcome;
   try {

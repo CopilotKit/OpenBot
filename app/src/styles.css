@@ -63,6 +63,36 @@
 }
 
 /*
+ * The Bot thinking, before it has said anything: three dots in its bubble, each rising a little and
+ * brightening, one after another. Only `opacity` and `transform` animate.
+ */
+.typing-dot {
+  opacity: 0.4;
+  animation: typing-dot 1.1s ease-in-out infinite;
+}
+
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 0.85;
+    transform: translateY(-2px);
+  }
+}
+
+/* Held still with reduced motion, and a little darker, so the three dots still read as a mark. */
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/*
  * A generated interface is never allowed to occupy nothing.
  *
  * The SDK sizes the frame it draws into from a single measurement taken inside the sandbox, and it
@@ -119,6 +149,22 @@
     display: flex;
     margin-top: 0;
   }
+}
+
+/*
+ * The compact composer's editor. PromptArea draws its placeholder as an overlay beside an editor
+ * that is empty, so the box keeps one line's height of its own at any text size, and a long
+ * placeholder ("Message" and a long Bot name) ends in an ellipsis on that line instead of wrapping
+ * under the controls.
+ */
+.composer-editor > .relative {
+  min-height: 1lh;
+}
+.composer-editor > .relative > [aria-hidden="true"] {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /*

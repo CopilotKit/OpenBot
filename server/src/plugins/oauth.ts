@@ -48,7 +48,7 @@ const CALLBACK_PATH = "/api/plugins/oauth/callback";
 /**
  * Which screen started this, so somebody is returned to the one they left.
  *
- * A closed set of two names, never a URL, and that is the security point rather than a style choice.
+ * A closed set of names, never a URL, and that is the security point rather than a style choice.
  * Carrying a destination through an OAuth flow is how open redirects get built: a
  * `returnTo=https://evil.test` the callback honours turns this deployment into a redirector that
  * arrives with a fresh consent behind it. A name cannot express another origin, and an unrecognised
@@ -58,7 +58,26 @@ const CALLBACK_PATH = "/api/plugins/oauth/callback";
  * It lives in the SEALED state rather than on the callback URL because the callback is a request
  * somebody else's server sent the browser on. Nothing on it is believable by itself.
  */
-export type ConnectOrigin = "settings" | "admin";
+export type ConnectOrigin =
+  | "settings"
+  | "admin"
+  /** Onboarding's Connect your apps step. */
+  | "onboarding";
+
+const ORIGINS: ReadonlySet<string> = new Set<ConnectOrigin>([
+  "admin",
+  "onboarding",
+]);
+
+/**
+ * A query string's or a sealed state's `returnTo`, narrowed to a name this deployment knows.
+ * Anything else is the default, never carried: see {@link ConnectOrigin}.
+ */
+export function connectOriginFrom(value: unknown): ConnectOrigin {
+  return typeof value === "string" && ORIGINS.has(value)
+    ? (value as ConnectOrigin)
+    : "settings";
+}
 
 export type ConnectState = {
   /** Who is connecting. Taken from their session when the flow starts, never from the callback. */
@@ -120,6 +139,18 @@ export function connectedAccountsUrlFor(
   returnTo: ConnectOrigin = "settings",
 ): string {
   const origin = appUrl?.replace(/\/+$/, "") ?? "";
+
+  /*
+   * Onboarding is the only page somebody who has not finished it may open: every other one sends
+   * them back to it (`routes/_authed.tsx`). So both outcomes land on the step that started the flow,
+   * which reads the connection again on arrival and says how it went. A failure carries
+   * `connected=failed`, which the step reads once and drops from the address.
+   */
+  if (returnTo === "onboarding") {
+    return "serverId" in where
+      ? `${origin}/onboarding?step=apps`
+      : `${origin}/onboarding?step=apps&connected=failed`;
+  }
 
   if (returnTo === "admin") {
     /*
@@ -219,8 +250,8 @@ export async function readConnectState(
       userId: payload.userId,
       serverId: payload.serverId,
       verifier: payload.verifier,
-      // Only the one name is recognised; anything else becomes the default rather than being carried.
-      returnTo: payload.returnTo === "admin" ? "admin" : "settings",
+      // Only the known names are recognised; anything else becomes the default rather than being carried.
+      returnTo: connectOriginFrom(payload.returnTo),
     };
   } catch {
     return null;

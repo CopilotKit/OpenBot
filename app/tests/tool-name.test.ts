@@ -72,8 +72,8 @@ describe("naming a tool call", () => {
     // Composio is how this deployment reaches Gmail, which is plumbing: the reader asked their Bot
     // about their email, not about which broker holds the grant. Composio also prefixes every tool
     // with the app, so the app is dropped from the action and named once, beside it.
-    expect(readToolName("mcp__composio-gmail__GMAIL_FETCH_EMAILS")).toEqual({
-      label: "Fetch emails",
+    expect(readToolName("mcp__composio-gmail__GMAIL_LIST_LABELS")).toEqual({
+      label: "List labels",
       detail: "Gmail",
     });
     expect(readToolName("mcp__composio-airtable__AIRTABLE_LIST_BASES")).toEqual(
@@ -85,16 +85,16 @@ describe("naming a tool call", () => {
   });
 
   test("an action that does not lead with its app is kept whole, beside the app", () => {
-    expect(readToolName("mcp__composio-gmail__FETCH_EMAILS")).toEqual({
-      label: "Fetch emails",
+    expect(readToolName("mcp__composio-gmail__LIST_LABELS")).toEqual({
+      label: "List labels",
       detail: "Gmail",
     });
   });
 
   test("an Arcade app is named as the app, never as arcade-", () => {
     // Arcade already strips its toolkit from the action, so only the broker prefix is left to drop.
-    expect(readToolName("mcp__arcade-Gmail__ListEmails")).toEqual({
-      label: "List emails",
+    expect(readToolName("mcp__arcade-Gmail__ListLabels")).toEqual({
+      label: "List labels",
       detail: "Gmail",
     });
   });
@@ -150,6 +150,84 @@ describe("naming a tool call", () => {
   });
 });
 
+describe("the person's own mail and calendar", () => {
+  test("are named for what happened to them, through whichever app reached them", () => {
+    // The app stays beside the words: two mailboxes are still told apart.
+    expect(
+      readToolName("mcp__composio-gmail__GMAIL_FETCH_EMAILS", true),
+    ).toEqual({ label: "Reading your email", detail: "Gmail" });
+    expect(readToolName("mcp__composio-gmail__GMAIL_FETCH_EMAILS")).toEqual({
+      label: "Read your email",
+      detail: "Gmail",
+    });
+    expect(readToolName("mcp__arcade-Gmail__ListEmails")).toEqual({
+      label: "Searched your email",
+      detail: "Gmail",
+    });
+    // An app the server does not name, when the tool leads with it.
+    expect(
+      readToolName("mcp__google-workspace__gmail_search_messages", true),
+    ).toEqual({ label: "Searching your email", detail: "Google Workspace" });
+    expect(
+      readToolName("mcp__composio-outlook__OUTLOOK_SEND_EMAIL", true).label,
+    ).toBe("Sending your email");
+    expect(
+      readToolName("mcp__composio-gmail__GMAIL_REPLY_TO_THREAD").label,
+    ).toBe("Sent your email");
+    expect(
+      readToolName("mcp__composio-googlecalendar__GOOGLECALENDAR_EVENTS_LIST")
+        .label,
+    ).toBe("Checked your calendar");
+    // A mail app's calendar is a calendar.
+    expect(
+      readToolName("mcp__composio-outlook__OUTLOOK_LIST_EVENTS", true).label,
+    ).toBe("Checking your calendar");
+  });
+
+  test("anything that changes them, or isn't mail at all, keeps the app's own name", () => {
+    // "Sent" for a draft, or "checked your calendar" for a new event, would say what did not happen.
+    expect(
+      readToolName("mcp__composio-gmail__GMAIL_CREATE_EMAIL_DRAFT"),
+    ).toEqual({ label: "Create email draft", detail: "Gmail" });
+    expect(readToolName("mcp__composio-gmail__GMAIL_DELETE_MESSAGE")).toEqual({
+      label: "Delete message",
+      detail: "Gmail",
+    });
+    expect(
+      readToolName("mcp__composio-outlook__OUTLOOK_LIST_CONTACTS"),
+    ).toEqual({ label: "List contacts", detail: "Outlook" });
+    // Sending an email is not sending the person's own unless it went through their mail app.
+    expect(readToolName("mcp__mailgun__send_email")).toEqual({
+      label: "Send email",
+      detail: "mailgun",
+    });
+  });
+
+  test("a refused or failed call is named plainly, never as done", () => {
+    expect(
+      readToolName("mcp__composio-gmail__GMAIL_SEND_EMAIL", "plain").label,
+    ).toBe("Send your email");
+    expect(
+      readToolName("mcp__google-workspace__gmail_search_messages", "plain")
+        .label,
+    ).toBe("Search your email");
+  });
+});
+
+describe("research", () => {
+  test("says what it is doing while it runs", () => {
+    expect(readToolName("mcp__exa__web_search_exa", true).label).toBe(
+      "Searching the web",
+    );
+    expect(readToolName("mcp__exa__web_fetch_exa", true).label).toBe(
+      "Reading web pages",
+    );
+    expect(readToolName("mcp__exa__web_search_exa", "plain").label).toBe(
+      "Search the web",
+    );
+  });
+});
+
 describe("this deployment's own tools", () => {
   test("show_app_access is named for what it is doing, then for what it did", () => {
     expect(readToolName("show_app_access", true)).toEqual({
@@ -157,6 +235,12 @@ describe("this deployment's own tools", () => {
     });
     expect(readToolName("show_app_access")).toEqual({
       label: "Checked app access",
+    });
+  });
+
+  test("refused or failed, it is named for what it would have done", () => {
+    expect(readToolName("show_app_access", "plain")).toEqual({
+      label: "Show app access",
     });
   });
 

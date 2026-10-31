@@ -1,76 +1,162 @@
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * OpenBot's visual system, in the variables every screen already reads. Neutral greys with a cool
+ * bias; a near-black primary that turns light in the dark; one accent, `--brand`, kept for focus,
+ * selection and links and never for headings (shadcn's `--accent` stays the neutral hover fill); it
+ * reaches the focus ring today. Four status colours for how work stands, and the glass and shadow
+ * below, are here for the screens that adopt them. Every colour here has a dark value in `.dark` below, and
+ * `tests/visual-system.test.ts` fails if one is missing or a colour that carries words falls under
+ * 4.5:1 on a ground it sits on.
+ */
 :root {
   color-scheme: light;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.96 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --success: oklch(0.6 0.118 184.704);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #f6f6f8;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #111114;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1f4;
+  --secondary-foreground: #18181b;
+  --muted: #f1f1f4;
+  --muted-foreground: #6b6b75;
+  --accent: #f1f1f4;
+  --accent-foreground: #18181b;
+  --destructive: #b91c1c;
+  --success: #147a3a;
+  --border: rgb(24 24 27 / 9%);
+  --input: rgb(24 24 27 / 12%);
+  --ring: #6430ab;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.97 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.5 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.55rem;
+  --sidebar: #f1f1f4;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #6430ab;
+  --sidebar-primary-foreground: #ffffff;
+  /* A row lifts to the card's white on the sidebar's grey, the way a selected segment does. */
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: rgb(24 24 27 / 9%);
+  --sidebar-ring: #6430ab;
+
+  /* The one accent, and what sits on it. */
+  --brand: #6430ab;
+  --brand-foreground: #ffffff;
+  /* How work stands: ready for review, needs you, working, couldn't finish. Only on status. */
+  --status-done: #147a3a;
+  --status-done-soft: #e6f4ea;
+  --status-needs: #a34a06;
+  --status-needs-soft: #fdf3e1;
+  --status-working: #1d4ed8;
+  --status-working-soft: #eaf0fd;
+  --status-problem: #b91c1c;
+  --status-problem-soft: #fbeaea;
+  /*
+   * A conversation's bubbles: a Bot's in a grey a shade darker than the page, the person's in a
+   * tint of the accent. One radius on every corner and no tail. `--radius-bubble` sits in
+   * Tailwind's `--radius-*` namespace like `--shadow-*` below, so it is not registered either: use
+   * it as `rounded-(--radius-bubble)`.
+   */
+  --bubble: #eeeef1;
+  --bubble-user: #e7e3f7;
+  --radius-bubble: 1.25rem;
+  /*
+   * Not registered with Tailwind: `--shadow-*` is its namespace, and a theme key of the same name
+   * would point at itself. Use them as `shadow-(--shadow-float)`.
+   */
+  --shadow-float:
+    0 0 0 0.5px rgb(1 5 7 / 10%), 0 1px 1.5px rgb(1 5 7 / 6%),
+    0 4px 12px -4px rgb(1 5 7 / 12%);
+  --shadow-card: 0 0 0 1px var(--border), 0 6px 18px -12px rgb(1 5 7 / 18%);
+  --shadow-raised: 0 0 0 1px var(--border), 0 10px 26px -14px rgb(1 5 7 / 20%);
+  /*
+   * Glass: the chrome that floats over a screen lets what scrolls under it show through, frosted.
+   * Translucent enough to read as a layer, opaque enough that text under it never competes with the
+   * controls on it. `--veil` is the same material laid over a whole screen, for a sheet that the
+   * screen stays visible behind. The `glass` and `veil` utilities below draw them.
+   */
+  --glass: rgb(255 255 255 / 80%);
+  --veil: rgb(246 246 248 / 74%);
+  --glass-edge: inset 0 0.5px 0 rgb(255 255 255 / 80%);
+  --shadow-glass: var(--glass-edge), var(--shadow-float);
+  /* The smallest thing a finger can hit. */
+  --target: 44px;
+  /*
+   * Motion. `--ease-out` and `--ease-in` are Tailwind's own names, so `ease-out` and `ease-in` draw
+   * these curves; `--ease-out` is the one `lib/motion.ts` already uses.
+   */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-tap: 120ms;
+  --dur-swap: 200ms;
+  --dur-enter: 250ms;
+  --dur-sheet: 350ms;
 }
 
+/* Near-black and neutral, the same roles, and the primary action turns light. */
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --success: oklch(0.704 0.14 182.503);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: #111113;
+  --foreground: #f4f4f5;
+  --card: #1c1c1f;
+  --card-foreground: #f4f4f5;
+  --popover: #1c1c1f;
+  --popover-foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #111114;
+  --secondary: #26262b;
+  --secondary-foreground: #f4f4f5;
+  --muted: #26262b;
+  --muted-foreground: #8e8e98;
+  --accent: #26262b;
+  --accent-foreground: #f4f4f5;
+  --destructive: #f87171;
+  --success: #4ade80;
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: #b49ae8;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: #18181b;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-primary: #b49ae8;
+  --sidebar-primary-foreground: #1a1033;
+  --sidebar-accent: #26262b;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: rgb(255 255 255 / 10%);
+  --sidebar-ring: #b49ae8;
+
+  --brand: #b49ae8;
+  /* Dark text on the light lilac: white on it was 2.4:1. */
+  --brand-foreground: #1a1033;
+  --status-done: #4ade80;
+  --status-done-soft: #14301f;
+  --status-needs: #fbbf24;
+  --status-needs-soft: #3a2a0c;
+  --status-working: #7aa2ff;
+  --status-working-soft: #18233d;
+  --status-problem: #f87171;
+  --status-problem-soft: #3a1717;
+  --bubble: #26262b;
+  --bubble-user: #2f2845;
+  --shadow-float:
+    0 0 0 0.5px rgb(255 255 255 / 10%), 0 4px 12px -4px rgb(0 0 0 / 50%);
+  --shadow-card: 0 0 0 1px var(--border);
+  --shadow-raised: 0 0 0 1px var(--border), 0 10px 26px -14px rgb(0 0 0 / 60%);
+  --glass: rgb(28 28 31 / 82%);
+  --veil: rgb(17 17 19 / 72%);
+  --glass-edge: inset 0 0.5px 0 rgb(255 255 255 / 8%);
+  --shadow-glass: var(--glass-edge), var(--shadow-float);
 }
 
 * {
@@ -102,23 +188,11 @@ body {
  */
 
 /*
- * Text is sized on a 15px base while everything else is on Tailwind's 16px rem.
- *
- * The root stays at the browser's 16px so spacing, sizes and radii land on Tailwind's 4px grid
- * (`p-4` is 16px, `h-8` is 32px). Only type keeps the scale it had under the old 15px root: each
- * size below is Tailwind's default multiplied by 15/16, so `text-sm` is still 13.125px. Line
- * heights are Tailwind's own unitless ratios and scale with them. `body` reads `--text-base`, so
- * unclassed text is 15px too.
+ * No `--text-*` here. Text follows the browser's own size, 16px by default, on Tailwind's own scale,
+ * like the spacing and the radii; OpenBot used to set every size to 15/16 of Tailwind's. The type
+ * scale below is in rem too, so it follows the person's text size.
  */
 @theme inline {
-  --text-xs: 0.703125rem; /* 11.25px */
-  --text-sm: 0.8203125rem; /* 13.125px */
-  --text-base: 0.9375rem; /* 15px */
-  --text-lg: 1.0546875rem; /* 16.875px */
-  --text-xl: 1.171875rem; /* 18.75px */
-  --text-2xl: 1.40625rem; /* 22.5px */
-  --text-3xl: 1.7578125rem; /* 28.125px */
-  --text-4xl: 2.109375rem; /* 33.75px */
   --font-heading: var(--font-sans);
   --font-sans: "Inter Variable", sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
@@ -160,6 +234,83 @@ body {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-status-done: var(--status-done);
+  --color-status-done-soft: var(--status-done-soft);
+  --color-status-needs: var(--status-needs);
+  --color-status-needs-soft: var(--status-needs-soft);
+  --color-status-working: var(--status-working);
+  --color-status-working-soft: var(--status-working-soft);
+  --color-status-problem: var(--status-problem);
+  --color-status-problem-soft: var(--status-problem-soft);
+  --color-bubble: var(--bubble);
+  --color-bubble-user: var(--bubble-user);
+}
+
+/*
+ * The type scale: five sizes, in rem so they follow the person's text size. Inter's tracking tightens
+ * as it grows. Weights are not part of a size: 600 for titles, 500 for row titles, chips and
+ * buttons, 400 otherwise. `cn` knows these as font sizes (`lib/utils.ts`), so one given later
+ * replaces a primitive's `text-*` and the `leading-*` that came with it.
+ *
+ *   type-display  24/28  screen titles
+ *   type-nav      18/22  navigation rows, Settings rows
+ *   type-body     17/23  messages, task and card titles
+ *   type-sub      15/20  status lines, chips, the composer, section headers, buttons
+ *   type-caption  13/16  captions, labels, the footer, timestamps, tags
+ */
+@utility type-display {
+  font-size: 1.5rem;
+  line-height: 1.75rem;
+  letter-spacing: -0.018em;
+}
+@utility type-nav {
+  font-size: 1.125rem;
+  line-height: 1.375rem;
+  letter-spacing: -0.011em;
+}
+@utility type-body {
+  font-size: 1.0625rem;
+  line-height: 1.4375rem;
+  letter-spacing: -0.011em;
+}
+@utility type-sub {
+  font-size: 0.9375rem;
+  line-height: 1.25rem;
+  letter-spacing: -0.006em;
+}
+@utility type-caption {
+  font-size: 0.8125rem;
+  line-height: 1rem;
+  letter-spacing: 0;
+}
+/*
+ * Frosted chrome over a scrolling screen. The blur is what makes the translucency readable: without
+ * it, a message passing under the composer would sit legibly behind its placeholder. A browser that
+ * cannot blur gets the opaque card instead, never a see-through bar.
+ */
+@utility glass {
+  background-color: var(--card);
+  @supports (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px)) {
+    background-color: var(--glass);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
+  }
+}
+@utility veil {
+  background-color: var(--background);
+  @supports (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px)) {
+    background-color: var(--veil);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    backdrop-filter: blur(28px) saturate(160%);
+  }
+}
+/* Inter's single-storey a (cv11) and flat-topped 3 (ss03). On `body`, so every screen has them. */
+@utility face {
+  font-feature-settings: "cv11", "ss03";
 }
 
 @layer base {
@@ -167,7 +318,7 @@ body {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground text-base;
+    @apply bg-background text-foreground face;
   }
   html {
     @apply font-sans;

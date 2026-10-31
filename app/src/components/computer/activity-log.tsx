@@ -9,33 +9,35 @@
  * This session only. The record is the audit trail, which is on the server and survives a reload;
  * this is a window, and it is allowed to be empty when a tab is opened on a conversation that
  * already happened.
+ *
+ * The pane draws these among the Bot's browser steps, in one list (`step-log.tsx`). What is here is
+ * what only a command log can say: what each call is called, how it ended, and what it printed.
  */
-import { IconFile, IconFolder, IconTerminal2 } from "@tabler/icons-react";
-import { useSyncExternalStore } from "react";
-import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import {
-  activityFor,
-  type ComputerActivity,
-  subscribeToActivity,
-} from "@/lib/computers/activity";
+import type { ComputerActivity } from "@/lib/computers/activity";
 import { CommandOutput } from "./command-output";
 
-const ICONS = {
-  command: IconTerminal2,
-  read_file: IconFile,
-  write_file: IconFile,
-  list_files: IconFolder,
+/**
+ * What the line says was done, in the words the call's own line in the conversation uses
+ * (`computer-tools.tsx`). The subject beside it says what it was done to.
+ */
+export const ACTIVITY_LABELS = {
+  command: "Ran a command",
+  read_file: "Read file",
+  write_file: "Saved file",
+  list_files: "Listed files",
 } as const;
 
-/** What the line says was done. The subject beside it says what it was done to. */
-const LABELS = {
-  command: "Ran",
-  read_file: "Read",
-  write_file: "Saved",
-  list_files: "Listed",
-} as const;
+/** How a call ended: a boundary refused it, it exited non-zero, or it worked. */
+export function activityStatus(
+  entry: ComputerActivity,
+): "done" | "blocked" | "failed" {
+  if (entry.refused === true) return "blocked";
+  if (typeof entry.exitCode === "number" && entry.exitCode !== 0)
+    return "failed";
+  return "done";
+}
 
-function timeOf(at: number): string {
+export function timeOf(at: number): string {
   return new Date(at).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
@@ -43,84 +45,22 @@ function timeOf(at: number): string {
   });
 }
 
-function Entry({ entry }: { entry: ComputerActivity }) {
-  const Icon = ICONS[entry.kind];
-  const failed =
-    entry.refused === true ||
-    (typeof entry.exitCode === "number" && entry.exitCode !== 0);
-
-  return (
-    <li className="border-border/60 border-b py-2 last:border-b-0">
-      <div className="flex items-baseline gap-2">
-        <Icon
-          aria-hidden
-          className={`size-3.5 shrink-0 translate-y-0.5 ${
-            failed ? "text-destructive" : "text-muted-foreground"
-          }`}
-        />
-        <span className="shrink-0 text-muted-foreground text-xs">
-          {LABELS[entry.kind]}
-        </span>
-        {/*
-          The command wraps rather than truncating. In the transcript one line per call is what keeps
-          it readable; here the whole point is to see exactly what ran, and a long command with its
-          middle cut out is the one thing this pane must not do.
-        */}
-        <code className="min-w-0 break-all font-mono text-xs">
-          {entry.subject}
-        </code>
-        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground tabular-nums">
-          {timeOf(entry.at)}
-        </span>
-      </div>
-
-      {entry.refused === true ? (
-        <p className="mt-1 pl-5 text-destructive text-xs">
-          {entry.output || "A boundary refused it."}
-        </p>
-      ) : (
-        <div className="mt-1 max-h-64 overflow-auto pl-5">
-          <CommandOutput
-            {...(entry.exitCode !== undefined
-              ? { exitCode: entry.exitCode }
-              : {})}
-            output={entry.output}
-            timedOut={entry.timedOut === true}
-            truncated={entry.truncated === true}
-          />
-        </div>
-      )}
-    </li>
-  );
-}
-
-export function ActivityLog({ computerId }: { computerId: string }) {
-  const entries = useSyncExternalStore(
-    subscribeToActivity,
-    () => activityFor(computerId),
-    () => activityFor(computerId),
-  );
-
-  if (entries.length === 0) {
+/** What came back: the refusal's reason, or what the call printed. */
+export function ActivityOutput({ entry }: { entry: ComputerActivity }) {
+  if (entry.refused === true)
     return (
-      <Empty className="h-[180px] border border-dashed">
-        <EmptyHeader>
-          <EmptyTitle className="text-muted-foreground">
-            Nothing yet. Commands the Bot runs and files it reads appear here.
-          </EmptyTitle>
-        </EmptyHeader>
-      </Empty>
+      <p className="type-caption text-status-problem">
+        {entry.output || "A boundary refused it."}
+      </p>
     );
-  }
-
-  // Newest first: what somebody watching wants is what just happened, without scrolling for it.
-  const newestFirst = [...entries].reverse();
-
   return (
-    <ul className="min-w-0">
-      {newestFirst.map((entry) => (
-        <Entry entry={entry} key={entry.id} />
-      ))}
-    </ul>
+    <div className="max-h-64 overflow-auto">
+      <CommandOutput
+        {...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {})}
+        output={entry.output}
+        timedOut={entry.timedOut === true}
+        truncated={entry.truncated === true}
+      />
+    </div>
   );
 }

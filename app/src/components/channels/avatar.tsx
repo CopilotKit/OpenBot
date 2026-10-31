@@ -1,37 +1,43 @@
-import Avatar from "boring-avatars";
 import { memo } from "react";
-import { cn } from "@/lib/utils";
+import { BotOrb, type BotOrbState } from "@/components/agents/orb/bot-orb";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
  * `use-channel-events` preserves participant id arrays for unchanged rows.
  *
- * `size-full` opts the generated SVG out of ancestor icon selectors such as
- * `[&_svg:not([class*='size-'])]:size-4`.
+ * Each face is the Bot's orb, with the look its id picks: the same face `AbstractAvatar` draws from
+ * the seed, which is the id unless a tenant package set one or the Bot was copied from another
+ * (a copy keeps its source's seed). Clipped to its circle, so its glow
+ * never spills into the row.
  *
- * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
- * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
+ * `typing` marks a channel whose Bot is mid-turn: every face works, and a still dot at the
+ * bottom-right says so without moving the row's layout. `state` sets what the faces show instead.
  */
 export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
   size = 32,
   typing = false,
+  state = typing ? "thinking" : "idle",
 }: {
   participantIds: string[];
   size?: number;
   typing?: boolean;
+  /** What every face shows. Working while `typing`, resting otherwise. */
+  state?: BotOrbState;
 }) {
   const avatar =
     participantIds.length === 1 ? (
-      <Avatar className="size-full" name={participantIds[0]} size={size} />
+      <span className="block size-full overflow-hidden rounded-full">
+        <BotOrb seed={participantIds[0]} size={size} state={state} />
+      </span>
     ) : (
-      <GroupFaces participantIds={participantIds} size={size} />
+      <GroupFaces participantIds={participantIds} size={size} state={state} />
     );
 
   return (
     <div className="relative" style={{ height: size, width: size }}>
       {avatar}
-      {typing ? <TypingBadge /> : null}
+      {typing ? <BusyDot /> : null}
     </div>
   );
 });
@@ -63,9 +69,11 @@ const LAYOUTS = {
 function GroupFaces({
   participantIds,
   size,
+  state,
 }: {
   participantIds: string[];
   size: number;
+  state: BotOrbState;
 }) {
   const shown = participantIds.slice(0, 3);
   const layout = LAYOUTS[shown.length === 2 ? 2 : 3];
@@ -97,7 +105,7 @@ function GroupFaces({
               WebkitMaskComposite: "source-in",
             }}
           >
-            <Avatar className="size-full" name={id} size={diameter} />
+            <BotOrb seed={id} size={diameter} state={state} />
           </div>
         );
       })}
@@ -106,25 +114,15 @@ function GroupFaces({
 }
 
 /**
- * Three bouncing dots in a small badge, ringed in the sidebar's own colour so it sits on the
- * avatar as a badge rather than floating over it. The staggered negative delays start each dot at
- * a different point in the same bounce, which is what makes the three read as one wave.
+ * A still dot in the working colour, ringed so it sits on the avatar as a badge rather than floating
+ * over it. Still on purpose: an orb this small only blinks, and reduced motion stills it entirely, so
+ * the faces working is too slight to read as busy from across the roster. The ring is the ground the
+ * avatar sits on, the sidebar's own unless a row lit behind it sets `--avatar-ground`.
  */
-function TypingBadge() {
+function BusyDot() {
   return (
-    <div className="absolute -bottom-0.5 -right-0.5 flex items-center gap-0.5 rounded-full bg-sidebar p-0.5 ring-2 ring-sidebar">
+    <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-status-working ring-2 ring-(--avatar-ground,var(--sidebar))">
       <span className="sr-only">Working…</span>
-      <Dot className="[animation-delay:-0.3s]" />
-      <Dot className="[animation-delay:-0.15s]" />
-      <Dot />
-    </div>
-  );
-}
-
-function Dot({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn("size-1 rounded-full bg-primary animate-bounce", className)}
-    />
+    </span>
   );
 }

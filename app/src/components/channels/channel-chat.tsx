@@ -1012,6 +1012,11 @@ export function ChannelChat({
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
   }, []);
 
+  /** The Bot's own name, once its profile is in. The conversation's name may be its title instead. */
+  const botName = agentProfiles?.find(
+    (profile) => profile.id === runtimeAgentId,
+  )?.name;
+
   return (
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's
     // channel instance so an action continues this thread instead of looking for a default agent.
@@ -1055,6 +1060,8 @@ export function ChannelChat({
             commands={skillCommands}
             // Readiness is handled by `say`; deletion is the only disabled-chat state.
             disabled={!channel.active}
+            // Until the Bot's name is in, the composer keeps its own words.
+            {...(botName ? { placeholder: `Message ${botName}` } : {})}
             messages={withVoiceChats(
               transcriptMessages(agent.messages, seed),
               voiceArchive.entries,

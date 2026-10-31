@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { useEffect } from "react";
 import { DetailPanel } from "@/components/layout/detail-panel";
@@ -90,6 +91,61 @@ test("narrow container overlays details without remounting the chat draft", asyn
   await resize(view.container, 560);
   expect(await view.findByRole("dialog", { name: "Computer" })).toBeTruthy();
   expect(mounts).toBe(1);
+});
+
+test("says whether it overlays, so an owner can keep from covering the page", async () => {
+  const reports: boolean[] = [];
+  const view = render(
+    <DetailPanel
+      detail={<p>Browser preview</p>}
+      detailWidth={440}
+      onClose={() => {}}
+      onOverlayChange={(overlay) => reports.push(overlay)}
+      open={false}
+      title="Computer"
+    >
+      <p>Chat</p>
+    </DetailPanel>,
+  );
+  // Closed or open, measured against the width it opens at: 440 beside a 400px page.
+  await resize(view.container, 840);
+  expect(reports.at(-1)).toBe(false);
+  await resize(view.container, 839);
+  expect(reports.at(-1)).toBe(true);
+  await resize(view.container, 1200);
+  expect(reports.at(-1)).toBe(false);
+  // Told when it changes, not on every resize.
+  const told = reports.length;
+  await resize(view.container, 1300);
+  expect(reports).toHaveLength(told);
+});
+
+test("the owner's actions sit beside the close button, beside the page and in a sheet", async () => {
+  const props = {
+    title: "Computer",
+    actions: <button type="button">Take control</button>,
+    onClose: () => {},
+    detail: <p>Browser preview</p>,
+    children: <p>Chat</p>,
+  };
+  const view = render(<DetailPanel {...props} open />);
+  await resize(view.container, 1000);
+  const header = view.container.querySelector(
+    '[data-slot="detail-pane-header"]',
+  );
+  expect(
+    header?.querySelector('[data-slot="detail-pane-title"]')?.textContent,
+  ).toBe("Computer");
+  // In the header, and outside the title the skins dress.
+  const docked = view.getByRole("button", { name: "Take control" });
+  expect(header?.contains(docked)).toBe(true);
+  expect(docked.closest('[data-slot="detail-pane-title"]')).toBeNull();
+
+  await resize(view.container, 560);
+  const sheet = await view.findByRole("dialog", { name: "Computer" });
+  expect(
+    within(sheet).getByRole("button", { name: "Take control" }),
+  ).toBeTruthy();
 });
 
 test("closing narrow details invokes the owner and unmounts detail work", async () => {
