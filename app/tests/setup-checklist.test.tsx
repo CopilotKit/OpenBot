@@ -228,11 +228,51 @@ test("a member sees their admin sets it up, and no variable names", async () => 
 
   const model = rowOf(view, "model");
   expect(model.getByText("Your admin sets this up.")).not.toBeNull();
-  expect(model.getByText("Needs setup")).not.toBeNull();
   expect(view.container.textContent).not.toContain("OPENAI_API_KEY");
   expect(view.container.textContent).not.toContain("OPENTAG");
   expect(view.queryByRole("link", { name: "Setup guide" })).toBeNull();
   expect(view.queryByRole("link")).toBeNull();
+});
+
+test("a member's gaps are one neutral line: no amber or red pill, no Required, no counts", async () => {
+  serving(MEMBER);
+  const view = draw();
+  await view.findByRole("list", { name: "Setup" });
+
+  for (const id of ["model", "computer", "chat"]) {
+    const row = rowOf(view, id);
+    expect(row.queryByText("Needs setup")).toBeNull();
+    expect(row.queryByText("Required")).toBeNull();
+    expect(row.getByText("Your admin sets this up.")).not.toBeNull();
+  }
+  const list = view.getByRole("list", { name: "Setup" });
+  expect(list.innerHTML).not.toContain("status-problem");
+  expect(list.innerHTML).not.toContain("status-needs");
+  // What works still says so.
+  expect(rowOf(view, "intelligence").getByText("Ready")).not.toBeNull();
+  expect(view.getByRole("status").textContent).toBe(
+    "Your admin sets up anything that isn't ready yet.",
+  );
+});
+
+test("while the answer is on its way, the checklist says it's checking", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  globalThis.fetch = Object.assign(
+    async () => {
+      await held;
+      return Response.json({ checklist: ADMIN });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw();
+
+  expect(view.getByRole("status").textContent).toBe("Checking your setup…");
+  release();
+  await view.findByRole("list", { name: "Setup" });
+  expect(view.queryByText("Checking your setup…")).toBeNull();
 });
 
 test("Check again asks the server to check again, and draws its answer", async () => {
