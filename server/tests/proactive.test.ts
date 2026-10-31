@@ -163,24 +163,13 @@ describe("the window a check-in reads", () => {
     );
   });
 
-  test("after a quiet or raised check-in it reads only what is new since that one started", () => {
+  test("after a check-in that read everything it reads only what is new since that one started", () => {
     const last = new Date("2026-10-22T16:30:00.000Z");
-    for (const outcome of ["quiet", "raised"] as const) {
-      const window = checkInWindow({ outcome, startedAt: last }, NOW);
-      expect(window).toMatchObject({ firstRun: false, since: last });
-      expect(researchInstruction({ focus: "" }, window)).toContain(
-        `(Unix time ${Math.floor(last.getTime() / 1000)})`,
-      );
-    }
-  });
-
-  test("after a failed check-in it goes back a day, since that run's reads are not to be trusted", () => {
-    const window = checkInWindow(
-      { outcome: "failed", startedAt: new Date("2026-10-22T16:30:00.000Z") },
-      NOW,
+    const window = checkInWindow(last, NOW);
+    expect(window).toMatchObject({ firstRun: false, since: last });
+    expect(researchInstruction({ focus: "" }, window)).toContain(
+      `(Unix time ${Math.floor(last.getTime() / 1000)})`,
     );
-    expect(window.firstRun).toBe(true);
-    expect(window.since.toISOString()).toBe("2026-10-21T17:30:00.000Z");
   });
 
   test("the prompt makes silence the usual outcome, and carries what is open with ids, open tasks, what was hidden with its app, and what was started", () => {
@@ -284,13 +273,21 @@ describe("what counts as the same item", () => {
       open: [
         {
           id: "o",
+          agentId: "studio",
           title: ROSA,
           sourceLink: "https://mail.example.test/m/1",
         },
       ],
-      tasks: [{ title: "Book the kiln technician", sourceLink: null }],
+      tasks: [
+        {
+          agentId: "studio",
+          title: "Book the kiln technician",
+          sourceLink: null,
+        },
+      ],
       hidden: [
         {
+          agentId: "studio",
           title: "Renew the market stall",
           sourceLink: "https://mail.example.test/m/9",
           sourceApp: "Gmail",
@@ -298,30 +295,82 @@ describe("what counts as the same item", () => {
       ],
       started: [],
     };
+    const studio = (input: { title: string; sourceLink?: string }) =>
+      repeatOf(prior, { agentId: "studio", ...input });
     expect(
-      repeatOf(prior, { title: "reply to rosa about the glaze substitute." }),
+      studio({ title: "reply to rosa about the glaze substitute." }),
     ).toContain("already raised and still open");
     expect(
-      repeatOf(prior, {
+      studio({
         title: "Answer Rosa",
         sourceLink: "https://MAIL.example.test/m/1/",
       }),
     ).toContain(ROSA);
-    expect(repeatOf(prior, { title: "Book the kiln technician" })).toContain(
+    expect(studio({ title: "Book the kiln technician" })).toContain(
       "already have a task",
     );
     expect(
-      repeatOf(prior, {
+      studio({
         title: "Something else",
         sourceLink: "https://mail.example.test/m/9",
       }),
     ).toContain("They hid");
     expect(
-      repeatOf(prior, {
+      studio({
         title: "Send Priya replacement mugs",
         sourceLink: "https://mail.example.test/m/2",
       }),
     ).toBeNull();
+  });
+
+  test("another of the person's Bots finding the same thing is a repeat too, named without its title", () => {
+    const prior = {
+      open: [
+        {
+          id: "o",
+          agentId: "studio",
+          title: ROSA,
+          sourceLink: "https://mail.example.test/m/1",
+        },
+      ],
+      tasks: [
+        {
+          agentId: "studio",
+          title: "Book the kiln technician",
+          sourceLink: null,
+        },
+      ],
+      hidden: [
+        {
+          agentId: "studio",
+          title: "Renew the market stall",
+          sourceLink: "https://mail.example.test/m/9",
+          sourceApp: "Gmail",
+        },
+      ],
+      started: [],
+    };
+    const shop = (input: { title: string; sourceLink?: string }) =>
+      repeatOf(prior, { agentId: "shop", ...input });
+    const open = shop({
+      title: "Write back to Rosa",
+      sourceLink: "https://mail.example.test/m/1",
+    });
+    expect(open).toBe(
+      "Another of their Bots already raised this, and it is still open. Do not raise it again.",
+    );
+    expect(shop({ title: "Book the kiln technician." })).toBe(
+      "They already have a task for this from another of their Bots. Do not raise it again.",
+    );
+    expect(
+      shop({
+        title: "Pay the stall fee",
+        sourceLink: "https://mail.example.test/m/9",
+      }),
+    ).toBe(
+      "They hid this when another of their Bots raised it. Do not raise it, or anything like it, again.",
+    );
+    expect(shop({ title: "Order glaze" })).toBeNull();
   });
 });
 

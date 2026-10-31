@@ -224,9 +224,14 @@ test("a ping of three items sends one browser notification, and nothing more unt
     await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
   });
   await waitFor(() => expect(sent).toHaveLength(1));
+  // As the phone says it: how many, then a line per item naming its Bot.
   expect(sent[0]).toEqual({
-    title: "Your Bots",
-    body: "3 things need you: Approve the March invoice; Reply to Dana; Fix the stale onboarding page",
+    title: "3 things need you",
+    body: [
+      "Expenses: Approve the March invoice",
+      "Expenses: Reply to Dana",
+      "Knowledge: Fix the stale onboarding page",
+    ].join("\n"),
     tag: "openbot-ping-ping-1",
   });
 
@@ -249,9 +254,43 @@ test("a ping of three items sends one browser notification, and nothing more unt
   });
   await waitFor(() => expect(sent).toHaveLength(2));
   expect(sent[1]).toEqual({
-    title: "Expenses",
-    body: "One thing needs you: Book the venue",
+    title: "One thing needs you",
+    body: "Expenses: Book the venue",
     tag: "openbot-ping-ping-2",
+  });
+});
+
+test("a ping that carried one thing twice, from two Bots, lists it once, labelled with its Bot", async () => {
+  const sent = notifications();
+  serving([attention("expenses", {}), attention("knowledge", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+
+  lastPingId = "ping-1";
+  items = [
+    item("s1", "expenses", "Approve the Q4 budget by Friday", "ping-1"),
+    item("s2", "expenses", "Confirm November offsite headcount", "ping-1"),
+    item("s3", "knowledge", "confirm November offsite headcount.", "ping-1"),
+  ];
+  served = [
+    attention("expenses", { items: 2 }),
+    attention("knowledge", { items: 1 }),
+  ];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]).toEqual({
+    title: "2 things need you",
+    body: [
+      "Expenses: Approve the Q4 budget by Friday",
+      "Expenses: Confirm November offsite headcount",
+    ].join("\n"),
+    tag: "openbot-ping-ping-1",
   });
 });
 

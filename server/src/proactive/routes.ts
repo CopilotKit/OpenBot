@@ -7,6 +7,7 @@ import {
   type ProactiveRunRow,
   type ProactiveStore,
   STOPPED_BEFORE_FINISHING,
+  unreachedApps,
 } from "./store";
 import {
   ProactiveNotFoundError,
@@ -23,6 +24,24 @@ function payloadOf({ dedupeKey: _, ...item }: ProactiveSuggestion) {
   return item;
 }
 
+/** "Mail", "Mail and Calendar", "Mail, Calendar and Drive". */
+function listed(apps: readonly string[]) {
+  return apps.length <= 1
+    ? (apps[0] ?? "")
+    : `${apps.slice(0, -1).join(", ")} and ${apps.at(-1)}`;
+}
+
+/**
+ * Why a check-in couldn't finish, in one plain sentence. An app it could not reach is named, since
+ * that is what the person can do something about; the next check-in reads what it missed.
+ */
+function failedBecause(error: string | null) {
+  const apps = unreachedApps(error);
+  if (apps)
+    return `Couldn't reach ${listed(apps)}. The next check-in will try again.`;
+  return `Couldn't finish: ${plainFailure(error === STOPPED_BEFORE_FINISHING ? null : error)}.`;
+}
+
 /**
  * A setting's newest check-in as the person reads it (`LastCheckInPayload`): how it ended and, for
  * one that was skipped or couldn't finish, why, in one plain sentence. Never the error itself, which
@@ -34,7 +53,7 @@ function lastRunOf(run: ProactiveRunRow | undefined) {
     run.outcome === "skipped" && run.skipReason
       ? SKIPPED_BECAUSE[run.skipReason]
       : run.outcome === "failed"
-        ? `Couldn't finish: ${plainFailure(run.error === STOPPED_BEFORE_FINISHING ? null : run.error)}.`
+        ? failedBecause(run.error)
         : null;
   return {
     outcome: run.outcome,

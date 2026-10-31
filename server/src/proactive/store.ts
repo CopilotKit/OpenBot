@@ -29,6 +29,7 @@ import {
   parseWith,
   proactiveSettingInputSchema,
   proactiveSettingPatchSchema,
+  sameThing,
   titleKey,
 } from "./types";
 import type { LastCheckIn } from "./window";
@@ -44,19 +45,67 @@ export const STOPPED_BEFORE_FINISHING =
 export type ProactiveRead = { ref: string; at: Date };
 
 /**
- * What this person had from this Bot before a check-in: what the repeat check refuses against, and
- * what the check-in is told (`window.ts`). Titles and links, never the mail they came from.
+ * What this person had before a check-in: what the repeat check refuses against, and what the
+ * check-in is told (`window.ts`). Titles and links, never the mail they came from.
+ *
+ * Open items, tasks and what they hid are the person's from every one of their Bots, each naming its
+ * Bot: the same request is one thing to them whichever Bot found it, so it is raised once, and once
+ * hidden it stays hidden from all of them. What a check-in is told of them is its own Bot's alone
+ * (see `contextOf` in `engine.ts`). Started is only ever told, so it is this Bot's alone.
  */
 export type PriorItems = {
-  open: { id: string; title: string; sourceLink: string | null }[];
-  tasks: { title: string; sourceLink: string | null }[];
+  open: {
+    id: string;
+    agentId: string;
+    title: string;
+    sourceLink: string | null;
+  }[];
+  tasks: { agentId: string; title: string; sourceLink: string | null }[];
   hidden: {
+    agentId: string;
     title: string;
     sourceLink: string | null;
     sourceApp: string | null;
   }[];
   started: { title: string }[];
 };
+
+/**
+ * How many of the person's open items, tasks and hidden items the repeat check reads, across all
+ * their Bots. Far more than anybody keeps open; the index on open titles backs it per Bot.
+ */
+const PRIOR_LIMIT = 200;
+
+/**
+ * A check-in that couldn't read an app records it in its run's `error`: this marker, then the apps'
+ * names. On a failed run that is the reason the person reads on the Bot's check-ins; on one that
+ * raised something anyway, it keeps the next check-in's window open from before it (`windowStart`).
+ */
+const UNREACHED = "unreached:";
+/** How many app names one run's error keeps, so it fits the column's 500 characters. */
+const UNREACHED_KEPT = 5;
+
+/** The `error` a check-in that couldn't read these apps is closed with. */
+export function unreachedError(apps: readonly string[]): string {
+  return `${UNREACHED}${JSON.stringify(
+    apps.slice(0, UNREACHED_KEPT).map((app) => app.slice(0, 80)),
+  )}`;
+}
+
+/** The apps a check-in couldn't read, from its `error`, or null when that is not why it failed. */
+export function unreachedApps(error: string | null): string[] | null {
+  if (!error?.startsWith(UNREACHED)) return null;
+  try {
+    const apps: unknown = JSON.parse(error.slice(UNREACHED.length));
+    return Array.isArray(apps) &&
+      apps.length > 0 &&
+      apps.every((app) => typeof app === "string")
+      ? apps
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 /** A setting's run as the ledger keeps it. */
 /**
@@ -107,6 +156,142 @@ const claimable = and(
   sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
   sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
 );
+
+/** A new item as a check-in raises it. Its id, status and normalized title are the store's. */
+export type NewSuggestion = Omit<
+  ProactiveSuggestion,
+  | "id"
+  | "status"
+  | "dedupeKey"
+  | "pingId"
+  | "deliveredAt"
+  | "resolvedAt"
+  | "createdAt"
+>;
+
+/** The database, or a transaction on it. */
+type Executor = Pick<Database, "select" | "insert" | "update" | "execute">;
+
+/**
+ * Serialize what changes which items a person has open, across every replica: raising one, and
+ * putting one back after a Start that failed. Transaction-scoped, so it is let go at commit.
+ */
+async function lockItems(executor: Executor, owner: string) {
+  await executor.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`proactive-items\u001f${owner}`}, 0))`,
+  );
+}
+
+/**
+ * Open a new item. Its normalized title goes in `dedupe_key`, so when two check-ins race to open
+ * the same thing for one person and Bot, the partial unique index lets one in and the other is
+ * refused here as the repeat it is.
+ */
+async function insertSuggestion(
+  executor: Executor,
+  input: NewSuggestion,
+): Promise<ProactiveSuggestion> {
+  try {
+    const [row] = await executor
+      .insert(proactiveSuggestions)
+      .values({
+        id: randomUUID(),
+        ...input,
+        dedupeKey: titleKey(input.title),
+      })
+      .returning();
+    if (!row) throw new Error("Suggestion insert returned no row.");
+    return row;
+  } catch (error) {
+    if (violates(error, "proactive_suggestions_open_dedupe_idx"))
+      throw new ProactiveRefusedError(
+        "This is already raised and still open. Do not raise it again.",
+      );
+    throw error;
+  }
+}
+
+/**
+ * What this person had (see {@link PriorItems}). Read fresh for each item a check-in raises, under
+ * the person's lock when it is about to write, so an item any of their Bots opened a moment ago
+ * counts too.
+ */
+async function priorItemsOf(
+  executor: Executor,
+  owner: string,
+  agentId: string,
+): Promise<PriorItems> {
+  const since = new Date(Date.now() - HIDDEN_DAYS * 86_400_000);
+  const theirs = eq(proactiveSuggestions.ownerUserId, owner);
+  const columns = {
+    id: proactiveSuggestions.id,
+    agentId: proactiveSuggestions.agentId,
+    title: proactiveSuggestions.title,
+    sourceLink: proactiveSuggestions.sourceLink,
+    sourceApp: proactiveSuggestions.sourceApp,
+  };
+  /*
+   * One after another: inside a transaction they share its one connection, and a driver is free to
+   * refuse a second statement on it while the first is in flight.
+   */
+  const open = await executor
+    .select(columns)
+    .from(proactiveSuggestions)
+    .where(and(theirs, eq(proactiveSuggestions.status, "open")))
+    .orderBy(desc(proactiveSuggestions.createdAt))
+    .limit(PRIOR_LIMIT);
+  const hidden = await executor
+    .select(columns)
+    .from(proactiveSuggestions)
+    .where(
+      and(
+        theirs,
+        eq(proactiveSuggestions.status, "dismissed"),
+        gte(proactiveSuggestions.resolvedAt, since),
+      ),
+    )
+    .orderBy(desc(proactiveSuggestions.resolvedAt))
+    .limit(PRIOR_LIMIT);
+  const started = await executor
+    .select(columns)
+    .from(proactiveSuggestions)
+    .where(
+      and(
+        theirs,
+        eq(proactiveSuggestions.agentId, agentId),
+        eq(proactiveSuggestions.status, "started"),
+        gte(proactiveSuggestions.resolvedAt, since),
+      ),
+    )
+    .orderBy(desc(proactiveSuggestions.resolvedAt))
+    .limit(20);
+  const tasks = await executor
+    .select({
+      agentId: botTasks.agentId,
+      title: botTasks.title,
+      sourceLink: botTasks.sourceLink,
+    })
+    .from(botTasks)
+    .where(and(eq(botTasks.ownerUserId, owner), isNull(botTasks.resolvedAt)))
+    .orderBy(desc(botTasks.createdAt))
+    .limit(PRIOR_LIMIT);
+  return {
+    open: open.map(({ id, agentId, title, sourceLink }) => ({
+      id,
+      agentId,
+      title,
+      sourceLink,
+    })),
+    tasks,
+    hidden: hidden.map(({ agentId, title, sourceLink, sourceApp }) => ({
+      agentId,
+      title,
+      sourceLink,
+      sourceApp,
+    })),
+    started: started.map(({ title }) => ({ title })),
+  };
+}
 
 export function createProactiveStore(database: Database) {
   const owned = (owner: string, id: string) =>
@@ -298,6 +483,28 @@ export function createProactiveStore(database: Database) {
         row.ref ? [{ ref: row.ref, at: row.at }] : [],
       );
     },
+    /**
+     * The tools this proactive run called that failed: the app could not be reached, refused the
+     * account, or answered with an error. From the audit trail, as `readsFor` is. A call this
+     * deployment refused before it left (a write a check-in may not make) is not one of them.
+     */
+    async failedReadsFor(runId: string): Promise<string[]> {
+      const rows = await database
+        .selectDistinct({ ref: auditEvents.targetId })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(
+              auditEvents.initiatorId,
+              `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
+            ),
+            eq(auditEvents.eventType, "mcp.call_failed"),
+            gte(auditEvents.createdAt, new Date(Date.now() - 86_400_000)),
+          ),
+        )
+        .limit(200);
+      return rows.flatMap((row) => (row.ref ? [row.ref] : []));
+    },
     async countSuggestions(runId: string) {
       const [row] = await database
         .select({ count: sql<number>`count(*)::int` })
@@ -306,116 +513,39 @@ export function createProactiveStore(database: Database) {
       return row?.count ?? 0;
     },
     /**
-     * Open a new item. Its normalized title goes in `dedupe_key`, so when two check-ins race to open
-     * the same thing for one person and Bot, the partial unique index lets one in and the other is
-     * refused here as the repeat it is.
+     * Open a new item as it is, with only the index's check (see {@link insertSuggestion}). A
+     * check-in raises through `raise`, which refuses a repeat from any of the person's Bots first.
      */
-    async addSuggestion(
-      input: Omit<
-        ProactiveSuggestion,
-        | "id"
-        | "status"
-        | "dedupeKey"
-        | "pingId"
-        | "deliveredAt"
-        | "resolvedAt"
-        | "createdAt"
-      >,
-    ): Promise<ProactiveSuggestion> {
-      try {
-        const [row] = await database
-          .insert(proactiveSuggestions)
-          .values({
-            id: randomUUID(),
-            ...input,
-            dedupeKey: titleKey(input.title),
-          })
-          .returning();
-        if (!row) throw new Error("Suggestion insert returned no row.");
-        return row;
-      } catch (error) {
-        if (violates(error, "proactive_suggestions_open_dedupe_idx"))
-          throw new ProactiveRefusedError(
-            "This is already raised and still open. Do not raise it again.",
-          );
-        throw error;
-      }
+    async addSuggestion(input: NewSuggestion): Promise<ProactiveSuggestion> {
+      return insertSuggestion(database, input);
     },
     /**
-     * What this person had from this Bot: items still open, unfinished tasks, and what they hid or
-     * started in the last thirty days, newest first. Read fresh for each item a check-in raises, so
-     * an item another check-in opened a moment ago counts too.
+     * What this person had: items still open, unfinished tasks and what they hid in the last thirty
+     * days, from every one of their Bots, and what they started from this Bot. Newest first.
      */
-    async priorItems(owner: string, agentId: string): Promise<PriorItems> {
-      const since = new Date(Date.now() - HIDDEN_DAYS * 86_400_000);
-      const mine = and(
-        eq(proactiveSuggestions.ownerUserId, owner),
-        eq(proactiveSuggestions.agentId, agentId),
-      );
-      const columns = {
-        id: proactiveSuggestions.id,
-        title: proactiveSuggestions.title,
-        sourceLink: proactiveSuggestions.sourceLink,
-        sourceApp: proactiveSuggestions.sourceApp,
-      };
-      const [open, hidden, started, tasks] = await Promise.all([
-        database
-          .select(columns)
-          .from(proactiveSuggestions)
-          .where(and(mine, eq(proactiveSuggestions.status, "open")))
-          .orderBy(desc(proactiveSuggestions.createdAt))
-          .limit(50),
-        database
-          .select(columns)
-          .from(proactiveSuggestions)
-          .where(
-            and(
-              mine,
-              eq(proactiveSuggestions.status, "dismissed"),
-              gte(proactiveSuggestions.resolvedAt, since),
-            ),
-          )
-          .orderBy(desc(proactiveSuggestions.resolvedAt))
-          .limit(50),
-        database
-          .select(columns)
-          .from(proactiveSuggestions)
-          .where(
-            and(
-              mine,
-              eq(proactiveSuggestions.status, "started"),
-              gte(proactiveSuggestions.resolvedAt, since),
-            ),
-          )
-          .orderBy(desc(proactiveSuggestions.resolvedAt))
-          .limit(20),
-        database
-          .select({ title: botTasks.title, sourceLink: botTasks.sourceLink })
-          .from(botTasks)
-          .where(
-            and(
-              eq(botTasks.ownerUserId, owner),
-              eq(botTasks.agentId, agentId),
-              isNull(botTasks.resolvedAt),
-            ),
-          )
-          .orderBy(desc(botTasks.createdAt))
-          .limit(50),
-      ]);
-      return {
-        open: open.map(({ id, title, sourceLink }) => ({
-          id,
-          title,
-          sourceLink,
-        })),
-        tasks,
-        hidden: hidden.map(({ title, sourceLink, sourceApp }) => ({
-          title,
-          sourceLink,
-          sourceApp,
-        })),
-        started: started.map(({ title }) => ({ title })),
-      };
+    priorItems: (owner: string, agentId: string) =>
+      priorItemsOf(database, owner, agentId),
+    /**
+     * Open a new item a check-in raised, unless `refuse` finds it repeats something the person
+     * already has (it gets what {@link priorItemsOf} reads, and answers why, or null).
+     *
+     * The read and the insert run under one lock per person. Their Bots check in on their own
+     * schedules, on any replica, and two of them often find the same request at once; without the
+     * lock both would read before either wrote, and the person would be told twice. The index on
+     * open titles is per Bot, so for a second Bot this lock is the only thing that holds.
+     */
+    async raise(
+      input: NewSuggestion,
+      refuse: (prior: PriorItems) => string | null,
+    ): Promise<ProactiveSuggestion> {
+      return database.transaction(async (transaction) => {
+        await lockItems(transaction, input.ownerUserId);
+        const repeat = refuse(
+          await priorItemsOf(transaction, input.ownerUserId, input.agentId),
+        );
+        if (repeat) throw new ProactiveRefusedError(repeat);
+        return insertSuggestion(transaction, input);
+      });
     },
     /**
      * A check-in clearing one of its Bot's open items as no longer needed. Only an open item of this
@@ -536,7 +666,10 @@ export function createProactiveStore(database: Database) {
         throw error;
       }
     },
-    /** End a running check-in. A row the lease sweep already closed stays as it was closed. */
+    /**
+     * End a running check-in. A row the lease sweep already closed stays as it was closed. `error`
+     * on a raised one says an app couldn't be read (`unreachedError`); a quiet one never has one.
+     */
     async finishRun(
       id: string,
       result: {
@@ -559,7 +692,28 @@ export function createProactiveStore(database: Database) {
           and(eq(proactiveRuns.id, id), eq(proactiveRuns.outcome, "running")),
         );
     },
-    /** The setting's last check-in that reached the model and ended: where the next one's window opens. */
+    /**
+     * Where the setting's next check-in's window opens: the start of its last check-in that read
+     * everything it tried to. That is a quiet one, or one that raised something with no app left
+     * unread (`unreachedError`). A failed one never counts, so anything that arrived while an app
+     * was down, or a run broke off, is read by the next one that can. Null when there is none.
+     */
+    async windowStart(settingId: string): Promise<Date | null> {
+      const [row] = await database
+        .select({ startedAt: proactiveRuns.startedAt })
+        .from(proactiveRuns)
+        .where(
+          and(
+            eq(proactiveRuns.settingId, settingId),
+            inArray(proactiveRuns.outcome, ["quiet", "raised"]),
+            isNull(proactiveRuns.error),
+          ),
+        )
+        .orderBy(desc(proactiveRuns.startedAt))
+        .limit(1);
+      return row?.startedAt ?? null;
+    },
+    /** The setting's last check-in that reached the model and ended, for Run now's ten minutes. */
     async lastCheckIn(settingId: string): Promise<LastCheckIn | null> {
       const [row] = await database
         .select({
@@ -751,20 +905,32 @@ export function createProactiveStore(database: Database) {
     },
     /**
      * Back to open, after a Start whose task could not be opened, so the person can press it again.
-     * Left started when the Bot raised the same thing again meanwhile: that new item is the open one.
+     * Left started when any of their Bots raised the same thing again meanwhile: that new item is
+     * the open one. Under the person's lock, so a check-in raising it now waits and finds this one.
      */
     async reopenSuggestion(owner: string, id: string) {
       try {
-        await database
-          .update(proactiveSuggestions)
-          .set({ status: "open", resolvedAt: null })
-          .where(
-            and(
-              eq(proactiveSuggestions.ownerUserId, owner),
-              eq(proactiveSuggestions.id, id),
-              eq(proactiveSuggestions.status, "started"),
-            ),
-          );
+        await database.transaction(async (transaction) => {
+          await lockItems(transaction, owner);
+          const [item] = await transaction
+            .select()
+            .from(proactiveSuggestions)
+            .where(
+              and(
+                eq(proactiveSuggestions.ownerUserId, owner),
+                eq(proactiveSuggestions.id, id),
+                eq(proactiveSuggestions.status, "started"),
+              ),
+            )
+            .limit(1);
+          if (!item) return;
+          const { open } = await priorItemsOf(transaction, owner, item.agentId);
+          if (open.some((other) => sameThing(other, item))) return;
+          await transaction
+            .update(proactiveSuggestions)
+            .set({ status: "open", resolvedAt: null })
+            .where(eq(proactiveSuggestions.id, item.id));
+        });
       } catch (error) {
         if (!violates(error, "proactive_suggestions_open_dedupe_idx"))
           throw error;

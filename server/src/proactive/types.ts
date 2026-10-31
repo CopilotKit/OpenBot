@@ -54,6 +54,21 @@ export function linkKey(link: string | null | undefined): string | null {
   }
 }
 
+/**
+ * Whether two items are the same thing to the person: the same title as {@link titleKey} reads it,
+ * or the same source link. The same mail raised under another wording is still that mail.
+ */
+export function sameThing(
+  one: { title: string; sourceLink?: string | null },
+  other: { title: string; sourceLink?: string | null },
+): boolean {
+  const link = linkKey(one.sourceLink);
+  return (
+    titleKey(one.title) === titleKey(other.title) ||
+    (link !== null && linkKey(other.sourceLink) === link)
+  );
+}
+
 const focusSchema = z.string().trim().max(1000);
 const intervalSchema = z
   .number()
