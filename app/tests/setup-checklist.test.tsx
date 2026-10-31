@@ -221,6 +221,17 @@ test("an admin is shown the variable to set, the page, and the guide", async () 
   expect(rowOf(view, "chat").getByText("OPENTAG_SHARED_SECRET")).not.toBeNull();
 });
 
+test("a fix's links show a full-strength focus ring", async () => {
+  serving(ADMIN);
+  const view = draw();
+  await view.findByRole("list", { name: "Setup" });
+
+  for (const link of rowOf(view, "model").getAllByRole("link")) {
+    expect(link.className).toContain("focus-visible:ring-ring");
+    expect(link.className).not.toContain("ring-ring/50");
+  }
+});
+
 test("a member sees their admin sets it up, and no variable names", async () => {
   serving(MEMBER);
   const view = draw();
