@@ -326,6 +326,13 @@ The gear panel in a conversation ends with Pin and Delete for that conversation.
 On the home screen the @ menu opened away from the text, partly off the window; it now opens at the
 caret. It is wider and shows each Bot's avatar beside its name.
 
+### Outside content that looks marked as untrusted is marked anyway
+
+A connector's answer was passed to the model without the untrusted-data notice when its text
+already started and ended like one. That text could carry a
+notice in its own words, or close the tag and continue with instructions outside it. Content is now
+left as it is only when it is exactly what OpenBot itself wrapped; anything else is wrapped.
+
 ### Filling in a form is no longer mistaken for paying
 
 The built-in safety rules (paying or moving money, credentials, security settings) read the words a
