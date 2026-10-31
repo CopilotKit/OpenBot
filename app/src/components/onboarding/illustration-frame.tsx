@@ -14,6 +14,10 @@ import type * as React from "react";
  *
  * The label sits on a wrapper rather than on the inert element because an inert element is removed
  * from the accessibility tree along with everything in it, its own name included.
+ *
+ * AND IT LOOKS LIKE ONE. Its colours are a little muted (`saturate-75`), and what it draws avoids
+ * the app's own buttons, whose fills and hover states say "press me": a drawn control is a muted
+ * shape with its words.
  */
 export function IllustrationFrame({
   label,
@@ -28,7 +32,7 @@ export function IllustrationFrame({
   return (
     <div aria-label={label} className="w-full max-w-lg" role="img">
       <div
-        className={`pointer-events-none select-none rounded-2xl border border-border bg-muted/60 ${className}`}
+        className={`pointer-events-none select-none rounded-2xl border border-border bg-muted/60 saturate-75 ${className}`}
         inert
       >
         {children}

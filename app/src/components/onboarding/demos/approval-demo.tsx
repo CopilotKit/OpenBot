@@ -1,6 +1,5 @@
 import { IconCheck, IconMail } from "@tabler/icons-react";
 import { BotOrb } from "@/components/agents/orb/bot-orb";
-import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
 
@@ -17,11 +16,17 @@ export const APPROVAL_CHOICES = [
  *
  * A DRAWING OF AN APPROVAL CARD, FOR THIS STEP ONLY. The real card is the conversation's, and it
  * decides a real request; this one decides nothing, so it is drawn here rather than borrowed. The
- * buttons say what the real card says, Allow once first and loudest, Always allow here the quietest.
+ * answers say what the real card says, Allow once first and loudest, Always allow here the
+ * quietest, but they are drawn as labels in muted tones, not the app's buttons: nothing about them
+ * should invite a click.
  *
  * Three beats: waiting for you, Allow once pressed, sent. With reduced motion it waits, because the
  * question is the point.
  */
+/** One drawn answer: a button's shape, none of its behaviour or its hover. */
+const CHOICE =
+  "type-caption inline-flex h-7 items-center rounded-md px-2.5 font-medium";
+
 export function ApprovalDemo() {
   return (
     <DemoStage
@@ -81,25 +86,24 @@ export function ApprovalDemo() {
               ) : (
                 <>
                   <span
-                    className={buttonVariants({
-                      size: "sm",
-                      variant: "outline",
-                    })}
+                    className={cn(
+                      CHOICE,
+                      "text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]",
+                    )}
                   >
                     {APPROVAL_CHOICES[0]}
                   </span>
                   <span
                     className={cn(
-                      buttonVariants({ size: "sm" }),
-                      pressed && "ring-3 ring-ring/50 translate-y-px",
+                      CHOICE,
+                      "bg-foreground/70 text-background transition-colors duration-300",
+                      pressed && "bg-foreground/85",
                     )}
                     data-pressed={pressed ? "" : undefined}
                   >
                     {APPROVAL_CHOICES[1]}
                   </span>
-                  <span
-                    className={buttonVariants({ size: "sm", variant: "ghost" })}
-                  >
+                  <span className={cn(CHOICE, "text-muted-foreground")}>
                     {APPROVAL_CHOICES[2]}
                   </span>
                 </>

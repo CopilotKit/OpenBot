@@ -6,6 +6,7 @@ import {
   requestNotificationPermission,
   useNotificationPermission,
 } from "@/lib/notifications/permission";
+import { IllustrationFrame } from "./illustration-frame";
 import { StepIntro } from "./onboarding-frame";
 import type { OnboardingStep } from "./onboarding-wizard";
 
@@ -119,54 +120,67 @@ export function useNotifyStep(botName: string): OnboardingStep {
 }
 
 /**
- * A ghost phone, so the card reads as something arriving on a screen: taller than it is wide, its
- * top fading out rather than drawn, the notification over it and four app tiles under it.
+ * A browser window with the notification arriving at its corner, because that is where these
+ * notifications show: the footnote says they come while OpenBot is open in a browser tab, so the
+ * picture is a browser's, never a phone's home screen. One tab open on OpenBot, a faint page, and
+ * the notification over it, named by the site it comes from.
  */
 function NotifyPreview({ botName }: { botName: string }) {
   const preview = notificationPreview(botName);
   return (
-    <div className="flex justify-center">
-      <div
-        aria-label={`A notification from ${PRODUCT}: ${preview.title}. ${preview.body}.`}
-        className="relative flex h-[380px] w-[300px] max-w-full flex-col items-center"
-        data-ghost-phone=""
-        role="img"
+    <div className="flex w-full justify-center" data-ghost-browser="">
+      <IllustrationFrame
+        className="p-4 sm:p-6"
+        label={`A notification from ${PRODUCT}: ${preview.title}. ${preview.body}.`}
       >
-        <div
-          aria-hidden
-          className="absolute inset-0 rounded-[46px] bg-linear-to-b from-background to-muted shadow-[inset_0_0_0_1.5px_var(--border)] [mask-image:linear-gradient(to_bottom,transparent,black_38%)]"
-        />
-        <div
-          aria-hidden
-          className="relative mt-[120px] flex w-[272px] max-w-[calc(100%-24px)] items-center gap-3 rounded-[20px] bg-card px-3 py-3 shadow-(--shadow-raised)"
-          data-notification-preview=""
-        >
-          <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[10px] bg-muted">
-            <AgentOrb size="30px" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-baseline justify-between gap-2">
-              <span className="type-sub line-clamp-2 font-semibold text-foreground">
-                {preview.title}
-              </span>
-              <span className="type-caption shrink-0 text-muted-foreground">
-                now
-              </span>
+        <div className="overflow-hidden rounded-xl bg-background shadow-[inset_0_0_0_1px_var(--border)]">
+          <div className="flex items-center gap-3 border-b border-border px-3 py-2">
+            <span className="flex gap-1.5">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  className="size-2.5 rounded-full bg-muted-foreground/25"
+                  key={dot}
+                />
+              ))}
             </span>
-            <span className="type-sub block truncate text-muted-foreground">
-              {preview.body}
+            <span className="type-caption flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-muted-foreground">
+              <AgentOrb size="12px" />
+              <span className="truncate">{PRODUCT}</span>
             </span>
-          </span>
+          </div>
+          <div className="relative h-56 p-4">
+            <div className="flex flex-col gap-2.5">
+              <span className="h-3 w-1/3 rounded-full bg-muted" />
+              <span className="h-2.5 w-2/3 rounded-full bg-muted/70" />
+              <span className="h-2.5 w-1/2 rounded-full bg-muted/70" />
+            </div>
+            <div
+              className="absolute top-3 right-3 flex w-[272px] max-w-[calc(100%-24px)] items-start gap-3 rounded-xl bg-card px-3 py-3 shadow-(--shadow-raised)"
+              data-notification-preview=""
+            >
+              <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted">
+                <AgentOrb size="26px" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="type-sub line-clamp-2 font-semibold text-foreground">
+                    {preview.title}
+                  </span>
+                  <span className="type-caption shrink-0 text-muted-foreground">
+                    now
+                  </span>
+                </span>
+                <span className="type-sub block truncate text-muted-foreground">
+                  {preview.body}
+                </span>
+                <span className="type-caption block truncate text-muted-foreground">
+                  {window.location.host || PRODUCT}
+                </span>
+              </span>
+            </div>
+          </div>
         </div>
-        <div aria-hidden className="relative mt-14 flex gap-3">
-          {[0, 1, 2, 3].map((tile) => (
-            <span
-              className="size-[52px] rounded-[14px] bg-card/80 shadow-[inset_0_0_0_1px_var(--border)]"
-              key={tile}
-            />
-          ))}
-        </div>
-      </div>
+      </IllustrationFrame>
     </div>
   );
 }

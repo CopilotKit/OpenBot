@@ -86,7 +86,7 @@ function WelcomeScene({
         still={!playing}
       />
       <div className="w-full max-w-md">
-        <div className="flex min-h-[7.5rem] flex-col justify-between gap-3 rounded-2xl bg-card p-3 shadow-(--shadow-card)">
+        <div className="flex min-h-[7.5rem] flex-col justify-between gap-3 rounded-2xl bg-card/80 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
           <p
             className={cn(
               "type-sub min-h-10 px-1 pt-1 text-left transition-opacity duration-300",
@@ -109,11 +109,12 @@ function WelcomeScene({
               <span className="grid size-8 place-items-center rounded-full text-muted-foreground">
                 <IconMicrophone className="size-4" />
               </span>
+              {/* Muted even when "ready": a drawing of Send, never something to press. */}
               <span
                 className={cn(
                   "grid size-8 place-items-center rounded-full transition-colors duration-300",
                   typed.length > 0 || sent
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-foreground/70 text-background"
                     : "bg-muted text-muted-foreground",
                 )}
               >
