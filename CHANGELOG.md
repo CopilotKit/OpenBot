@@ -397,6 +397,14 @@ opening the app's page already did. A Shared app's team account is still recorde
 If Composio then reports no account after all, Connect says nothing was connected and asks you to
 press it again. It no longer tells you to disconnect anything.
 
+### A Bot's Slack or Teams link code works only in a direct message
+
+The `link <code>` message a Bot's Reaching you shows now links only when it is sent to the app in a
+direct message. Sent in a channel, with or without a mention, it is cancelled and the sender is told
+to make a new one, as an account code from Connections already was. Whoever sends the code first is
+linked to that Bot: their messages run it as its owner, and its questions and approval requests go
+to them, so a code others have seen must not still work.
+
 ### A Bot with an app or web research can use its browser in a conversation again
 
 A Bot that held any app or research tool, such as Parallel Search, could not open a page, click or

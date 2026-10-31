@@ -499,7 +499,8 @@ Slack app of its own.
 
 Point OpenTag's `AGENT_URL` at `<public URL>/api/delivery/webhooks/opentag/agent`. A person links
 their Slack or Teams identity from a Bot's page, under **Reaching you**: OpenBot shows a one-time `link <code>` message,
-valid for ten minutes, which they send to the OpenTag app. After that, only that person's messages
+valid for ten minutes, which they send to the OpenTag app in a direct message. A code posted in a
+shared channel is cancelled, because whoever sends it first is linked to that Bot. After that, only that person's messages
 reach their chosen Bot, in their own OpenBot conversation, with learning, governance, approvals and
 audit on every turn. Anyone unlinked is told how to link and nothing runs. Approval requests appear
 as OpenTag approval cards (allow once, always allow, cancel) and are decided through the approvals

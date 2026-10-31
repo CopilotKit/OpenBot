@@ -117,8 +117,8 @@ const LINK =
 const LINKS = new RegExp(LINK.source, "gi");
 
 /**
- * A channel post the app was not mentioned in: everyone there has seen any account code in it, so
- * each one is cancelled, quietly (an observe run never replies). The codes are redacted rather than
+ * A channel post the app was not mentioned in: everyone there has seen any link code in it,
+ * Reachability or account, so each one is cancelled, quietly (an observe run never replies). The codes are redacted rather than
  * the message dropped, so the post still fires the owners' message triggers without carrying a
  * code. A failed cancel is logged and never stops the triggers.
  */
@@ -129,22 +129,36 @@ async function withoutLinkCodes(
 ) {
   const codes = [...text.matchAll(LINKS)].map((m) => m[1]?.toLowerCase());
   if (!codes.length) return text;
-  if (sender.transport === "slack" && deps.identity)
-    for (const code of codes) {
-      if (!code) continue;
-      try {
+  for (const code of codes) {
+    if (!code) continue;
+    try {
+      await cancelReachabilityCode(deps, code);
+      if (sender.transport === "slack" && deps.identity)
         await deps.identity.discard(code);
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            type: "opentag-link-code-discard-error",
-            errorType: error instanceof Error ? error.name : "UnknownError",
-          }),
-        );
-      }
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "opentag-link-code-discard-error",
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
     }
+  }
   return text.replace(LINKS, "link [code removed]");
 }
+
+/** Spends a live Reachability code without binding anyone; true when one was cancelled. */
+async function cancelReachabilityCode(deps: OpenTagAgentDeps, code: string) {
+  const challenge = await deps.store.readChallenge(code);
+  return Boolean(
+    challenge &&
+      (await deps.store.consumeChallenge(code, challenge.ownerUserId)),
+  );
+}
+
+const CANCELLED_IN_SHARED =
+  "That code was posted where others could see it, so I cancelled it. Create a new one in OpenBot and send it to me in a direct message.";
+
 const platformName = (transport: ChatTransport) =>
   transport === "teams" ? "Microsoft Teams" : "Slack";
 
@@ -410,6 +424,14 @@ async function link(
   code: string,
 ) {
   const challenge = await deps.store.readChallenge(code);
+  // A Reachability code binds whoever sends it to its issuer's Bot: their messages run as the
+  // issuer, and the Bot's questions and approval requests go to them. Anyone else in a shared
+  // conversation has seen it and could send it first, so it is only redeemed in a direct message
+  // and one posted here is spent, the same rule as for an account code below.
+  if (challenge && !sender.private) {
+    await deps.store.consumeChallenge(code, challenge.ownerUserId);
+    return { text: CANCELLED_IN_SHARED };
+  }
   if (!challenge && sender.transport === "slack" && deps.identity) {
     // Anyone else in a shared conversation has now seen the code and could send it first, binding
     // their own Slack account to its issuer, so an account code is only redeemed in a direct
@@ -417,9 +439,7 @@ async function link(
     // `withoutLinkCodes`).
     if (!sender.private) {
       if (await deps.identity.discard(code))
-        return {
-          text: "That code was posted where others could see it, so I cancelled it. Create a new one in OpenBot and send it to me in a direct message.",
-        };
+        return { text: CANCELLED_IN_SHARED };
       return {
         text: "That link code expired, was already used, or is for another app. Create a new one in OpenBot.",
       };
