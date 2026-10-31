@@ -1,12 +1,24 @@
 import { IconChevronLeft } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
   ConversationOrb,
   ConversationPresenceProvider,
 } from "@/components/channels/conversation-presence";
+import {
+  ComputerChatControls,
+  ComputerControlButton,
+} from "@/components/computer/computer-controls";
+import {
+  ComputerPaneTitle,
+  ComputerViewPanel,
+  SCREEN_PANEL_WIDTH,
+} from "@/components/computer/computer-panel";
+import type { ComputerViewHandle } from "@/components/computer/computer-view";
+import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
+import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -46,8 +58,20 @@ const ALREADY_RUNNING =
  *
  * A task that couldn't finish takes a reply as Try again, with the person's words beside the ask,
  * so a reply never runs without the task it belongs to.
+ *
+ * The Bot's computer opens beside it from the header, as it does beside a conversation. Whether it
+ * is open is the caller's, a search parameter on the route, so Back closes it.
  */
-export function TaskPage({ taskId }: { taskId: string }) {
+export function TaskPage({
+  taskId,
+  watching = false,
+  onWatchChange,
+}: {
+  taskId: string;
+  /** The Bot's computer is open beside the task. */
+  watching?: boolean;
+  onWatchChange?: (open: boolean) => void;
+}) {
   const task = useQuery(taskQueryOptions(taskId));
   if (task.isPending) return null;
   // A refresh that fails keeps the task it already has, and its conversation with what was typed.
@@ -65,7 +89,12 @@ export function TaskPage({ taskId }: { taskId: string }) {
       channelId={task.data.channelId}
       threadId={task.data.threadId ?? undefined}
     >
-      <TaskBody stale={task.isRefetchError} task={task.data} />
+      <TaskBody
+        onWatchChange={onWatchChange}
+        stale={task.isRefetchError}
+        task={task.data}
+        watching={watching}
+      />
     </ConversationPresenceProvider>
   );
 }
@@ -98,10 +127,14 @@ function TaskHeaderBar() {
 function TaskBody({
   task,
   stale,
+  watching,
+  onWatchChange,
 }: {
   task: TaskRecord;
   /** The last read of the task failed, so what is shown is from the one before. */
   stale: boolean;
+  watching: boolean;
+  onWatchChange?: (open: boolean) => void;
 }) {
   // Open on screen is read, as a conversation's own page is.
   useMarkOpenChannelRead(task.channelId);
@@ -118,8 +151,26 @@ function TaskBody({
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
   const reply = useMutation(replyToTaskMutationOptions(queryClient));
-  const botName =
-    bots.data?.find((bot) => bot.id === task.botId)?.name ?? "your Bot";
+  const bot = bots.data?.find((candidate) => candidate.id === task.botId);
+  const botName = bot?.name ?? "your Bot";
+  /** Whether the computer would be a sheet over the task, as `DetailPanel` last measured. */
+  const [overlaying, setOverlaying] = useState(true);
+  /** The screen in the pane, which the pane's Take control opens full size. */
+  const screen = useRef<ComputerViewHandle>(null);
+  // The Bot using its computer opens it beside the task, as beside a conversation.
+  const autoWatch = useAutoWatchScreen({
+    botId: task.botId,
+    watching,
+    busy: false,
+    docked: !overlaying,
+    open: () => onWatchChange?.(true),
+    close: () => onWatchChange?.(false),
+  });
+  const watch = (open: boolean) => {
+    // Closing it holds for the rest of the Bot's current run.
+    if (!open && watching) autoWatch.dismiss();
+    onWatchChange?.(open);
+  };
   const done = task.resolvedAt !== null;
   const failed = status === "failed";
   /*
@@ -150,7 +201,28 @@ function TaskBody({
   }, [busy, task.id]);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <DetailPanel
+      actions={
+        <ComputerControlButton
+          computerId={task.botId}
+          inline
+          onTakeControl={() => screen.current?.openFullSize()}
+        />
+      }
+      detail={
+        <ComputerViewPanel
+          agentId={task.botId}
+          name={bot?.name}
+          screen={screen}
+          wheelInHeader
+        />
+      }
+      detailWidth={SCREEN_PANEL_WIDTH}
+      onClose={() => watch(false)}
+      onOverlayChange={setOverlaying}
+      open={watching}
+      title={<ComputerPaneTitle agentId={task.botId} name={bot?.name} />}
+    >
       <div
         className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-border border-b px-3 py-2"
         data-slot="task-header"
@@ -184,6 +256,12 @@ function TaskBody({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <ComputerChatControls
+            computerId={task.botId}
+            onOpenChange={watch}
+            open={watching}
+            unseen={autoWatch.unseen}
+          />
           {failed ? (
             <Button
               disabled={again.isPending}
@@ -296,6 +374,6 @@ function TaskBody({
           }}
         />
       )}
-    </div>
+    </DetailPanel>
   );
 }

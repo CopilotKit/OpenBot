@@ -4,6 +4,7 @@ import {
   Outlet,
   useNavigate,
   useParams,
+  useSearch,
 } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
@@ -46,11 +47,18 @@ const somethingOpen = () =>
  * closed decides it too: the two sit side by side once there are 56rem to share (a 360px list and a
  * conversation a comfortable width beside it).
  *
+ * While the open task's computer is open beside it, the list folds away to give the two the room.
+ *
  * From the keyboard: ↓ and ↑, or j and k, move through the list, Enter opens a task, and Escape closes
  * it again with the focus back on its row. With nothing focused, j or k puts the focus in the list.
  */
 function TasksLayout() {
   const { taskId } = useParams({ strict: false }) as { taskId?: string };
+  const watching = useSearch({
+    strict: false,
+    select: (search) => (search as { watch?: boolean }).watch === true,
+  });
+  const folded = Boolean(taskId) && watching;
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   const list = useRef<HTMLDivElement>(null);
@@ -91,9 +99,11 @@ function TasksLayout() {
     <div className="@container flex min-h-0 flex-1">
       <div
         className={cn(
-          "min-h-0 w-full flex-col @4xl:flex @4xl:w-90 @4xl:shrink-0 @4xl:border-border @4xl:border-r",
+          "min-h-0 w-full flex-col @4xl:w-90 @4xl:shrink-0 @4xl:border-border @4xl:border-r",
           taskId ? "hidden" : "flex",
+          !folded && "@4xl:flex",
         )}
+        data-folded={folded ? "" : undefined}
         data-slot="task-list-column"
       >
         <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-border border-b px-3 py-2">
