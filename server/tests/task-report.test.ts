@@ -3,11 +3,11 @@ import { frameTaskBrief, frameTaskReply } from "@openbot/shared/task-brief";
 import { Hono } from "hono";
 import {
   buildTaskReport,
-  firstSentence,
   type ReportApproval,
   type ReportInput,
   type ReportMessage,
   type TaskReportReader,
+  updateText,
 } from "../src/tasks/report";
 import { createTaskRoutes } from "../src/tasks/routes";
 import type { TaskStore } from "../src/tasks/store";
@@ -107,7 +107,13 @@ const sendConversation: ReportMessage[] = [
 
 function input(overrides: Partial<ReportInput> = {}): ReportInput {
   return {
-    task: { id: "task-1", status: "ready_for_review" },
+    task: {
+      id: "task-1",
+      status: "ready_for_review",
+      title: "Reply to Ana",
+      origin: "asked",
+      why: null,
+    },
     messages: sendConversation,
     approvals: [send],
     firstTurnEndedAt: new Date("2026-10-23T09:41:12Z"),
@@ -130,10 +136,10 @@ describe("a task's decisions and updates", () => {
       ),
     ).toEqual([
       // The first turn stopped to ask, so it ended when it asked.
-      "update I read Ana's email. at 2026-10-23T09:41:10.000Z",
+      "update I read Ana's email. She wants 200 mugs for Friday. at 2026-10-23T09:41:10.000Z",
       "decision allow_once by you at 2026-10-23T09:42:00.000Z",
       // Carried on after the approval: its work item's end.
-      "update Sent. at 2026-10-23T09:42:20.000Z",
+      "update Anything else on the Hearth order is with Sam. at 2026-10-23T09:42:20.000Z",
     ]);
     const decision = report.entries[1];
     expect(decision?.kind === "decision" && decision.action).toEqual({
@@ -180,13 +186,13 @@ describe("a task's decisions and updates", () => {
         : [`${entry.kind}: ${entry.text} @ ${entry.at}`],
     );
     expect(lines).toEqual([
-      "update: I read Ana's email. @ 2026-10-23T09:41:10.000Z",
-      "update: Sent. @ 2026-10-23T09:42:20.000Z",
+      "update: I read Ana's email. She wants 200 mugs for Friday. @ 2026-10-23T09:41:10.000Z",
+      "update: Anything else on the Hearth order is with Sam. @ 2026-10-23T09:42:20.000Z",
       "reply: Thanks. Also ask Sam which box to use. @ null",
       // A turn the person started in their browser left no time anywhere, unless it is the latest.
-      "update: I asked Sam in his thread. @ null",
+      "update: I asked Sam in his thread. I'll tell you when he answers. @ null",
       "reply: Great @ null",
-      "update: Sam says double-wall boxes. @ 2026-10-23T09:42:19.000Z",
+      "update: Sam says double-wall boxes. Packing starts at noon. @ 2026-10-23T09:42:19.000Z",
     ]);
   });
 
@@ -255,7 +261,7 @@ describe("a task's decisions and updates", () => {
 
   test("while the task works, its latest turn is still being written and is left out", () => {
     const report = buildTaskReport(
-      input({ task: { id: "task-1", status: "working" } }),
+      input({ task: { ...input().task, status: "working" } }),
     );
     expect(report.entries.map((entry) => entry.kind)).toEqual([
       "update",
@@ -328,27 +334,99 @@ describe("a task's decisions and updates", () => {
     expect(report.entries[0]).toEqual({
       kind: "update",
       id: "a1",
-      text: "Done.",
+      text: "Done. The notes are ready.",
       at: "2026-10-23T09:41:12.000Z",
     });
   });
 });
 
-describe("an update's first sentence", () => {
-  test("stops at a sentence, not at an abbreviation or a number, without markdown, cut at a word", () => {
-    expect(firstSentence("## Done\n\nThe deck is ready.")).toBe("Done");
-    expect(firstSentence("- **Sent** the reply. Ana has it.")).toBe(
-      "Sent the reply.",
+describe("what a task asked for and why", () => {
+  test("the ask is the person's, read back without its frame, never a later correction", () => {
+    const report = buildTaskReport(
+      input({
+        messages: [
+          ...sendConversation,
+          {
+            id: "u2",
+            role: "user",
+            content: frameTaskReply(
+              "Reply to Ana that the order ships Friday.",
+              "Say Saturday instead.",
+            ),
+          },
+        ],
+      }),
     );
+    expect(report.ask).toBe("Reply to Ana that the order ships Friday.");
+    expect(report.partial).toBe(false);
+  });
+
+  test("without the ask in its conversation, the instruction it was queued with, then its title", () => {
     expect(
-      firstSentence("Order no. 5521 ships e.g. by Friday. Then Monday."),
-    ).toBe("Order no. 5521 ships e.g. by Friday.");
-    expect(firstSentence("See [the deck](https://x.test) for more")).toBe(
-      "See the deck for more",
+      buildTaskReport(
+        input({ messages: [], instruction: "Plan the Lisbon trip." }),
+      ).ask,
+    ).toBe("Plan the Lisbon trip.");
+    expect(buildTaskReport(input({ messages: [] })).ask).toBe("Reply to Ana");
+  });
+
+  /*
+   * A recording showed an asked task's why holding the Bot's own reasoning: "This is a multi-step
+   * planning request that benefits from a dedicated task". Only a suggestion's reason is a why; an
+   * asked task's ask is the person's words.
+   */
+  test("only a task started from a suggestion has a why, its suggestion's own reason", () => {
+    const botReasoning =
+      "This is a multi-step planning request that benefits from a dedicated task.";
+    const asked = buildTaskReport(
+      input({ task: { ...input().task, why: botReasoning } }),
     );
-    const long = `I ${"looked through every message about the Hearth order and ".repeat(4)}found it.`;
-    const cut = firstSentence(long);
-    expect(cut.length).toBeLessThanOrEqual(161);
+    expect("why" in asked).toBe(false);
+    const suggested = buildTaskReport(
+      input({
+        task: {
+          ...input().task,
+          origin: "suggestion",
+          why: "Ana confirms today if you can do 200.",
+        },
+      }),
+    );
+    expect(suggested.why).toBe("Ana confirms today if you can do 200.");
+    expect(
+      "why" in
+        buildTaskReport(
+          input({ task: { ...input().task, origin: "suggestion" } }),
+        ),
+    ).toBe(false);
+  });
+});
+
+describe("an update's text", () => {
+  test("is the reply's conclusion, not its preamble", () => {
+    expect(
+      updateText(
+        "Here's a thoughtful plan for your trip.\n\n- Day 1: Alfama\n- Day 2: Belém\n\nI booked the Alfama walking tour for Friday and put the plan in your notes.",
+      ),
+    ).toBe(
+      "I booked the Alfama walking tour for Friday and put the plan in your notes.",
+    );
+  });
+
+  test("leaves out lists, drafts and a closing line that only says nothing waits on you", () => {
+    expect(
+      updateText(
+        "I drafted the reply to Rosa.\n\n> Hi Rosa, Oat Satin it is.\n\nNothing is waiting on you.",
+      ),
+    ).toBe("I drafted the reply to Rosa.");
+  });
+
+  test("is one line without markdown, cut at a word", () => {
+    expect(
+      updateText("## Done\n\nSee [the deck](https://x.test) for **more**"),
+    ).toBe("See the deck for more");
+    const long = `I ${"looked through every message about the Hearth order and ".repeat(6)}found it.`;
+    const cut = updateText(long);
+    expect(cut.length).toBeLessThanOrEqual(281);
     expect(cut.endsWith("…")).toBe(true);
   });
 });
@@ -407,12 +485,19 @@ describe("GET /api/tasks/:id/report", () => {
     }).request("/tasks/task-1/report");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      report: { taskId: string; entries: unknown[] };
+      report: {
+        taskId: string;
+        ask: string;
+        partial: boolean;
+        entries: unknown[];
+      };
     };
     expect(body.report).toEqual(
       JSON.parse(JSON.stringify(buildTaskReport(input()))),
     );
     expect(body.report.taskId).toBe("task-1");
+    expect(body.report.ask).toBe("Reply to Ana that the order ships Friday.");
+    expect(body.report.partial).toBe(false);
     expect(body.report.entries).toHaveLength(3);
     expect(asked).toEqual([["owner", "task-1"]]);
   });

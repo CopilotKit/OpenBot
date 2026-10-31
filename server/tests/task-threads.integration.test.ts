@@ -2201,7 +2201,7 @@ describe("a task whose turn fails", () => {
     });
     const report = () =>
       buildTaskReport({
-        task: { id: task.id, status: "failed" },
+        task: { ...task, status: "failed" },
         messages,
         approvals: [],
         firstTurnEndedAt: null,
@@ -3095,10 +3095,59 @@ describe("report", () => {
           : `${entry.kind} ${entry.text} ${entry.at}`,
       ),
     ).toEqual([
-      `update I read Ana's email. ${asked.toISOString()}`,
+      `update I read Ana's email. Sending the reply. ${asked.toISOString()}`,
       `allow_once ${approvalId} ${decided.toISOString()}`,
-      `update Sent. ${resumed.toISOString()}`,
+      `update Sent. Ana has it. ${resumed.toISOString()}`,
     ]);
+    // The person's ask without its frame, and a suggestion's own reason as its why.
+    expect(report).toMatchObject({
+      ask: "Reply to Ana.",
+      why: "Ana needs an answer today.",
+      partial: false,
+    });
+  });
+
+  test("answers without the conversation when it isn't read in time, with the ask it was queued with", async () => {
+    const opened = await threads.open({
+      ownerUserId: owner.id,
+      agentId: bot,
+      title: `Slow report ${randomUUID()}`,
+      why: "A multi-step request that benefits from a dedicated task.",
+      origin: "asked",
+      suggestionId: null,
+      sourceApp: null,
+      sourceLink: null,
+    });
+    await database.insert(workItems).values({
+      kind: PROACTIVE_TASK_KIND,
+      key: `task:${opened.id}`,
+      payload: {
+        ownerUserId: owner.id,
+        taskId: opened.id,
+        text: "Plan a three-day trip to Lisbon.",
+        runs: 2,
+      },
+      attempts: 1,
+      finishedAt: new Date(),
+    });
+    const task = await taskStore.get(owner.id, opened.id);
+    expect(task.threadId).not.toBeNull();
+    const started = Date.now();
+    const report = await createTaskReportReader({
+      database,
+      // Intelligence never answers.
+      history: () => new Promise(() => {}),
+      historyTimeoutMs: 50,
+    })(owner.id, task);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(report).toEqual({
+      taskId: opened.id,
+      ask: "Plan a three-day trip to Lisbon.",
+      partial: true,
+      entries: [],
+    });
+    // An asked task has no why: the person's words are its ask.
+    expect("why" in report).toBe(false);
   });
 });
 

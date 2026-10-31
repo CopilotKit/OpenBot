@@ -1,9 +1,10 @@
-import { readTaskFrame } from "@openbot/shared/task-brief";
+import { readTaskBrief, readTaskFrame } from "@openbot/shared/task-brief";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { approvalRequests, channels, workItems } from "../db/schema";
 import { PROACTIVE_TASK_KIND, taskExecutionId } from "../proactive/engine";
+import { replyConclusion } from "./reply-ending";
 import type { TaskRecord } from "./types";
 
 /*
@@ -16,8 +17,13 @@ import type { TaskRecord } from "./types";
  * - Decisions are the approval inbox's: Allowed once, Always allowed or Refused, by the person, at
  *   `decidedAt`. Each sits where the conversation carried it on (the `approval:<id>` message the
  *   resume writes), or after the call it was asked about.
- * - Updates are each finished turn's last words from the Bot, cut to their first sentence. A turn
- *   ends when the Bot's work item finishes (the task's first turn, a turn carried on after an
+ * - The ask is the person's, as the task's first message carries it under its frame
+ *   (`readTaskBrief`), or as its first turn was queued with when the conversation can't be read.
+ * - The why is a suggestion's own reason, kept on the task when it was started. An asked task has
+ *   none here: the person's words are its ask, and a why the Bot wrote for one could be its own
+ *   reasoning about making a task.
+ * - Updates are each finished turn's conclusion: the last paragraph the Bot wrote to the person
+ *   (`replyConclusion`), since a reply often opens on a preamble. A turn ends when the Bot's work item finishes (the task's first turn, a turn carried on after an
  *   approval), when it pauses to ask for approval, or, for the latest turn, at the conversation's
  *   last message.
  * - The person's replies are their own messages after the ask that opened the task.
@@ -76,14 +82,27 @@ export type ReportEntry = ReportDecision | ReportReply | ReportUpdate;
 
 export type TaskReport = {
   taskId: string;
+  /** What the person asked for, in their words. */
+  ask: string;
+  /** The suggestion's own reason it matters. Only on a task started from a suggestion that gave one. */
+  why?: string;
+  /**
+   * True when the conversation couldn't be read in time: the ask is the one the task was queued
+   * with, and the entries hold only the decisions.
+   */
+  partial: boolean;
   /** In the order they happened in the conversation. */
   entries: ReportEntry[];
 };
 
 /** What the report is built from, read beforehand so the building can be tested without a database. */
 export type ReportInput = {
-  task: Pick<TaskRecord, "id" | "status">;
+  task: Pick<TaskRecord, "id" | "status" | "title" | "origin" | "why">;
   messages: readonly ReportMessage[];
+  /** The conversation couldn't be read in time, so `messages` is empty. */
+  partial?: boolean;
+  /** The instruction the task's first turn was queued with, for when its conversation holds no ask. */
+  instruction?: string | null;
   approvals: readonly ReportApproval[];
   /** When the task's first turn finished, from its work item. */
   firstTurnEndedAt: Date | null;
@@ -99,8 +118,10 @@ export type ReportInput = {
 
 const DECISIONS = new Set(["allow_once", "allow_always", "deny", "handled"]);
 
-/** How long an update or a reply gets before it is cut at a word. */
+/** How long a reply gets before it is cut at a word. */
 const LINE_LENGTH = 160;
+/** How long an update gets: a conclusion runs to a sentence or two. */
+const UPDATE_LENGTH = 280;
 
 /** A message's text: a string, or the text parts of structured content. */
 export function textOf(content: unknown): string {
@@ -130,26 +151,20 @@ function plain(line: string): string {
     .trim();
 }
 
-/** Cut at a word with an ellipsis past `LINE_LENGTH`. */
-function capped(text: string): string {
-  if (text.length <= LINE_LENGTH) return text;
-  const cut = text.slice(0, LINE_LENGTH);
+/** Cut at a word with an ellipsis past `length`. */
+function capped(text: string, length = LINE_LENGTH): string {
+  if (text.length <= length) return text;
+  const cut = text.slice(0, length);
   const space = cut.lastIndexOf(" ");
-  return `${(space > LINE_LENGTH / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, "")}…`;
+  return `${(space > length / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, "")}…`;
 }
 
 /**
- * The first sentence of what the Bot said: its first line with words on it, up to a stop followed
- * by a capital, so "Sent. Ana" ends at "Sent." but "no. 5521" and "e.g. this" do not end early.
+ * What a turn did, from the Bot's last words in it: their conclusion (`replyConclusion`), without
+ * markdown, on one line, cut at a word past `UPDATE_LENGTH`.
  */
-export function firstSentence(text: string): string {
-  const line =
-    text
-      .split("\n")
-      .map(plain)
-      .find((part) => /\p{L}|\p{N}/u.test(part)) ?? "";
-  const sentence = line.split(/(?<=[^.][.!?])\s+(?=\p{Lu})/u)[0] ?? line;
-  return capped(sentence);
+export function updateText(text: string): string {
+  return capped(plain(replyConclusion(text) ?? ""), UPDATE_LENGTH);
 }
 
 /** The person's words, on one line. */
@@ -299,7 +314,7 @@ export function buildTaskReport(input: ReportInput): TaskReport {
       !(last && input.task.status === "working") ||
       input.completedTurnIds?.has(turn.id);
     if (reply && finished) {
-      const text = firstSentence(textOf(reply.content));
+      const text = updateText(textOf(reply.content));
       const endedAt =
         asked[0]?.createdAt ??
         (turn.opener.kind === "brief" && index === 0
@@ -333,7 +348,31 @@ export function buildTaskReport(input: ReportInput): TaskReport {
       entries.push(decisionEntry(answered));
     }
   }
-  return { taskId: input.task.id, entries };
+  return {
+    taskId: input.task.id,
+    ask: askOf(input),
+    ...(input.task.origin === "suggestion" && input.task.why
+      ? { why: input.task.why }
+      : {}),
+    partial: input.partial ?? false,
+    entries,
+  };
+}
+
+/**
+ * The person's ask: the first message framed as the task's brief, read back without its frame. A
+ * reply or a correction is not the ask. Without one, the instruction its first turn was queued with,
+ * and last of all its title.
+ */
+function askOf(input: ReportInput): string {
+  for (const message of input.messages) {
+    if (message.role !== "user") continue;
+    const text = textOf(message.content);
+    if (readTaskFrame(text)?.kind !== "brief") continue;
+    const ask = readTaskBrief(text)?.trim();
+    if (ask) return ask;
+  }
+  return input.instruction?.trim() || input.task.title;
 }
 
 /** Reads a thread's messages for its owner. Index.ts gives it Intelligence's client. */
@@ -363,16 +402,54 @@ export function intelligenceHistory(client: {
     ).messages;
 }
 
-/** `GET /api/tasks/:id/report`'s reader: the ledgers, then `buildTaskReport`. */
+/** How long the report waits for the conversation before it answers without it. */
+export const HISTORY_TIMEOUT_MS = 8_000;
+
+/** The conversation, or null when it isn't read within `ms`. A read that fails still throws. */
+async function historyWithin(
+  read: Promise<readonly ReportMessage[]>,
+  ms: number,
+): Promise<readonly ReportMessage[] | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * `GET /api/tasks/:id/report`'s reader: the ledgers, then `buildTaskReport`.
+ *
+ * NEVER HANGS ON THE CONVERSATION. Intelligence holds it, and a read that never answers would hold
+ * the task page's report with it. Past `historyTimeoutMs` the report is built without it, marked
+ * `partial`, from the ledgers alone.
+ */
 export function createTaskReportReader(deps: {
   database: Database;
   history: ReportHistory;
+  /** See `HISTORY_TIMEOUT_MS`. Tests pass less. */
+  historyTimeoutMs?: number;
 }): TaskReportReader {
   return async (ownerUserId, task) => {
-    if (!task.threadId) return { taskId: task.id, entries: [] };
+    if (!task.threadId)
+      return buildTaskReport({
+        task,
+        messages: [],
+        approvals: [],
+        firstTurnEndedAt: null,
+        resumedEndedAt: new Map(),
+        lastMessageAt: null,
+      });
     const threadId = task.threadId;
-    const [messages, rows, turns, channel, answers] = await Promise.all([
-      deps.history({ threadId, ownerUserId }),
+    const [history, rows, turns, channel, answers] = await Promise.all([
+      historyWithin(
+        deps.history({ threadId, ownerUserId }),
+        deps.historyTimeoutMs ?? HISTORY_TIMEOUT_MS,
+      ),
       deps.database
         .select({
           id: approvalRequests.id,
@@ -463,9 +540,22 @@ export function createTaskReportReader(deps: {
                 ),
               ),
             );
+    if (history === null)
+      console.error(
+        JSON.stringify({
+          type: "task-report-history-timeout",
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    // The ask its first own turn was queued with: a reply or a Try again carries other words.
+    const first = turns.find(
+      (row) => row.payload.followup !== true && row.payload.again !== true,
+    );
     return buildTaskReport({
       task,
-      messages,
+      messages: history ?? [],
+      partial: history === null,
+      instruction: asString(first?.payload.text) || null,
       approvals,
       firstTurnEndedAt: turns[0]?.finishedAt ?? null,
       resumedEndedAt: new Map(
