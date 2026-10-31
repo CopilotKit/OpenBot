@@ -17,7 +17,10 @@ import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import {
+  channelListQueryOptions,
+  conversationsOnly,
+} from "@/lib/channels/queries";
 import {
   CoworkerRoutingRefusedError,
   routeMessage,
@@ -58,7 +61,8 @@ function RouteComponent() {
           <h1 className="text-2xl font-bold tracking-tight mt-1.5 text-center">
             {firstConversationGreeting(
               user,
-              channels.isSuccess && channels.data.length === 0,
+              channels.isSuccess &&
+                conversationsOnly(channels.data).length === 0,
             )}
           </h1>
         </div>

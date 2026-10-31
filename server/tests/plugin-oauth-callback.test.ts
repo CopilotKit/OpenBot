@@ -555,3 +555,79 @@ describe("a callback whose own checks failed", () => {
     expect(recorded).toEqual([]);
   });
 });
+
+/*
+ * Onboarding's Connect your apps step offers Connect. Somebody who has not finished onboarding is
+ * sent back to it from any other page, so the flow returns to that step itself, whether it worked
+ * or not.
+ */
+describe("a consent started in onboarding", () => {
+  async function startedFromOnboarding(hono: ReturnType<typeof app>) {
+    const started = await hono.request(
+      "http://t/api/plugins/servers/notion/connect?returnTo=onboarding",
+      { method: "POST" },
+    );
+    const { authorizationUrl } = (await started.json()) as {
+      authorizationUrl: string;
+    };
+    return new URL(authorizationUrl).searchParams.get("state") ?? "";
+  }
+
+  test("comes back to the Connect your apps step", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({ recorded });
+    const state = await startedFromOnboarding(hono);
+
+    await withWillingVendor(async () => {
+      const response = await hono.request(callbackUrl(state));
+      expect(response.headers.get("location")).toBe(
+        "https://app.example/onboarding?step=apps",
+      );
+    });
+    expect(recorded).toHaveLength(1);
+  });
+
+  test("a refusal after the state is read comes back to the step too, saying so", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({ recorded, personHasAccess: async () => false });
+    const state = await startedFromOnboarding(hono);
+
+    const response = await hono.request(callbackUrl(state));
+    expect(response.headers.get("location")).toBe(
+      "https://app.example/onboarding?step=apps&connected=failed",
+    );
+    expect(recorded).toEqual([]);
+  });
+
+  /*
+   * Cancel on the vendor's consent: the state comes back with `error=access_denied` and no code.
+   * The person goes back to the step they pressed Connect on, not to a page the onboarding gate
+   * would bounce them out of.
+   */
+  test("a consent declined at the vendor comes back to the step, saying so", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({ recorded });
+    const state = await startedFromOnboarding(hono);
+
+    const response = await hono.request(
+      `${CALLBACK}?error=access_denied&state=${encodeURIComponent(state)}`,
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://app.example/onboarding?step=apps&connected=failed",
+    );
+    expect(recorded).toEqual([]);
+  });
+
+  test("a declined consent with no state still goes to the list", async () => {
+    const hono = app({ recorded: [] });
+    const response = await hono.request(`${CALLBACK}?error=access_denied`);
+    expect(response.headers.get("location")).toBe(FAILED);
+  });
+
+  test("a state nobody can read still goes to the list", async () => {
+    const hono = app({ recorded: [] });
+    const response = await hono.request(callbackUrl("not-a-state"));
+    expect(response.headers.get("location")).toBe(FAILED);
+  });
+});

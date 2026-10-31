@@ -16,13 +16,20 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import {
+  AppSidebar,
+  NavigationEntry,
+} from "@/components/app-sidebar/app-sidebar";
+import { SidebarMenu, SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { channelKeys } from "@/lib/channels/queries";
-import { NAVIGATION, navigationFor } from "@/lib/navigation";
+import {
+  NAVIGATION,
+  type NavigationItem,
+  navigationFor,
+} from "@/lib/navigation";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
 
@@ -30,7 +37,8 @@ import { settleReactWork } from "./settle-react-work";
  * OpenBot's destinations live in one list (`lib/navigation.ts`) that the sidebar and every skin draw
  * from. This holds the sidebar to that list exactly: the same entries, in the same order, at the
  * same addresses, with Admin only for admins. A destination added to the list and not drawn, or
- * drawn here and not added to the list, fails.
+ * drawn here and not added to the list, fails. An entry's badge, a count of what waits there, comes
+ * from the list too.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -188,9 +196,48 @@ test("Admin is in the list for admins only", () => {
   expect(ids("user")).not.toContain("admin");
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
+    "tasks",
     "bots",
     "capabilities",
     "connections",
     "settings",
   ]);
+});
+
+test("an entry's badge counts what waits there, and draws nothing at zero", async () => {
+  const connections = NAVIGATION.find((item) => item.id === "connections");
+  if (!connections) throw new Error("No Connections entry");
+  const counted = (badge: number): NavigationItem => ({
+    ...connections,
+    badge,
+  });
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () => (
+        <SidebarProvider>
+          <SidebarMenu>
+            <NavigationEntry item={counted(3)} />
+            <NavigationEntry item={counted(0)} />
+          </SidebarMenu>
+        </SidebarProvider>
+      ),
+    }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  const queryClient = new QueryClient();
+  clients.push(queryClient);
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+
+  const [three, zero] = await view.findAllByRole("link", {
+    name: /Connections/,
+  });
+  expect(
+    within(three).getByRole("img", { name: "3 things need you" }).textContent,
+  ).toBe("3");
+  expect(within(zero).queryByRole("img")).toBeNull();
+  expect(zero.textContent).toBe("Connections");
 });

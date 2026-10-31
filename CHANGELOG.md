@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Sixteen things change for an existing deployment:
+**Before upgrading.** Seventeen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -64,6 +64,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   research run replaces them.
 - Migration `0062_action_policy_labels` adds a `labels` column to `action_policies`, defaulting to
   empty. Existing boundary rules keep working and show as "Custom rule" until somebody names them.
+- Migration `0070_tasks` adds one table, `tasks`, naming each task's conversation (below), and one
+  index to `work_items`. The table starts empty. A suggestion started before the upgrade and still
+  queued opens a task when it runs, rather than running in the conversation it was suggested in.
 - On Helm's `shared` computer and the docker-compose `agent-computer`, each Bot's files now live in
   `computers/<Bot id>` on the workspace volume (below). Files saved before the upgrade stay at the
   root of the volume, where no Bot sees them; move them into a Bot's folder to give them back.
@@ -77,6 +80,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+
+### Started work gets a conversation of its own
+
+Start on a suggestion now opens a task: a new conversation with the Bot where the work runs, so the
+conversation the suggestion came from stays as it was. A task's status is worked out from the work
+queue and the approval and question inboxes on every read. A turn that fails is tried once more, then
+reads as failed with the reason in plain words and can be tried again; replying in a task's
+conversation steers it, in order, even across a restart. The new `/api/tasks` routes serve it.
+
+A Bot OpenBot runs itself now hands anything bigger than a quick answer to a task of its own
+(`start_task`) and answers "On it" where it was asked. A Bot behind a remote agent framework is not
+offered the tool; its tasks start from its suggestions, or from `POST /api/tasks`, which starts one
+with any of the person's Bots. `GET /api/tasks/:id/report` reads a task's conversation back as its
+report: the person's decisions and replies, and the Bot's update as each turn ended, in order.
+
+Tasks sits above Bots in the sidebar, with how many tasks need you. It lists every task by what it
+needs (Needs you, Working, Failed, Ready for review, then Done, folded), each with its Bot and one line
+of what comes next, and opens the task beside the list, or after it on a narrow screen. ↓ and ↑, or
+j and k, move through the list, Enter opens a task and Escape closes it. A task's page is its report
+above its conversation, with Mark done, Reopen, and Try again when it couldn't finish; a reply there
+goes to the server and waits its turn, and a reply on a failed task tries it again with your words.
+The + starts a task with any of your Bots, and Up next under the list starts or dismisses your
+Bots' suggestions. In a conversation, a task a Bot started is a card under its "On it" that keeps
+its status and opens the task. A task's own conversation is left out of the conversation list, and
+the OpenDuet skin's Tasks tab now opens this Tasks and counts the tasks that need you.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
@@ -132,6 +160,67 @@ pace, and the view follows it until the person scrolls up or selects some of it,
 again when they come back to the end or press the arrow. A rail beside a conversation has a mark
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
+
+### First run shows what OpenBot does, one step at a time
+
+- The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
+  own, a team of Bots, and asking before it acts), then Connect your apps, Get notified, Check your
+  setup, and the name step, whose Get started opens the app. On a desktop the steps are listed on the
+  left beside a picture of each; on a phone they come one at a time. A reload, browser Back and a
+  connection's return all keep the person's place, which is now saved as they go.
+- Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
+  more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
+  shown the page or the variables that close a gap; everybody else only that their admin sets it up.
+  Check again asks Intelligence and the model provider again, at most every 10 seconds. Reading the
+  checklist does the same once an answer has failed or is five minutes old, without waiting for it,
+  so the next read has the new answer. To check the Bot computer, the server sends each running
+  computer its network policy whenever it asks, and sees that it answers; it wakes none.
+- An app connected from Connect your apps comes back to that step from the app's own sign-in page,
+  whether it connected, failed or was cancelled there. A connection started from Connections or an
+  app's admin page comes back where it did before.
+
+### OpenBot has a new look
+
+- Every screen has new colours: cool neutral greys, a near-black primary button that turns light
+  in dark mode, a purple focus ring, slightly rounder corners and quicker easing. Text now follows
+  the browser's own size, so it is a little larger than before.
+- Dark mode follows the system by default. Settings → General → Appearance offers System, Light and
+  Dark, kept in this browser. Someone who had turned the old dark switch on stays dark.
+- Every Bot, and OpenBot's own mark, is an orb with eyes that blinks and follows the pointer. It
+  holds still with reduced motion.
+- Each Bot's orb takes its colour and pattern from the Bot, so two Bots in one colour still look
+  different. Violet is kept for OpenBot's own mark.
+- The sidebar takes the same look, with OpenBot's orb beside its name. A row lifts to a card under
+  the pointer and while it is open, and you can always see where the keyboard is. While a Bot is
+  working, its orb in the list shows it, and so does a still blue dot. Each conversation has a "…"
+  button with Pin and Delete, which used to be on right-click alone. ⌘K, or Ctrl+K, opens the
+  sidebar and puts you in its search box.
+- A conversation reads like a chat. A Bot's reply arrives one bubble per thought, and a bubble holding
+  a code block or a table takes the full width on a wide screen; your messages sit in a tinted bubble,
+  and three dots show a Bot thinking. A step is marked done only when it worked: one that was refused,
+  failed or declined by you is named for what it would have done ("Send your email"), and one held on
+  its approval card says it is waiting for you. Mail and calendar steps, through any app, are named
+  for what happened to yours ("Searched your email").
+- A conversation with one Bot shows that Bot's orb in its header. The orb works while the Bot does,
+  watches while you type, and smiles when an answer lands. Under the conversation's name, "Working ·
+  Searching the web" says which step the Bot is on, and "Needs you" says an approval is waiting there.
+  A run that goes on after you allow something shows as working too. The message box is a rounded
+  pill with larger buttons, and it says "Message" and the Bot's name until you type.
+- A Bot's computer opens in a wider pane beside the conversation. Its header shows the Bot's orb,
+  whose computer it is and Take control, with a dot while the conversation needs you. Under the
+  screen, every step the Bot took in its browser, approved clicks included, sits among the commands
+  it ran, newest last, marked done, waiting for you or didn't work. The pane opens by itself only
+  when it fits beside the conversation; on a narrow screen the computer button lights up instead.
+  The box for a password or a code says the value goes straight to the page and the Bot never sees
+  it.
+- When a Bot asks before acting, its card says in plain words what it will do, in which app or
+  where, to whom, and what it will send, with everything else under Details. Decline and Allow once
+  answer it, and a quieter Always allow here saves a rule for that Bot, action and place; a step
+  handed to you asks "I did it myself" or "Don't do it". The same card is in the conversation, on
+  the Bot's page and in the list of what needs you. Once you answer, it folds to how it went
+  (Allowed, Sent, Done, Declined, Didn't work) and says who decided. A request for a step that is
+  alone in its turn now shows in the conversation too, where before it waited only on the Bot's
+  page. Under the message box, every conversation says that OpenBot is AI and can make mistakes.
 
 ### Generated interfaces use A2UI 1.0
 

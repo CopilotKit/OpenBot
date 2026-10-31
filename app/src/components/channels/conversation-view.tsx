@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AiNotice } from "@/components/channels/ai-notice";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import {
   type AgentOption,
@@ -18,6 +19,7 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
+import { useReportConversation } from "@/components/channels/conversation-presence";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { newId } from "../../lib/new-id";
 
@@ -39,6 +41,8 @@ export function ConversationView({
   onSubmit,
   onStop,
   voiceCall,
+  placeholder,
+  held,
 }: {
   messages: readonly Message[];
   busy?: boolean;
@@ -97,6 +101,13 @@ export function ConversationView({
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
+  /** The composer's empty-state text, e.g. "Message Ana". The composer's own when absent. */
+  placeholder?: string;
+  /**
+   * Messages the server took and holds for their turn, drawn as Queued at the end of the transcript.
+   * A task's replies wait there. Unlike the queue this screen keeps, nothing here can take one back.
+   */
+  held?: readonly { messageId: string; text: string }[];
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -154,6 +165,16 @@ export function ConversationView({
    */
   const [running, setRunning] = useState(false);
   const inFlight = pending || running;
+  /*
+   * The conversation's header follows it: the orb thinks for the turn and listens to the draft, and
+   * the line under the name says the step. Not while history is restoring: joining the thread is a
+   * run of its own, and it is not an answer. Outside a conversation route nothing is reported.
+   */
+  const presence = useReportConversation({
+    working: (busy || inFlight) && !restoring,
+    failed: Boolean(stopped),
+    messages,
+  });
 
   /**
    * Every change to the queue goes through here, so the ref and the state can never disagree.
@@ -433,13 +454,14 @@ export function ConversationView({
             apply({ id, type: "remove" });
           }}
           queued={queued}
+          {...(held?.length ? { held } : {})}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
           working={working}
         />
       </div>
       <div
-        className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
+        className="max-w-2xl mx-auto w-full px-3 pb-4 shrink-0"
         data-slot="composer-column"
       >
         {notice}
@@ -460,8 +482,17 @@ export function ConversationView({
                 }
               : undefined
           }
-          onStop={onStop}
+          onStop={
+            onStop && presence
+              ? () => {
+                  presence.onStop();
+                  onStop();
+                }
+              : onStop
+          }
           onSubmit={(draft) => submit(draft, false)}
+          {...(presence ? { onTextChange: presence.onTextChange } : {})}
+          {...(placeholder ? { placeholder } : {})}
           /*
            * `inFlight` rather than the `pending` this was given. A drained turn is started from the
            * effect above rather than from the composer, so the composer's own send tracking knows
@@ -502,6 +533,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
+        <AiNotice />
       </div>
     </div>
   );

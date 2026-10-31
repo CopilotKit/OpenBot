@@ -4,6 +4,7 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { taskKeys } from "@/lib/tasks/queries";
 export type ApprovalDecision =
   | "allow_once"
   | "allow_always"
@@ -25,28 +26,53 @@ export const BEHAVIOUR_LABELS: Record<RuleBehaviour, string> = {
   ask: "Ask before taking action",
   hand_off: "Hand off to you",
 };
+/** One action a Bot asked to take, as the inbox returns it: waiting, decided, or done. */
+export type ApprovalRequest = {
+  id: string;
+  /** "pending", "approved", "denied", "consumed" (running), or "completed". */
+  status: string;
+  createdAt: string;
+  action: {
+    botId: string;
+    toolRef: string;
+    effect: string;
+    scope: string;
+    threadId: string;
+    toolCallId?: string;
+    args: unknown;
+    target: unknown;
+    policy?: {
+      behaviour: "allow" | "ask" | "hand_off" | "deny";
+      source: string;
+      reason: string;
+    };
+  };
+  /**
+   * What was chosen: by the person, or `allow_always` by a saved rule as the request opened. Null
+   * while it waits, and for a request withdrawn before anyone answered.
+   */
+  decision?: ApprovalDecision | null;
+  /** ISO-8601, when it was decided. */
+  decidedAt?: string | null;
+  /** ISO-8601, when the action finished running. */
+  completedAt?: string | null;
+  /** How running it went. The content stays on the server. */
+  result?: { error?: string } | null;
+};
+/** A question a Bot asked mid-run and is waiting on the person to answer. */
+export type PersonQuestion = {
+  id: string;
+  botId: string;
+  /** The Bot whose conversation this belongs to: for a hand-off, the Bot that handed it on. */
+  conversationBotId?: string;
+  threadId: string;
+  question: string;
+  why?: string;
+  createdAt: string;
+};
 export type ApprovalInboxData = {
   enabled: boolean;
-  requests: {
-    id: string;
-    status: string;
-    createdAt: string;
-    action: {
-      botId: string;
-      toolRef: string;
-      effect: string;
-      scope: string;
-      threadId: string;
-      toolCallId?: string;
-      args: unknown;
-      target: unknown;
-      policy?: {
-        behaviour: "allow" | "ask" | "hand_off" | "deny";
-        source: string;
-        reason: string;
-      };
-    };
-  }[];
+  requests: ApprovalRequest[];
   rules: ApprovalRuleRow[];
   teamRules: ApprovalRuleRow[];
   preferences?: {
@@ -61,17 +87,10 @@ export type ApprovalInboxData = {
   };
   /** The member's command policy after the team cap. */
   hostCommands?: HostCommandPolicy;
-  questions: {
-    id: string;
-    botId: string;
-    /** The Bot whose conversation this belongs to: for a hand-off, the Bot that handed it on. */
-    conversationBotId?: string;
-    threadId: string;
-    question: string;
-    why?: string;
-    createdAt: string;
-  }[];
+  questions: PersonQuestion[];
 };
+/** How often a screen showing approvals asks for them again. */
+const INBOX_POLL_MS = 10_000;
 export const approvalInboxOptions = () =>
   queryOptions({
     queryKey: ["approvals"],
@@ -81,7 +100,21 @@ export const approvalInboxOptions = () =>
       });
       return response.json();
     },
-    refetchInterval: 10_000,
+    refetchInterval: INBOX_POLL_MS,
+  });
+/**
+ * The same inbox, for a reader drawn once per tool call, with no poll of its own.
+ *
+ * TanStack Query polls once per observer, and every tool call in a conversation reads the inbox, so
+ * a reply with thirty calls asked for it sixty times every ten seconds. The screen polls it once
+ * (`ConversationPresenceProvider`, the Bot page), and a row that mounts between two polls reads what
+ * the last one brought.
+ */
+export const approvalInboxCacheOptions = () =>
+  queryOptions({
+    ...approvalInboxOptions(),
+    refetchInterval: false,
+    staleTime: INBOX_POLL_MS,
   });
 export const decideApproval = (id: string, decision: ApprovalDecision) =>
   client(`/api/approvals/${encodeURIComponent(id)}/decision`, {
@@ -161,6 +194,12 @@ export const updateTeamApprovalRule = (
 const approvalsKey = ["approvals"] as const;
 const settle = (queryClient: QueryClient) => () =>
   queryClient.invalidateQueries({ queryKey: approvalsKey });
+/** An answer can move the task it was asked in off Needs you, so the tasks are read again too. */
+const settleAnswer = (queryClient: QueryClient) => () =>
+  Promise.all([
+    settle(queryClient)(),
+    queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+  ]);
 
 export const approvalPreferencesMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
@@ -210,19 +249,55 @@ export const revokeTeamApprovalRuleMutationOptions = (
     mutationFn: revokeTeamApprovalRule,
     onSettled: settle(queryClient),
   });
-/** Allow once, always allow, deny, or "I did it myself" on one waiting action. */
+/**
+ * Allow once, always allow, decline, or "I did it myself" on one waiting action.
+ *
+ * THE ONE WRITE HERE THAT ALSO PATCHES THE INBOX, before reading it again. The card folds as soon
+ * as the decision is saved, and stays folded if that read fails: left pending, it showed its buttons
+ * again and a second press was refused as "already decided". Only what the server just answered is
+ * written: the decision it accepted, the status it returned (or the one `decide` sets for it), and
+ * the time. Everything else waits for the read.
+ */
 export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
-    mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
-      decideApproval(id, choice),
-    onSuccess: settle(queryClient),
+    mutationFn: async ({
+      id,
+      choice,
+    }: {
+      id: string;
+      choice: ApprovalDecision;
+    }): Promise<{ status?: string }> =>
+      // Saved once this resolves. A body that does not parse loses only the status, not the answer.
+      (await decideApproval(id, choice)).json().catch(() => ({})),
+    onSuccess: async (saved, { id, choice }) => {
+      queryClient.setQueryData<ApprovalInboxData>(
+        approvalInboxOptions().queryKey,
+        (inbox) =>
+          inbox && {
+            ...inbox,
+            requests: inbox.requests.map((request) =>
+              request.id === id
+                ? {
+                    ...request,
+                    decision: choice,
+                    decidedAt: new Date().toISOString(),
+                    status:
+                      saved.status ??
+                      (choice === "deny" ? "denied" : "approved"),
+                  }
+                : request,
+            ),
+          },
+      );
+      await settleAnswer(queryClient)();
+    },
   });
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: ({ id, response }: { id: string; response: string }) =>
       answerPersonQuestion(id, response),
-    onSuccess: settle(queryClient),
+    onSuccess: settleAnswer(queryClient),
   });
 
 /**

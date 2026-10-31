@@ -143,6 +143,10 @@ import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
 import type { SelfHostBanner } from "./self-host-banner";
+import { createSetupRoutes, type SetupSources } from "./setup/checklist";
+import type { TaskReportReader } from "./tasks/report";
+import { createTaskRoutes, type TaskIntake } from "./tasks/routes";
+import type { TaskStore } from "./tasks/store";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
 import type { PackageStatusReader } from "./tenant-package";
@@ -445,6 +449,10 @@ export function createApp(
     };
     memory?: { store: MemoryStore; ingestion: MemoryIngestion };
     proactive?: { store: ProactiveStore; engine: ProactiveEngine };
+    /** A person's tasks, each in a conversation of its own. See tasks/store.ts. */
+    tasks?: TaskStore;
+    /** A task's report, read from its conversation. See tasks/report.ts. Absent, it is not served. */
+    taskReport?: TaskReportReader;
     responsibilities?: {
       store: ResponsibilityStore;
       engine: ResponsibilityEngine;
@@ -461,6 +469,11 @@ export function createApp(
     teamBots?: TeamBots;
     /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
     lifecycle?: BotLifecycleServices;
+    /**
+     * The setup checklist onboarding's "Check your setup" step draws, read from this server's own
+     * configuration and state. See setup/checklist.ts. Absent, `/api/setup` is not mounted.
+     */
+    setup?: SetupSources;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1673,6 +1686,13 @@ export function createApp(
       "/api/bots",
       createBotLifecycleRoutes(coworker.lifecycle, requireUser),
     );
+  /*
+   * Signed in, unlike `/api/capabilities`, which anybody can read. The checklist names what this
+   * deployment has and lacks, and for an admin which variables would close a gap, which is not a
+   * visitor's to have before they sign in.
+   */
+  if (coworker?.setup)
+    app.route("/api/setup", createSetupRoutes(coworker.setup, requireUser));
   if (coworker?.groups)
     app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
   if (coworker?.teamBots)
@@ -1718,6 +1738,18 @@ export function createApp(
         coworker.proactive.engine,
         requireUser,
       ),
+    );
+  if (coworker?.tasks)
+    app.route(
+      "/api/tasks",
+      // A task's turns run on the proactive engine, so replying and Try again are its.
+      createTaskRoutes(coworker.tasks, requireUser, {
+        retry: coworker.proactive?.engine,
+        report: coworker.taskReport,
+        ...(coworker.proactive
+          ? { intake: taskIntake(coworker.proactive.engine) }
+          : {}),
+      }),
     );
   if (coworker?.memory)
     app.route(
@@ -2087,5 +2119,12 @@ function credentialInput(
     metadata: body.metadata as Record<string, unknown>,
     plaintext: body.plaintext,
     actorUserId,
+  };
+}
+
+/** The + on Tasks starts a task the way `start_task` does, on the proactive engine. */
+function taskIntake(engine: ProactiveEngine): TaskIntake {
+  return {
+    start: (owner, botId, task) => engine.startAsked(owner, botId, task),
   };
 }

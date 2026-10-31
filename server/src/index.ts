@@ -282,6 +282,17 @@ import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
+import { createSetupSources, modelKeyOf } from "./setup/checklist";
+import { createComputerCheck } from "./setup/computer-check";
+import { createTaskReplyContext } from "./tasks/reply-context";
+import { createTaskReportReader, intelligenceHistory } from "./tasks/report";
+import { createTaskStore } from "./tasks/store";
+import {
+  createContinuationRunner,
+  createTaskThreads,
+  createTaskTurn,
+} from "./tasks/threads";
+import { builtInBots, taskTools } from "./tasks/tools";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -932,7 +943,7 @@ const signInService = computerGateway
           resumeResponsibility: (owner, runId, result) =>
             responsibilityStore.resumeWaiting(owner, runId, result),
           continueTurn: ({ ownerUserId, botId, snapshot, result, messageId }) =>
-            approvalContinuationRunner({
+            continuationRunner({
               ownerUserId,
               routineId: "sign-in",
               agentId: botId,
@@ -1293,18 +1304,32 @@ const intentRouter = createIntentRouter({
 
 // Said once at boot: whether the key can call the model the Bots run on. A key without access to it
 // otherwise passes every start-up check and fails at the first message, in front of whoever sent it.
-void reportModelAvailability({
-  provider: runtimeModel.provider,
-  model: runtimeModel.defaultModel,
-  apiKey: () =>
-    resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
-      reader: credentialStore,
-      provider: runtimeModel.provider,
-      keyId: tenantPackage.model.credentialSecretRef,
-      environment: process.env,
-    }),
-});
+// Kept, with a stamp naming the key it asked about, so the setup checklist can repeat the answer
+// for that key and say "not checked yet" for any other. The checklist's "Check again" asks again
+// through the same function. Never rejects: a failed read reads as not checked.
+const checkModelAvailability = () =>
+  reportModelAvailability({
+    provider: runtimeModel.provider,
+    model: runtimeModel.defaultModel,
+    apiKey: () =>
+      resolveModelApiKey({
+        encryptionKey: config.keyEncryptionKey,
+        reader: credentialStore,
+        provider: runtimeModel.provider,
+        keyId: tenantPackage.model.credentialSecretRef,
+        environment: process.env,
+      }),
+  });
+const modelCheckAtBoot = (async () => {
+  const { stamp } = await modelKeyOf({
+    plan: Boolean(runtimeModel.plan),
+    provider: runtimeModel.provider,
+    keyId: tenantPackage.model.credentialSecretRef,
+    credentials: credentialStore,
+    environment: process.env,
+  });
+  return { outcome: await checkModelAvailability(), stamp };
+})().catch(() => undefined);
 
 // Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
 
@@ -1404,6 +1429,13 @@ const deliveryScopeFor: DeliveryScopeResolver = async (
 };
 
 /*
+ * A person's tasks, read from the queue and the approval and question inboxes the sweeps keep. See
+ * tasks/store.ts. Made this early because research delivery below asks it which conversations are
+ * a task's own.
+ */
+const taskStore = createTaskStore(database);
+
+/*
  * Memory sources and background research, on by default for each person and Bot, and never switched
  * back on once the person turns one down. See memory/defaults.ts.
  */
@@ -1415,9 +1447,11 @@ const memoryDefaults = createMemoryDefaults({
   channelBots: async (ownerUserId, channelId) =>
     (await channelStore.get(await actorFor(ownerUserId), channelId))
       ?.agentIds ?? null,
-  // The same rule research delivery uses, read when a person speaks (long after it is defined).
+  // The same rule research delivery uses, read when a person speaks (long after it is defined). Never
+  // a task's own conversation: research writes to the person, and a task's turn works for them.
   canDeliver: async (ownerUserId, channelId, agentId) =>
-    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null,
+    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null &&
+    !(await taskStore.isTaskConversation(ownerUserId, channelId)),
   mintThreadId: () => threadIdentity.mint(),
   // Read when a Bot turn starts, long after `teamBots` below is defined.
   publishedByAnother: (ownerUserId, agentId) =>
@@ -1460,9 +1494,26 @@ const memorySweep = repeatAfterEach(async () => {
 // Follow-ups a Bot schedules for itself, on the shared work queue. See agents/wake-up.ts.
 const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
 
+/** Whether OpenBot runs a Bot itself: only those are offered `start_task`. See tasks/tools.ts. */
+const isBuiltInBot = builtInBots(database);
+
 const loadToolsForActor =
-  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
+  (
+    actorId: string,
+    initiator: AuditInitiator = PERSON_INITIATOR,
+    turn: { task?: boolean } = {},
+  ) =>
   async (botId: string) => [
+    // Hands bigger work to a task of its own. Read when a turn is built, long after the engine is.
+    ...(await taskTools({
+      actorId,
+      botId,
+      initiator,
+      start: ({ ownerUserId, agentId, task }) =>
+        proactiveEngine.startAsked(ownerUserId, agentId, task),
+      builtIn: isBuiltInBot,
+      inTask: turn.task === true,
+    })),
     ...wakeUpTools({
       store: wakeUpStore,
       ownerUserId: actorId,
@@ -1726,11 +1777,14 @@ const buildAgentFor = async ({
   agentId,
   initiator,
   depth,
+  task,
 }: {
   ownerUserId: string;
   agentId: string;
   initiator: AuditInitiator;
   depth?: number;
+  /** A task's own turn. See `AgentResolutionContext.task`. */
+  task?: boolean;
 }) => {
   const actor = await actorFor(ownerUserId);
   let agent: AbstractAgent | undefined;
@@ -1738,6 +1792,7 @@ const buildAgentFor = async ({
     agent = await actorAgentResolver.resolveAgentForActor(actor, agentId, {
       initiator,
       depth,
+      ...(task ? { task } : {}),
     });
   } catch (error) {
     if (!(error instanceof CoworkerUnavailableError)) throw error;
@@ -1807,10 +1862,10 @@ const actorAgentResolver = createActorAgentResolver({
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
   stallGuard,
-  loadToolsForActor: (actorId, initiator) =>
+  loadToolsForActor: (actorId, initiator, turn) =>
     restrictToolsForRun(
       initiator,
-      loadToolsForActor(actorId, initiator),
+      loadToolsForActor(actorId, initiator, turn),
       proactiveReadOnlyRefs,
     ),
   signRunForActor,
@@ -1985,6 +2040,31 @@ const approvalContinuationRunner = createTurnRunner({
     Promise.resolve(undefined),
 });
 /**
+ * A task's own turns: the same runner, with the Bot built for a task's turn, so it is not offered
+ * `start_task` there (see tasks/tools.ts).
+ */
+const taskTurnRunner = createTurnRunner({
+  admission: serverTurnAdmission,
+  intelligence: routineIntelligence,
+  runner: routineAgentRunner,
+  components: componentCatalog,
+  buildAgentFor: (input) => buildAgentFor({ ...input, task: true }),
+  toolsForTurn: async ({ ownerUserId, agentId, initiator }) =>
+    approvalComputerTools(ownerUserId, agentId, initiator),
+  learningContainerForThread: (input) =>
+    copilotRuntime.learning?.containerForThread(input) ??
+    Promise.resolve(undefined),
+});
+/**
+ * Turns carried on after waiting on the person: Allow once, a question card's answer, a sign-in.
+ * One in a task's own conversation is the task's turn, built by `taskTurnRunner`.
+ */
+const continuationRunner = createContinuationRunner({
+  isTaskThread: taskStore.isTaskThread,
+  taskTurn: taskTurnRunner,
+  otherwise: approvalContinuationRunner,
+});
+/**
  * Conversations with several Bots. Each Bot turn is an ordinary headless AG-UI turn into that Bot's
  * own group thread, built exactly as a routine's is, so governance, learning and the computer tools
  * apply unchanged; Bots answering each other reuse the handoff desk's grant and caps.
@@ -2067,7 +2147,7 @@ const approvalSweep = repeatAfterEach(
     database,
     responsibilityStore,
     groupConversations,
-    approvalContinuationRunner,
+    approvalContinuationRunner: continuationRunner,
     channelStore,
     actorFor,
     // Assigned further down, once delivery is wired.
@@ -2160,6 +2240,22 @@ deliveryNotifications = (scope, input) => deliveryRouter.notify(scope, input);
  * work queue as routines. Suggestions go to the web inbox and the owner's delivery routing.
  */
 const proactiveStore = createProactiveStore(database);
+// The files and skills a reply in a task's conversation names, checked as a conversation checks them.
+const taskReplyContext = createTaskReplyContext({
+  load: (scope, id) =>
+    loadAttachmentForTurn(
+      database,
+      { actorId: scope.ownerUserId, threadId: scope.threadId },
+      id,
+    ),
+  markSent: (scope, ids) =>
+    markAttachmentsSent(
+      database,
+      { actorId: scope.ownerUserId, threadId: scope.threadId },
+      ids,
+    ),
+  skillsFor: (agentId) => pluginStore.listForAgent(agentId),
+});
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
   memory: personalMemoryStore,
@@ -2179,30 +2275,21 @@ const proactiveEngine = createProactiveEngine({
   }),
   resolveScope: deliveryScopeFor,
   notify: (scope, input) => deliveryNotifications(scope, input),
-  startTask: async (scope, input) => {
-    const actor = await actorFor(scope.ownerUserId);
-    await channelStore.recordActivity(
-      actor,
-      scope.channelId,
-      { text: input.text, agentId: null, at: new Date() },
-      { id: `${input.runId}:input` },
-    );
-    const result = await approvalContinuationRunner({
-      ...scope,
-      routineId: input.runId,
-      instruction: input.text,
-      userMessage: { id: input.runId, role: "user", content: input.text },
-      initiator: PERSON_INITIATOR,
-      signal: input.signal,
-    });
-    if (result.replyText)
-      await channelStore.recordActivity(
-        actor,
-        scope.channelId,
-        { text: result.replyText, agentId: scope.agentId, at: new Date() },
-        { id: `${input.runId}:reply` },
-      );
-  },
+  // Started work runs as a task, in a conversation of its own. See tasks/threads.ts.
+  tasks: createTaskThreads({
+    database,
+    store: taskStore,
+    channels: channelStore,
+    actorFor,
+    scopeFor: deliveryScopeFor,
+  }),
+  startTask: createTaskTurn({
+    channels: channelStore,
+    actorFor,
+    runTurn: taskTurnRunner,
+    replyContext: taskReplyContext,
+  }),
+  acceptReplyContext: taskReplyContext.accept,
   catalogue: pluginStore,
   deniedToolNames: async (ownerUserId, agentId) => {
     const [tools, allowed] = await Promise.all([
@@ -2320,7 +2407,7 @@ const personResponseSweep = repeatAfterEach(
     approvalQueue,
     personResponseOwner,
     authoriseQuestion,
-    approvalContinuationRunner,
+    approvalContinuationRunner: continuationRunner,
     responsibilityStore,
     responsibilityAnswerTurn,
     sourceForCoordinationRun,
@@ -2749,6 +2836,12 @@ const app = createApp(
     },
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
     proactive: { store: proactiveStore, engine: proactiveEngine },
+    tasks: taskStore,
+    // A task's report reads its conversation through the client every headless turn reads with.
+    taskReport: createTaskReportReader({
+      database,
+      history: intelligenceHistory(routineIntelligence),
+    }),
     responsibilities: {
       store: responsibilityStore,
       engine: responsibilityEngine,
@@ -2769,6 +2862,34 @@ const app = createApp(
       profiles: agentProfileStore,
       auditStore: bootAuditStore,
     },
+    // The checklist onboarding ends on. Facts and verdicts about this configuration, never values.
+    setup: createSetupSources({
+      productName: tenantPackage.productName,
+      config,
+      environment: process.env,
+      model: {
+        provider: runtimeModel.provider,
+        keyId: tenantPackage.model.credentialSecretRef,
+        defaultModel: runtimeModel.defaultModel,
+        plan: Boolean(runtimeModel.plan),
+        check: checkModelAvailability,
+      },
+      credentials: credentialStore,
+      modelCheckAtBoot,
+      entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
+      computer: Boolean(config.computer),
+      computerCheck: createComputerCheck({
+        provider: computerProvider,
+        controls: enterpriseControls,
+        ...(config.computer?.token ? { token: config.computer.token } : {}),
+        ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
+      }),
+      apps: {
+        configured: Boolean(composio),
+        provider: composio?.provider ?? config.brokerProvider ?? "composio",
+      },
+      chat: Boolean(deliveryProviders.slack),
+    }),
   },
   createSelfHostBanner({
     enabled: config.selfHostBanner,

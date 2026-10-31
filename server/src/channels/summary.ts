@@ -9,6 +9,7 @@
  */
 
 import { readFiring } from "@openbot/shared/routine-firing";
+import { readTaskBrief } from "@openbot/shared/task-brief";
 import { and, asc, eq, isNull, notExists, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
@@ -302,9 +303,9 @@ async function openingOf(
   const rawAsked = textOf(question.content);
   if (!rawAsked) return null;
   // A channel a routine opened has the firing frame wrapped around its first message, not a
-  // person's words. Unwrapped before it can become the title, same as the transcript unwraps it
-  // before it can become what a person reads.
-  const asked = readFiring(rawAsked) ?? rawAsked;
+  // person's words, and so does a task's, round the person's ask. Unwrapped before it can become
+  // the title, same as the transcript unwraps it before it can become what a person reads.
+  const asked = readFiring(rawAsked) ?? readTaskBrief(rawAsked) ?? rawAsked;
   const replied = answer ? textOf(answer.content) : "";
 
   return oneLine(

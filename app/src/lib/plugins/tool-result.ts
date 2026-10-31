@@ -129,6 +129,54 @@ export function toolResultFailed(result: string | undefined): boolean {
   const answer = asText(result);
   return (
     answer.startsWith("The vendor reported an error:") ||
-    answer.startsWith("That tool could not be called")
+    answer.startsWith("That tool could not be called") ||
+    // The model SDK's own answer when a call names a tool the run does not hold.
+    answer.includes("tried to call unavailable tool")
   );
+}
+
+/**
+ * The server's reason for not carrying a call out, wherever the call's door put it.
+ *
+ * The same reason arrives in three shapes: on its own, once the person has answered a card; after
+ * {@link REFUSAL_MARKER}, when a connector refuses a call the person has already answered; and in a
+ * computer tool's JSON, as `error` from the server's computer or `reason` from the browser's. A
+ * computer's JSON that did not fail carries no reason, and reads as empty.
+ */
+function reasonNotDone(result: string): string {
+  const answer = asText(result).trim();
+  if (answer.startsWith(REFUSAL_MARKER))
+    return answer.slice(REFUSAL_MARKER.length).trim();
+  if (!answer.startsWith("{")) return answer;
+  try {
+    const parsed: unknown = JSON.parse(answer);
+    if (!parsed || typeof parsed !== "object") return "";
+    const { ok, error, reason } = parsed as Record<string, unknown>;
+    if (ok !== false) return "";
+    if (typeof error === "string") return error;
+    return typeof reason === "string" ? reason : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Whether a call was not carried out because of the person: `"declined"` when they said no on its
+ * card, `"alreadyWaiting"` when an identical request was still waiting for their answer, so this
+ * one was not asked again. Null for anything else.
+ *
+ * Read from the first words of `DECLINED_BY_PERSON` and `ALREADY_WAITING` in
+ * `server/src/approvals/service.ts`, declared at both ends like {@link REFUSAL_MARKER}. Neither is a
+ * result, and neither is a boundary: a line must never say a send went out when the person said
+ * no, call it blocked, or say they declined a card they have not answered yet.
+ */
+export function toolResultHeldBack(
+  result: string | undefined,
+): "declined" | "alreadyWaiting" | null {
+  if (result === undefined) return null;
+  const reason = reasonNotDone(result);
+  if (reason.startsWith("The person declined this action")) return "declined";
+  if (reason.startsWith("An identical request is already waiting"))
+    return "alreadyWaiting";
+  return null;
 }

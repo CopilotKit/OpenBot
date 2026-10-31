@@ -310,6 +310,31 @@ function describeAttachments(attachments: readonly Attachment[]): string {
 }
 
 /**
+ * A task's own conversation, open on its page (components/tasks/task-page.tsx).
+ *
+ * The task's turns run on the server, so nothing typed here runs in this tab: `send` hands it to the
+ * server, which queues it behind whatever the task is doing and records it under `messageId`. The
+ * person's bubble is drawn under that id at once and kept until the transcript has it.
+ */
+export type ChannelTaskMode = {
+  /** A turn runs or waits on the server for this task: the Bot shows as working. */
+  busy: boolean;
+  /** Replies the server took and has not started yet, drawn as Queued until their turn. */
+  queued: readonly { messageId: string; text: string }[];
+  /** Only words go: no attachments, no skills (a reply that tries a failed task again). */
+  wordsOnly: boolean;
+  /** Throws when the server did not take it, which puts the words back in the composer. */
+  send: (input: {
+    text: string;
+    messageId: string;
+    attachmentIds?: string[];
+    skillIds?: string[];
+  }) => Promise<void>;
+  /** Changes whenever the task moves on, which reads the conversation's history again. */
+  version: string;
+};
+
+/**
  * One channel's conversation with one coworker.
  *
  * The local agent id is channel-scoped so two channels with the same coworker keep separate
@@ -318,9 +343,12 @@ function describeAttachments(attachments: readonly Attachment[]): string {
 export function ChannelChat({
   channel,
   runtimeAgentId,
+  task,
 }: {
   channel: AgentChannel;
   runtimeAgentId: string;
+  /** This conversation is a task's own, and what is sent goes through the task. */
+  task?: ChannelTaskMode;
 }) {
   // The core attaches the frontend tool registry; direct agent runs do not.
   const { copilotkit } = useCopilotKit();
@@ -381,6 +409,13 @@ export function ChannelChat({
    */
   const agentRef = useRef(agent);
   agentRef.current = agent;
+  /** Reads the durable history again, from the refresh below; null until it is set up. */
+  const pullHistory = useRef<(() => void) | null>(null);
+  /**
+   * What the person sent to a task that the transcript does not hold yet, drawn as their bubbles
+   * until it does: the server records a reply when its turn starts, and reads it back after.
+   */
+  const [taskSends, setTaskSends] = useState<Message[]>([]);
   const voiceArchive = useVoiceArchive(channel.id);
   const [voiceContextNotice, setVoiceContextNotice] = useState<string | null>(
     null,
@@ -557,6 +592,7 @@ export function ChannelChat({
       })();
     };
 
+    pullHistory.current = pull;
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
       const activity = authoredActivity();
       if (activity && !sameActivity(activity, lastSeen)) {
@@ -582,10 +618,32 @@ export function ChannelChat({
     })();
     return () => {
       cancelled = true;
+      pullHistory.current = null;
       unsubscribe();
       offFinishedAway();
     };
   }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
+
+  /*
+   * A TASK MOVING ON IS NEWS HERE TOO. Its turns run on the server, and the Bot's line arriving is
+   * not the only moment its history changes: a reply's turn starting records the person's words,
+   * and a stop for approval records the step it stopped on. So history is read again whenever the
+   * task does, after the join, never in place of the read on mount.
+   */
+  const taskVersion = task?.version;
+  const lastTaskVersion = useRef(taskVersion);
+  useEffect(() => {
+    if (taskVersion === undefined || taskVersion === lastTaskVersion.current)
+      return;
+    lastTaskVersion.current = taskVersion;
+    let cancelled = false;
+    void joinGatePromise.then(() => {
+      if (!cancelled) pullHistory.current?.();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskVersion, joinGatePromise]);
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);
@@ -949,11 +1007,58 @@ export function ChannelChat({
   /** Stable reference for effects and component callbacks. */
   const sayRef = useRef(say);
   sayRef.current = say;
+
+  /**
+   * A send into a task: drawn at once under the id it is sent with, so the turn that records it is
+   * the same message, and taken back off if the server does not take it, so the composer can put
+   * the words back.
+   */
+  const sendToTask = task
+    ? async (draft: {
+        text: string;
+        attachments: Attachment[];
+        commandIds: string[];
+      }) => {
+        const text = draft.text.trim();
+        if (!text && draft.attachments.length === 0) return;
+        const messageId = newId();
+        setTaskSends((sent) => [
+          ...sent,
+          {
+            id: messageId,
+            role: "user",
+            content: toMessageContent(text, draft.attachments),
+          },
+        ]);
+        try {
+          await task.send({
+            text,
+            messageId,
+            ...(draft.attachments.length
+              ? {
+                  attachmentIds: draft.attachments.map(
+                    (attachment) => uploadedAttachment(attachment).attachmentId,
+                  ),
+                }
+              : {}),
+            ...(draft.commandIds.length ? { skillIds: draft.commandIds } : {}),
+          });
+        } catch (error) {
+          setTaskSends((sent) =>
+            sent.filter((message) => message.id !== messageId),
+          );
+          throw error;
+        }
+      }
+    : null;
+  const taskSendRef = useRef(sendToTask);
+  taskSendRef.current = sendToTask;
   const stopEpoch = useRef(0);
 
   const call = useVoiceCall({
     channelId: channel.id,
-    disabled: !channel.active,
+    // A task's turns run on the server, and a call would talk to the Bot here, beside the task.
+    disabled: !channel.active || task !== undefined,
     context: async () =>
       [
         voiceArchiveContext(await loadVoiceArchive(channel.id)).slice(-6000),
@@ -990,7 +1095,12 @@ export function ChannelChat({
    * is still holding, and the failed turn is already reported by `runError` under the transcript.
    */
   const askFromComponent = useCallback((text: string) => {
-    void sayRef.current(text).catch(() => undefined);
+    const send = taskSendRef.current;
+    void (
+      send
+        ? send({ text, attachments: [], commandIds: [] })
+        : sayRef.current(text)
+    ).catch(() => undefined);
   }, []);
 
   /**
@@ -1012,6 +1122,30 @@ export function ChannelChat({
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
   }, []);
 
+  /** The Bot's own name, once its profile is in. The conversation's name may be its title instead. */
+  const botName = agentProfiles?.find(
+    (profile) => profile.id === runtimeAgentId,
+  )?.name;
+
+  const transcript = transcriptMessages(agent.messages, seed);
+  /*
+   * What was sent to the task and is not in the transcript yet. One the server holds is drawn as
+   * Queued instead, until its turn starts; one whose turn has started is the person's bubble again,
+   * until the transcript has it.
+   */
+  const recorded = new Set(transcript.map((message) => message.id));
+  const held = new Set((task?.queued ?? []).map((reply) => reply.messageId));
+  const unrecorded = taskSends.filter(
+    (message) => !recorded.has(message.id) && !held.has(message.id),
+  );
+  /*
+   * The server's own turn shows itself as a work row ("Ana is working on it…"), so the transcript's
+   * Thinking line is only for a task whose turn is waiting to start.
+   */
+  const serverRunning =
+    channel.work?.some((entry) => entry.kind === "task") ?? false;
+  const taskBusy = Boolean(task?.busy) && !serverRunning;
+
   return (
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's
     // channel instance so an action continues this thread instead of looking for a default agent.
@@ -1021,21 +1155,23 @@ export function ChannelChat({
     >
       <ConversationProvider ask={askFromComponent}>
         <div className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
-          <VoiceCallWidget
-            call={call}
-            name={
-              agentProfiles?.find((profile) => profile.id === runtimeAgentId)
-                ?.name ?? channel.name
-            }
-            avatarSeed={
-              agentProfiles?.find((profile) => profile.id === runtimeAgentId)
-                ?.avatarSeed ?? runtimeAgentId
-            }
-            taskRunning={agent.isRunning || runsInFlight > 0}
-          />
+          {task ? null : (
+            <VoiceCallWidget
+              call={call}
+              name={
+                agentProfiles?.find((profile) => profile.id === runtimeAgentId)
+                  ?.name ?? channel.name
+              }
+              avatarSeed={
+                agentProfiles?.find((profile) => profile.id === runtimeAgentId)
+                  ?.avatarSeed ?? runtimeAgentId
+              }
+              taskRunning={agent.isRunning || runsInFlight > 0}
+            />
+          )}
           <ConversationView
             voiceCall={
-              call.available
+              call.available && !task
                 ? {
                     active: call.active,
                     supported: call.supported,
@@ -1044,19 +1180,29 @@ export function ChannelChat({
                 : undefined
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
-            channelId={channel.id}
+            // A reply that tries a failed task again carries words only: no attachments, no skills.
+            {...(task?.wordsOnly ? {} : { channelId: channel.id })}
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
              * "Thinking" line exists for. Same value as `pending`, deliberately.
              */
-            busy={agent.isRunning || turnsInFlight > 0}
+            busy={agent.isRunning || turnsInFlight > 0 || taskBusy}
             // The `/` menu exposes only skills granted to this Bot.
-            commands={skillCommands}
+            {...(task?.wordsOnly ? {} : { commands: skillCommands })}
+            held={task?.queued}
             // Readiness is handled by `say`; deletion is the only disabled-chat state.
             disabled={!channel.active}
+            // Until the Bot's name is in, the composer keeps its own words.
+            {...(botName
+              ? {
+                  placeholder: task
+                    ? `Reply to ${botName}`
+                    : `Message ${botName}`,
+                }
+              : {})}
             messages={withVoiceChats(
-              transcriptMessages(agent.messages, seed),
+              unrecorded.length ? [...transcript, ...unrecorded] : transcript,
               voiceArchive.entries,
             )}
             notice={
@@ -1111,6 +1257,10 @@ export function ChannelChat({
               </>
             }
             onSubmit={async (draft) => {
+              if (sendToTask) {
+                await sendToTask(draft);
+                return;
+              }
               // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
               // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
               // per-message mention is a change to that binding, not to the composer.
@@ -1147,8 +1297,11 @@ export function ChannelChat({
              * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
              * moment this one is over — including when it is over because somebody pressed the button
              * above.
+             *
+             * Not in a task: the server holds a reply until the task's turn is over, durably, so
+             * holding it here as well would only hold it twice.
              */
-            queueWhileBusy
+            queueWhileBusy={!task}
             restoring={historyLoading}
             /*
              * The run, not the turn. Stop reaches a run through the core's abort controller, and that

@@ -76,7 +76,8 @@ function connectorTools(plugins: GrantedPlugins): Map<string, string[]> {
   const connectors = new Map<string, string[]>();
   for (const tool of plugins.tools) {
     const key = tool.ref.split("/")[0] ?? tool.ref;
-    let label = readToolName(tool.toolName).label;
+    // What the tool does, not what it did: "Send your email", never "Sent your email".
+    let label = readToolName(tool.toolName, "plain").label;
     const prefix = `${key.toLowerCase()} `;
     if (label.toLowerCase().startsWith(prefix)) {
       const rest = label.slice(prefix.length);

@@ -26,10 +26,12 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { taskKeys } from "@/lib/tasks/queries";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -191,6 +193,21 @@ function renderSidebar() {
     open: false,
     tabs: [],
   });
+  // So does the Tasks entry's count, from the tasks and the approval inbox.
+  for (const queryKey of [taskKeys.list(), approvalInboxOptions().queryKey]) {
+    queryClient.setQueryDefaults(queryKey, {
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchInterval: false,
+    });
+  }
+  queryClient.setQueryData(taskKeys.list(), []);
+  queryClient.setQueryData(approvalInboxOptions().queryKey, {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
       { channels: [channel("Recent conversation")], nextCursor: "older/page" },
@@ -225,7 +242,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
   const view = renderSidebar();
   const agent = await view.findByText("Recent conversation");
   const thread = view.getByText("New conversation");
-  expect(thread.className).toContain("text-[0.9rem]");
+  expect(thread.className).toContain("type-sub");
   act(() =>
     clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
       messageListEmphasis: "agent",
@@ -234,7 +251,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
       skin: "openbot",
     }),
   );
-  await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));
+  await waitFor(() => expect(agent.className).toContain("type-sub"));
   expect(thread.className).toContain("text-muted-foreground");
 });
 

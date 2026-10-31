@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import type { AIState } from "@/components/agents/orb/ai-core";
+import type { AIState } from "@/components/agents/orb/agent-orb";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelWork,
@@ -65,6 +65,7 @@ export function doingLine(busy: boolean, work: ChannelWork[]): string | null {
   if (first?.kind === "handoff")
     return `Asking ${first.botName ?? "another Bot"}`;
   if (first?.kind === "routine") return "Running a routine";
+  if (first?.kind === "task") return "Working on a task";
   return busy ? "Thinking" : null;
 }
 

@@ -4,6 +4,7 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { taskKeys } from "@/lib/tasks/queries";
 
 export type ProactiveSetting = {
   id: string;
@@ -81,14 +82,31 @@ export const removeProactiveSetting = (id: string) =>
     method: "DELETE",
     fallback: "Could not remove background research",
   });
-export const resolveSuggestion = (id: string, action: "start" | "dismiss") =>
-  client(`/api/proactive/suggestions/${encodeURIComponent(id)}/${action}`, {
+/** The task Start opened for a suggestion. Its page reads the whole record. */
+export type StartedTask = { id: string; channelId: string; title: string };
+
+/**
+ * Start opens a task of its own for the suggestion, in a conversation with just its Bot, and answers
+ * with that task so the screen can open it. Dismiss answers with nothing a caller needs.
+ */
+export const resolveSuggestion = async (
+  id: string,
+  action: "start" | "dismiss",
+): Promise<StartedTask | null> => {
+  const path = `/api/proactive/suggestions/${encodeURIComponent(id)}/${action}`;
+  if (action === "dismiss") {
+    await client(path, {
+      method: "POST",
+      fallback: "Could not dismiss this suggestion",
+    });
+    return null;
+  }
+  const task = await client<StartedTask | undefined>(path, "task", {
     method: "POST",
-    fallback:
-      action === "start"
-        ? "Could not start this suggestion"
-        : "Could not dismiss this suggestion",
+    fallback: "Could not start this suggestion",
   });
+  return task ?? null;
+};
 
 /** A setting's research produces suggestions, so a change to either refreshes both. */
 const settleProactive = (queryClient: QueryClient) => () =>
@@ -97,12 +115,19 @@ const settleProactive = (queryClient: QueryClient) => () =>
     queryClient.invalidateQueries({ queryKey: proactiveKeys.suggestions }),
   ]);
 
-/** Start a suggested next step as a task, or dismiss it. */
+/**
+ * Start a suggested next step as a task, or dismiss it. Start answers with the task it opened, which
+ * Tasks now lists.
+ */
 export const resolveSuggestionMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: ({ id, action }: { id: string; action: "start" | "dismiss" }) =>
       resolveSuggestion(id, action),
-    onSuccess: settleProactive(queryClient),
+    onSuccess: () =>
+      Promise.all([
+        settleProactive(queryClient)(),
+        queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+      ]),
   });
 
 export const createProactiveSettingMutationOptions = (

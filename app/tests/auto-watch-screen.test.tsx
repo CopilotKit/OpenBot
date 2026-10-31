@@ -30,16 +30,20 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-function paneFor(options: { watching?: boolean; busy?: boolean } = {}) {
+function paneFor(
+  options: { watching?: boolean; busy?: boolean; docked?: boolean } = {},
+) {
   const opened: number[] = [];
   const closed: number[] = [];
   let watching = options.watching ?? false;
+  const docked = options.docked ?? true;
   const view = renderHook(
     (props: { watching: boolean }) =>
       useAutoWatchScreen({
         botId: "bot-1",
         watching: props.watching,
         busy: options.busy ?? false,
+        docked,
         open: () => {
           opened.push(1);
           watching = true;
@@ -56,6 +60,14 @@ function paneFor(options: { watching?: boolean; busy?: boolean } = {}) {
   return {
     opened,
     closed,
+    /** Whether the header's computer button is lit for activity nobody is watching. */
+    unseen: () => view.result.current.unseen,
+    /** What opening the pane by hand does. */
+    watch: () =>
+      act(() => {
+        watching = true;
+        view.rerender({ watching });
+      }),
     /** What closing the pane by hand does: the pane shuts, and this run stops auto-opening. */
     dismiss: () =>
       act(() => {
@@ -162,5 +174,72 @@ describe("another Bot's computer", () => {
     announce("other-bot");
 
     expect(pane.opened).toHaveLength(0);
+  });
+});
+
+/*
+ * On a screen too narrow for the pane beside the conversation, opening it would cover the
+ * conversation with a sheet. The header's computer button lights up instead, and the person opens
+ * it when they want to watch.
+ */
+describe("a screen with no room beside the conversation", () => {
+  test("lights the computer button instead of covering the conversation", () => {
+    const pane = paneFor({ docked: false });
+    expect(pane.unseen()).toBe(false);
+
+    announce();
+
+    expect(pane.opened).toHaveLength(0);
+    expect(pane.unseen()).toBe(true);
+  });
+
+  test("puts the light out once the person opens the screen", () => {
+    const pane = paneFor({ docked: false });
+    announce();
+
+    pane.watch();
+
+    expect(pane.unseen()).toBe(false);
+  });
+
+  test("puts the light out when the call that lit it is taken back", () => {
+    const pane = paneFor({ docked: false });
+    const announcement = announce();
+
+    act(() => withdrawComputerActivity("bot-1", announcement));
+
+    expect(pane.unseen()).toBe(false);
+    expect(pane.closed).toHaveLength(0);
+  });
+
+  test("lights nothing for a run the person dismissed", () => {
+    const pane = paneFor({ docked: false });
+    announce();
+    pane.watch();
+    pane.dismiss();
+
+    announce();
+
+    expect(pane.unseen()).toBe(false);
+    expect(pane.opened).toHaveLength(0);
+  });
+
+  test("lights nothing beside a pane opened for something else", () => {
+    const pane = paneFor({ docked: false, busy: true });
+
+    announce();
+
+    expect(pane.unseen()).toBe(false);
+  });
+});
+
+describe("a screen with room beside the conversation", () => {
+  test("opens rather than lighting the button", () => {
+    const pane = paneFor({ docked: true });
+
+    announce();
+
+    expect(pane.opened).toHaveLength(1);
+    expect(pane.unseen()).toBe(false);
   });
 });

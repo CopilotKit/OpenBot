@@ -1,18 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { personWasAsked } from "@/lib/approval-view";
 import {
-  type ApprovalDecision,
-  approvalInboxOptions,
-  decideApproval,
+  type ApprovalRequest,
+  approvalInboxCacheOptions,
+  decideApprovalMutationOptions,
 } from "@/lib/approvals";
+import { ApprovalCard } from "./approval-card";
+
+/** A request the person decided on a card, which keeps its folded card in the conversation. */
+const decidedByPerson = (request: ApprovalRequest) =>
+  request.status !== "pending" &&
+  Boolean(request.decision) &&
+  personWasAsked(request);
 
 /**
- * A pending approval, drawn in the conversation where the action it holds would have been.
+ * An approval, drawn in the conversation where the action it holds would have been.
  *
- * The same request as the Approvals page, read from the same owner-scoped inbox, so a decision made
- * in either place is the one decision. Once decided the server runs the action exactly once and
- * continues the conversation, and this gives the line back to the tool's own renderer.
+ * The same request as the Bot's page, read from the same owner-scoped inbox, so a decision made in
+ * either place is the one decision. Once decided the server runs the action exactly once and
+ * continues the conversation, and this gives the line back to the tool's own renderer, under the
+ * folded card saying how it ended and who decided. A request the person was never asked about (a
+ * saved rule allowed it) leaves no card behind.
  */
 export function InlineApproval({
   toolCallId,
@@ -22,89 +31,59 @@ export function InlineApproval({
   fallback: ReactNode;
 }) {
   const cache = useQueryClient();
-  const inbox = useQuery(approvalInboxOptions());
-  const decision = useMutation({
-    mutationFn: (choice: ApprovalDecision) =>
-      decideApproval(request?.id ?? "", choice),
-    onSuccess: () => cache.invalidateQueries({ queryKey: ["approvals"] }),
-  });
+  const inbox = useQuery(approvalInboxCacheOptions());
+  const decision = useMutation(decideApprovalMutationOptions(cache));
   const request = toolCallId
     ? inbox.data?.requests.find(
         (candidate) => candidate.action.toolCallId === toolCallId,
       )
     : undefined;
-  if (request?.status !== "pending") return <>{fallback}</>;
-  const handOff = request.action.policy?.behaviour === "hand_off";
-  const choices: [ApprovalDecision, string][] = handOff
-    ? [
-        ["handled", "I did it myself"],
-        ["deny", "Don't do it"],
-      ]
-    : [
-        ["allow_once", "Allow once"],
-        ["allow_always", "Always allow here"],
-        ["deny", "Deny"],
-      ];
-  return (
-    <section
-      aria-label="Waiting for your approval"
-      className="space-y-2 rounded-lg border p-3 text-sm"
-    >
-      <p className="font-medium">
-        {handOff ? "This needs you" : "Waiting for your approval"}:{" "}
-        {request.action.toolRef
-          .replace(/^computer_|^host\//, "")
-          .replaceAll("_", " ")}{" "}
-        on {request.action.scope}
-      </p>
-      {request.action.policy ? (
-        <p className="text-muted-foreground">{request.action.policy.reason}</p>
-      ) : null}
-      {decision.error ? (
-        <p role="alert" className="text-destructive">
-          {decision.error.message}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        {choices.map(([choice, label], index) => (
-          <Button
-            key={choice}
-            size="sm"
-            variant={index === 0 ? "default" : "outline"}
-            disabled={decision.isPending}
-            onClick={() => decision.mutate(choice)}
-          >
-            {label}
-          </Button>
-        ))}
+  if (!request) return <>{fallback}</>;
+  if (request.status !== "pending") {
+    if (!decidedByPerson(request)) return <>{fallback}</>;
+    return (
+      <div className="space-y-2">
+        <ApprovalCard request={request} />
+        {fallback}
       </div>
-    </section>
+    );
+  }
+  return (
+    <ApprovalCard
+      busy={decision.isPending}
+      error={decision.error?.message ?? null}
+      onDecide={(choice) => decision.mutate({ id: request.id, choice })}
+      request={request}
+    />
   );
 }
 
 /**
- * The pending approvals for a group of tool calls, for a transcript that draws those calls itself
- * rather than through each tool's renderer: the browser-activity group folds every click and field
- * into one collapsed line, so a card inside a step would never be seen. Drawn beside the group,
- * outside the fold, one card per waiting call; nothing at all when none is waiting.
+ * The approval cards for tool calls a transcript draws itself rather than through each tool's
+ * renderer: a run of steps folded into one line, whose cards would never be seen inside the fold,
+ * and a server call alone in its turn, which has no renderer to draw one. Drawn beside the line, one
+ * card per call the person was asked about: waiting to be decided, or folded once it was. Nothing
+ * at all for calls nobody asked about.
  */
-export function PendingApprovals({
+export function ToolCallApprovals({
   toolCallIds,
 }: {
   toolCallIds: readonly string[];
 }) {
-  const inbox = useQuery(approvalInboxOptions());
-  const waiting = new Set(
+  const inbox = useQuery(approvalInboxCacheOptions());
+  const asked = new Set(
     (inbox.data?.requests ?? [])
-      .filter((request) => request.status === "pending")
+      .filter(
+        (request) => request.status === "pending" || decidedByPerson(request),
+      )
       .flatMap((request) =>
         request.action.toolCallId ? [request.action.toolCallId] : [],
       ),
   );
-  const ids = toolCallIds.filter((id) => waiting.has(id));
+  const ids = toolCallIds.filter((id) => asked.has(id));
   if (ids.length === 0) return null;
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-3 space-y-3">
       {ids.map((id) => (
         <InlineApproval key={id} toolCallId={id} fallback={null} />
       ))}

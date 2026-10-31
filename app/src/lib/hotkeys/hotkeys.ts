@@ -9,7 +9,8 @@
  * browser window before the page ever sees the keystroke, and `preventDefault` is ignored for
  * reserved shortcuts, so no entry here can use one. Plain Shift+letter combos work everywhere,
  * at the cost that they are also just how capital letters are typed — which is why `useHotkey`
- * ignores them while focus is in anything editable.
+ * ignores them while focus is in anything editable. Cmd/Ctrl+K is not reserved, and a modified
+ * combo fires from inside a field too, so search reaches the roster from the composer.
  */
 
 export type HotkeyCombo = {
@@ -35,6 +36,12 @@ export const HOTKEYS = [
     label: "New chat",
     description: "Start a new chat from anywhere in the app.",
     combo: { key: "n", shift: true },
+  },
+  {
+    id: "search",
+    label: "Search conversations",
+    description: "Open the sidebar and search your conversations.",
+    combo: { key: "k", mod: true },
   },
 ] as const satisfies readonly Hotkey[];
 
@@ -102,4 +109,9 @@ export function formatHotkey(combo: HotkeyCombo): string[] {
   if (combo.shift) parts.push(isMac ? "⇧" : "Shift");
   parts.push(combo.key.toUpperCase());
   return parts;
+}
+
+/** The combo as one short label, for a tooltip: "⇧N" on a Mac, "Shift+N" everywhere else. */
+export function hotkeyLabel(combo: HotkeyCombo): string {
+  return formatHotkey(combo).join(isMac ? "" : "+");
 }

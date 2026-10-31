@@ -7,6 +7,7 @@ import {
   IconRadar,
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import {
   PageEmpty,
@@ -44,7 +45,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import {
+  channelListQueryOptions,
+  conversationsOnly,
+} from "@/lib/channels/queries";
 import {
   changeProactiveSettingMutationOptions,
   createProactiveSettingMutationOptions,
@@ -69,7 +73,10 @@ const intervalItems = intervals.map((interval) => ({
 const intervalLabel = (minutes: number) =>
   intervals.find((interval) => interval.minutes === minutes)?.label ??
   `Every ${minutes} minutes`;
-/** Next steps a Bot proposed from background research: start one as a task, or dismiss it. */
+/**
+ * Next steps a Bot proposed from background research: start one as a task, or dismiss it. Start
+ * opens a task of its own, and the task's page opens with it.
+ */
 /** How many suggestions show before the rest fold behind "Show more". */
 const SUGGESTIONS_SHOWN = 3;
 
@@ -85,6 +92,8 @@ export function SuggestionsInbox({
   );
   const bots = useQuery(agentListQueryOptions());
   const act = useMutation(resolveSuggestionMutationOptions(queryClient));
+  // Drawn on its own, as some tests do, there is no router: the task still starts, and is on Tasks.
+  const router = useRouter({ warn: false });
   const [expanded, setExpanded] = useState(false);
   const botName = (id: string) =>
     bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
@@ -148,7 +157,18 @@ export function SuggestionsInbox({
                         size="sm"
                         disabled={act.isPending}
                         onClick={() =>
-                          act.mutate({ id: suggestion.id, action: "start" })
+                          act.mutate(
+                            { id: suggestion.id, action: "start" },
+                            {
+                              onSuccess: (task) => {
+                                if (task)
+                                  void router?.navigate({
+                                    to: "/tasks/$taskId",
+                                    params: { taskId: task.id },
+                                  });
+                              },
+                            },
+                          )
                         }
                       >
                         Start as task
@@ -289,7 +309,7 @@ function TurnOnResearchDialog({
   const [focus, setFocus] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(240);
   const id = useId();
-  const eligibleChannels = (channels.data ?? []).filter(
+  const eligibleChannels = conversationsOnly(channels.data).filter(
     (channel) => channel.active && channel.agentIds.includes(agentId),
   );
   const add = useMutation(createProactiveSettingMutationOptions(queryClient));

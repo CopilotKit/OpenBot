@@ -46,6 +46,7 @@ export function mainChannel(
   return channels?.find(
     (channel) =>
       channel.active !== false &&
+      channel.taskId == null &&
       channel.agentIds.length === 1 &&
       channel.agentIds[0] === agentId,
   );

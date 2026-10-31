@@ -23,6 +23,20 @@ export function isLockConflict(error: unknown): boolean {
 }
 
 /**
+ * The lock was refused when the turn first asked for it, so the turn has not run.
+ *
+ * The same 409 from the platform later on can follow a tool call or a model's spend; only this one
+ * is safe to put back on the queue without counting it as an attempt. The platform's error is kept
+ * as the cause.
+ */
+export class ThreadLockBusyError extends Error {
+  override name = "ThreadLockBusyError";
+  constructor(cause: unknown) {
+    super("The conversation is busy with another turn.", { cause });
+  }
+}
+
+/**
  * No renewal has succeeded for nearly as long as the lock lives, so it will have lapsed before the
  * next one could land, whatever the reason was.
  */
@@ -41,8 +55,8 @@ export class LockLapsedError extends Error {
  * Lost means one of two things, and either one stops the heartbeat and calls `onLost`, once:
  *
  * - A renewal is refused as a conflict ({@link isLockConflict}): somebody else holds it now.
- * - No renewal has succeeded for so long that the lock will have lapsed before the next tick:
- *   longer than `lifetimeMs - everyMs`, whatever the failures were — network errors, 5xx, 401, a
+ * - No renewal has succeeded for so long that the lock will have lapsed by the next tick:
+ *   at least `lifetimeMs - everyMs`, whatever the failures were — network errors, 5xx, 401, a
  *   request that never settles. Checked on each tick rather than when a renewal fails, because a
  *   renewal that hangs never fails. One interval short of the lifetime, so the turn stops while the
  *   lock is still its own rather than up to one interval after it has gone.
@@ -76,7 +90,7 @@ export function keepLease(input: {
     onLost(error);
   };
   heartbeat = setInterval(() => {
-    if (now() - renewedAt > giveUpAfterMs) {
+    if (now() - renewedAt >= giveUpAfterMs) {
       lose(new LockLapsedError(lifetimeMs));
       return;
     }

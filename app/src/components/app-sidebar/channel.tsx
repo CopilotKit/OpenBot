@@ -1,4 +1,9 @@
-import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
+import {
+  IconDots,
+  IconPin,
+  IconPinnedOff,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
@@ -9,17 +14,70 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SidebarMenuAction, SidebarMenuItem } from "@/components/ui/sidebar";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
 import { ChannelItemContent } from "./channel-item-content";
 
+/*
+ * A row lifts to the card's fill and shadow under the pointer, while it is the open conversation,
+ * and while its own menu is open, so the menu points at the row it is about. `--avatar-ground`
+ * keeps the busy dot's ring the colour of the row it sits on. The sidebar's other controls light
+ * the same way.
+ */
+export const LIT =
+  "bg-sidebar-accent shadow-(--shadow-card) [--avatar-ground:var(--sidebar-accent)]";
+const rowClassName = [
+  "flex w-full flex-row items-center gap-2 rounded-lg px-2 py-2 outline-hidden [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]",
+  "hover:bg-sidebar-accent hover:shadow-(--shadow-card) hover:[--avatar-ground:var(--sidebar-accent)]",
+  "group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:bg-sidebar-accent group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:shadow-(--shadow-card) group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:[--avatar-ground:var(--sidebar-accent)]",
+  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+  // Under 768px the "…" button always shows, so the row keeps room for it.
+  "max-md:pr-9",
+].join(" ");
+
+/** Pin and Delete, the same two in the row's right-click menu and in its "…" menu. */
+function ConversationMenuItems({
+  item: Item,
+  pinned,
+  onPin,
+  onDelete,
+}: {
+  item: typeof ContextMenuItem | typeof DropdownMenuItem;
+  pinned: boolean;
+  onPin: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      <Item onClick={onPin}>
+        {pinned ? <IconPinnedOff /> : <IconPin />}
+        {pinned ? "Unpin conversation" : "Pin conversation"}
+      </Item>
+      <Item variant="destructive" onClick={onDelete}>
+        <IconTrash />
+        Delete conversation…
+      </Item>
+    </>
+  );
+}
+
 /**
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
  * `content-visibility` keeps off-screen rows cheap without virtualization.
  *
- * Right-click opens Pin and Delete. Deleting is confirmed in a dialog that names the channel,
- * because the row it was invoked on is one of several identical-looking rows.
+ * Pin and Delete open from right-click, and from the "…" button over the row's end. Right-click
+ * alone was found by nobody who was not told, and reached by no keyboard. The button shows under
+ * the pointer and while focus is in the row, and comes straight after it in tab order. Deleting is
+ * confirmed in a dialog that names the channel, because the row it was invoked on is one of several
+ * identical-looking rows.
  */
 export const Channel = memo(function Channel({
   channelId,
@@ -70,8 +128,18 @@ export const Channel = memo(function Channel({
    */
   const [pinProblem, setPinProblem] = useState<string | null>(null);
 
+  const title = summary || lastMessage || "New conversation";
+  const pin = () => {
+    setPinProblem(null);
+    setPinned.mutate(
+      { channelId, pinned: !pinned },
+      { onError: (thrown) => setPinProblem(thrown.message) },
+    );
+  };
+  const askToDelete = () => setConfirming(true);
+
   return (
-    <>
+    <SidebarMenuItem>
       <ContextMenu>
         <ContextMenuTrigger>
           <Link
@@ -83,15 +151,13 @@ export const Channel = memo(function Channel({
             }
             params={{ channelId }}
             type="button"
-            className="flex flex-row py-2 px-2 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
-            activeProps={{
-              className: "bg-foreground/5",
-            }}
+            className={rowClassName}
+            activeProps={{ className: LIT }}
           >
             <ChannelItemContent
               participantIds={participantIds}
               name={name}
-              title={summary || lastMessage || "New conversation"}
+              title={title}
               displayedTitle={threadTitle}
               lastMessageAt={lastMessageAt}
               emphasis={emphasis}
@@ -103,27 +169,36 @@ export const Channel = memo(function Channel({
           </Link>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem
-            onClick={() => {
-              setPinProblem(null);
-              setPinned.mutate(
-                { channelId, pinned: !pinned },
-                { onError: (thrown) => setPinProblem(thrown.message) },
-              );
-            }}
-          >
-            {pinned ? <IconPinnedOff /> : <IconPin />}
-            {pinned ? "Unpin conversation" : "Pin conversation"}
-          </ContextMenuItem>
-          <ContextMenuItem
-            variant="destructive"
-            onClick={() => setConfirming(true)}
-          >
-            <IconTrash />
-            Delete conversation…
-          </ContextMenuItem>
+          <ConversationMenuItems
+            item={ContextMenuItem}
+            onDelete={askToDelete}
+            onPin={pin}
+            pinned={pinned}
+          />
         </ContextMenuContent>
       </ContextMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <SidebarMenuAction
+              aria-label={`Options for ${title}`}
+              // On the first line, over the time that steps aside for it; 24px, the smallest target.
+              className="top-1.5 right-1.5 size-6 text-muted-foreground hover:bg-sidebar aria-expanded:bg-sidebar aria-expanded:text-sidebar-foreground"
+              showOnHover
+            />
+          }
+        >
+          <IconDots />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-auto">
+          <ConversationMenuItems
+            item={DropdownMenuItem}
+            onDelete={askToDelete}
+            onPin={pin}
+            pinned={pinned}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
       {pinProblem ? (
         <p className="px-2 pb-1 text-destructive text-xs" role="alert">
           {pinProblem}
@@ -137,6 +212,6 @@ export const Channel = memo(function Channel({
         onOpenChange={setConfirming}
         open={confirming}
       />
-    </>
+    </SidebarMenuItem>
   );
 });
