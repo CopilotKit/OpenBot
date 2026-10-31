@@ -18,6 +18,7 @@ import {
   TASK_REPLY_LINE,
 } from "@openbot/shared/task-brief";
 import type { TaskReplyContext } from "@openbot/shared/task-reply";
+import { ThreadAlreadyRunningError } from "@copilotkit/runtime/v2";
 import { ThreadLockBusyError } from "@openbot/toolkit/lease";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -63,6 +64,7 @@ import {
   type ProactiveScope,
   type TaskThreads,
   TASK_TURNS_PER_PERSON,
+  TaskTurnTimeoutError,
   type TaskTurnEnding,
 } from "../src/proactive/engine";
 import { createProactiveRoutes } from "../src/proactive/routes";
@@ -259,7 +261,7 @@ function engineFor(
   durable?: WorkQueue,
   replyContext?: ReturnType<typeof createTaskReplyContext>,
   tasks: TaskThreads = threads,
-  options: { taskTurnsAtOnce?: number } = {},
+  options: { taskTurnsAtOnce?: number; taskTurnMs?: number } = {},
 ) {
   const memory = memoryQueue();
   const queue = durable ?? memory.queue;
@@ -3909,103 +3911,166 @@ test.each(["release", "finish"])("expired task %s", async (ending) => {
   }
 });
 
-for (const failedRuns of [0, 1]) {
-  test(`task reply survives four initial lock conflicts after ${failedRuns} provider failures with stable message identity`, async () => {
-    const actual = createWorkQueue(database);
-    const prefixKind = `busy-reply-${randomUUID()}:`;
-    const claimOwners: string[] = [];
-    const queue: WorkQueue = {
-      offer: (input) =>
-        actual.offer({ ...input, kind: prefixKind + input.kind }),
-      claim: async (input) => {
-        const items = await actual.claim(prefixedClaim(input, prefixKind));
-        if (items.length) claimOwners.push(input.owner);
-        return items.map((item) => ({ ...item, kind: input.kind }));
-      },
-      renew: (input) =>
-        actual.renew({ ...input, kind: prefixKind + input.kind }),
-      finish: (input) =>
-        actual.finish({ ...input, kind: prefixKind + input.kind }),
-      release: (input) =>
-        actual.release({ ...input, kind: prefixKind + input.kind }),
-      purge: (input) =>
-        actual.purge({ ...input, kind: prefixKind + input.kind }),
-    };
-    const task = await threads.open({
-      ownerUserId: owner.id,
-      agentId: bot,
-      title: "Draft the reply",
-      why: null,
-      origin: "asked",
-      suggestionId: null,
-      sourceApp: null,
-      sourceLink: null,
-    });
-    const messageId = randomUUID();
-    let calls = 0;
-    const said = new Map<string, string>();
-    const taskTurn = createTaskTurn({
-      actorFor,
-      channels: {
-        recordActivity: async (_actor, _channel, activity, source) => {
-          said.set(source?.id ?? "", activity.text);
+/*
+ * Refused before it ran: the conversation's lock is held, or the runner still has the run before it
+ * winding down (a recording saw a retry fail on `ThreadAlreadyRunningError` behind a hung first run).
+ */
+const refusedBeforeRunning = [
+  [
+    "lock conflicts",
+    () => new ThreadLockBusyError(new Error("Thread lock denied")),
+  ],
+  ["runs still winding down", () => new ThreadAlreadyRunningError()],
+] as const;
+for (const [refusal, refused] of refusedBeforeRunning)
+  for (const failedRuns of [0, 1]) {
+    test(`task reply survives four initial ${refusal} after ${failedRuns} provider failures with stable message identity`, async () => {
+      const actual = createWorkQueue(database);
+      const prefixKind = `busy-reply-${randomUUID()}:`;
+      const claimOwners: string[] = [];
+      const queue: WorkQueue = {
+        offer: (input) =>
+          actual.offer({ ...input, kind: prefixKind + input.kind }),
+        claim: async (input) => {
+          const items = await actual.claim(prefixedClaim(input, prefixKind));
+          if (items.length) claimOwners.push(input.owner);
+          return items.map((item) => ({ ...item, kind: input.kind }));
         },
-        signalBusy: async () => {},
-      },
-      runTurn: async () => {
-        calls += 1;
-        if (calls <= failedRuns) throw new Error("provider unavailable");
-        if (calls <= failedRuns + 4)
-          throw new ThreadLockBusyError(new Error("Thread lock denied"));
-        return { replyText: "Delivered." };
-      },
-    });
-    const { engine, started } = engineFor(async ({ scope, ...input }) => {
-      await taskTurn(scope, { ...input, signal: new AbortController().signal });
-    }, queue);
-    const reply = { reply: "Keep Friday", messageId };
-    await engine.reply(owner.id, task.id, reply);
-    await engine.idle();
-    expect(calls).toBe(failedRuns + 5);
-    // A late result from a prior claim on this same worker must not match the replacement lease.
-    expect(new Set(claimOwners).size).toBe(calls);
-    expect(started[0]?.runId).toBe(messageId);
-    const deferredRuns = started.slice(failedRuns);
-    expect(new Set(deferredRuns.map((run) => run.runId)).size).toBe(1);
-    expect(deferredRuns.every((run) => run.final === (failedRuns === 1))).toBe(
-      true,
-    );
-    if (failedRuns) expect(deferredRuns[0]?.runId).not.toBe(messageId);
-    expect([...said.keys()].filter((id) => id.endsWith(":failed"))).toEqual([]);
-    expect(
-      [...said.values()].filter((text) => text === reply.reply),
-    ).toHaveLength(failedRuns + 1);
-    expect(
-      [...said.values()].filter((text) => text === "Delivered."),
-    ).toHaveLength(1);
-    const [row] = await database
-      .select()
-      .from(workItems)
-      .where(
-        and(
-          eq(workItems.kind, prefixKind + PROACTIVE_TASK_KIND),
-          eq(workItems.key, `task:${task.id}:reply:${messageId}`),
-        ),
+        renew: (input) =>
+          actual.renew({ ...input, kind: prefixKind + input.kind }),
+        finish: (input) =>
+          actual.finish({ ...input, kind: prefixKind + input.kind }),
+        release: (input) =>
+          actual.release({ ...input, kind: prefixKind + input.kind }),
+        purge: (input) =>
+          actual.purge({ ...input, kind: prefixKind + input.kind }),
+      };
+      const task = await threads.open({
+        ownerUserId: owner.id,
+        agentId: bot,
+        title: "Draft the reply",
+        why: null,
+        origin: "asked",
+        suggestionId: null,
+        sourceApp: null,
+        sourceLink: null,
+      });
+      const messageId = randomUUID();
+      let calls = 0;
+      const said = new Map<string, string>();
+      const taskTurn = createTaskTurn({
+        actorFor,
+        channels: {
+          recordActivity: async (_actor, _channel, activity, source) => {
+            said.set(source?.id ?? "", activity.text);
+          },
+          signalBusy: async () => {},
+        },
+        runTurn: async () => {
+          calls += 1;
+          if (calls <= failedRuns) throw new Error("provider unavailable");
+          if (calls <= failedRuns + 4) throw refused();
+          return { replyText: "Delivered." };
+        },
+      });
+      const { engine, started } = engineFor(async ({ scope, ...input }) => {
+        await taskTurn(scope, {
+          ...input,
+          signal: new AbortController().signal,
+        });
+      }, queue);
+      const reply = { reply: "Keep Friday", messageId };
+      await engine.reply(owner.id, task.id, reply);
+      await engine.idle();
+      expect(calls).toBe(failedRuns + 5);
+      // A late result from a prior claim on this same worker must not match the replacement lease.
+      expect(new Set(claimOwners).size).toBe(calls);
+      expect(started[0]?.runId).toBe(messageId);
+      const deferredRuns = started.slice(failedRuns);
+      expect(new Set(deferredRuns.map((run) => run.runId)).size).toBe(1);
+      expect(
+        deferredRuns.every((run) => run.final === (failedRuns === 1)),
+      ).toBe(true);
+      if (failedRuns) expect(deferredRuns[0]?.runId).not.toBe(messageId);
+      expect([...said.keys()].filter((id) => id.endsWith(":failed"))).toEqual(
+        [],
       );
-    expect(row).toMatchObject({
-      attempts: failedRuns + 1,
-      payload: { messageId, text: reply.reply },
+      expect(
+        [...said.values()].filter((text) => text === reply.reply),
+      ).toHaveLength(failedRuns + 1);
+      expect(
+        [...said.values()].filter((text) => text === "Delivered."),
+      ).toHaveLength(1);
+      const [row] = await database
+        .select()
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, prefixKind + PROACTIVE_TASK_KIND),
+            eq(workItems.key, `task:${task.id}:reply:${messageId}`),
+          ),
+        );
+      expect(row).toMatchObject({
+        attempts: failedRuns + 1,
+        payload: { messageId, text: reply.reply },
+      });
+      expect(row?.finishedAt).not.toBeNull();
+      // The original request identity remains idempotent after deferral and delivery.
+      await engine.reply(owner.id, task.id, reply);
+      await engine.idle();
+      expect(calls).toBe(failedRuns + 5);
+      await database
+        .delete(workItems)
+        .where(eq(workItems.kind, prefixKind + PROACTIVE_TASK_KIND));
     });
-    expect(row?.finishedAt).not.toBeNull();
-    // The original request identity remains idempotent after deferral and delivery.
-    await engine.reply(owner.id, task.id, reply);
-    await engine.idle();
-    expect(calls).toBe(failedRuns + 5);
-    await database
-      .delete(workItems)
-      .where(eq(workItems.kind, prefixKind + PROACTIVE_TASK_KIND));
+  }
+
+test("a turn that never answers is stopped at its time limit, and fails saying it took too long", async () => {
+  const signals: AbortSignal[] = [];
+  const { engine, started } = engineFor(
+    (_run, signal) => {
+      signals.push(signal);
+      // A step that never answers, and ignores its signal.
+      return new Promise(() => {});
+    },
+    createWorkQueue(database),
+    undefined,
+    threads,
+    { taskTurnMs: 50 },
+  );
+  const begun = Date.now();
+  const opened = await engine.startAsked(owner.id, bot, {
+    title: "Plan the Lisbon trip",
+    instruction: "Plan a three-day trip to Lisbon.",
   });
-}
+  await engine.idle();
+  expect(Date.now() - begun).toBeLessThan(10_000);
+  // Both runs were given up on at the limit, each told why through its signal.
+  expect(started.map((run) => run.final)).toEqual([false, true]);
+  expect(
+    signals.map((signal) => signal.reason instanceof TaskTurnTimeoutError),
+  ).toEqual([true, true]);
+  // Failed with the time limit as its reason, not "the run was cut off partway through".
+  expect(await taskStore.get(owner.id, opened.id)).toMatchObject({
+    status: "failed",
+    failure: "the run took longer than 1 minute",
+  });
+  const [row] = await database
+    .select()
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.kind, PROACTIVE_TASK_KIND),
+        eq(workItems.key, `task:${opened.id}`),
+      ),
+    );
+  expect(row).toMatchObject({
+    attempts: 2,
+    claimedBy: null,
+    finishedAt: null,
+    lastError: "The task's turn was stopped after 0s.",
+  });
+});
 
 test("a provider 409 still exhausts both task reply attempts", async () => {
   const failure = Object.assign(new Error("Provider conflict"), {
