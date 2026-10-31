@@ -18,8 +18,8 @@ import { settleReactWork } from "./settle-react-work";
 
 /**
  * The frame every onboarding step sits in. One DOM, laid out two ways: on a phone, Back at the top
- * left, the steps as dashes and the buttons pinned to the bottom; from `lg` up, the step list and
- * the step's words on the left with Continue and Back under them, and its picture on the right.
+ * left, the steps as dashes and the buttons pinned to the bottom; from `lg` up, "Step N of M" and
+ * the step's words on the left with Back and Continue under them, and its picture on the right.
  * happy-dom applies no stylesheet, so both layouts' parts are in the document here, and each test
  * reads the one it is about.
  */
@@ -86,8 +86,20 @@ const desktopBack = (view: ReturnType<typeof render>) =>
     '[data-onboarding-back="desktop"]',
   );
 
-const stepList = (view: ReturnType<typeof render>) =>
-  view.getByRole("navigation", { name: "Onboarding steps" });
+/** "Step N of M", the desktop's way to the list of steps. */
+const stepsButton = (view: ReturnType<typeof render>) => {
+  const found = view.container.querySelector<HTMLButtonElement>(
+    "[data-onboarding-steps]",
+  );
+  if (!found) throw new Error("no step menu");
+  return found;
+};
+
+/** The list of steps, opened over the page. */
+const stepList = (view: ReturnType<typeof render>) => {
+  fireEvent.click(stepsButton(view));
+  return view.getByRole("navigation", { name: "Onboarding steps" });
+};
 
 test("the first step has no Back, and the dashes say step 1", () => {
   const view = draw();
@@ -401,84 +413,70 @@ test("held by its caller, it asks to move and draws whatever step it is handed",
 });
 
 /*
- * THE DESKTOP'S STEP LIST. Every step by name, the one on screen marked as the current step, the
- * ones before it ticked. A step already reached is a button back to it; one ahead is only its name.
+ * THE DESKTOP'S STEP LIST, ON DEMAND. One line says where somebody is; pressing it opens every step
+ * by name, the one on screen marked as the current step, the ones before it ticked. A step already
+ * reached is a button back to it; one ahead is only its name.
  */
 
-test("on a desktop, the step list names every step and marks the one on screen", () => {
+test("on a desktop, where somebody is takes one line, and opens the list of steps", () => {
   const view = draw({ initialStepId: "two" });
 
+  expect(stepsButton(view).textContent).toBe("Step 2 of 3");
+  // Shut until asked for.
+  expect(view.queryByRole("navigation", { name: "Onboarding steps" })).toBe(
+    null,
+  );
   const items = within(stepList(view)).getAllByRole("listitem");
   expect(items.map((item) => item.textContent?.replace(/^\d/, ""))).toEqual([
     "One",
     "Two",
     "Three",
   ]);
-  const current = stepList(view).querySelector('[aria-current="step"]');
+  const current = view.container.ownerDocument.querySelector(
+    '[aria-current="step"]',
+  );
   expect(current?.textContent).toContain("Two");
-  // The list is the desktop's, the dashes the phone's.
-  expect(stepList(view).className).toContain("hidden lg:flex");
+  // The line is the desktop's, the dashes the phone's.
+  expect(stepsButton(view).parentElement?.className).toContain(
+    "hidden lg:flex",
+  );
   expect(progress(view).parentElement?.className).toContain("lg:hidden");
 });
 
 /*
- * A SHORT SCREEN. Nine steps, a heading, a few lines and the buttons used to run past the bottom of
- * a laptop's window on the longer steps, cutting Continue and Back in half.
+ * THE STEP COMES FIRST. The whole list used to sit above the heading, and on a laptop the step's
+ * words started 300 to 640 px down the screen.
  *
- * WHAT THIS CAN'T PROVE. happy-dom lays nothing out, so no test here can show that the buttons fit
- * on any given screen. It pins the structure that makes them fit: on a desktop the frame is one
- * screen tall, the step list's row is the only one that can shrink, the list is what scrolls, and
- * the step on screen is scrolled into it. That this adds up to every step's buttons on screen at
- * 1280 by 800 and 1280 by 700 was checked in a browser, step by step.
+ * WHAT THIS CAN'T PROVE. happy-dom lays nothing out, so no test here can show where the heading
+ * lands or that the buttons fit on any given screen. It pins the structure that does it: nothing
+ * but the one line sits above the heading, the list is not in the page until it is opened, and
+ * neither the words nor the buttons scroll or shrink. That every step's buttons are on screen at
+ * 1280 by 800 and 1280 by 700, with the heading near the top, was checked in a browser, step by step.
  */
-test("on a desktop, a short screen scrolls the step list, never the step's words or its buttons", () => {
-  const scrolled: Array<{ row: Element; options: unknown }> = [];
-  const original = Element.prototype.scrollIntoView;
-  Element.prototype.scrollIntoView = function (
-    this: Element,
-    options?: boolean | ScrollIntoViewOptions,
-  ) {
-    scrolled.push({ row: this, options });
-  };
-  try {
-    const view = draw({ initialStepId: "two" });
+test("on a desktop, only the one line sits above the step's heading, and the list opens over the page", () => {
+  const view = draw({ initialStepId: "two" });
 
-    // One screen tall, and of the left's rows only the list's can shrink.
-    const frame = view.container.querySelector("[data-onboarding-frame]");
-    expect(frame?.className).toContain("lg:h-svh");
-    expect(frame?.className).toContain(
-      "lg:grid-rows-[minmax(10rem,auto)_auto_auto_1fr]",
-    );
-    // The picture stretches to the screen rather than being set to its height, which would give
-    // that height to the empty last row before the list got its own.
-    const demo = view.container.querySelector("[data-onboarding-demo]");
-    expect(demo?.className).toContain("lg:max-h-svh");
-    expect(demo?.className).not.toContain("lg:h-svh");
+  const frame = view.container.querySelector("[data-onboarding-frame]");
+  expect(frame?.className).toContain("lg:h-svh");
+  expect(frame?.className).toContain("lg:grid-rows-[auto_auto_auto_1fr]");
+  // Above the heading, the header holds the phone's bar and the desktop's one line, nothing more.
+  const header = view.container.querySelector("header");
+  expect(header?.querySelectorAll("li")).toHaveLength(0);
+  expect(header?.querySelector("nav")).toBeNull();
+  const heading = view.getByRole("heading", { name: "Two" });
+  expect(
+    stepsButton(view).compareDocumentPosition(heading) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 
-    // The list is what scrolls, inside a header and a nav that let it shrink.
-    const list = stepList(view).querySelector("ol");
-    expect(list?.className).toContain("overflow-y-auto");
-    expect(list?.className).toContain("min-h-0");
-    expect(stepList(view).className).toContain("lg:min-h-0");
-    expect(view.container.querySelector("header")?.className).toContain(
-      "lg:min-h-0",
-    );
-    // The step's words and its buttons neither scroll nor shrink.
-    const intro = view.container.querySelector("[data-onboarding-intro]");
-    for (const part of [intro, footer(view)]) {
-      expect(part?.className).not.toMatch(/overflow|min-h-0|max-h-/);
-    }
-
-    // The step on screen is kept in the list's view, and the next one once Continue is pressed.
-    expect(scrolled.at(-1)?.row.textContent).toContain("Two");
-    expect(
-      scrolled.at(-1)?.row.querySelector('[aria-current="step"]'),
-    ).not.toBeNull();
-    expect(scrolled.at(-1)?.options).toEqual({ block: "nearest" });
-    fireEvent.click(primary(view));
-    expect(scrolled.at(-1)?.row.textContent).toContain("Three");
-  } finally {
-    Element.prototype.scrollIntoView = original;
+  // Opened, the list is drawn outside the frame, so nothing in it moves.
+  const list = stepList(view);
+  expect(frame?.contains(list)).toBe(false);
+  const demo = view.container.querySelector("[data-onboarding-demo]");
+  expect(demo?.className).toContain("lg:max-h-svh");
+  const intro = view.container.querySelector("[data-onboarding-intro]");
+  for (const part of [intro, footer(view)]) {
+    expect(part?.className).not.toMatch(/overflow|min-h-0|max-h-/);
   }
 });
 
@@ -492,15 +490,17 @@ test("a step already reached can be picked from the list; one ahead cannot", asy
   fireEvent.click(list.getByRole("button", { name: "One" }));
   const heading = await view.findByRole("heading", { name: "One" });
   await waitFor(() => expect(document.activeElement).toBe(heading));
+  // Picking closes the list.
+  await waitFor(() =>
+    expect(
+      view.queryByRole("navigation", { name: "Onboarding steps" }),
+    ).toBeNull(),
+  );
 
   // Two has been seen now, so it is a way back; Three still is not.
-  expect(
-    within(stepList(view)).getByRole("button", { name: "Two" }),
-  ).toBeTruthy();
-  expect(
-    within(stepList(view)).queryByRole("button", { name: "Three" }),
-  ).toBeNull();
-  fireEvent.click(within(stepList(view)).getByRole("button", { name: "Two" }));
+  const again = within(stepList(view));
+  expect(again.queryByRole("button", { name: "Three" })).toBeNull();
+  fireEvent.click(again.getByRole("button", { name: "Two" }));
   expect(await view.findByRole("heading", { name: "Two" })).toBeTruthy();
 });
 

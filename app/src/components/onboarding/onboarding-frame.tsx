@@ -1,25 +1,32 @@
-import { IconCheck, IconChevronLeft } from "@tabler/icons-react";
-import { type ReactNode, useLayoutEffect, useRef } from "react";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconChevronLeft,
+} from "@tabler/icons-react";
+import { createContext, type ReactNode, useContext, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { buttonVariants } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
 
 /**
  * The frame every onboarding step sits in: one DOM, laid out two ways by CSS.
  *
- * FROM `lg` UP, TWO PANES. On the left, the steps as a list with the one on screen marked, then
- * the step's heading and sentence, then Continue and Back. On the right, filling the rest of the
- * screen, the step's picture. Steps already reached can be picked from the list; the ones ahead
- * cannot.
+ * FROM `lg` UP, TWO PANES. On the left, one line with the product's name and where somebody is
+ * ("Step 5 of 9"), then the step's heading and sentence, then Back and Continue. On the right,
+ * filling the rest of the screen, the step's picture.
  *
- * ONE SCREEN TALL ON A DESKTOP, AND THE LIST IS WHAT GIVES. Nine steps, a heading, a few lines and
- * the buttons are taller than a laptop's window on the longer steps, which used to cut Continue and
- * Back off at the bottom. So the frame is the window's height, the step's words and its buttons
- * keep their full size, and the step list takes what is left: on a short screen it scrolls within
- * itself, with the step on screen kept in view. Its rows are spaced so that every step still fits
- * whole in a 1280 by 800 window; the list scrolls only below that, and only a window too short for
- * the words and the buttons themselves scrolls the page.
+ * THE STEP COMES FIRST, AND THE LIST IS ON DEMAND. The whole list of steps used to sit above the
+ * heading, nine rows that pushed every step's words 300 to 640 px down a laptop's screen. Where
+ * somebody is takes one line now, and pressing it opens the list over the page, where a step
+ * already reached can be picked and the ones ahead cannot. Opening it moves nothing, so the step's
+ * words and its buttons sit at the same height on every step and fit a 1280 by 700 window.
  *
  * BELOW `lg`, ONE COLUMN, for a phone: a round back chevron at the top left, the steps as dashes
  * across the top, the heading and its picture, and the buttons pinned to the bottom, full width,
@@ -87,14 +94,10 @@ export function OnboardingFrame({
     "h-[52px] w-full rounded-full px-5 type-sub font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg";
   return (
     <div
-      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(22rem,30rem)_minmax(0,1fr)] lg:grid-rows-[minmax(10rem,auto)_auto_auto_1fr]"
+      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(22rem,30rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_auto_1fr]"
       data-onboarding-frame=""
     >
-      {/*
-       * On a desktop the list's row is the one that shrinks (`minmax(10rem,auto)` above, against
-       * the words' and the buttons' `auto`), down to room for the product's name and a step or two.
-       */}
-      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background pt-[env(safe-area-inset-top)] lg:static lg:flex lg:min-h-0 lg:flex-col lg:bg-transparent lg:px-10 lg:pt-10">
+      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background pt-[env(safe-area-inset-top)] lg:static lg:bg-transparent lg:px-10 lg:pt-10">
         {/*
          * The phone's chrome. Back is not drawn on the first step, rather than drawn disabled: there
          * is nowhere behind it, and a control that does nothing is one more thing a screen reader
@@ -114,17 +117,23 @@ export function OnboardingFrame({
           ) : null}
           <StepDashes index={index} total={total} />
         </div>
-        <StepList
-          index={index}
-          onPick={onPick}
-          reached={reached}
-          titles={titles}
-        />
+        <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
+          <p className="type-sub flex items-center gap-2 font-semibold">
+            <AgentOrb size="24px" />
+            {appConfig.brand.productName}
+          </p>
+          <StepMenu
+            index={index}
+            onPick={onPick}
+            reached={reached}
+            titles={titles}
+          />
+        </div>
       </header>
 
       <div
         className={cn(
-          "col-start-1 min-w-0 px-4 lg:row-start-2 lg:px-10 lg:pt-8",
+          "col-start-1 min-w-0 px-4 lg:row-start-2 lg:px-10 lg:pt-12",
           demoFirst ? "row-start-3" : "row-start-2 pt-1.5",
         )}
         data-onboarding-intro=""
@@ -235,10 +244,12 @@ export function OnboardingFrame({
 }
 
 /**
- * The steps as a list, on a desktop: each with a mark, done ones ticked, the one on screen filled.
- * A step already reached is a button back to it; one ahead is only its name.
+ * Where somebody is, on a desktop: "Step 5 of 9", which opens the list of steps over the page.
+ *
+ * In the list each step has a mark, done ones ticked and the one on screen filled. A step already
+ * reached is a button back to it, and picking one closes the list; one ahead is only its name.
  */
-function StepList({
+function StepMenu({
   titles,
   index,
   reached,
@@ -249,91 +260,90 @@ function StepList({
   reached: number;
   onPick: (index: number) => void;
 }) {
-  // On a screen too short for every step, the list scrolls: keep the one on screen in it, before
-  // the first paint, so arriving on a late step never shows the list's top for a frame.
-  const list = useRef<HTMLOListElement>(null);
-  useLayoutEffect(() => {
-    list.current?.children[index]?.scrollIntoView?.({ block: "nearest" });
-  }, [index]);
+  const [open, setOpen] = useState(false);
   return (
-    <nav
-      aria-label="Onboarding steps"
-      className="hidden lg:flex lg:min-h-0 lg:flex-col"
-    >
-      <p className="type-sub flex shrink-0 items-center gap-2 font-semibold">
-        <AgentOrb size="24px" />
-        {appConfig.brand.productName}
-      </p>
-      {/*
-       * The part that scrolls when the screen is short. Its padding, taken back by the negative
-       * margins so nothing moves, is room for a focused row's ring and for the fade at either end:
-       * the fade falls only on the empty padding while every step fits, and on a row only once the
-       * list is scrolling under that edge. `scroll-py-3` keeps the step on screen clear of it.
-       */}
-      <ol
-        className="-mx-1 mt-3 -mb-3 flex min-h-0 scroll-py-3 flex-col overflow-y-auto px-1 py-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]"
-        ref={list}
+    <Popover onOpenChange={setOpen} open={open}>
+      <PopoverTrigger
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "sm" }),
+          "type-caption -me-2 gap-1 font-medium text-muted-foreground",
+        )}
+        data-onboarding-steps=""
       >
-        {titles.map((title, at) => {
-          const current = at === index;
-          const done = at < index;
-          const pickable = !current && at <= reached;
-          const body = (
-            <>
-              <span
-                aria-hidden
-                className={cn(
-                  "type-caption grid size-6 shrink-0 place-items-center rounded-full font-semibold tabular-nums",
-                  current
-                    ? "bg-primary text-primary-foreground"
-                    : done
-                      ? "bg-foreground/8 text-foreground"
-                      : "text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]",
-                )}
-              >
-                {done ? (
-                  <IconCheck className="size-3.5" stroke={2.6} />
-                ) : (
-                  at + 1
-                )}
-              </span>
-              <span className="min-w-0 truncate">{title}</span>
-            </>
-          );
-          const row =
-            "type-sub flex min-h-8 w-full items-center gap-3 rounded-lg px-2 py-1 text-left";
-          return (
-            <li key={title}>
-              {pickable ? (
-                <button
-                  className={cn(
-                    row,
-                    "text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+        Step {index + 1} of {titles.length}
+        <IconChevronDown aria-hidden className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 gap-1 p-1.5">
+        <PopoverTitle className="type-caption px-2 pt-1 text-muted-foreground">
+          Steps
+        </PopoverTitle>
+        <nav aria-label="Onboarding steps">
+          <ol className="flex flex-col">
+            {titles.map((title, at) => {
+              const current = at === index;
+              const done = at < index;
+              const pickable = !current && at <= reached;
+              const body = (
+                <>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "type-caption grid size-6 shrink-0 place-items-center rounded-full font-semibold tabular-nums",
+                      current
+                        ? "bg-primary text-primary-foreground"
+                        : done
+                          ? "bg-foreground/8 text-foreground"
+                          : "text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]",
+                    )}
+                  >
+                    {done ? (
+                      <IconCheck className="size-3.5" stroke={2.6} />
+                    ) : (
+                      at + 1
+                    )}
+                  </span>
+                  <span className="min-w-0 truncate">{title}</span>
+                </>
+              );
+              const row =
+                "type-sub flex min-h-8 w-full items-center gap-3 rounded-lg px-2 py-1 text-left";
+              return (
+                <li key={title}>
+                  {pickable ? (
+                    <button
+                      className={cn(
+                        row,
+                        "text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                      )}
+                      data-onboarding-pick={at}
+                      onClick={() => {
+                        setOpen(false);
+                        onPick(at);
+                      }}
+                      type="button"
+                    >
+                      {body}
+                    </button>
+                  ) : (
+                    <div
+                      aria-current={current ? "step" : undefined}
+                      className={cn(
+                        row,
+                        current
+                          ? "bg-muted font-medium text-foreground"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {body}
+                    </div>
                   )}
-                  data-onboarding-pick={at}
-                  onClick={() => onPick(at)}
-                  type="button"
-                >
-                  {body}
-                </button>
-              ) : (
-                <div
-                  aria-current={current ? "step" : undefined}
-                  className={cn(
-                    row,
-                    current
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {body}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -371,18 +381,27 @@ export function StepDashes({ index, total }: { index: number; total: number }) {
 }
 
 /**
+ * The name of the step being drawn, which is also its name in the list of steps. The wizard
+ * provides it, so a step's heading and its place in the list can't say two different things.
+ */
+export const StepTitle = createContext<string | undefined>(undefined);
+
+/**
  * A step's heading and sentence, the way every step draws them: centred on a phone, flush left in
  * the desktop's left pane. `children` is the sentence; `after` is a control that belongs with it.
+ * The heading is the step's own title from the list unless `title` says otherwise.
  */
 export function StepIntro({
-  title,
+  title: given,
   children,
   after,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   children?: ReactNode;
   after?: ReactNode;
 }) {
+  const named = useContext(StepTitle);
+  const title = given ?? named;
   return (
     <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left">
       <h1 className="text-3xl font-semibold tracking-tight [overflow-wrap:anywhere] focus:outline-none">

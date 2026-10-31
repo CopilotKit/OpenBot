@@ -78,7 +78,7 @@ export function useNotifyStep(botName: string): OnboardingStep {
     id: "notify",
     title: "Get notified",
     intro: () => (
-      <StepIntro title="Get notified">
+      <StepIntro>
         <p>
           Allow notifications so {PRODUCT} can tell you when a Bot needs you.
         </p>
