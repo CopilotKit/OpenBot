@@ -32,15 +32,46 @@ describe("splitting a reply into bubbles", () => {
   });
 
   test("a code block is never cut, even while it streams in", () => {
-    expect(splitBubbles("Here:\n\n```\na\n\nb\n```\n\nDone.")).toEqual([
-      "Here:",
+    expect(splitBubbles("It ran.\n\n```\na\n\nb\n```\n\nDone.")).toEqual([
+      "It ran.",
       "```\na\n\nb\n```",
       "Done.",
     ]);
-    expect(splitBubbles("Here:\n\n```\na\n\nb")).toEqual([
-      "Here:",
+    expect(splitBubbles("It ran.\n\n```\na\n\nb")).toEqual([
+      "It ran.",
       "```\na\n\nb",
     ]);
+    // The line introducing it stays with it, as it does with a list.
+    expect(splitBubbles("Here:\n\n```\na\n\nb\n```")).toEqual([
+      "Here:\n\n```\na\n\nb\n```",
+    ]);
+  });
+
+  test("a long structured reply keeps headings and labels with what follows, and draws no empty bubble", () => {
+    const reply = [
+      "I looked into the Q3 budget.",
+      "## What changed",
+      "Travel went up by 12%.",
+      "---",
+      "### Next steps",
+      "- Ask Ana for receipts",
+      "- Move the offsite",
+      "&nbsp;",
+      "**Source:**",
+      "[Q3 budget sheet](https://example.com/q3)",
+    ].join("\n\n");
+    expect(splitBubbles(reply)).toEqual([
+      "I looked into the Q3 budget.",
+      "## What changed\n\nTravel went up by 12%.",
+      "### Next steps\n\n- Ask Ana for receipts\n\n- Move the offsite",
+      "**Source:**\n\n[Q3 budget sheet](https://example.com/q3)",
+    ]);
+  });
+
+  test("a heading and the heading under it both stay with the content", () => {
+    expect(
+      splitBubbles("# Report\n\n## Summary\n\nAll good.\n\nThanks!"),
+    ).toEqual(["# Report\n\n## Summary\n\nAll good.", "Thanks!"]);
   });
 
   test("a table stays whole", () => {
