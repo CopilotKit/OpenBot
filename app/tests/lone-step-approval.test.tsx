@@ -173,7 +173,7 @@ function draw(messages: Message[] = turn) {
 }
 
 const card = (view: ReturnType<typeof draw>) =>
-  view.findByRole("region", { name: "Waiting for your approval" });
+  view.findByRole("region", { name: /Send your email$/ });
 
 test("a gated call alone in its turn draws its approval card under its own line", async () => {
   approvals = [send("toolu_send")];
@@ -234,7 +234,7 @@ test("a decline folds the card to who decided, and it stays folded when the inbo
   ]);
   await waitFor(() =>
     expect(
-      view.queryAllByRole("region", { name: "Waiting for your approval" }),
+      view.queryAllByRole("region", { name: "Send your email" }),
     ).toHaveLength(0),
   );
   expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
@@ -271,10 +271,16 @@ test("a request with more than its face shows opens Details by itself", async ()
 test("an allowed send folds to Allowed, then to Sent once it has run", async () => {
   approvals = [send("toolu_send")];
   const view = draw();
-  fireEvent.click(
-    within(await card(view)).getByRole("button", { name: "Allow once" }),
-  );
+  const allow = within(await card(view)).getByRole("button", {
+    name: "Allow once",
+  });
+  allow.focus();
+  fireEvent.click(allow);
   expect(await view.findByText("Allowed once by you")).toBeTruthy();
+  // The same card folded under the person's focus, which went to its title, not the page.
+  await waitFor(() =>
+    expect(document.activeElement?.textContent).toBe("Send your email"),
+  );
   approvals = [
     send("toolu_send", {
       status: "completed",
