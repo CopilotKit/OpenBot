@@ -295,6 +295,28 @@ test("an allowed send folds to Allowed, then to Sent once it has run", async () 
   expect(view.queryByRole("button", { name: "Always allow here" })).toBeNull();
 });
 
+test("an allowed send whose step has landed reads Sent, though the inbox still has it allowed", async () => {
+  approvals = [
+    send("toolu_send", {
+      status: "approved",
+      decision: "allow_once",
+      decidedAt: "2026-10-22T20:05:00Z",
+    }),
+  ];
+  const view = draw([
+    ...turn,
+    {
+      id: "tool-1",
+      role: "tool",
+      toolCallId: "toolu_send",
+      content: JSON.stringify("Email sent to sam@marlowceramics.com."),
+    },
+  ]);
+  expect(await view.findByText("Allowed once by you")).toBeTruthy();
+  expect(view.getByText("Sent")).toBeTruthy();
+  expect(view.queryByText("Allowed")).toBeNull();
+});
+
 test("an action that ran and failed says it didn't work", async () => {
   approvals = [
     send("toolu_send", {
@@ -305,7 +327,8 @@ test("an action that ran and failed says it didn't work", async () => {
     }),
   ];
   const view = draw();
-  expect(await view.findByText("Didn't work")).toBeTruthy();
+  const failed = await view.findByText("Didn't work");
+  expect(failed.className).toContain("text-status-problem");
   expect(view.getByText("Always allowed here by you")).toBeTruthy();
 });
 
