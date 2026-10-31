@@ -47,6 +47,7 @@ import {
 } from "../src/plugins/composio";
 import { actionOf } from "../src/plugins/composio-vendor";
 import { redirectUriFor } from "../src/plugins/oauth";
+import { createPluginRoutes } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
   type AccessToken,
@@ -2877,6 +2878,163 @@ describe("a dynamic client the vendor has evicted", () => {
     // mint a client on top of the working one.
     expect(registrations).toEqual([]);
   });
+
+  test("Connect does not misclassify vendor registration faults as client read failures", async () => {
+    await clearClient();
+    registrations.length = 0;
+    const previousIssue = issue;
+    const vendorFailure = new Error("vendor registration unavailable");
+    issue = () => {
+      throw vendorFailure;
+    };
+    const readFailures = () =>
+      database
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
+    const before = await readFailures();
+    const routes = createPluginRoutes(
+      dynamicStore,
+      async (context, next) => {
+        context.set("actor", {
+          id: dynamicUserId,
+          email: "person@openbot.test",
+          role: "user",
+        });
+        await next();
+      },
+      async () => false,
+      {
+        encryptionKey: DYNAMIC_KEY,
+        publicUrl: "https://openbot.test",
+        appUrl: "https://openbot.test",
+        personHasAccess: async () => true,
+      },
+    );
+    const escaped: unknown[] = [];
+    routes.onError((error) => {
+      escaped.push(error);
+      return new Response("escaped", { status: 500 });
+    });
+    try {
+      const response = await routes.request(
+        `http://openbot.test/servers/${dynamicServerId}/connect`,
+        { method: "POST" },
+      );
+      expect(response.status).toBe(500);
+      expect(escaped).toEqual([vendorFailure]);
+      expect(registrations).toHaveLength(1);
+      expect(await readFailures()).toHaveLength(before.length);
+    } finally {
+      issue = previousIssue;
+      await putClient(EVICTED);
+    }
+  });
+
+  test.each(["wrong-key", "reader-fault"] as const)(
+    "Connect audits a client read fault (%s) without replacing or exposing it",
+    async (fault) => {
+      await putClient(EVICTED);
+      registrations.length = 0;
+      const sentinel = "private-client-secret-must-not-escape";
+      const audit = createAuditStore(database);
+      const beforeEvents = await database
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
+      const [before] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, dynamicServerId));
+      const failingStore = createPluginStore({
+        brokerProvider: "composio",
+        database,
+        auditStore: audit,
+        credentials:
+          fault === "reader-fault"
+            ? {
+                ...vault,
+                readSecret: async () => {
+                  throw new Error(sentinel);
+                },
+              }
+            : vault,
+        encryptionKey:
+          fault === "wrong-key"
+            ? Buffer.alloc(32, 1).toString("base64")
+            : DYNAMIC_KEY,
+        policy: () => policy,
+        ...seams,
+        redirectUri: REDIRECT_URI,
+      });
+      const routes = createPluginRoutes(
+        failingStore,
+        async (context, next) => {
+          context.set("actor", {
+            id: dynamicUserId,
+            email: "person@openbot.test",
+            role: "user",
+          });
+          await next();
+        },
+        async () => false,
+        {
+          encryptionKey: DYNAMIC_KEY,
+          publicUrl: "https://openbot.test",
+          appUrl: "https://openbot.test",
+          personHasAccess: async () => true,
+        },
+      );
+      const escaped: unknown[] = [];
+      routes.onError((error) => {
+        escaped.push(error);
+        return new Response("escaped", { status: 500 });
+      });
+      try {
+        const response = await routes.request(
+          `http://openbot.test/servers/${dynamicServerId}/connect`,
+          { method: "POST" },
+        );
+        const body = await response.text();
+        const events = await database
+          .select()
+          .from(auditEvents)
+          .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
+        const written = events.filter(
+          (event) => !beforeEvents.some((before) => before.id === event.id),
+        );
+        const [after] = await database
+          .select({ credentialId: mcpServers.credentialId })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, dynamicServerId));
+        expect(response.status).toBe(503);
+        expect(JSON.parse(body)).toEqual({
+          error:
+            "Couldn't connect Notion. Try again, or ask an admin if it keeps happening.",
+        });
+        expect(escaped).toEqual([]);
+        expect(written).toHaveLength(1);
+        expect(written[0]).toMatchObject({
+          actorUserId: dynamicUserId,
+          targetType: "mcp_server",
+          targetId: dynamicServerId,
+          payload: {
+            server: dynamicServerId,
+            operation: "connect",
+            reason: "credential_read_failed",
+          },
+        });
+        expect(body + JSON.stringify(written)).not.toContain(sentinel);
+        expect(registrations).toEqual([]);
+        expect(after?.credentialId).toBe(before?.credentialId);
+        expect(await dynamicStore.oauthClientFor(dynamicServerId)).toEqual(
+          EVICTED,
+        );
+      } finally {
+        await putClient(EVICTED);
+      }
+    },
+  );
 
   test.each(["before-lock", "under-lock"] as const)(
     "a client decryption fault %s does not replace the deployment's client",

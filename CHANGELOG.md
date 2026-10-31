@@ -104,7 +104,7 @@ Desktop's) still always listens on loopback.
 A server that cannot decrypt an app's stored OAuth client now fails that connection attempt without
 registering a replacement. A server with the correct encryption key can keep using the original
 client. Confirmed missing or revoked credentials and malformed stored clients still use the existing
-registration flow.
+registration flow. Connect records a safe read-failure audit row for the person and app and returns a retryable error, without exposing the vault failure.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
