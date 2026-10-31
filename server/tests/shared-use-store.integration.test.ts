@@ -1,7 +1,7 @@
 // server/tests/shared-use-store.integration.test.ts
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
@@ -271,6 +271,63 @@ describe("the shared-use gate", () => {
       false,
     );
   });
+});
+
+describe("decision durability", () => {
+  test.each(["shared_use_approvals", "shared_use_approval_members"] as const)(
+    "a failed %s write leaves an approval request pending and retryable",
+    async (table) => {
+      await database
+        .insert(teamBotPublications)
+        .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
+      await database
+        .insert(teamBotAudience)
+        .values({ agentId: bot, kind: "group", value: "platform" });
+      await call("newhire");
+      const [pending] = await store.pendingFor(bot);
+      const fault = `approval_fault_${suite}`;
+      await database.execute(
+        sql.raw(
+          `CREATE FUNCTION ${fault}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic approval write fault'; END $$`,
+        ),
+      );
+      await database.execute(
+        sql.raw(
+          `CREATE TRIGGER ${fault} BEFORE INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION ${fault}()`,
+        ),
+      );
+      try {
+        await expect(
+          store.decide({
+            id: pending!.id,
+            by: id("admin"),
+            decision: "approve",
+          }),
+        ).rejects.toThrow();
+        const [row] = await database
+          .select()
+          .from(sharedUseRequests)
+          .where(eq(sharedUseRequests.id, pending!.id));
+        expect(row?.status).toBe("pending");
+        expect(row?.decidedAt).toBeNull();
+        expect(await store.approvalFor(bot, app)).toBeNull();
+      } finally {
+        await database.execute(sql.raw(`DROP TRIGGER ${fault} ON ${table}`));
+        await database.execute(sql.raw(`DROP FUNCTION ${fault}()`));
+      }
+      await store.decide({
+        id: pending!.id,
+        by: id("admin"),
+        decision: "approve",
+      });
+      expect(await store.pendingFor(bot)).toHaveLength(0);
+      expect((await store.approvalFor(bot, app))?.members).toEqual([
+        { kind: "group", value: "platform" },
+      ]);
+      expect((await call("newhire")).allowed).toBe(true);
+      expect((await call("stranger")).allowed).toBe(false);
+    },
+  );
 });
 
 describe("decide", () => {
