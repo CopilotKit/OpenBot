@@ -25,8 +25,11 @@ import {
   ORB_PALETTES,
   type OrbLook,
   type OrbPose,
+  oklab,
   oklch,
+  type OrbPaletteName,
   orbLookFor,
+  orbSwatch,
   palette,
   RAYS,
   samePicture,
@@ -177,8 +180,8 @@ describe("the colours", () => {
       expect(ORB_PALETTES).toContain(orbLookFor(seed).palette);
     }
     // Pinned, so a change to the hash, which would change every Bot's face, can't land unnoticed.
-    expect(orbLookFor("research-desk").palette).toBe("ocean");
-    expect(orbLookFor("ticket-triage").palette).toBe("sun");
+    expect(orbLookFor("research-desk").palette).toBe("berry");
+    expect(orbLookFor("ticket-triage").palette).toBe("ember");
     expect(ORB_PALETTES).toContain(orbLookFor("").palette);
   });
 
@@ -224,9 +227,73 @@ describe("the colours", () => {
     expect(sharing).toBeGreaterThan(0);
   });
 
-  test("each palette is a colour of its own", () => {
-    const bases = ORB_PALETTES.map((name) => palette(name, 1, 0).main.join());
-    expect(new Set(bases).size).toBe(ORB_PALETTES.length);
+  /** How far apart two colours look, as the distance between them in OKLab. */
+  const distance = (a: OrbPaletteName, b: OrbPaletteName) => {
+    const [la, aa, ba] = oklab(orbSwatch(a));
+    const [lb, ab, bb] = oklab(orbSwatch(b));
+    return Math.hypot(la - lb, aa - ab, ba - bb);
+  };
+  /**
+   * The least distance two palettes may look apart, in OKLab. A flat difference of 0.02 is about
+   * the least anybody notices; a face 28px across is a small field, where colours look less
+   * saturated than they are, so a list of them needs four times that to read as two colours.
+   */
+  const APART = 0.08;
+
+  test("every palette, violet included, reads as a colour of its own at list size", () => {
+    for (const [i, a] of ORB_PALETTES.entries())
+      for (const b of ORB_PALETTES.slice(i + 1))
+        expect({ a, b, apart: distance(a, b) >= APART }).toEqual({
+          a,
+          b,
+          apart: true,
+        });
+  });
+
+  test("each palette reads as its plain colour name", () => {
+    // The hue each one's swatch is drawn in, in degrees round OKLab, and what a person calls it.
+    const bands: Record<OrbPaletteName, [string, number, number]> = {
+      violet: ["purple", 285, 320],
+      coral: ["red", 15, 35],
+      ember: ["orange", 45, 70],
+      sun: ["yellow", 90, 110],
+      moss: ["green", 130, 155],
+      sky: ["cyan", 195, 225],
+      ocean: ["blue", 250, 270],
+      berry: ["pink", 340, 360],
+      slate: ["grey", 0, 360],
+    };
+    for (const name of ORB_PALETTES) {
+      const [L, a, b] = oklab(orbSwatch(name));
+      const chroma = Math.hypot(a, b);
+      const hue = ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360;
+      const [colour, from, to] = bands[name];
+      expect({ name, colour, inBand: hue >= from && hue <= to }).toEqual({
+        name,
+        colour,
+        inBand: true,
+      });
+      // Grey has next to no colour; every other one has plenty, and none is so dark it reads brown.
+      if (name === "slate") expect(chroma).toBeLessThan(0.03);
+      else expect(chroma).toBeGreaterThan(0.07);
+      expect(L).toBeGreaterThan(0.65);
+    }
+  });
+
+  test("the Bots OpenBot ships with are drawn in colours far apart", () => {
+    // `examples/fintech/agents.yaml`, whose ids are their seeds.
+    const shipped = [
+      "general-assistant",
+      "knowledge",
+      "risk-analyst",
+      "picked-harness",
+    ].map((seed) => orbLookFor(seed).palette);
+    // Yellow, red, cyan and grey: no two beside each other round the wheel.
+    expect(shipped).toEqual(["sun", "coral", "sky", "slate"]);
+    // Half as far apart again as any two palettes have to be.
+    for (const [i, a] of shipped.entries())
+      for (const b of shipped.slice(i + 1))
+        expect(distance(a, b)).toBeGreaterThan(APART * 1.5);
   });
 });
 

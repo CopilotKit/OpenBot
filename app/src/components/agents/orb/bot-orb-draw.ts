@@ -176,7 +176,10 @@ type PaletteSpec = {
 
 /**
  * The nine colours: violet, OpenBot's own, and the eight a Bot's look is picked from by position.
- * Adding, removing or reordering one changes the colour of most Bots.
+ * Adding, removing or reordering one changes the colour of most Bots. Each reads as one plain colour
+ * even at 28px, where only its average shows (`orbSwatch`): purple, orange, green, yellow, pink,
+ * blue, cyan, red and grey. Where two sit close on the wheel, lightness keeps them apart, and a
+ * test holds every pair at least 0.08 apart in OKLab.
  */
 const PALETTES = {
   violet: {
@@ -188,70 +191,71 @@ const PALETTES = {
     shade: [40, 16, 78],
   },
   ember: {
-    main: [0.79, 0.13, 62],
-    side: [0.75, 0.15, 35],
-    deep: [0.53, 0.17, 30],
-    pale: [0.89, 0.08, 52],
-    base: [0.94, 0.03, 50],
-    shade: [84, 30, 14],
+    main: [0.77, 0.17, 60],
+    side: [0.73, 0.18, 52],
+    deep: [0.6, 0.16, 50],
+    pale: [0.86, 0.11, 66],
+    base: [0.94, 0.05, 70],
+    shade: [96, 44, 10],
   },
   moss: {
-    main: [0.77, 0.11, 182],
-    side: [0.78, 0.13, 152],
-    deep: [0.5, 0.12, 165],
-    pale: [0.89, 0.07, 160],
-    base: [0.94, 0.03, 160],
-    shade: [14, 60, 40],
+    main: [0.74, 0.17, 145],
+    side: [0.78, 0.16, 130],
+    deep: [0.55, 0.14, 150],
+    pale: [0.88, 0.09, 140],
+    base: [0.94, 0.04, 140],
+    shade: [14, 60, 24],
   },
   sun: {
-    main: [0.81, 0.15, 72],
-    side: [0.85, 0.14, 92],
-    deep: [0.57, 0.14, 58],
-    pale: [0.93, 0.08, 92],
-    base: [0.95, 0.03, 90],
-    shade: [92, 58, 10],
+    main: [0.89, 0.17, 98],
+    side: [0.91, 0.16, 106],
+    deep: [0.77, 0.16, 92],
+    pale: [0.95, 0.1, 104],
+    base: [0.97, 0.05, 102],
+    shade: [96, 76, 10],
   },
   berry: {
-    main: [0.7, 0.15, 328],
-    side: [0.72, 0.16, 352],
-    deep: [0.48, 0.18, 345],
-    pale: [0.86, 0.08, 350],
-    base: [0.93, 0.03, 350],
-    shade: [80, 14, 48],
+    main: [0.77, 0.17, 358],
+    side: [0.75, 0.18, 350],
+    deep: [0.57, 0.19, 358],
+    pale: [0.88, 0.09, 352],
+    base: [0.94, 0.04, 352],
+    shade: [90, 14, 50],
   },
   ocean: {
-    main: [0.74, 0.13, 205],
-    side: [0.75, 0.13, 232],
-    deep: [0.53, 0.2, 262],
-    pale: [0.86, 0.08, 220],
-    base: [0.93, 0.025, 235],
-    shade: [14, 30, 80],
+    main: [0.63, 0.16, 252],
+    side: [0.6, 0.17, 258],
+    deep: [0.45, 0.2, 265],
+    pale: [0.8, 0.08, 255],
+    base: [0.9, 0.035, 255],
+    shade: [14, 24, 90],
   },
-  // Beside ocean on the wheel, so lighter and softer: a clear sky against ocean's deep water.
+  // Lighter and greener than ocean: a clear cyan against ocean's blue.
   sky: {
-    main: [0.79, 0.11, 220],
-    side: [0.8, 0.1, 242],
-    deep: [0.55, 0.15, 245],
-    pale: [0.9, 0.06, 228],
-    base: [0.95, 0.02, 230],
-    shade: [10, 40, 76],
+    main: [0.82, 0.12, 210],
+    side: [0.85, 0.1, 195],
+    deep: [0.64, 0.12, 220],
+    pale: [0.92, 0.05, 205],
+    base: [0.96, 0.025, 210],
+    shade: [10, 50, 70],
   },
+  // Darker than ember and pink, so red stands apart from both its neighbours.
   coral: {
-    main: [0.78, 0.13, 32],
-    side: [0.74, 0.15, 8],
-    deep: [0.52, 0.17, 18],
-    pale: [0.88, 0.08, 22],
-    base: [0.94, 0.03, 20],
-    shade: [84, 20, 24],
+    main: [0.63, 0.2, 30],
+    side: [0.6, 0.21, 26],
+    deep: [0.48, 0.19, 28],
+    pale: [0.76, 0.13, 30],
+    base: [0.9, 0.05, 28],
+    shade: [90, 20, 16],
   },
   // Nearly grey: for a team big enough to want a quiet one.
   slate: {
-    main: [0.72, 0.045, 232],
-    side: [0.76, 0.04, 250],
-    deep: [0.48, 0.05, 265],
-    pale: [0.88, 0.02, 255],
-    base: [0.93, 0.012, 258],
-    shade: [30, 38, 54],
+    main: [0.64, 0.025, 250],
+    side: [0.68, 0.02, 255],
+    deep: [0.45, 0.03, 260],
+    pale: [0.84, 0.012, 255],
+    base: [0.91, 0.008, 258],
+    shade: [30, 34, 44],
   },
 } as const satisfies Record<string, PaletteSpec>;
 
@@ -310,13 +314,15 @@ function hashSeed(seed: string): number {
  */
 export function orbLookFor(seed: string): OrbLook {
   const h = hashSeed(seed);
-  // The eight colours take the low three bits, and each of the rest the next eight.
+  // The hue, the eyes and the turn take a byte each, and the colour the top one. Of the ways to
+  // share out the bits, this one draws the Bots OpenBot ships with in colours far apart, and turns
+  // two catalog Bots in one colour well apart.
   const share = (from: number) => ((h >>> from) & 0xff) / 256;
   return {
-    palette: BOT_PALETTES[h % BOT_PALETTES.length] as OrbPaletteName,
-    turn: share(3) * TAU,
-    hue: Math.round((share(11) * 2 - 1) * HUE_NUDGE),
-    eyes: 1 + (share(19) * 2 - 1) * EYE_NUDGE,
+    palette: BOT_PALETTES[(h >>> 24) % BOT_PALETTES.length] as OrbPaletteName,
+    turn: share(16) * TAU,
+    hue: Math.round((share(0) * 2 - 1) * HUE_NUDGE),
+    eyes: 1 + (share(8) * 2 - 1) * EYE_NUDGE,
   };
 }
 
@@ -426,13 +432,20 @@ export function finishPhase(age: number): FinishPhase {
 
 type Ctx = CanvasRenderingContext2D;
 
+/** A colour mass's opacity from its centre out: [distance as a share of its radius, share of its opacity]. */
+const FALLOFF = [
+  [0, 1],
+  [0.42, 0.78],
+  [0.76, 0.24],
+  [1, 0],
+] as const;
+/** How opaque a colour mass is at its centre. */
+const MASS_ALPHA = 0.94;
+
 function blob(ctx: Ctx, x: number, y: number, r: number, c: Rgb, a: number) {
   if (a <= 0.003 || r <= 0) return;
   const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-  g.addColorStop(0, rgba(c, a));
-  g.addColorStop(0.42, rgba(c, a * 0.78));
-  g.addColorStop(0.76, rgba(c, a * 0.24));
-  g.addColorStop(1, rgba(c, 0));
+  for (const [at, share] of FALLOFF) g.addColorStop(at, rgba(c, a * share));
   ctx.fillStyle = g;
   ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
 }
@@ -490,7 +503,14 @@ function mesh(
   ctx.fillRect(-R * 1.7, -R * 1.7, R * 3.4, R * 3.4);
   const cols = [pal.main, pal.pale, pal.side, pal.deep];
   meshPos(S.ta, false, turn).forEach((p, i) => {
-    blob(ctx, p[0] * R + lx * R, p[1] * R + ly * R, p[2] * R, cols[i], 0.94);
+    blob(
+      ctx,
+      p[0] * R + lx * R,
+      p[1] * R + ly * R,
+      p[2] * R,
+      cols[i],
+      MASS_ALPHA,
+    );
   });
   const swirl = S.think * 0.55;
   if (swirl > 0.01) {
@@ -505,6 +525,79 @@ function mesh(
       );
     });
   }
+}
+
+/** A colour mass's share of its opacity at `d`, its distance from the centre as a share of its radius. */
+function falloffAt(d: number): number {
+  for (let i = 1; i < FALLOFF.length; i++) {
+    const [at, share] = FALLOFF[i] as readonly [number, number];
+    const [from, start] = FALLOFF[i - 1] as readonly [number, number];
+    if (d <= at) return lerp(start, share, (d - from) / (at - from));
+  }
+  return 0;
+}
+
+const toLinear = (c: number) => {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+};
+const toSrgb = (v: number) =>
+  Math.round(
+    255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * clamp(v) ** (1 / 2.4) - 0.055),
+  );
+
+/** An sRGB colour in OKLab, as [L, a, b]. */
+export function oklab(c: Rgb): [number, number, number] {
+  const [r, g, b] = c.map(toLinear) as [number, number, number];
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+const swatchMemo = new Map<OrbPaletteName, Rgb>();
+
+/**
+ * The one colour an orb in `name` reads as where it is too small to see its colours drift, as in a
+ * list at 28px: its resting colour masses laid over its pale base the way the canvas lays them, then
+ * averaged as light over the disc and over every way its masses can be turned. The rim and the
+ * eye-lights are the same on every orb, so they are left out.
+ */
+export function orbSwatch(name: OrbPaletteName): Rgb {
+  const known = swatchMemo.get(name);
+  if (known) return known;
+  // At rest the orb draws its colour at 0.9 of its saturation (`drawBotOrb`).
+  const pal = palette(name, 0.9, 0);
+  const cols = [pal.main, pal.pale, pal.side, pal.deep];
+  const sum = [0, 0, 0];
+  let n = 0;
+  const grid = 24;
+  for (let turn = 0; turn < 8; turn++) {
+    const masses = meshPos(1.6, false, (turn / 8) * TAU);
+    for (let i = 0; i < grid; i++) {
+      for (let j = 0; j < grid; j++) {
+        const x = ((i + 0.5) / grid) * 2 - 1;
+        const y = ((j + 0.5) / grid) * 2 - 1;
+        if (x * x + y * y > 1) continue;
+        let c: number[] = [...pal.base];
+        masses.forEach((p, k) => {
+          const a =
+            MASS_ALPHA * falloffAt(Math.hypot(x - p[0], y - p[1]) / p[2]);
+          const col = cols[k] as Rgb;
+          c = c.map((v, ch) => lerp(v, col[ch] as number, a));
+        });
+        for (let ch = 0; ch < 3; ch++) sum[ch] += toLinear(c[ch] as number);
+        n++;
+      }
+    }
+  }
+  const swatch = sum.map((v) => toSrgb(v / n)) as Rgb;
+  swatchMemo.set(name, swatch);
+  return swatch;
 }
 
 /** Lit top edge, shaded bottom: what makes the disc read as a sphere. Call inside the clip. */
