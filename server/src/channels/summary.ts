@@ -254,11 +254,24 @@ async function summariseOne(
       const applied = await transaction
         .update(channels)
         .set({ summary: title, summaryAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(channels.id, channelId), isNull(channels.summary)))
+        .where(
+          and(
+            eq(channels.id, channelId),
+            isNull(channels.summary),
+            isNull(channels.deletedAt),
+          ),
+        )
         .returning({ id: channels.id });
-      // Somebody else named it between the claim and this write. Their title stands, and this work
-      // is done rather than still owed.
-      if (applied.length === 0) return "written";
+      if (applied.length === 0) {
+        // Another writer's title stands, but a conversation deleted while the model worked is gone.
+        // Both settle the queue item; only a surviving conversation counts as named.
+        const [remaining] = await transaction
+          .select({ id: channels.id })
+          .from(channels)
+          .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
+          .limit(1);
+        return remaining ? "written" : "nothing to name it with";
+      }
 
       const members = await transaction
         .select({ userId: channelMemberships.userId })
