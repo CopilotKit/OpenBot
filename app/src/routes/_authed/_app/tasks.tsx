@@ -1,4 +1,5 @@
 import { IconPlus, IconSearch } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   Outlet,
@@ -20,6 +21,9 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import { approvalInboxOptions } from "@/lib/approvals";
+import { firstNeedingYou } from "@/lib/tasks/groups";
+import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/_app/tasks")({
@@ -51,6 +55,10 @@ const somethingOpen = () =>
  * closed decides it too: the two sit side by side once there are 56rem to share (a 360px list and a
  * conversation a comfortable width beside it).
  *
+ * Arriving with no task open on a screen wide enough to show one beside the list, the first task
+ * that needs the person opens, instead of an empty pane. Only on arriving: closing a task later
+ * leaves the pane empty, as the person asked.
+ *
  * While the open task's computer is open beside it, the list folds away to give the two the room.
  *
  * From the keyboard: ↓ and ↑, or j and k, move through the list, Enter opens a task, and Escape closes
@@ -69,6 +77,30 @@ function TasksLayout() {
   const [draft, setDraft] = useState<TaskDraft>(EMPTY_DRAFT);
   const [filter, setFilter] = useState("");
   const list = useRef<HTMLDivElement>(null);
+  const pane = useRef<HTMLDivElement>(null);
+  const tasks = useQuery(taskListQueryOptions());
+  const inbox = useQuery(approvalInboxOptions());
+  /** Whether arriving here has been dealt with: a task opened, or the pane left as it was. */
+  const arrived = useRef(false);
+
+  useEffect(() => {
+    if (arrived.current) return;
+    if (taskId) {
+      arrived.current = true;
+      return;
+    }
+    if (!tasks.data) return;
+    arrived.current = true;
+    // The pane is drawn beside the list, not folded away on a narrow screen.
+    if ((pane.current?.getBoundingClientRect().width ?? 0) <= 0) return;
+    const first = firstNeedingYou(tasks.data, inbox.data);
+    if (first)
+      void navigate({
+        to: "/tasks/$taskId",
+        params: { taskId: first.id },
+        replace: true,
+      });
+  }, [taskId, tasks.data, inbox.data, navigate]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -156,6 +188,7 @@ function TasksLayout() {
           taskId ? "flex" : "hidden",
         )}
         data-slot="task-pane"
+        ref={pane}
       >
         <Outlet />
       </div>
