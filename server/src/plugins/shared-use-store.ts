@@ -284,13 +284,25 @@ export function createSharedUseStore(
         input.approval.audience === "people" &&
         input.approval.members.length > 0
       ) {
-        await tx.insert(sharedUseApprovalMembers).values(
-          input.approval.members.map((member) => ({
-            agentId: input.botId,
-            serverId,
-            ...member,
-          })),
-        );
+        // Publication and assignment can name the same group. Membership is a set of exact
+        // (kind, value) pairs; a user and a group with the same value are still distinct.
+        await tx
+          .insert(sharedUseApprovalMembers)
+          .values(
+            input.approval.members.map((member) => ({
+              agentId: input.botId,
+              serverId,
+              ...member,
+            })),
+          )
+          .onConflictDoNothing({
+            target: [
+              sharedUseApprovalMembers.agentId,
+              sharedUseApprovalMembers.serverId,
+              sharedUseApprovalMembers.kind,
+              sharedUseApprovalMembers.value,
+            ],
+          });
       }
       /* A pending request this approval now answers is closed as approved, so the inbox never asks twice. */
       const pending = await tx
