@@ -86,6 +86,28 @@ or, for routines, their stored Microsoft sign-in. Apps can also call OpenBot's A
 Entra token. Migration `0070_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
+### An unreconciled app authorization always reaches the audit trail
+
+An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
+When an attempt settles as unreconciled, its status and its audit row are written in one
+transaction, so the trail always says what happened to it, without the authorization's id, consent
+link or vendor account. If the audit row cannot be written, nothing changes and the attempt stays
+pending, rather than settling with no record.
+
+### Refunds now go to the person
+
+The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
+(such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
+rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
+
+### A computer run on a laptop can stay off the local network
+
+A managed computer listens on every network interface, which a container needs. Run straight on a
+laptop with `bun run dev`, that left its token-protected API reachable from the local network.
+`COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
+the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
+Desktop's) still always listens on loopback.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
@@ -327,6 +349,13 @@ The gear panel in a conversation ends with Pin and Delete for that conversation.
 
 On the home screen the @ menu opened away from the text, partly off the window; it now opens at the
 caret. It is wider and shows each Bot's avatar beside its name.
+
+### Outside content that looks marked as untrusted is marked anyway
+
+A connector's answer was passed to the model without the untrusted-data notice when its text
+already started and ended like one. That text could carry a
+notice in its own words, or close the tag and continue with instructions outside it. Content is now
+left as it is only when it is exactly what OpenBot itself wrapped; anything else is wrapped.
 
 ### Filling in a form is no longer mistaken for paying
 
