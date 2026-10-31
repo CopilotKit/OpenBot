@@ -16,7 +16,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { matchingTasks, type TaskItem, taskGroups } from "@/lib/tasks/groups";
-import { taskListQueryOptions } from "@/lib/tasks/queries";
+import { TASK_STATUS_LABEL, taskListQueryOptions } from "@/lib/tasks/queries";
 import { conversationFacts } from "@/lib/tasks/use-task";
 import { cn } from "@/lib/utils";
 import { STATUS_TONE } from "./task-status";
@@ -180,6 +180,9 @@ export function TaskList({
  * One task: the Bot's orb, the title, and under it what the task needs next, in its status's colour
  * while it needs the person or couldn't finish. The whole row opens the task, and is lit while it is
  * the one open.
+ *
+ * Its name starts with where it stands ("Needs you: Reply to Rosa, …"), so moving through the list
+ * with j and k says which group each row is in; on screen the group's heading says it.
  */
 function TaskRow({
   item,
@@ -207,6 +210,7 @@ function TaskRow({
       }
       size="sm"
     >
+      <span className="sr-only">{TASK_STATUS_LABEL[status]}: </span>
       <ItemMedia>
         <AbstractAvatar
           name={name}
