@@ -170,7 +170,11 @@ const runner: RunnerLike = {
 
 const sent: unknown[] = [];
 const read: unknown[] = [];
-/** A read meets the same gate, as every granted app's call does, and runs without asking. */
+/**
+ * A read meets the same gate, as every granted app's call does. The mail app is the person's own
+ * connection and its server says this tool only reads, which the plugin store tells the gate as
+ * `ownConnectionRead`: a read with that trust runs without asking, in a task as anywhere.
+ */
 async function readInbox(args: unknown, actorId: string, botId: string) {
   await approvalService.gate({
     actorId,
@@ -180,6 +184,7 @@ async function readInbox(args: unknown, actorId: string, botId: string) {
     scope: "mail",
     args,
     continuation: currentApprovalContext(),
+    ownConnectionRead: true,
   });
   read.push(args);
   return "Sam: can you send the spec by Friday?";
@@ -606,7 +611,7 @@ describe("where a task stands", () => {
     });
   });
 
-  test("a task asks before every change though Ask before making changes is off, its reads run freely, and the person's own conversation is unchanged", async () => {
+  test("a task asks before every change though Ask before making changes is off, its reads of the person's own app run freely, and the person's own conversation is unchanged", async () => {
     const { owner, botId, own, item } = await seed();
     // The deployment's default: off, and the person never turned it on.
     expect(await approvalStore.enabled(owner.id)).toBe(false);
@@ -788,10 +793,11 @@ describe("where a task stands", () => {
       agentId: null,
       at: new Date(),
     });
+    // Reopened, and never their own words read back to them as where the task stands.
     expect(await taskStore.get(owner.id, task.id)).toMatchObject({
       status: "ready_for_review",
       resolvedAt: null,
-      next: "“Also copy Ana on it.”",
+      next: null,
     });
 
     // Reopen undoes a "done" by hand.
@@ -799,6 +805,22 @@ describe("where a task stands", () => {
     expect((await taskStore.reopen(owner.id, task.id)).status).toBe(
       "ready_for_review",
     );
+  });
+
+  test("ready for review shows the Bot's own outcome, not the source it cites under it", async () => {
+    const { owner, item } = await seed();
+    script = (input) =>
+      reply(
+        input,
+        "I verified the request from Alex: Tuesday's 1:1 moved to 3pm.\n\nI couldn't send the confirmation because the reply was blocked.\nSource: Requests connector, request r-oneone.\n\n**Source:** Alex's request `r-oneone`, received 31 Oct.",
+      );
+    const task = await start(owner, item.id);
+    await tasks.idle();
+
+    expect(await taskStore.get(owner.id, task.id)).toMatchObject({
+      status: "ready_for_review",
+      next: "I couldn't send the confirmation because the reply was blocked.",
+    });
   });
 
   test("another person's task is answered like no task", async () => {

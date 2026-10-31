@@ -35,10 +35,12 @@ export type TaskTurn = (
  * THE PERSON'S OWN TURN. It runs under `PERSON_INITIATOR` through the approval continuation runner,
  * so every send or change the Bot tries meets the approval gate, as it would had the person typed
  * the ask themselves, with one difference: in a task's conversation the gate asks before EVERY
- * change, whatever the person's "Ask before making changes" or their rules would allow, because the
- * work began with something a Bot noticed rather than something they wrote out. The gate knows a
- * task's conversation by its thread (`asksEveryChange` in approvals/store.ts), so the turn an
- * approval carries on, and the person replying there, ask the same way. Reads still run freely.
+ * step, whatever the person's "Ask before making changes" or their rules would allow, because the
+ * work began with something a Bot noticed rather than something they wrote out. The one thing it
+ * does unasked is what a check-in may: read an app the person connected with their own account,
+ * with a tool its server says only reads. The gate knows a task's conversation by its thread
+ * (`asksEveryChange` in approvals/store.ts), so the turn an approval carries on, and the person
+ * replying there, ask the same way.
  *
  * The conversation's working dot is lit while it runs, since no browser streams this turn.
  *

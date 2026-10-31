@@ -108,6 +108,12 @@ const LIST_ITEM = /^\s*(?:[-*+•]|\d+[.)])\s+/;
 /** A paragraph that is something the Bot drafted for the person, not what it says to them. */
 const DRAFT =
   /^\s*(?:>|```|["“'‘]|\*{0,2}_{0,2}(?:draft|subject|to|dear|hi|hello)\b[^\n]{0,40}?:)/i;
+/**
+ * A line that says where the reply came from: "Source: …", "**Sources:**", "References -". A Bot
+ * closes on one because it is asked to cite what it read, and it is a footnote, not where things
+ * stand: shown as the next step it read "Source: Requests, request r-oneone." over "I couldn't send".
+ */
+const FOOTNOTE = /^(?:sources?|references?|citations?)\s*[:：\-–]/i;
 /** What can trail a question and still leave it one: closing quotes, brackets, emoji, spaces. */
 const TRAILING = /(?:[\s"”'’)\]}»\p{Extended_Pictographic}]|️|‍)+$/u;
 
@@ -126,9 +132,9 @@ const plain = (line: string) =>
  * something.
  *
  * A Bot ends a turn on what comes next, in the last paragraph it writes to the person. Lists and
- * drafts that close a reply are what it prepared, not what it says, so they are set aside. Within
- * that last paragraph its last question is the next step, even with a remark after it; without
- * one, its last sentence is. A short closing sentence keeps the one before it, so "Do you want me
+ * drafts that close a reply are what it prepared, not what it says, and a line citing its source is
+ * a footnote to it, so they are set aside. Within that last paragraph its last question is the next
+ * step, even with a remark after it; without one, its last sentence is. A short closing sentence keeps the one before it, so "Do you want me
  * to?" never stands alone. Null when there is nothing to say.
  */
 export function replyEnding(reply: string | null | undefined): {
@@ -139,16 +145,21 @@ export function replyEnding(reply: string | null | undefined): {
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter((paragraph) => /[\p{L}\p{N}]/u.test(paragraph));
+  const footnote = (line: string) => FOOTNOTE.test(plain(line));
   const spoken = paragraphs.filter((paragraph) => {
     const lines = paragraph.split("\n").filter((line) => line.trim());
     return !(
-      lines.every((line) => LIST_ITEM.test(line)) || DRAFT.test(paragraph)
+      lines.every((line) => LIST_ITEM.test(line)) ||
+      DRAFT.test(paragraph) ||
+      // "Sources:" and the list under it.
+      (lines[0] !== undefined && footnote(lines[0]))
     );
   });
   const kept = spoken.length ? spoken : paragraphs.slice(-1);
   const sentencesOf = (paragraph: string | undefined) =>
     (paragraph ?? "")
       .split("\n")
+      .filter((line) => !footnote(line))
       .map(plain)
       .flatMap((line) => line.split(/(?<=[.!?][\s"”'’)\]]*)\s+(?=\S)/))
       .map((sentence) => sentence.trim())
@@ -178,22 +189,22 @@ export function replyTail(reply: string | null | undefined): string | null {
   return replyEnding(reply).tail;
 }
 
-/** How long the person's own words may run as a task's next step. */
+/** How long a question the Bot asked may run as a task's next step. */
 const QUOTE_MAX = 120;
 
 /**
- * A task's next step, from the last line said in its conversation: the Bot's words end on what comes
- * next (`replyTail`); the person's are what the Bot is now working on, quoted.
+ * A task's next step, from the last line said in its conversation: the Bot's own words, where they
+ * leave things (`replyTail`). Never the person's: shown back to them as the next step, their own
+ * message read as the task's outcome while it was Ready for review, and said nothing about what the
+ * Bot did with it. A task whose last line is theirs shows its status alone until the Bot answers.
  */
 export function nextStepOf(
   said: string | null | undefined,
   byBot: boolean,
 ): string | null {
   const text = said?.trim();
-  if (!text) return null;
-  if (byBot) return replyTail(text);
-  const words = Array.from(text);
-  return `“${words.length > QUOTE_MAX ? `${words.slice(0, QUOTE_MAX - 1).join("")}…` : text}”`;
+  if (!text || !byBot) return null;
+  return replyTail(text);
 }
 
 /**
@@ -493,9 +504,8 @@ export async function readTaskStates(
     const entry = state.get(row.id);
     if (!entry) continue;
     const said = saidIn.get(row.channelId);
-    // The ask a turn starts on is the task itself, not a step: "Just started" says that better.
-    const ask = !said?.byBot && (said?.sourceId?.endsWith(ASK_LINE) ?? false);
-    if (said && !ask) entry.next = nextStepOf(said.lastMessage, said.byBot);
+    // The Bot's own last words; the person's, the ask a turn starts on included, are never shown.
+    if (said) entry.next = nextStepOf(said.lastMessage, said.byBot);
     /*
      * The person spoke in its conversation after marking it done: a turn they started in the
      * browser, which reports its lines with no source of its own. Lines from the task's own turns

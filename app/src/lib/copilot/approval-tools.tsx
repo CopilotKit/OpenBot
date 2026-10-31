@@ -3,9 +3,14 @@ import {
   useCopilotKit,
   useFrontendTool as useSDKFrontendTool,
 } from "@copilotkit/react-core/v2";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  type QueryClient,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { type ChannelPage, channelKeys } from "@/lib/channels/queries";
 import { tryClient } from "@/lib/client";
 import { failedComputerCall } from "@/lib/computers/call";
 import { useActiveBotHolder } from "./active-bot";
@@ -27,6 +32,28 @@ const writes = new Set([
 ]);
 
 /**
+ * Whether the run asking is in a task's own conversation, as the conversation list this app holds
+ * says. A task started from a check-in asks before every step, a look at a page included, and only
+ * the gate can ask: a look sent straight to the computer carries no conversation to ask in.
+ */
+function inTaskConversation(
+  queries: QueryClient,
+  threadId: string | undefined,
+): boolean {
+  if (!threadId) return false;
+  const listed = queries.getQueryData<InfiniteData<ChannelPage>>(
+    channelKeys.list(),
+  );
+  return (
+    listed?.pages.some((page) =>
+      page.channels.some(
+        (channel) => channel.threadId === threadId && channel.task === true,
+      ),
+    ) ?? false
+  );
+}
+
+/**
  * Route computer changes through the server's durable approval gate, and draw a pending decision
  * inline where the action would have been.
  *
@@ -43,7 +70,8 @@ const writes = new Set([
  * be paid on every step of every page. A rule can still ask about one ("ask before opening pages"),
  * and that call arrives with no conversation to ask in, so the computer answers `needsConversation`
  * having done nothing. It is sent again here through the gate, where the person is asked; before
- * this, the Bot was handed the refusal and could only apologise for a card nobody was shown.
+ * this, the Bot was handed the refusal and could only apologise for a card nobody was shown. In a
+ * task's own conversation every look goes through the gate first, since a task asks before each one.
  */
 export function useFrontendTool<T extends Record<string, unknown>>(
   tool: ReactFrontendTool<T>,
@@ -75,7 +103,10 @@ export function useFrontendTool<T extends Record<string, unknown>>(
     handler: tool.handler
       ? async (args, context) => {
           let direct: unknown;
-          if (!writes.has(tool.name)) {
+          if (
+            !writes.has(tool.name) &&
+            !inTaskConversation(queryClient, context.agent?.threadId)
+          ) {
             direct = await tool.handler?.(args, context);
             if (!needsConversation(direct)) return direct;
           }
