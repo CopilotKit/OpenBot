@@ -454,10 +454,11 @@ test("on a desktop, where somebody is takes one line, and opens the list of step
     null,
   );
   const items = within(stepList(view)).getAllByRole("listitem");
+  // What the ticks and the numbers show is said in words: done, and not yet available.
   expect(items.map((item) => item.textContent?.replace(/^\d/, ""))).toEqual([
-    "One",
+    "One, done",
     "Two",
-    "Three",
+    "Three, not yet available",
   ]);
   const current = view.container.ownerDocument.querySelector(
     '[aria-current="step"]',
@@ -511,10 +512,10 @@ test("a step already reached can be picked from the list; one ahead cannot", asy
   const view = draw({ initialStepId: "two" });
 
   const list = within(stepList(view));
-  expect(list.queryByRole("button", { name: "Three" })).toBeNull();
-  expect(list.queryByRole("button", { name: "Two" })).toBeNull();
+  expect(list.queryByRole("button", { name: /Three/ })).toBeNull();
+  expect(list.queryByRole("button", { name: /Two/ })).toBeNull();
 
-  fireEvent.click(list.getByRole("button", { name: "One" }));
+  fireEvent.click(list.getByRole("button", { name: /^One\W+done$/ }));
   const heading = await view.findByRole("heading", { name: "One" });
   await waitFor(() => expect(document.activeElement).toBe(heading));
   // Picking closes the list.
@@ -526,7 +527,7 @@ test("a step already reached can be picked from the list; one ahead cannot", asy
 
   // Two has been seen now, so it is a way back; Three still is not.
   const again = within(stepList(view));
-  expect(again.queryByRole("button", { name: "Three" })).toBeNull();
+  expect(again.queryByRole("button", { name: /Three/ })).toBeNull();
   fireEvent.click(again.getByRole("button", { name: "Two" }));
   expect(await view.findByRole("heading", { name: "Two" })).toBeTruthy();
 });
@@ -541,7 +542,9 @@ test("held by its caller, a pick from the list is asked for like Back", () => {
     />,
   );
 
-  fireEvent.click(within(stepList(view)).getByRole("button", { name: "One" }));
+  fireEvent.click(
+    within(stepList(view)).getByRole("button", { name: /^One\W+done$/ }),
+  );
   expect(asked).toEqual([["one", "back"]]);
 });
 
@@ -558,6 +561,21 @@ test("on a desktop, Back sits beside Continue, before it, and Back on a phone is
 
   fireEvent.click(back as HTMLButtonElement);
   expect(view.getByRole("heading", { name: "One" })).toBeTruthy();
+});
+
+test("focus rings on the step list, the phone's Back and the checklist's links are full strength", () => {
+  const view = draw({ initialStepId: "two" });
+
+  const rings = [
+    phoneBack(view)?.className,
+    within(stepList(view)).getByRole("button", { name: /^One\W+done$/ })
+      .className,
+  ];
+  for (const ring of rings) {
+    expect(ring).toContain("focus-visible:ring-ring");
+    // Half strength is about 2.4:1 against the page, under the 3:1 a focus ring needs.
+    expect(ring).not.toContain("ring-ring/50");
+  }
 });
 
 /*

@@ -243,7 +243,7 @@ function SetupItem({
 }
 
 const LINK =
-  "rounded-sm font-medium text-brand underline-offset-2 outline-none hover:underline focus-visible:underline focus-visible:ring-3 focus-visible:ring-ring/50";
+  "rounded-sm font-medium text-brand underline-offset-2 outline-none hover:underline focus-visible:underline focus-visible:ring-3 focus-visible:ring-ring";
 
 /** How to close one gap: a page to open, or the variables to set and a guide. */
 function Fix({
