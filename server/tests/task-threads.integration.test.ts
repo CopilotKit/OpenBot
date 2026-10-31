@@ -88,6 +88,7 @@ import {
   createContinuationRunner,
   createTaskThreads,
   createTaskTurn,
+  TASK_ENDING_DESCRIPTION,
 } from "../src/tasks/threads";
 import {
   builtInBots,
@@ -4419,7 +4420,12 @@ test("durable task reply context validates ownership and grants, and survives a 
     ],
   });
   expect(received[0]?.systemMessages).toEqual([
-    { id: "task:ending", role: "system", content: TASK_ENDING },
+    {
+      id: "task:ending",
+      role: "system",
+      content: TASK_ENDING,
+      description: TASK_ENDING_DESCRIPTION,
+    },
     {
       id: `${body.messageId}:skill:0`,
       role: "system",

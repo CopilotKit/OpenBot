@@ -218,6 +218,31 @@ describe("turnMessages", () => {
     ]);
   });
 
+  test("an instruction's description goes to the model as context, never onto its history row", () => {
+    const { messages, persistedInputMessages } = turnMessages({
+      seeded,
+      historicIds: new Set(["m1", "m2"]),
+      turn,
+      systemMessages: [
+        {
+          id: "task:ending",
+          role: "system",
+          content: "End with what you did.",
+          description: "How to end your reply in this task",
+        },
+      ],
+    });
+    expect(messages[2]).toEqual({
+      id: "task:ending",
+      role: "system",
+      content: "End with what you did.",
+    });
+    expect(persistedInputMessages.map((message) => message.id)).toEqual([
+      "task:ending",
+      "now",
+    ]);
+  });
+
   test("a continuation is its snapshot plus the answer, and never the turn message", () => {
     const { messages, persistedInputMessages } = turnMessages({
       seeded,
@@ -289,5 +314,37 @@ describe("turnInput", () => {
     expect(input.tools.map((tool) => tool.name)).toEqual(["offered"]);
     expect(input.context).toEqual([]);
     expect("resume" in input).toBe(false);
+  });
+
+  /*
+   * Every instruction reached the model as "Selected skill N", so a task's instruction on how to
+   * end its reply read as a skill the person had picked.
+   */
+  test("names each instruction by its description, and numbers only the skills", () => {
+    const input = turnInput({
+      threadId: "thread",
+      runId: "run",
+      messages: [],
+      state: {},
+      tools: [],
+      systemMessages: [
+        {
+          id: "task:ending",
+          role: "system",
+          content: "End with what you did.",
+          description: "How to end your reply in this task",
+        },
+        { id: "skill-0", role: "system", content: "Use the rubric." },
+        { id: "skill-1", role: "system", content: "Be brief." },
+      ],
+    });
+    expect(input.context).toEqual([
+      {
+        description: "How to end your reply in this task",
+        value: "End with what you did.",
+      },
+      { description: "Selected skill 1", value: "Use the rubric." },
+      { description: "Selected skill 2", value: "Be brief." },
+    ]);
   });
 });

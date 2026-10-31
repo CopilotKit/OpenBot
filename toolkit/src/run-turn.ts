@@ -94,8 +94,11 @@ export type TurnRunner = (input: {
    * Instructions the server resolved for this turn, such as the skills a person picked for a reply
    * to a task. Kept as rows of the turn's history and given to the model as context. Never from the
    * browser: only what the server itself looked up and checked belongs here.
+   *
+   * Each is named to the model by its `description`, which stays off the history row. Without one
+   * it is a skill the person picked, "Selected skill N".
    */
-  systemMessages?: Extract<Message, { role: "system" }>[];
+  systemMessages?: TurnSystemMessage[];
   /** Durable inbound delivery id; reused by lock, runner and emitted events. */
   runId?: string;
   /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
@@ -103,6 +106,11 @@ export type TurnRunner = (input: {
   /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
   onText?: (text: string) => void;
 }) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
+
+/** An instruction for one turn, and what the model is told it is. See `systemMessages`. */
+export type TurnSystemMessage = Extract<Message, { role: "system" }> & {
+  description?: string;
+};
 
 /** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
 export type DrawnComponent = { name: string; args: Record<string, unknown> };
@@ -321,7 +329,9 @@ export function turnMessages(input: {
       ])
     : [
         ...seeded,
-        ...systemMessages.filter((message) => !historicIds.has(message.id)),
+        ...systemMessages
+          .filter((message) => !historicIds.has(message.id))
+          .map(({ description, ...message }) => message),
         turn,
       ];
   return {
@@ -330,6 +340,18 @@ export function turnMessages(input: {
       (message) => !historicIds.has(message.id),
     ),
   };
+}
+
+/** This turn's instructions as context: a described one by its description, a skill by its number. */
+function contextOf(systemMessages: readonly TurnSystemMessage[]) {
+  let skills = 0;
+  return systemMessages.map((message) => {
+    if (message.description === undefined) skills += 1;
+    return {
+      description: message.description ?? `Selected skill ${skills}`,
+      value: message.content,
+    };
+  });
 }
 
 /** The run's input: this run's id, the conversation, the tools it is offered, and any resume. */
@@ -361,13 +383,11 @@ export function turnInput(input: {
      * A built-in Bot's model leaves system rows of the history out, so the instructions resolved for
      * this turn go to it as context too. Only those: never a system row from the history, and never
      * one a browser wrote. A continuation keeps the context it was captured with.
+     *
+     * Each under its own description. Called "Selected skill N" whatever it was, a task's
+     * instruction on how to end its reply reached the model as a skill the person had picked.
      */
-    context:
-      continuation?.snapshot.context ??
-      systemMessages.map((message, index) => ({
-        description: `Selected skill ${index + 1}`,
-        value: message.content,
-      })),
+    context: continuation?.snapshot.context ?? contextOf(systemMessages),
     forwardedProps: continuation?.snapshot.forwardedProps,
     ...(continuation
       ? {
