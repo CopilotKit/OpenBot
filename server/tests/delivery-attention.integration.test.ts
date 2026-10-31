@@ -606,10 +606,10 @@ describe("where the person routes it", () => {
     expect(sent.items.map((item) => item.agentName)).toEqual(["Inbox Bot"]);
     await router.notifyAttention(sent);
     await drain();
+    // The Teams account is Calendar Bot's conversation, the only one there, so Teams gets nothing.
     expect(chatSends.map((send) => send.transport).sort()).toEqual([
       "slack",
       "sms",
-      "teams",
     ]);
     for (const send of chatSends) {
       expect(send.text).toStartWith("One thing needs you\n");
@@ -619,6 +619,56 @@ describe("where the person routes it", () => {
       "One thing needs you",
       "One thing needs you",
     ]);
+  });
+});
+
+describe("an account whose Bot the person silenced", () => {
+  test("never carries a ping: the next account they used on that platform does, and a platform with none left gets nothing", async () => {
+    // The Slack account they used last is Research Bot's conversation, and Teams has Calendar Bot's alone.
+    await lifecycle.setNotify(owner, researchBot, "none");
+    await lifecycle.setNotify(owner, calendarBot, "none");
+    // Only what needs input still lets a ping through, as it lets that Bot's own questions through.
+    await lifecycle.setNotify(owner, inboxBot, "needs_input");
+    await raise(
+      inbox,
+      "Reply to Dana about Friday",
+      "Dana asked about Friday.",
+    );
+    const sent = await ping();
+    await router.notifyAttention(sent);
+    const rows = await outboxOf();
+    expect(placed(rows).sort()).toEqual(
+      [
+        `push:${phone}`,
+        `push:${tablet}`,
+        `slack:${slackNew.id}`,
+        `sms:${sms.id}`,
+      ].sort(),
+    );
+    // Each chat message is filed under, and sent as, a Bot the person still hears from.
+    expect(
+      rows.filter((row) => row.transport !== "push").map((row) => row.agentId),
+    ).toEqual([inboxBot, inboxBot]);
+
+    await drain();
+    expect(
+      chatSends.map((send) => `${send.transport}:${send.address}`).sort(),
+    ).toEqual(["slack:D-inbox", "sms:+15550100"]);
+    expect(
+      chatSends.find((send) => send.transport === "slack")?.sender,
+    ).toMatchObject({ agentId: inboxBot, name: "Inbox Bot" });
+    expect(pushSends).toHaveLength(2);
+  });
+
+  test("with every account on a platform silenced, that platform gets nothing and the push still goes", async () => {
+    await lifecycle.setNotify(owner, researchBot, "none");
+    await lifecycle.setNotify(owner, inboxBot, "none");
+    // Calendar Bot's items still ping; its only account is on Teams.
+    await raise(calendar, "Move the standup", "The room is double-booked.");
+    await router.notifyAttention(await ping());
+    expect(placed(await outboxOf()).sort()).toEqual(
+      [`push:${phone}`, `push:${tablet}`, `teams:${teams.id}`].sort(),
+    );
   });
 });
 

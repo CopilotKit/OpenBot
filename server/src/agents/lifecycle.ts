@@ -379,10 +379,12 @@ const KIND_OF_DELIVERY: Record<
 };
 
 /**
- * What a delivery asks the route for. One Bot's reply, question or approval names that Bot. A ping
- * names none: it folds several Bots' items, and each Bot's notification preference was applied to
- * its own items before the ping was written (a Bot set to notify nothing contributes no item to one,
- * see proactive/ping.ts), so only the person's routing is left to decide here.
+ * What a delivery asks the route for. One Bot's reply, question or approval names that Bot. So does
+ * a ping's chat message: it is posted in one Bot's conversation, as that Bot, so a Bot the person
+ * told to notify them of nothing must not carry it. A ping's push names none: it folds several Bots'
+ * items, and each Bot's notification preference was applied to its own items before the ping was
+ * written (a Bot set to notify nothing contributes no item to one, see proactive/ping.ts), so only
+ * the person's routing is left to decide it.
  */
 export type UpdateRouteInput =
   | {
@@ -390,7 +392,7 @@ export type UpdateRouteInput =
       agentId: string;
       kind: "reply" | "question" | "approval";
     }
-  | { ownerUserId: string; kind: "attention" };
+  | { ownerUserId: string; agentId?: string; kind: "attention" };
 
 export type UpdateRoute = {
   /** Which update kind this delivery is, as the person's preferences name it. */
@@ -422,7 +424,7 @@ export async function resolveUpdateRoute(
   try {
     const store = createBotLifecycleStore(database);
     const [level, routing] = await Promise.all([
-      "agentId" in input
+      input.agentId
         ? store.get(input.ownerUserId, input.agentId).then((row) => row.notify)
         : Promise.resolve<BotNotify>("all"),
       store.routing(input.ownerUserId),
