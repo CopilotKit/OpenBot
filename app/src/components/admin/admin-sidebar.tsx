@@ -9,6 +9,7 @@ import {
   IconLayoutGrid,
   IconListDetails,
   IconPuzzle,
+  IconRadar,
   IconShieldCheck,
   IconUsers,
 } from "@tabler/icons-react";
@@ -86,6 +87,11 @@ const GROUPS: {
         title: "Automatic learning",
         icon: IconFileText,
         linkOptions: { to: "/admin/learning" },
+      },
+      {
+        title: "Check-ins",
+        icon: IconRadar,
+        linkOptions: { to: "/admin/proactive" },
       },
       {
         title: "UI components",
