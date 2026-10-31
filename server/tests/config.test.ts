@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { configuredAuthProviders, loadConfig } from "../src/config";
+import { checkAgentEndpoint } from "../src/agents/endpoint";
 
 // Intelligence is part of the MINIMUM contract, so it belongs in the base environment every other
 // case builds on. Leaving it out of the base would make most of this file assert the behaviour of a
@@ -1155,8 +1156,57 @@ describe("AGENT_ENDPOINT_ALLOWED_HOSTS", () => {
   // deployment and failing on whichever requirement it forgot.
   const base = () => ({ ...baseEnvironment });
 
-  test("unset means none, which is the posture that shipped", () => {
-    expect(loadConfig(base()).agentEndpointAllowedHosts.size).toBe(0);
+  test("unset means only the deployment's own agent address, which configuration names", () => {
+    // The base environment configures a managed agent at http://localhost:4200/ag-ui: it is
+    // trusted implicitly, so the set is never empty when a managed agent is configured.
+    expect([...loadConfig(base()).agentEndpointAllowedHosts].sort()).toEqual([
+      "localhost:4200",
+    ]);
+  });
+
+  test("no managed agent and no list means none", () => {
+    const { MANAGED_AGENT_AG_UI_URL: _u, MANAGED_AGENT_TOKEN: _t, ...env } =
+      base();
+    expect(loadConfig(env).agentEndpointAllowedHosts.size).toBe(0);
+  });
+
+  test("the managed agent's host and port join the named list", () => {
+    const hosts = loadConfig({
+      ...base(),
+      AGENT_ENDPOINT_ALLOWED_HOSTS: "agents.internal",
+      MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:41706/ag-ui",
+    }).agentEndpointAllowedHosts;
+    expect([...hosts].sort()).toEqual([
+      "127.0.0.1:41706",
+      "agents.internal",
+    ]);
+  });
+
+  test("a picked harness URL joins too, as another address this deployment runs", () => {
+    const hosts = loadConfig({
+      ...base(),
+      PICKED_HARNESS_IMAGE: "openbot/harness:latest",
+      PICKED_HARNESS_URL: "http://10.0.0.5:4317/ag-ui",
+    }).agentEndpointAllowedHosts;
+    expect([...hosts].sort()).toEqual(["10.0.0.5:4317", "localhost:4200"]);
+  });
+
+  test("a Run-it-here Bot's loopback address clears the endpoint check (#888)", () => {
+    const config = loadConfig({
+      ...base(),
+      MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:41706/ag-ui",
+    });
+    // Without the implicit trust this is the refusal #888 reports.
+    expect(
+      checkAgentEndpoint("http://127.0.0.1:41706/ag-ui", {
+        allowedHosts: new Set(),
+      }).allowed,
+    ).toBe(false);
+    expect(
+      checkAgentEndpoint("http://127.0.0.1:41706/ag-ui", {
+        allowedHosts: config.agentEndpointAllowedHosts,
+      }),
+    ).toEqual({ allowed: true, url: "http://127.0.0.1:41706/ag-ui" });
   });
 
   test("a comma-separated list is parsed, lower-cased and trimmed", () => {
@@ -1164,7 +1214,11 @@ describe("AGENT_ENDPOINT_ALLOWED_HOSTS", () => {
       ...base(),
       AGENT_ENDPOINT_ALLOWED_HOSTS: " Agents.Internal , 10.0.0.42:9000 ",
     }).agentEndpointAllowedHosts;
-    expect([...hosts].sort()).toEqual(["10.0.0.42:9000", "agents.internal"]);
+    expect([...hosts].sort()).toEqual([
+      "10.0.0.42:9000",
+      "agents.internal",
+      "localhost:4200", // the base environment's managed agent, trusted implicitly
+    ]);
   });
 
   test("an IPv6 address is stored the way the endpoint check spells it", () => {
@@ -1179,6 +1233,7 @@ describe("AGENT_ENDPOINT_ALLOWED_HOSTS", () => {
       "[::1:8443]",
       "[::1]:8443",
       "[fe80::1]",
+      "localhost:4200", // the base environment's managed agent, trusted implicitly
     ]);
   });
 
