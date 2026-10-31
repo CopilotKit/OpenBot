@@ -333,6 +333,41 @@ describe("the header's orb and the line under the name", () => {
     expect(sent.orb()).toBe("idle");
   });
 
+  test("a turn that ends on a held call asks for the inbox at once, not at the next poll", async () => {
+    const asked: string[] = [];
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL) => {
+        asked.push(String(input));
+        return Response.json({ error: "not served" }, { status: 404 });
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    const { show } = renderConversation(<Chat busy messages={RUNNING} />);
+    expect(asked.filter((url) => url.endsWith("/api/approvals"))).toEqual([]);
+    // The server holds the search for the person: the turn ends with the call and no result.
+    show(<Chat messages={RUNNING} />);
+    await waitFor(() =>
+      expect(
+        asked.filter((url) => url.endsWith("/api/approvals")),
+      ).toHaveLength(1),
+    );
+  });
+
+  test("a turn that ends in an answer does not ask for the inbox again", async () => {
+    const asked: string[] = [];
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL) => {
+        asked.push(String(input));
+        return Response.json({ error: "not served" }, { status: 404 });
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    const { show } = renderConversation(<Chat busy messages={RUNNING} />);
+    show(<Chat messages={ANSWERED} />);
+    await settleReactWork();
+    expect(asked.filter((url) => url.endsWith("/api/approvals"))).toEqual([]);
+  });
+
   test("Needs you holds off the landing of a turn that did answer", () => {
     const { show, line, orb } = renderConversation(
       <Chat busy messages={RUNNING} />,

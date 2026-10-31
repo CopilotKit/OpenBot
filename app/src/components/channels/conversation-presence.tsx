@@ -1,5 +1,9 @@
 import type { Message } from "@ag-ui/core";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -62,6 +66,8 @@ type Reported = {
   drafting: boolean;
   /** Counts the turns that ended in an answer, rather than a failure or a Stop. */
   answers: number;
+  /** Counts the turns that ended on a call held for the person, such as an approval. */
+  held: number;
   /** The browser steps in the conversation, oldest first. */
   steps: readonly ConversationStep[];
 };
@@ -77,6 +83,7 @@ const AT_REST: Reported = {
   step: null,
   drafting: false,
   answers: 0,
+  held: 0,
   steps: NO_STEPS,
 };
 
@@ -225,6 +232,18 @@ export function ConversationPresenceProvider({
     [inbox.data, threadId],
   );
   const waiting = approvals.some((request) => request.status === "pending");
+  /*
+   * A turn that ended on a held call has a card for the person on the server. Asked for at once,
+   * so the card does not wait for the next poll, up to ten seconds away.
+   */
+  const cache = useQueryClient();
+  const held = useReported(presence, "held");
+  useEffect(() => {
+    if (held > 0)
+      void cache.invalidateQueries({
+        queryKey: approvalInboxOptions().queryKey,
+      });
+  }, [cache, held]);
   const facts = useMemo(
     () => ({ working, waiting, approvals }),
     [working, waiting, approvals],
@@ -394,6 +413,7 @@ export function useReportConversation({
 
   useEffect(() => {
     if (working && !wasWorking.current) stopped.current = false;
+    const wasWorkingBefore = wasWorking.current;
     const answered =
       wasWorking.current &&
       !working &&
@@ -401,10 +421,15 @@ export function useReportConversation({
       !stopped.current &&
       !waitsOnPerson;
     wasWorking.current = working;
+    const heldNow = wasWorkingBefore && !working && waitsOnPerson;
     report((current) =>
-      current.working === working && !answered
+      current.working === working && !answered && !heldNow
         ? null
-        : { working, answers: current.answers + (answered ? 1 : 0) },
+        : {
+            working,
+            answers: current.answers + (answered ? 1 : 0),
+            held: current.held + (heldNow ? 1 : 0),
+          },
     );
   }, [report, working, failed, waitsOnPerson]);
 
