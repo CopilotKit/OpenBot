@@ -2878,6 +2878,59 @@ describe("a dynamic client the vendor has evicted", () => {
     expect(registrations).toEqual([]);
   });
 
+  test.each(["before-lock", "under-lock"] as const)(
+    "a client decryption fault %s does not replace the deployment's client",
+    async (where) => {
+      await putClient(EVICTED);
+      registrations.length = 0;
+      issue = () => FRESH;
+      const [before] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, dynamicServerId));
+      const wrongKeyStore = createPluginStore({
+        brokerProvider: "composio",
+        database,
+        auditStore: createAuditStore(database),
+        // The initial read can find no row while a client is found under the lock. Neither read
+        // may interpret a decryption failure as permission to register over the working client.
+        credentials:
+          where === "under-lock"
+            ? { ...vault, readSecret: async () => null }
+            : vault,
+        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+        policy: () => policy,
+        ...seams,
+        redirectUri: REDIRECT_URI,
+      });
+      try {
+        const outcome = await wrongKeyStore
+          .ensureOAuthClient(dynamicServerId, "someone@openbot.test")
+          .then(
+            () => "returned",
+            () => "rejected",
+          );
+        const [after] = await database
+          .select({ credentialId: mcpServers.credentialId })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, dynamicServerId));
+        expect({
+          outcome,
+          registrations: registrations.length,
+          pointerUnchanged: before?.credentialId === after?.credentialId,
+          client: await dynamicStore.oauthClientFor(dynamicServerId),
+        }).toEqual({
+          outcome: "rejected",
+          registrations: 0,
+          pointerUnchanged: true,
+          client: EVICTED,
+        });
+      } finally {
+        await putClient(EVICTED);
+      }
+    },
+  );
+
   test("a dynamic entry with no client gets one, kept and recorded", async () => {
     await clearClient();
     registrations.length = 0;
