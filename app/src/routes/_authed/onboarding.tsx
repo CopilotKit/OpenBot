@@ -212,19 +212,48 @@ const welcome: OnboardingStep = {
   demo: () => <WelcomeDemo />,
 };
 
-const computer: OnboardingStep = {
-  id: "computer",
-  title: "Each Bot has its own browser and files",
-  intro: () => (
-    <StepIntro>
-      <p>
-        It opens a browser, reads pages and works with files on a computer
-        OpenBot runs for you, so yours stays yours.
-      </p>
-    </StepIntro>
-  ),
-  demo: () => <ComputerDemo />,
-};
+/**
+ * What a Bot's own computer gives it, said as this OpenBot has it. The setup checklist's Bot
+ * computer row says whether there is one: where it needs setup, the step promises nothing it
+ * can't keep, and says who adds one. `missing` is null until the checklist answers, which reads as
+ * the usual case, a computer that is there.
+ */
+function computerStep(
+  missing: { audience: "admin" | "member" } | null,
+): OnboardingStep {
+  if (!missing)
+    return {
+      id: "computer",
+      title: "Each Bot has its own browser and files",
+      intro: () => (
+        <StepIntro>
+          <p>
+            It opens a browser, reads pages and works with files on a computer{" "}
+            {PRODUCT} runs for you, so yours stays yours.
+          </p>
+        </StepIntro>
+      ),
+      demo: () => <ComputerDemo />,
+    };
+  return {
+    id: "computer",
+    title: "A Bot can have its own browser and files",
+    intro: () => (
+      <StepIntro>
+        <p>
+          With a Bot computer set up, a Bot opens a browser, reads pages and
+          works with files on it, so yours stays yours.
+        </p>
+        <p>
+          {missing.audience === "admin"
+            ? `${PRODUCT} doesn't have one yet. Check your setup shows how to add one.`
+            : `${PRODUCT} doesn't have one yet. Your admin sets it up.`}
+        </p>
+      </StepIntro>
+    ),
+    demo: () => <ComputerDemo />,
+  };
+}
 
 const team: OnboardingStep = {
   id: "team",
@@ -467,11 +496,18 @@ function RouteComponent() {
   const { data: agents } = useQuery(agentListQueryOptions());
   const notify = useNotifyStep(defaultAgentProfile(agents)?.name ?? PRODUCT);
   const name = useNameStep({ finish, finished });
-  // The checklist's answer names the page a carried link opens, so each step after it can say which.
-  const { data: checklist } = useQuery({
-    ...setupChecklistQueryOptions(),
-    enabled: search.open !== undefined,
-  });
+  /*
+   * The checklist's answer says whether there is a Bot computer, which the computer step is honest
+   * about, and names the page a carried link opens, so each step after it can say which. Read from
+   * the start: Check your setup draws the same answer from the cache.
+   */
+  const { data: checklist } = useQuery(setupChecklistQueryOptions());
+  const computerRow = checklist?.rows.find((row) => row.id === "computer");
+  const computer = computerStep(
+    checklist && computerRow?.status === "needs_setup"
+      ? { audience: checklist.audience }
+      : null,
+  );
   const openLabel =
     checklist?.rows
       .map((row) =>
