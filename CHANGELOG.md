@@ -81,9 +81,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 ### Choose how a Bot looks
 
 A Bot's Setup page has a Look section for whoever may edit the Bot: its face, large, the eight
-colours to pick from, and New face, which keeps the colour and draws a different face. A choice
-saves at once and shows wherever the Bot appears, the conversation list and a conversation's header
-included. The choice is the Bot's avatar seed, so nothing is migrated: `PATCH /api/agents/:agentId`
+colours to pick from, and New face, which keeps the colour and draws a different face. The face
+previews each colour as the owner moves through them, and the one they stop on saves after a short
+pause, or when they leave the colours, so browsing makes one save and one audit row. New face saves
+at once. Undo puts back the look from before either. A saved look shows wherever the Bot appears,
+the conversation list and a conversation's header included. The choice is the Bot's avatar seed, so nothing is migrated: `PATCH /api/agents/:agentId`
 takes an optional `avatarSeed`, and a seed may start with a colour, as `moss:knowledge`. A seed that
 names no colour, which is every Bot's until somebody chooses, draws exactly as before. Violet stays
 OpenBot's own, and a `violet:` seed or a colour no Bot has is refused. A tenant package's
