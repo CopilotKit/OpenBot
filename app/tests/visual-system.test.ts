@@ -184,6 +184,63 @@ describe("contrast, checked in both themes", () => {
     });
   }
 
+  /** `ink` drawn at `alpha` over `ground`, as the browser blends it. */
+  function over(ink: string, alpha: number, ground: string): string {
+    const channel = (hex: string, at: number) =>
+      Number.parseInt(hex.slice(at, at + 2), 16);
+    return `#${[1, 3, 5]
+      .map((at) =>
+        Math.round(channel(ink, at) * alpha + channel(ground, at) * (1 - alpha))
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")}`;
+  }
+
+  /*
+   * The focus rings this look draws with the ring colour alone, with no full-strength border beside
+   * them: the outline every element falls back on, and OpenMuse's header and tabs. Each is read at
+   * the strength its class gives it, so a `/50` that halves the ring fails here.
+   */
+  const focusRings = [
+    ["theme.css", styles, /outline-ring(?:\/(\d+))?/g],
+    [
+      "skins/openmuse/frame.tsx",
+      readFileSync(
+        new URL("../src/skins/openmuse/frame.tsx", import.meta.url),
+        "utf8",
+      ),
+      /focus-visible:ring-ring(?:\/(\d+))?/g,
+    ],
+  ] as const;
+
+  test("the focus ring clears 3:1 on the background and on a card, at the strength it is drawn", () => {
+    for (const [file, source, pattern] of focusRings) {
+      const strengths = [...source.matchAll(pattern)].map((match) =>
+        match[1] ? Number(match[1]) / 100 : 1,
+      );
+      expect({ file, rings: strengths.length > 0 }).toEqual({
+        file,
+        rings: true,
+      });
+      for (const [themeName, theme] of themes)
+        for (const ground of ["--background", "--card"])
+          for (const alpha of strengths) {
+            const fill = resolve(theme, ground);
+            const ratio = contrast(
+              over(resolve(theme, "--ring"), alpha, fill),
+              fill,
+            );
+            expect({ file, themeName, ground, clears: ratio >= 3 }).toEqual({
+              file,
+              themeName,
+              ground,
+              clears: true,
+            });
+          }
+    }
+  });
+
   test("what sits on the primary clears 4.5:1", () => {
     for (const [themeName, theme] of themes)
       for (const [on, fill] of [

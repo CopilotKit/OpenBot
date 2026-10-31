@@ -182,7 +182,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                 aria-label={
                   bot ? `${bot.name}, ${status}. Switch Bot` : "Choose a Bot"
                 }
-                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
+                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none"
                 onClick={() => setSheet("bots")}
                 type="button"
               >
@@ -255,7 +255,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
               {TABS.map((item) => {
                 const active = item.id === tab;
                 const className = cn(
-                  "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+                  "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none",
                   active
                     ? "bg-[var(--openmuse-tab-active)]"
                     : "hover:bg-[var(--openmuse-tab-hover)]",
