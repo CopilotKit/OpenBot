@@ -28,6 +28,9 @@ export type ShellWidth = "prose" | "full";
  * bar needs the router, so `PageShell` draws it and passes `bar` to say whether it did; this file
  * imports nothing from the router so the extension can render the same column.
  */
+/** The name the router restores a page's scroll position by. See `router.tsx`. */
+export const PAGE_SCROLLER = "page";
+
 export function PageColumn({
   bar,
   children,
@@ -58,7 +61,10 @@ export function PageColumn({
        * Separate from the centred column below so the scrollbar rides the pane's edge instead of
        * appearing inside the measure with content either side of it.
        */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto"
+        data-scroll-restoration-id={PAGE_SCROLLER}
+      >
         <div
           className={cn(
             /*
@@ -72,8 +78,9 @@ export function PageColumn({
              */
             "mx-auto flex w-full flex-col px-4 pb-16",
             "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
-            // Without a bar above it the heading keeps the full original space.
-            bar ? "pt-8" : "pt-12",
+            // Under the bar: its 56px, then the 32px the heading keeps below it. Without one, the
+            // heading keeps the full original space.
+            bar ? "pt-22" : "pt-12",
             "max-w-3xl",
             className,
           )}

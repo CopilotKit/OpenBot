@@ -81,6 +81,8 @@ import { Route as AuthedAppBotsAgentIdResponsibilitiesRouteImport } from './rout
 import { Route as AuthedAppBotsAgentIdRoutinesRouteImport } from './routes/_authed/_app/bots.$agentId.routines'
 import { Route as AuthedAppBotsAgentIdSetupRouteImport } from './routes/_authed/_app/bots.$agentId.setup'
 import { Route as AuthedAppBotsAgentIdSharingRouteImport } from './routes/_authed/_app/bots.$agentId.sharing'
+import { Route as AuthedAppCapabilitiesSkillsSlugRouteImport } from './routes/_authed/_app/capabilities.skills_.$slug'
+import { Route as AuthedAppCapabilitiesSkillsNewRouteImport } from './routes/_authed/_app/capabilities.skills_.new'
 import { Route as AuthedAdminPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/admin/plugins/$key_.bots.$agentId'
 import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
 
@@ -471,6 +473,18 @@ const AuthedAppBotsAgentIdSharingRoute =
     path: '/bots/$agentId/sharing',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppCapabilitiesSkillsSlugRoute =
+  AuthedAppCapabilitiesSkillsSlugRouteImport.update({
+    id: '/skills_/$slug',
+    path: '/skills/$slug',
+    getParentRoute: () => AuthedAppCapabilitiesRoute,
+  } as any)
+const AuthedAppCapabilitiesSkillsNewRoute =
+  AuthedAppCapabilitiesSkillsNewRouteImport.update({
+    id: '/skills_/new',
+    path: '/skills/new',
+    getParentRoute: () => AuthedAppCapabilitiesRoute,
+  } as any)
 const AuthedAdminPluginsKeyBotsAgentIdRoute =
   AuthedAdminPluginsKeyBotsAgentIdRouteImport.update({
     id: '/plugins/$key_/bots/$agentId',
@@ -554,6 +568,8 @@ export interface FileRoutesByFullPath {
   '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/capabilities/skills/$slug': typeof AuthedAppCapabilitiesSkillsSlugRoute
+  '/capabilities/skills/new': typeof AuthedAppCapabilitiesSkillsNewRoute
   '/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
@@ -625,6 +641,8 @@ export interface FileRoutesByTo {
   '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/capabilities/skills/$slug': typeof AuthedAppCapabilitiesSkillsSlugRoute
+  '/capabilities/skills/new': typeof AuthedAppCapabilitiesSkillsNewRoute
   '/bots/$agentId': typeof AuthedAppBotsAgentIdIndexRoute
   '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
@@ -702,6 +720,8 @@ export interface FileRoutesById {
   '/_authed/_app/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/_authed/_app/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/_authed/_app/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/_authed/_app/capabilities/skills_/$slug': typeof AuthedAppCapabilitiesSkillsSlugRoute
+  '/_authed/_app/capabilities/skills_/new': typeof AuthedAppCapabilitiesSkillsNewRoute
   '/_authed/_app/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/_authed/admin/plugins/$key_/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/_authed/admin/plugins/$key_/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
@@ -778,6 +798,8 @@ export interface FileRouteTypes {
     | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/sharing'
+    | '/capabilities/skills/$slug'
+    | '/capabilities/skills/new'
     | '/bots/$agentId/'
     | '/admin/plugins/$key/bots/$agentId'
     | '/admin/plugins/$key/tools/$tool'
@@ -849,6 +871,8 @@ export interface FileRouteTypes {
     | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/sharing'
+    | '/capabilities/skills/$slug'
+    | '/capabilities/skills/new'
     | '/bots/$agentId'
     | '/admin/plugins/$key/bots/$agentId'
     | '/admin/plugins/$key/tools/$tool'
@@ -925,6 +949,8 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/$agentId/routines'
     | '/_authed/_app/bots/$agentId/setup'
     | '/_authed/_app/bots/$agentId/sharing'
+    | '/_authed/_app/capabilities/skills_/$slug'
+    | '/_authed/_app/capabilities/skills_/new'
     | '/_authed/_app/bots/$agentId/'
     | '/_authed/admin/plugins/$key_/bots/$agentId'
     | '/_authed/admin/plugins/$key_/tools/$tool'
@@ -1441,6 +1467,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppBotsAgentIdSharingRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/capabilities/skills_/$slug': {
+      id: '/_authed/_app/capabilities/skills_/$slug'
+      path: '/skills/$slug'
+      fullPath: '/capabilities/skills/$slug'
+      preLoaderRoute: typeof AuthedAppCapabilitiesSkillsSlugRouteImport
+      parentRoute: typeof AuthedAppCapabilitiesRoute
+    }
+    '/_authed/_app/capabilities/skills_/new': {
+      id: '/_authed/_app/capabilities/skills_/new'
+      path: '/skills/new'
+      fullPath: '/capabilities/skills/new'
+      preLoaderRoute: typeof AuthedAppCapabilitiesSkillsNewRouteImport
+      parentRoute: typeof AuthedAppCapabilitiesRoute
+    }
     '/_authed/admin/plugins/$key_/bots/$agentId': {
       id: '/_authed/admin/plugins/$key_/bots/$agentId'
       path: '/plugins/$key/bots/$agentId'
@@ -1552,12 +1592,16 @@ interface AuthedAppCapabilitiesRouteChildren {
   AuthedAppCapabilitiesMemoryRoute: typeof AuthedAppCapabilitiesMemoryRoute
   AuthedAppCapabilitiesSkillsRoute: typeof AuthedAppCapabilitiesSkillsRoute
   AuthedAppCapabilitiesIndexRoute: typeof AuthedAppCapabilitiesIndexRoute
+  AuthedAppCapabilitiesSkillsSlugRoute: typeof AuthedAppCapabilitiesSkillsSlugRoute
+  AuthedAppCapabilitiesSkillsNewRoute: typeof AuthedAppCapabilitiesSkillsNewRoute
 }
 
 const AuthedAppCapabilitiesRouteChildren: AuthedAppCapabilitiesRouteChildren = {
   AuthedAppCapabilitiesMemoryRoute: AuthedAppCapabilitiesMemoryRoute,
   AuthedAppCapabilitiesSkillsRoute: AuthedAppCapabilitiesSkillsRoute,
   AuthedAppCapabilitiesIndexRoute: AuthedAppCapabilitiesIndexRoute,
+  AuthedAppCapabilitiesSkillsSlugRoute: AuthedAppCapabilitiesSkillsSlugRoute,
+  AuthedAppCapabilitiesSkillsNewRoute: AuthedAppCapabilitiesSkillsNewRoute,
 }
 
 const AuthedAppCapabilitiesRouteWithChildren =
