@@ -52,6 +52,10 @@ const PRODUCT = appConfig.brand.productName;
  * NOTHING HERE BLOCKS ANYTHING. A required gap is drawn plainly, in red, and the step around it still
  * lets the person carry on: they cannot set a server's environment from a browser, and keeping them
  * out of the app would not set it either.
+ *
+ * NO ALARM FOR WHAT A MEMBER CAN'T FIX. A member is told, in one neutral line, that their admin sets
+ * a thing up: no amber or red pill, no "Required", and a summary that counts nothing. The pills and
+ * the counts are for the admin, who can act on them.
  */
 export function SetupChecklist({
   openPage,
@@ -94,7 +98,11 @@ export function SetupChecklist({
           Couldn't check again. Try again.
         </p>
       ) : null}
-      {checklist.isPending ? null : checklist.error ? (
+      {checklist.isPending ? (
+        <p className="type-sub text-muted-foreground" role="status">
+          Checking your setup…
+        </p>
+      ) : checklist.error ? (
         <>
           <p className="type-sub text-destructive" role="alert">
             Couldn't check your setup. Check again, or carry on and look later.
@@ -104,7 +112,9 @@ export function SetupChecklist({
       ) : (
         <>
           <p className="type-sub text-muted-foreground" role="status">
-            {summaryOf(checklist.data.rows)}
+            {checklist.data.audience === "member"
+              ? memberSummaryOf(checklist.data.rows)
+              : summaryOf(checklist.data.rows)}
           </p>
           <PageRows className="mt-0">
             <ul aria-label="Setup">
@@ -116,7 +126,11 @@ export function SetupChecklist({
                   key={row.id}
                 >
                   {at > 0 ? <Separator /> : null}
-                  <SetupItem openPage={openPage} row={row} />
+                  <SetupItem
+                    member={checklist.data.audience === "member"}
+                    openPage={openPage}
+                    row={row}
+                  />
                 </li>
               ))}
             </ul>
@@ -149,6 +163,13 @@ export function summaryOf(rows: SetupRow[]): string {
   return notChecked ? `${needs} ${notChecked}` : needs;
 }
 
+/** A member's line over the list: whether anything is left, and who sees to it, without counting. */
+export function memberSummaryOf(rows: SetupRow[]): string {
+  return rows.every((row) => row.ready)
+    ? "Everything is set up."
+    : "Your admin sets up anything that isn't ready yet.";
+}
+
 /** The pill's words and colours: done green, a gap that blocks red, everything else amber. */
 function pillFor(row: SetupRow) {
   if (row.status === "ready")
@@ -168,13 +189,16 @@ function pillFor(row: SetupRow) {
 
 function SetupItem({
   row,
+  member,
   openPage,
 }: {
   row: SetupRow;
+  /** A member reads a gap as one neutral line, the server's detail, with no pill. */
+  member: boolean;
   openPage: (target: { label: string; path: string }) => void;
 }) {
   const Icon = ICONS[row.id];
-  const pill = pillFor(row);
+  const pill = member && !row.ready ? null : pillFor(row);
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -184,7 +208,7 @@ function SetupItem({
         {/* `line-clamp-none` makes the title a block, so the tag keeps its own space. */}
         <ItemTitle className="line-clamp-none [overflow-wrap:anywhere]">
           {row.title}
-          {row.required ? (
+          {row.required && !member ? (
             <span className="type-caption ms-2 whitespace-nowrap font-normal text-muted-foreground">
               Required
             </span>
@@ -194,16 +218,18 @@ function SetupItem({
           {row.detail}
         </ItemDescription>
       </ItemContent>
-      <ItemActions className="shrink-0 self-start">
-        <span
-          className={cn(
-            "type-caption rounded-full px-2 py-0.5 font-medium",
-            pill.tone,
-          )}
-        >
-          {pill.label}
-        </span>
-      </ItemActions>
+      {pill ? (
+        <ItemActions className="shrink-0 self-start">
+          <span
+            className={cn(
+              "type-caption rounded-full px-2 py-0.5 font-medium",
+              pill.tone,
+            )}
+          >
+            {pill.label}
+          </span>
+        </ItemActions>
+      ) : null}
       {!row.ready && row.fix ? (
         <ItemFooter className="pl-11">
           <Fix fix={row.fix} openPage={openPage} />
