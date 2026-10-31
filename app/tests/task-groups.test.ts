@@ -321,7 +321,11 @@ test("a started task's card goes under the Bot's words in its turn, before the p
       ],
     },
     { id: "r1", role: "tool", toolCallId: "call-1", content: "{}" },
-    { id: "a2", role: "assistant", content: "On it." },
+    {
+      id: "a2",
+      role: "assistant",
+      content: "On it. I'll put the result in Tasks.",
+    },
     { id: "u2", role: "user", content: "Thanks" },
   ];
   expect(
