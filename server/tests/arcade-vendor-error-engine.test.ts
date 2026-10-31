@@ -197,7 +197,7 @@ describe("a refusal from Arcade is an Error this deployment wrote", () => {
     });
   }
 
-  test("the body's error.name still reaches callTool's authorize sentence", async () => {
+  test("the body's error.name still reaches callTool's lost-account answer", async () => {
     engine();
     const { actions } = createArcadeClient("never-dialled");
     useArcadeClient(actions);
@@ -209,8 +209,10 @@ describe("a refusal from Arcade is an Error this deployment wrote", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
+      "Arcade no longer allows Gmail.SendEmail on this account.",
     );
+    // Answered as a lost account, which the store turns into the Reconnect card.
+    expect(result.accountGone).toBe(true);
     // AND THE VENDOR'S WORDS ARE NOT IN WHAT A MODEL IS HANDED.
     expect(result.text).not.toContain(BEARER);
   });

@@ -997,6 +997,18 @@ export function connectionMethods(context: StoreContext) {
     },
 
     /**
+     * The name a person's grants are filed under at this deployment's broker NOW: their own id, or
+     * the one `brokered_identities` holds for them, which only a single-user deployment's one person
+     * has. Read the way every resolution reads it ({@link personAccountOf}).
+     *
+     * For the verifier, which has to tell an attempt minted under that name from one minted under a
+     * name the person has since been given a replacement for. See `/arcade/verify`.
+     */
+    async personAccount(userId: string): Promise<AccountRef> {
+      return personAccountOf(userId);
+    },
+
+    /**
      * The other apps this deployment holds a connection for that share THIS app's connection: the
      * apps on the same vendor identity AND the same AUTH PROVIDER, never the provider alone. The
      * reason is written out on {@link connectionSiblings}; this is that computation over the rows

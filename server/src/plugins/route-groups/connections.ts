@@ -2147,6 +2147,51 @@ export function mountConnectionRoutes({
       const authId = attempt.authId;
 
       /*
+       * AN ATTEMPT MINTED UNDER A NAME THIS PERSON NO LONGER HAS IS REFUSED, AND NOTHING AT THE
+       * VENDOR IS TOUCHED.
+       *
+       * A person's name at the broker changes in one way only: a single-user deployment that was
+       * filed under `dev-local-user` is given its own name at a start after an upgrade (see
+       * `ensureSingleUserIdentity`). A consent begun before that restart comes back holding the old
+       * name, and `dev-local-user` at Arcade is shared by every other single-user OpenBot on the
+       * key. Finished, `confirm_user` would complete a grant under that shared name, and the
+       * freshness check below would read the new name as an account that moved and WITHDRAW the
+       * old one's connection, which is other installs' grants. So it is refused before the vendor
+       * is asked anything: the flow at Arcade is left to lapse unconfirmed, and the attempt is
+       * freed so Connect can be pressed again at once under the new name.
+       *
+       * THIS IS WHAT COMPOSIO DOES IN THE SAME CASE, by construction rather than by a check. A
+       * Composio consent finished under the old name is never recorded under the new one, because
+       * the confirm asks Composio about the new name and hears no; nothing is withdrawn, and the
+       * person connects again. Here the refusal says so instead of leaving them to find out.
+       *
+       * Only a PERSON's attempt can be stale this way. A Shared app's identity is minted per app
+       * and a retired one is exactly what the freshness check below exists to withdraw.
+       */
+      if (attemptAccount.holder === "person") {
+        const filed = await store.personAccount(attemptAccount.userId);
+        if (filed.vendorUserId !== attemptAccount.vendorUserId) {
+          console.error(
+            JSON.stringify({
+              type: "arcade-attempt-under-retired-name",
+              server: attempt.serverId,
+              action: attempt.action,
+              authorizationId: authId,
+              attemptStartedAt: attempt.createdAt,
+              note: "A person returned from a consent begun under the name this deployment filed them under before it was given its own. Nothing was confirmed or withdrawn at the vendor, because that name may be shared by other deployments; the flow there lapses unconfirmed. The attempt was cleared so the person can connect again under the current name.",
+            }),
+          );
+          await store
+            .discardAuthorizationAttempt({
+              actorId,
+              createdAt: attempt.createdAt,
+            })
+            .catch(() => false);
+          return refusedWith("name-changed");
+        }
+      }
+
+      /*
        * THE BINDING. `handle` IS AN OPAQUE STRING THE SEAM DOES NOT INTERPRET — the vendor's word for
        * it stops at the adapter, and nothing here parses it, compares it to a scheme or reads a
        * provider out of it.

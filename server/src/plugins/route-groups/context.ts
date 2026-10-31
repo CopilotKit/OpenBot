@@ -175,6 +175,9 @@ export const AUTHORIZATION_REFUSALS = [
   "authorization-failed",
   // The app's account context moved on while the consent was open (D28).
   "context-changed",
+  // The consent was begun under the name this person was filed under before the deployment gave
+  // them their own, so it was refused before the vendor was asked and nothing there was touched.
+  "name-changed",
   // The person can no longer act on the app's account — a Shared app's administrator was demoted,
   // or the app itself stopped resolving to an account — so the consent was closed and nothing moved.
   "not-permitted",

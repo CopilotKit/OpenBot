@@ -123,8 +123,10 @@ describe("createArcadeClient", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
+      "Arcade no longer allows Gmail.SendEmail on this account.",
     );
+    // Answered as a lost account, which the store turns into the Reconnect card.
+    expect(result.accountGone).toBe(true);
   });
 
   test("a non-SDK error is rethrown as itself, not as a synthetic failure", async () => {

@@ -448,8 +448,8 @@ export type McpCallResult = {
   truncated: boolean;
   /**
    * The vendor no longer holds the account this call was made in, though this deployment still has
-   * a row for it. Only the Composio transport sets it, and only on an `isError` result; the store
-   * turns it into a refusal that offers Reconnect. Absent everywhere else.
+   * a row for it. The brokered transports set it, Composio and Arcade, and only on an `isError`
+   * result; the store turns it into a refusal that offers Reconnect. Absent everywhere else.
    */
   accountGone?: true;
 };

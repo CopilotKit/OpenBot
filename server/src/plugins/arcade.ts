@@ -616,6 +616,27 @@ const failureResult = (text: string): McpCallResult => ({
 });
 
 /**
+ * ARCADE REFUSING THIS ACCOUNT THE ACTION IS COMPOSIO'S LOST ACCOUNT, AND IS ANSWERED AS ONE.
+ *
+ * A call reaches Arcade only once this deployment holds a connection row for the account (see
+ * `grantIsLocal` in `./arcade-adapter`), and Connect asks Arcade for everything the app needs. So
+ * Arcade answering that the account must authorize the action means the grant the row stands for
+ * is gone there: withdrawn at the provider, ended in Arcade's dashboard, or narrower than the action
+ * needs. That is the state Composio reports as a lost account, and `accountGone` is how the store
+ * learns it from either transport: it ends the row, as a confirm hearing the same no would, and
+ * refuses with the app card that offers Reconnect, so the person sees what a lost Composio account
+ * shows and can put it right from the conversation.
+ *
+ * It used to be a plain failure telling the model to authorize the action in Connections, which
+ * left the row reading connected on every screen while every call failed. The sentence here now
+ * reaches the trail only; what the person reads is the card's.
+ */
+const accountGoneResult = (toolName: string): McpCallResult => ({
+  ...failureResult(`Arcade no longer allows ${toolName} on this account.`),
+  accountGone: true,
+});
+
+/**
  * Call one Arcade action as the connection's actor.
  *
  * THE ACTION IN THE REFUSAL COMES FROM THE CALL SITE, never from the error: `APIError` in
@@ -623,8 +644,9 @@ const failureResult = (text: string): McpCallResult => ({
  *
  * NO URL IS EVER IN THE SENTENCE, ON ANY PATH. The `authorization.url` is a bearer capability:
  * whoever opens it attaches an account to the identity the flow was minted for. It is never
- * returned to a model, logged, put in an error body or written to an audit row. The refusal names
- * the Settings page, where the link is minted by an authenticated request whose actor is known.
+ * returned to a model, logged, put in an error body or written to an audit row. An authorization
+ * Arcade asks for is answered as a lost account ({@link accountGoneResult}), whose card mints a
+ * fresh link through Connect, by an authenticated request whose actor is known.
  *
  * THE SUCCESS PATH IS COVERED BY THAT SAME PROMISE, and this is where it is easiest to break. A 200
  * is not a safe envelope: `ExecuteToolResponse.output.authorization` is the SAME
@@ -659,11 +681,7 @@ export async function callTool(
       input: args,
       user_id: connection.actorId,
     });
-    if (answer.output?.authorization) {
-      return failureResult(
-        `${toolName} has not been authorized on this account yet. Authorize it in Connections and ask again.`,
-      );
-    }
+    if (answer.output?.authorization) return accountGoneResult(toolName);
     if (answer.success === false || answer.output?.error) {
       return failureResult(`Arcade could not run ${toolName}.`);
     }
@@ -684,9 +702,7 @@ export async function callTool(
   } catch (thrown) {
     const failure = arcadeFailure(thrown);
     if (failure && isAuthorizationRequired(failure)) {
-      return failureResult(
-        `${toolName} has not been authorized on this account yet. Authorize it in Connections and ask again.`,
-      );
+      return accountGoneResult(toolName);
     }
     return failureResult(`Arcade could not run ${toolName}.`);
   }

@@ -398,7 +398,9 @@ A deployment with such a row keeps using `dev-local-user`, so nothing is disconn
 reconnects; it gets its own id at the first start after its last such connection is disconnected. A
 deployment with none gets its own id at once. On Arcade that includes one whose consents were given
 at Arcade without coming back through this deployment, which approves its apps once more under the
-new id. A deployment that signs people in is unchanged. To see the id in use, run
+new id. A consent begun under `dev-local-user` before that start and finished after it is refused,
+and the person is asked to press Connect again; nothing held under `dev-local-user`, which other
+deployments may share, is confirmed or withdrawn. A deployment that signs people in is unchanged. To see the id in use, run
 `select provider, vendor_user_id from brokered_identities`; no row for the active broker means
 `dev-local-user`. That is also the `--user` to give `bun run composio:smoke`.
 

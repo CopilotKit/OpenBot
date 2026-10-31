@@ -505,6 +505,7 @@ test("the reasons the verifier can refuse with are a closed set", () => {
     "not-finished",
     "authorization-failed",
     "context-changed",
+    "name-changed",
     "not-permitted",
     "cancelled",
     "cancelled-left-live",

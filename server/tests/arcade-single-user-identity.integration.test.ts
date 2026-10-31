@@ -9,6 +9,8 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
+import { eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import postgres from "postgres";
 import { createAuditStore } from "../src/audit";
@@ -22,6 +24,7 @@ import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
 import {
   agents,
+  auditEvents,
   brokeredConnections,
   brokeredIdentities,
   mcpServers,
@@ -32,7 +35,7 @@ import { useArcadeClient } from "../src/plugins/arcade";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { seedPeople } from "./support/people";
@@ -56,6 +59,11 @@ import { seedPeople } from "./support/people";
  * through the verifier, which writes the row. A deployment that already holds Arcade grants under
  * `dev-local-user` keeps that name, the name survives a restart, and a deployment that signs people
  * in files them under their own ids as before.
+ *
+ * AND THE TWO EDGES OF RECORDING GRANTS HERE. A Bot's call that Arcade no longer allows is answered
+ * with the card a lost Composio account shows, and the row goes. A consent begun under the shared
+ * name before an upgrade gave the deployment its own is refused when it comes back, and nothing held
+ * at Arcade under `dev-local-user`, which other installs share, is confirmed or withdrawn.
  *
  * REAL DATABASES, REAL ROUTES, THE REAL SINGLE-USER GUARD, THE REAL STORE, THE REAL ADAPTER AND THE
  * REAL SDK. Arcade is faked at its HTTP boundary only, through `ARCADE_BASE_URL`, as
@@ -211,6 +219,8 @@ function arcadeProject() {
   /** Every tool Arcade ran, as whom and in which mailbox. */
   const ran: { userId: string; tool: string; mailbox: string }[] = [];
   const deleted: string[] = [];
+  /** Every `confirm_user`, by the `user_id` it named: each one completes a grant under that name. */
+  const confirmed: string[] = [];
   /** Anything asked of this engine that it does not serve. */
   const unexpected: string[] = [];
   let next = 0;
@@ -327,6 +337,7 @@ function arcadeProject() {
       );
     }
     if (route === "POST /v1/auth/confirm_user") {
+      confirmed.push(String(body.user_id));
       const id = byHandle.get(String(body.flow_id));
       const flow = id ? flows.get(id) : undefined;
       if (!id || !flow) return refuse(404, "not_found", "No such flow.");
@@ -433,6 +444,7 @@ function arcadeProject() {
     minted,
     ran,
     deleted,
+    confirmed,
     unexpected,
     grant,
     /**
@@ -520,15 +532,22 @@ const signedInAs =
  * `settled` IS WHAT `ensureSingleUserIdentity` ANSWERED, and `identity` the name calls go out
  * under, which is the person's own id where nothing was settled.
  */
-async function boot(url: string, signedIn?: string) {
+async function boot(
+  url: string,
+  signedIn?: string,
+  /** False for a deployment as it ran before it could be given a name of its own. */
+  { named = true }: { named?: boolean } = {},
+) {
   const database = open(url);
   await initializeDevActorUser(database, signedIn === undefined);
   if (signedIn) await seedPeople(database, [signedIn]);
   const actor = signedIn ?? DEV_ACTOR.id;
-  const settled = await ensureSingleUserIdentity(database, {
-    singleUser: signedIn === undefined,
-    broker: arcadeWired(),
-  });
+  const settled = named
+    ? await ensureSingleUserIdentity(database, {
+        singleUser: signedIn === undefined,
+        broker: arcadeWired(),
+      })
+    : null;
   const identity = settled ?? actor;
   const store = createPluginStore({
     brokerProvider: "arcade",
@@ -930,6 +949,107 @@ describe("a deployment that signs people in", () => {
     expect((await deployment.call(SEND)).text).toContain("alice@example.test");
     expect(project.ran).toEqual([
       { userId: alice, tool: SEND, mailbox: "alice@example.test" },
+    ]);
+    expect(project.unexpected).toEqual([]);
+  });
+});
+
+describe("a Bot's call on an Arcade grant that is gone", () => {
+  test("shows the card a lost Composio account shows, ends the row, and Connect puts it back", async () => {
+    const deployment = await newDeployment();
+    await connectGmail(deployment, "me@example.test");
+
+    // The person removes OpenBot's access at Google, and Arcade's connection goes with it.
+    project.connections.splice(0);
+
+    const refused = await deployment.call(SEND).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(PluginRefusedError);
+    // The same card, the same reason and the same words `calls.ts` gives a lost Composio account.
+    expect(readConnectPrompt((refused as Error).message)).toEqual({
+      serverId: ROW,
+      title: "Gmail",
+      reason: "reconnect",
+      at: expect.any(String),
+      message:
+        "Your Gmail account is no longer connected, so this wasn't done. Reconnect it and ask again.",
+    });
+    // The row went with it, so every screen says not connected, and the trail says why.
+    expect(await rowsIn(deployment.database)).toEqual([]);
+    const failed = await deployment.database
+      .select({ payload: auditEvents.payload })
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "mcp.call_failed"));
+    expect(failed).toMatchObject([
+      {
+        payload: {
+          tool: "SendEmail",
+          failure: "Arcade no longer allows Gmail.SendEmail on this account.",
+        },
+      },
+    ]);
+
+    // Reconnect is Connect, under the same name, and the Bot sends again.
+    await connectGmail(deployment, "me@example.test");
+    expect((await deployment.call(SEND)).text).toContain("me@example.test");
+    expect(project.unexpected).toEqual([]);
+  });
+});
+
+describe("a consent begun before the upgrade gave a deployment its own Arcade name", () => {
+  test("is refused when it comes back, and nothing held at Arcade under dev-local-user is confirmed or withdrawn", async () => {
+    const url = await freshDatabase();
+    // Before the upgrade: no name of its own, so Connect went out as `dev-local-user`.
+    const before = await boot(url, undefined, { named: false });
+    await enableGmail(before);
+    // Another install on the same key already holds a read grant under that shared name.
+    project.grant(
+      DEV_ACTOR.id,
+      SCOPES[READ] ?? [],
+      "someone-else@example.test",
+    );
+    const theirs = structuredClone(project.connections);
+
+    const pressed = await before.app.request(
+      `/api/plugins/servers/${ROW}/connect`,
+      { method: "POST" },
+    );
+    expect(pressed.status).toBe(200);
+    const { authorizationUrl } = (await pressed.json()) as {
+      authorizationUrl: string;
+    };
+    expect(project.minted.map((mint) => mint.userId)).toEqual([DEV_ACTOR.id]);
+    await close(before.database);
+
+    // The upgrade. Nothing of Arcade's is recorded here, so the next start gives it its own name.
+    const after = await boot(url);
+    expect(after.settled).toStartWith(`${DEV_ACTOR.id}:`);
+
+    // The person finishes Google's consent in the tab they opened before, and comes back.
+    const flow = project.consent(authorizationUrl, "me@example.test");
+    const back = await after.app.request(
+      `/api/plugins/arcade/verify?flow_id=${flow}`,
+    );
+    expect(back.status).toBe(303);
+    expect(back.headers.get("location")).toBe(
+      `${APP_URL}/connections?authorized=name-changed`,
+    );
+
+    // Nothing under the shared name moved: not confirmed, not extended, not deleted.
+    expect(project.confirmed).toEqual([]);
+    expect(project.deleted).toEqual([]);
+    expect(project.connections).toEqual(theirs);
+    // Nothing recorded here, and the attempt is cleared so Connect works again at once.
+    expect(await rowsIn(after.database)).toEqual([]);
+    expect(await after.database.select().from(pendingAuthorizations)).toEqual(
+      [],
+    );
+    await connectGmail(after, "me@example.test");
+    expect(project.connections.map((row) => row.user_id)).toEqual([
+      DEV_ACTOR.id,
+      after.identity,
     ]);
     expect(project.unexpected).toEqual([]);
   });

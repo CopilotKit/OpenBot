@@ -106,7 +106,8 @@ under `dev-local-user` keeps that id, so nobody reconnects. See
 An Arcade app now has Connect, under Connections and on a Bot's app card, which asks Arcade for
 everything the app's actions need in one consent. The action list still approves one action at a
 time. Every Arcade connection is recorded in OpenBot when it is made or confirmed and removed when
-it is disconnected, and a Bot's call needs it, exactly as on Composio. See
+it is disconnected, and a Bot's call needs it, exactly as on Composio. A call Arcade no longer
+allows shows the Reconnect card a lost Composio account shows, instead of a plain error. See
 [Arcade](docs/plugins/arcade.md#connect-asks-for-the-whole-app-and-each-action-can-still-be-approved-alone).
 
 ### A computer closes browsers nobody is using when its memory runs high
