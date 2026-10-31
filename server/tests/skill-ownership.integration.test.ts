@@ -345,3 +345,7 @@ describe("what a person may do over HTTP", () => {
     expect(slugs).not.toContain(bobSkill);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

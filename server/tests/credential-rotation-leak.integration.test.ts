@@ -162,3 +162,7 @@ describe("a rotation the database refuses", () => {
     expect(sentence).not.toContain("ciphertext");
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

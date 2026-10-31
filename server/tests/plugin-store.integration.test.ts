@@ -8236,3 +8236,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
     expect(written).not.toContain(faultCredentialId ?? "<none>");
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

@@ -1,5 +1,5 @@
 // server/tests/shared-gated-mode.integration.test.ts
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -152,4 +152,8 @@ describe("connectionTokenFor's gatedMode guard", () => {
     );
     expect(sentAs).toEqual([]);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

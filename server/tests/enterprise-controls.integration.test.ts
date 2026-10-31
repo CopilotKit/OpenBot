@@ -967,3 +967,7 @@ describe("SCIM 2.0 through Better Auth", () => {
     expect(after).toEqual([]);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

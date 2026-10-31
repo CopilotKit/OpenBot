@@ -5226,3 +5226,7 @@ test("a connect spends its check on the account it just made", async () => {
  * action the check spent — is asserted by the check-does-not-come-back-clean test above, which now
  * reaches that state by the ordinary path instead of only through a vendor that would not act.
  */
+
+afterAll(async () => {
+  await database.$client.close();
+});

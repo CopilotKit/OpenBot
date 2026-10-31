@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import {
   auditQueryFromUrl,
@@ -290,4 +290,8 @@ describe("what started a run", () => {
 
     expect(reattribute()).rejects.toThrow();
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

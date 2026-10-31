@@ -251,3 +251,7 @@ describe("a hop, against the database", () => {
     });
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

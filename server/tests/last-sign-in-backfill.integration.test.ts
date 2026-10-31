@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { sessions, users } from "../src/db/schema";
@@ -111,4 +111,8 @@ describe("the backfill migration", () => {
     // Nothing to backfill from is the case the pull request says it cannot fix, said out loud here.
     expect(observed.get(neverHere)).toBeNull();
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

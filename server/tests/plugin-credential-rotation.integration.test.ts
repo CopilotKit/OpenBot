@@ -215,3 +215,7 @@ describe("reconnecting the same person to the same server", () => {
     expect(connection?.credentialId).toBe(live(all)[0]?.id as string);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

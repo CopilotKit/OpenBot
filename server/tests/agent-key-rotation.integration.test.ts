@@ -159,3 +159,7 @@ describe("editing a Bot's key", () => {
     expect(await liveKeysFor(profile.id)).toHaveLength(0);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});
