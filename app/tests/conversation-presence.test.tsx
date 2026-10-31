@@ -18,6 +18,7 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, useState } from "react";
+import { ApprovalCard } from "@/components/approvals/approval-card";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { Composer } from "@/components/channels/composer/composer";
 import {
@@ -320,6 +321,22 @@ describe("the header's orb and the line under the name", () => {
       ]),
     });
     expect(elsewhere.line()).toBe("");
+  });
+
+  test("Needs you is a button that takes the person to the waiting card", async () => {
+    const inbox = inboxWith([{ threadId: THREAD, status: "pending" }]);
+    const [request] = inbox.requests;
+    if (!request) throw new Error("no request");
+    const { view } = renderConversation(
+      <ApprovalCard onDecide={() => {}} request={request} />,
+      { inbox },
+    );
+    const button = view.getByRole("button", { name: "Needs you" });
+    const card = view.container.querySelector("[data-approval-waiting]");
+    expect(card).not.toBeNull();
+    expect(document.activeElement).not.toBe(card);
+    await act(async () => button.click());
+    expect(document.activeElement).toBe(card);
   });
 
   test("Needs you comes before the step the Bot is on", () => {

@@ -73,3 +73,17 @@ test("a state passed in reaches every face, a group's included", () => {
   // The dot is about the conversation, so it stays whatever the faces show.
   expect(group.getByText("Working…")).toBeTruthy();
 });
+
+test("a conversation waiting on the person has a needs dot, ahead of busy, and says so", () => {
+  const view = render(
+    <ChannelAvatar needsYou participantIds={["expenses"]} typing />,
+  );
+  const said = view.getByText("Needs you");
+  expect(said.className).toContain("sr-only");
+  expect(said.parentElement?.className).toContain("bg-status-needs");
+  // One dot, and it is the person's turn, not the Bot working.
+  expect(view.queryByText("Working…")).toBeNull();
+  expect(view.container.querySelectorAll(".rounded-full.ring-2")).toHaveLength(
+    1,
+  );
+});

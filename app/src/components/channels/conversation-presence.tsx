@@ -462,9 +462,23 @@ export function ConversationOrb({
 }
 
 /**
+ * Bring the first card waiting on the person into view and put focus on it, for "Needs you". The
+ * card lives in the transcript, far from the header, and marks itself while it waits
+ * (`ApprovalCard`). Without one on screen, such as a card on an earlier page of the conversation,
+ * nothing moves.
+ */
+export function showWaitingCard() {
+  const card = document.querySelector<HTMLElement>("[data-approval-waiting]");
+  if (!card) return;
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  card.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+  card.focus({ preventScroll: true });
+}
+
+/**
  * The line under the conversation's name: "Working · Searching the web" while the Bot works,
  * "Working" alone for a run the server resumed, "Needs you" while an approval waits here, and
- * nothing at rest. Empty, it takes no height, so the name sits level with the orb.
+ * nothing at rest. "Needs you" is a button that takes the person to the card waiting on them. Empty, it takes no height, so the name sits level with the orb.
  *
  * Always mounted, so the live region is there before the first step arrives: a region added with
  * its text already in it is not announced. The step shimmers as a running tool line does, and stops
@@ -479,7 +493,13 @@ export function ConversationStatusLine({ className }: { className?: string }) {
       className={cn("type-caption truncate text-muted-foreground", className)}
     >
       {status.kind === "needs-you" ? (
-        <span className="font-medium text-status-needs">Needs you</span>
+        <button
+          className="rounded-sm font-medium text-status-needs underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={showWaitingCard}
+          type="button"
+        >
+          Needs you
+        </button>
       ) : status.kind === "working" ? (
         <>
           <span className="font-medium text-status-working">Working</span>

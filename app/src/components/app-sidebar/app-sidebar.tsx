@@ -33,6 +33,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { threadsNeedingYouOptions } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelSummary,
@@ -167,10 +168,13 @@ function ChannelRow({
   channel,
   animateOrder,
   emphasis,
+  needsYou,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
   emphasis: MessageListEmphasis;
+  /** An approval or a question in this conversation waits on the person. */
+  needsYou: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -207,6 +211,7 @@ function ChannelRow({
         unread={unread}
         // A turn running, or work the conversation waits on between turns: a hop, a routine.
         busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
+        needsYou={needsYou}
       />
     </motion.div>
   );
@@ -299,6 +304,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const animateOrder =
     !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
+  // The roster's one poll of the inbox, for the rows waiting on the person.
+  const needsYou = useQuery(threadsNeedingYouOptions());
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -408,6 +415,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   key={channel.id}
                   animateOrder={animateOrder}
                   channel={channel}
+                  needsYou={needsYou.data?.includes(channel.threadId) ?? false}
                 />
               ))}
             </AnimatePresence>

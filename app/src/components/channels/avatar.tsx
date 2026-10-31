@@ -13,7 +13,9 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
  * `[&_svg:not([class*='size-'])]:size-4`.
  *
  * `typing` marks a channel whose Bot is mid-turn: every orb works, and a still dot at the
- * bottom-right says so without moving the row's layout. `state` sets what the orbs show instead.
+ * bottom-right says so without moving the row's layout. `needsYou` marks one waiting on the person
+ * (an approval or a question), with the same dot in the needs colour; it outranks busy, since the
+ * Bot cannot go on until the person answers. `state` sets what the orbs show instead.
  *
  * Where Bots are orbs (`useBotLook`), each is drawn from its `avatarSeed`, as `AbstractAvatar`
  * draws it, so a Bot is one color everywhere; a skin that has not opted in keeps the faces. The orbs
@@ -24,11 +26,14 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
   size = 32,
   typing = false,
+  needsYou = false,
   state = typing ? "working" : "idle",
 }: {
   participantIds: string[];
   size?: number;
   typing?: boolean;
+  /** An approval or a question in the conversation waits on the person. */
+  needsYou?: boolean;
   /** What every orb shows. Working while `typing`, resting otherwise. A face shows no state. */
   state?: BotOrbState;
 }) {
@@ -51,7 +56,11 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   return (
     <div className="relative" style={{ height: size, width: size }}>
       {avatar}
-      {typing ? <BusyDot /> : null}
+      {needsYou ? (
+        <StatusDot label="Needs you" tone="bg-status-needs" />
+      ) : typing ? (
+        <StatusDot label="Working…" tone="bg-status-working" />
+      ) : null}
     </div>
   );
 });
@@ -171,15 +180,17 @@ function GroupFaces({
 }
 
 /**
- * A still dot in the working colour, ringed so it sits on the avatar as a badge rather than floating
- * over it. Still on purpose: reduced motion stills the orb, and a skin's faces show no state at all,
- * so the orb working alone would not read as busy from across the roster. The ring is the ground the
- * avatar sits on, the sidebar's own unless a row lit behind it sets `--avatar-ground`.
+ * A still dot in a status colour, ringed so it sits on the avatar as a badge rather than floating
+ * over it: working, or needs you. Still on purpose: reduced motion stills the orb, and a skin's faces
+ * show no state at all, so the avatar alone would not read from across the roster. The ring is the
+ * ground the avatar sits on, the sidebar's own unless a row lit behind it sets `--avatar-ground`.
  */
-function BusyDot() {
+function StatusDot({ label, tone }: { label: string; tone: string }) {
   return (
-    <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-status-working ring-2 ring-(--avatar-ground,var(--sidebar))">
-      <span className="sr-only">Working…</span>
+    <span
+      className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-(--avatar-ground,var(--sidebar)) ${tone}`}
+    >
+      <span className="sr-only">{label}</span>
     </span>
   );
 }

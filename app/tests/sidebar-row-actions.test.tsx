@@ -105,7 +105,7 @@ beforeEach(() => {
   );
 });
 
-function renderSidebar(channels: ChannelSummary[]) {
+function renderSidebar(channels: ChannelSummary[], inbox?: unknown) {
   served = channels;
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -134,6 +134,7 @@ function renderSidebar(channels: ChannelSummary[]) {
     pages: [{ channels, nextCursor: null }],
     pageParams: [""],
   });
+  if (inbox) queryClient.setQueryData(["approvals"], inbox);
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
@@ -250,4 +251,48 @@ test("Delete from the … menu is confirmed before anything is deleted", async (
 
   await user.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(requests).toContain("DELETE /api/channels/c1"));
+});
+
+test("a conversation waiting on the person says so on its row, for an approval or a question", async () => {
+  const { view } = renderSidebar(
+    [
+      conversation("a", "Pay the invoice"),
+      conversation("b", "Plan the offsite"),
+      conversation("c", "Quiet one"),
+    ],
+    {
+      enabled: true,
+      requests: [
+        {
+          id: "r-1",
+          status: "pending",
+          createdAt: "2026-10-30T00:00:00.000Z",
+          action: { threadId: "thread-a", toolRef: "computer_click" },
+        },
+        {
+          id: "r-2",
+          status: "completed",
+          createdAt: "2026-10-30T00:00:00.000Z",
+          action: { threadId: "thread-c", toolRef: "computer_click" },
+        },
+      ],
+      rules: [],
+      teamRules: [],
+      questions: [
+        {
+          id: "q-1",
+          botId: "expenses",
+          threadId: "thread-b",
+          question: "Which week?",
+          createdAt: "2026-10-30T00:00:00.000Z",
+        },
+      ],
+    },
+  );
+  const invoice = await view.findByRole("link", { name: /Pay the invoice/ });
+  await waitFor(() => expect(invoice.textContent).toContain("Needs you"));
+  const offsite = view.getByRole("link", { name: /Plan the offsite/ });
+  expect(offsite.textContent).toContain("Needs you");
+  const quiet = view.getByRole("link", { name: /Quiet one/ });
+  expect(quiet.textContent).not.toContain("Needs you");
 });
