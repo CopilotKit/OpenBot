@@ -37,8 +37,9 @@ logs `intelligence-entitlement-not-ready`, naming the fix, when the answer is no
 
 `MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
-server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and creating a
-coworker without its own endpoint is refused. A leftover token with no URL is ignored. The
+server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and a coworker
+created without its own endpoint runs in the server as a built-in Bot on its role description. A
+leftover token with no URL is ignored. The
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
 at `agent-langgraph` on a laptop.
 
@@ -72,8 +73,9 @@ at `agent-langgraph` on a laptop.
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
-in a sandboxed iframe, and A2UI 1.0 interfaces built from its 18 basic components. Their buttons send
-their named action and the values entered back to the current conversation's Bot.
+in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
+standard component except Map, Favicon, LinkCard and Citation). Their buttons send their named action
+and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.
@@ -1004,6 +1006,10 @@ When optional SPIRE services are used:
 - computers read `SPIFFE_ENDPOINT_SOCKET`;
 - Compose also uses `SPIRE_JOIN_TOKEN` and `COMPOSE_PROJECT_NAME`.
 
+A computer fetches its identity and reports it on its own `/health` route. Nothing checks it yet:
+the server does not ask for it, and `scripts/start.sh` and the Helm chart do not start SPIRE. It
+names a computer; it does not yet gate anything.
+
 ## Images
 
 Every service `docker-compose.yml` can build is published by a release, so a machine can run the
@@ -1237,6 +1243,12 @@ sources:
 ```
 
 Supported source types are `google-drive` and `microsoft-onedrive`.
+
+The server checks this file at startup and refuses a malformed one, but nothing reads the sources
+yet. The connector that used them indexed a whole Drive with one service account, so every answer
+came back as the deployment rather than as the person asking, and it was removed. There is no
+OneDrive connector. What the Knowledge Bot can read is whatever its grants reach: Google Drive or
+Notion, connected by each person under Connections.
 
 ### `skills.yaml` (optional)
 
