@@ -3,15 +3,15 @@
  * line, the computer's step log and an approval card for the same step all say the same words.
  */
 
-/** A step that happened. */
+/** A step that happened, as a whole phrase like the ones below: "Filled in a field". */
 export const BROWSER_STEP_DONE: Record<string, string> = {
-  computer_navigate: "Opened page",
-  computer_read: "Read page",
-  computer_snapshot: "Inspected page",
-  computer_click: "Clicked on page",
-  computer_type: "Filled in field",
-  computer_key: "Pressed key",
-  computer_scroll: "Scrolled page",
+  computer_navigate: "Opened a page",
+  computer_read: "Read the page",
+  computer_snapshot: "Inspected the page",
+  computer_click: "Clicked on the page",
+  computer_type: "Filled in a field",
+  computer_key: "Pressed a key",
+  computer_scroll: "Scrolled the page",
 };
 
 /**
