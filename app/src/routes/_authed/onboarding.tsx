@@ -146,7 +146,13 @@ function RosterStep() {
               // Dimmed and labelled, so an invented name never reads as a Bot this deployment has.
               className={`bg-card p-4 rounded-lg flex flex-row gap-4 items-center ${a.example ? "opacity-70" : ""}`}
             >
-              <AbstractAvatar name={a.name} seed={a.avatarSeed} size={40} />
+              {/* The heading beside it names the Bot, so the face isn't announced too. */}
+              <AbstractAvatar
+                decorative
+                name={a.name}
+                seed={a.avatarSeed}
+                size={40}
+              />
               <div className="flex min-w-0 flex-col">
                 <h3 className="line-clamp-1 text-base font-medium tracking-tight">
                   {a.name}

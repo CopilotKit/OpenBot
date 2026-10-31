@@ -6,6 +6,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render } from "@testing-library/react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
@@ -953,6 +954,20 @@ describe("a Bot's face and OpenBot's mark", () => {
     expect(orb.style.width).toBe("36px");
     expect(avatar.querySelector("canvas")).not.toBeNull();
     expect(avatar.querySelector("svg")).toBeNull();
+  });
+
+  test("beside a heading that names the Bot, a decorative face is not announced at all", () => {
+    const view = render(
+      <AbstractAvatar decorative name="Ticket triage" seed="ticket-triage" />,
+    );
+    expect(view.queryByRole("img")).toBeNull();
+    expect(view.queryByLabelText("Ticket triage")).toBeNull();
+    // Onboarding's roster names each Bot in a heading beside its face.
+    const onboarding = readFileSync(
+      new URL("../src/routes/_authed/onboarding.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(onboarding).toMatch(/<AbstractAvatar\s+decorative\b/);
   });
 
   test("two Bots with different seeds can differ in colour, the same seed never does", () => {
