@@ -1,8 +1,5 @@
-import { SHOW_APP_ACCESS_TOOL } from "@openbot/shared/connect-prompt";
-import {
-  RESEARCH_ROLE_LABELS,
-  researchRoleOfTool,
-} from "@openbot/shared/research";
+import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
+import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 
 /**
  * A tool call, named the way the person watching would name it.
@@ -29,8 +26,14 @@ export function readToolName(name: string, running = false): ToolName {
   if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
 
   const [, rawServer, ...rest] = parts;
-  const server = rawServer ?? "";
-  const tool = rest.join("__");
+  return appToolName(rawServer ?? "", rest.join("__"));
+}
+
+/**
+ * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
+ * `mcp__server__tool` name, and what an approval is asked about as `server/tool`.
+ */
+export function appToolName(server: string, tool: string): ToolName {
   const broker = brokeredApp(server);
   /*
    * Research is named for what it did, not for who did it. `web_search_exa` would read "Web search
@@ -94,6 +97,38 @@ export function connectorName(server: string): string {
   return wordsOf(brokeredApp(server) ?? server)
     .map((word) => word[0]?.toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+/**
+ * What an approval asks to do and where, as its card says it: "Waiting for your approval: {action}
+ * on {place}", and "{Bot} wants to {action}" over the place on a list.
+ *
+ * An app's tool is asked about as `<app>/<tool>` on the app itself (`toolRef` and `scope` in
+ * server/src/plugins/plugin-store/calls.ts), so it read "requests/get request on requests": the app's
+ * key twice and the tool's raw name. It is named the way the conversation names the same call, the
+ * action in words and the app by its name, so the card reads "get request on Requests". Every other
+ * action keeps the words it had: a computer's on the site or folder it acts on, a command on the
+ * computer it runs on.
+ */
+export function approvalWords(action: { toolRef: string; scope: string }): {
+  action: string;
+  place: string;
+} {
+  const slash = action.toolRef.indexOf("/");
+  const app = action.toolRef.slice(0, slash);
+  if (slash > 0 && app === action.scope) {
+    const { label } = appToolName(app, action.toolRef.slice(slash + 1));
+    return {
+      action: label.charAt(0).toLowerCase() + label.slice(1),
+      place: connectorName(app),
+    };
+  }
+  return {
+    action: action.toolRef
+      .replace(/^computer_|^host\//, "")
+      .replaceAll("_", " "),
+    place: action.scope,
+  };
 }
 
 /**

@@ -48,7 +48,7 @@ import {
   type GrantedPlugins,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
-import { readToolName } from "@/lib/plugins/tool-name";
+import { readToolName } from "@openbot/shared/tool-name";
 import { queryClient } from "@/query-client";
 
 /**

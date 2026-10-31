@@ -1,3 +1,4 @@
+import { approvalWords } from "@openbot/shared/tool-name";
 import { and, desc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
@@ -211,10 +212,8 @@ export function waitingLine(
     const words = Array.from(waiting.question.trim());
     return `Waiting for your answer: ${words.length > QUOTE_MAX ? `${words.slice(0, QUOTE_MAX - 1).join("")}…` : words.join("")}`;
   }
-  const action = waiting.toolRef
-    .replace(/^computer_|^host\//, "")
-    .replaceAll("_", " ");
-  return `${waiting.handOff ? "This needs you" : "Waiting for your approval"}: ${action} on ${waiting.scope}`;
+  const { action, place } = approvalWords(waiting);
+  return `${waiting.handOff ? "This needs you" : "Waiting for your approval"}: ${action} on ${place}`;
 }
 
 /** The suffix of the line a task's turn records when it fails on its last run. */
