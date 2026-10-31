@@ -437,13 +437,18 @@ changes for a deployment.
 ### First run shows what OpenBot does, one step at a time
 
 - The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
-  own, a team of Bots, and asking before it acts), then Connect your apps, Get notified, Check your
-  setup, and the name step, whose Get started opens the app. On a desktop the steps are listed on the
-  left beside a picture of each; on a phone they come one at a time. A reload, browser Back and a
-  connection's return all keep the person's place, which is now saved as they go.
+  own, a team of Bots, and asking before it acts, with Ask before making changes offered right
+  there), then Check your setup, Connect your apps, Get notified, and the name step, whose Get
+  started opens the app. On a desktop each step's words sit beside a picture of it, under one line
+  saying where the person is ("Step 5 of 9") that opens the list of steps; on a phone they come one
+  at a time. A reload, browser Back and a connection's return all keep the person's place, which is
+  now saved as they go. A link on a step to another page moves on to the next step and opens that
+  page once onboarding is done.
 - Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
   more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
-  shown the page or the variables that close a gap; everybody else only that their admin sets it up.
+  shown the page or the variables that close a gap; everybody else only that their admin sets it up,
+  with no warning colours. An admin can reopen the same checklist afterwards in Settings → Setup, to
+  check again after setting a variable and restarting OpenBot.
   Check again asks Intelligence and the model provider again, at most every 10 seconds. Reading the
   checklist does the same once an answer has failed or is five minutes old, without waiting for it,
   so the next read has the new answer. To check the Bot computer, the server sends each running
