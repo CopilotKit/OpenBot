@@ -19,6 +19,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, useState } from "react";
 import { ApprovalCard } from "@/components/approvals/approval-card";
+import { InlineApproval } from "@/components/approvals/inline-approval";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { Composer } from "@/components/channels/composer/composer";
 import {
@@ -408,6 +409,26 @@ describe("the header's orb and the line under the name", () => {
     expect(document.activeElement).not.toBe(card);
     await act(async () => button.click());
     expect(document.activeElement).toBe(card);
+  });
+
+  test("a card is matched to its call in this conversation's thread, not by the call id alone", () => {
+    // The same call id in another conversation is another call.
+    const elsewhere = renderConversation(
+      <InlineApproval fallback={<p>The line</p>} toolCallId="call-0" />,
+      { inbox: inboxWith([{ threadId: "another-thread", status: "pending" }]) },
+    );
+    expect(elsewhere.view.getByText("The line")).toBeTruthy();
+    expect(
+      elsewhere.view.container.querySelector("[data-approval-waiting]"),
+    ).toBeNull();
+    cleanup();
+    const here = renderConversation(
+      <InlineApproval fallback={<p>The line</p>} toolCallId="call-0" />,
+      { inbox: inboxWith([{ threadId: THREAD, status: "pending" }]) },
+    );
+    expect(
+      here.view.container.querySelector("[data-approval-waiting]"),
+    ).not.toBeNull();
   });
 
   test("Needs you comes before the step the Bot is on", () => {
