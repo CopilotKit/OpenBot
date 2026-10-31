@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { isLockConflict, keepLease, LockLapsedError } from "../src/lease";
+import { describe, expect, spyOn, test } from "bun:test";
+import {
+  isLockConflict,
+  keepLease,
+  LockLapsedError,
+  ThreadLockBusyError,
+} from "../src/lease";
 
 function platformError(status: number): Error {
   const error = new Error(`Intelligence platform error ${status}`);
@@ -9,6 +14,30 @@ function platformError(status: number): Error {
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Drive the real interval callback against an explicit clock without waiting for production TTLs.
+function manualLease(input: Omit<Parameters<typeof keepLease>[0], "now">) {
+  let clock = 0;
+  const interval = spyOn(globalThis, "setInterval");
+  try {
+    const lease = keepLease({ ...input, now: () => clock });
+    const callback = interval.mock.calls[0]?.[0];
+    if (typeof callback !== "function") {
+      lease.stop();
+      throw new Error("No lease heartbeat scheduled");
+    }
+    return {
+      stop: lease.stop,
+      tickAt: async (time: number) => {
+        clock = time;
+        callback();
+        await Promise.resolve();
+      },
+    };
+  } finally {
+    interval.mockRestore();
+  }
+}
 
 describe("isLockConflict", () => {
   test("only the platform's 409 is a lock that belongs to somebody else", () => {
@@ -24,7 +53,90 @@ describe("isLockConflict", () => {
   });
 });
 
+describe("ThreadLockBusyError", () => {
+  test("names a refused first acquisition and keeps the platform's answer as its cause", () => {
+    const conflict = platformError(409);
+    const busy = new ThreadLockBusyError(conflict);
+    expect(busy).toBeInstanceOf(Error);
+    expect(busy.name).toBe("ThreadLockBusyError");
+    expect(busy.cause).toBe(conflict);
+    // Not the platform's error itself, so nothing that stops on a lost lock mistakes it for one.
+    expect(isLockConflict(busy)).toBe(false);
+  });
+});
+
 describe("keepLease", () => {
+  for (const everyMs of [30_000, 15_000]) {
+    for (const renewal of ["rejected", "pending"] as const) {
+      test(`${renewal} renewals lose a 120s lease exactly one ${everyMs}ms interval before expiry`, async () => {
+        const lost: unknown[] = [];
+        let renewals = 0;
+        const lease = manualLease({
+          renew: () => {
+            renewals += 1;
+            return renewal === "rejected"
+              ? Promise.reject(platformError(503))
+              : new Promise(() => {});
+          },
+          everyMs,
+          lifetimeMs: 120_000,
+          onLost: (error) => lost.push(error),
+        });
+        try {
+          const boundary = 120_000 - everyMs;
+          for (let time = everyMs; time < boundary; time += everyMs)
+            await lease.tickAt(time);
+          await lease.tickAt(boundary - 1);
+          expect(lost).toEqual([]);
+          const beforeBoundary = renewals;
+
+          await lease.tickAt(boundary);
+          expect(lost).toHaveLength(1);
+          expect(lost[0]).toBeInstanceOf(LockLapsedError);
+          expect(renewals).toBe(beforeBoundary);
+
+          await lease.tickAt(boundary + 1);
+          await lease.tickAt(120_000);
+          expect(lost).toHaveLength(1);
+          expect(renewals).toBe(beforeBoundary);
+        } finally {
+          lease.stop();
+        }
+      });
+    }
+
+    test(`a successful ${everyMs}ms renewal moves the exact safety boundary forward`, async () => {
+      const lost: unknown[] = [];
+      let renewals = 0;
+      const lease = manualLease({
+        renew: async () => {
+          renewals += 1;
+          if (renewals !== 2) throw platformError(503);
+        },
+        everyMs,
+        lifetimeMs: 120_000,
+        onLost: (error) => lost.push(error),
+      });
+      try {
+        await lease.tickAt(everyMs);
+        await lease.tickAt(2 * everyMs);
+        await lease.tickAt(120_000 - everyMs);
+        expect(lost).toEqual([]);
+
+        const boundary = 120_000 + everyMs;
+        await lease.tickAt(boundary - 1);
+        expect(lost).toEqual([]);
+        const beforeBoundary = renewals;
+        await lease.tickAt(boundary);
+        expect(lost).toHaveLength(1);
+        expect(lost[0]).toBeInstanceOf(LockLapsedError);
+        expect(renewals).toBe(beforeBoundary);
+      } finally {
+        lease.stop();
+      }
+    });
+  }
+
   test("renews until stopped", async () => {
     let renewals = 0;
     const lease = keepLease({

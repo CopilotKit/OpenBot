@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { FIRING_FRAME, frameFiring } from "@openbot/shared/routine-firing";
+import { frameTaskBrief, TASK_FRAME } from "@openbot/shared/task-brief";
 import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
@@ -325,6 +326,29 @@ describe("naming a claimed conversation", () => {
     expect(excerptSeen).toContain("Post the standup summary.");
     expect(excerptSeen).not.toContain(FIRING_FRAME[0]);
     expect((await summaryOf(channel.id))?.summary).toBe("Standup summary");
+  });
+
+  test("titles a task's conversation from the person's ask, not the task frame", async () => {
+    const owner = await createUser();
+    const channel = await createUsedChannel(owner);
+    await offer(channel.id);
+
+    let excerptSeen = "";
+    await summariseClaimedChannels(
+      options({
+        // A task's first message is the person's ask inside the frame that says it is a task: see
+        // `shared/task-brief.ts`.
+        transcript: transcriptOf(frameTaskBrief("Draft a reply to Rosa.")),
+        title: async (excerpt) => {
+          excerptSeen = excerpt;
+          return "Reply to Rosa";
+        },
+      }),
+    );
+
+    expect(excerptSeen).toContain("Draft a reply to Rosa.");
+    expect(excerptSeen).not.toContain(TASK_FRAME[0]);
+    expect((await summaryOf(channel.id))?.summary).toBe("Reply to Rosa");
   });
 
   test("two replicas racing for the same conversation name it once", async () => {

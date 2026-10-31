@@ -15,7 +15,18 @@
  * Postgres considered expired on arrival, and the next replica to look took the item straight out
  * from under the first. Both then ran it. Every time this file names a moment it names it in SQL.
  */
-import { and, eq, gte, isNull, like, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gt,
+  gte,
+  isNull,
+  like,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import postgres from "postgres";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
@@ -68,7 +79,8 @@ export type WorkItem = {
   key: string;
   payload: Record<string, unknown>;
   /**
-   * How many times this has been handed out, including now.
+   * How many times this has been handed out to run, including now. A claim given back with
+   * `unstarted` does not count.
    *
    * ONE MEANS IT HAS CERTAINLY NOT RUN. More than one means a previous owner stopped renewing, and
    * may already have called a tool or spent money before it did. A caller that cannot tell those
@@ -86,6 +98,89 @@ export type WorkItem = {
  * its last error, which is a terminal state a person can query rather than a silence.
  */
 export const DEFAULT_MAX_ATTEMPTS = 5;
+
+/**
+ * Work that has to run one item at a time within a group: a conversation's turns, where a second
+ * reply must not start while the first is still running, or overtake an older one still waiting.
+ *
+ * An item waits while another of its group holds a live lease, or while an older one is unfinished
+ * and still has attempts left. An older item out of attempts no longer holds the group back, or one
+ * failure would stop the group for good.
+ *
+ * Several kinds can share one order, each with the attempt cap its own worker claims at, which is
+ * how a sibling of another kind is known to be out of attempts.
+ */
+export type SerialOrder = {
+  /** Names the group's lock. The same for every kind that shares the order. */
+  name: string;
+  /** Every kind in the order, the claimed one too, with the attempt cap its worker claims at. */
+  kinds: Readonly<Record<string, number>>;
+  /**
+   * The group a row is in, as SQL over the `work_items` row named `row`. Null leaves the row in no
+   * group, so it runs as it would without an order.
+   */
+  groupOf: (row: SQL) => SQL;
+};
+
+/** The order a payload field gives: rows of one kind with the same value run one at a time. */
+function orderByField(
+  kind: string,
+  field: string,
+  maxAttempts: number,
+): SerialOrder {
+  return {
+    name: kind,
+    kinds: { [kind]: maxAttempts },
+    groupOf: (row) => sql`${row}.payload->>${field}`,
+  };
+}
+
+/** The row a claim is looking at, and each other row it is weighed against. */
+const due = sql`${sql.identifier("due")}`;
+const other = sql`${sql.identifier("other")}`;
+
+/**
+ * Whether the row named `due` is held back by another of its group: one that is running, or one
+ * that is older, unfinished and still has attempts left. Older by when each was made, so an insert
+ * that commits late keeps its place.
+ */
+function heldBack(order: SerialOrder) {
+  const kinds = Object.entries(order.kinds);
+  const cap = sql`case ${other}.kind ${sql.join(
+    kinds.map(([name, attempts]) => sql`when ${name} then ${attempts}::int`),
+    sql` `,
+  )} end`;
+  return sql`exists (
+    select 1 from "work_items" as ${other}
+    where ${other}.kind in (${sql.join(
+      kinds.map(([name]) => sql`${name}`),
+      sql`, `,
+    )})
+      and (${other}.kind, ${other}.key) != (${due}.kind, ${due}.key)
+      and ${other}.finished_at is null
+      and (${other}.attempts < ${cap} or ${other}.lease_until > now())
+      and ${order.groupOf(other)} = ${order.groupOf(due)}
+      and (${other}.lease_until > now()
+        or (${other}.created_at, ${other}.key, ${other}.kind) < (${due}.created_at, ${due}.key, ${due}.kind))
+  )`;
+}
+
+/**
+ * At most `max` items of one kind running at once for each value `by` gives, as SQL over the
+ * `work_items` row named `row`: one person's task turns, say. Running is a live lease.
+ */
+export type RunningCap = { by: (row: SQL) => SQL; max: number };
+
+/** Whether the row named `due` would be one too many running for its value of `cap.by`. */
+function atCap(kind: string, cap: RunningCap) {
+  return sql`(
+    select count(*) from "work_items" as ${other}
+    where ${other}.kind = ${kind}
+      and ${other}.finished_at is null
+      and ${other}.lease_until > now()
+      and ${cap.by(other)} = ${cap.by(due)}
+  ) >= ${cap.max}`;
+}
 
 export type WorkQueue = {
   /**
@@ -123,8 +218,22 @@ export type WorkQueue = {
     leaseMs: number;
     limit?: number;
     maxAttempts?: number;
+    /**
+     * Run one item at a time per group ({@link SerialOrder}). A payload field's name is the order
+     * of this kind alone, grouped by that field's value.
+     */
+    serialBy?: string | SerialOrder;
+    /**
+     * Leave an item queued while its value already has as many running as the cap allows
+     * ({@link RunningCap}). It is claimed once one of those finishes or is let go, never refused.
+     * One item per claim.
+     */
+    runningAtMost?: RunningCap;
   }) => Promise<WorkItem[]>;
-  /** Keep a claim alive while the work runs. False means it was already taken away. */
+  /**
+   * Keep a claim alive while the work runs. False means it expired, finished, or went to somebody
+   * else.
+   */
   renew: (input: {
     kind: string;
     key: string;
@@ -132,20 +241,35 @@ export type WorkQueue = {
     leaseMs: number;
   }) => Promise<boolean>;
   /**
-   * Done. False means the lease had already gone to somebody else, so this was not ours to finish.
+   * Done. False means the lease had expired or gone to somebody else, so this was not ours to
+   * finish.
    */
   finish: (input: {
     kind: string;
     key: string;
     owner: string;
+    /**
+     * What the work came to, merged into its payload in the same write, for whatever reads the
+     * queue afterwards: how a task's turn ended, say. Kept only if the item was still ours.
+     */
+    payload?: Record<string, unknown>;
   }) => Promise<boolean>;
-  /** Not done, and worth another go after `delayMs`. False means it was no longer ours. */
+  /**
+   * Not done, and worth another go after `delayMs`. False means the lease had expired or it was no
+   * longer ours.
+   */
   release: (input: {
     kind: string;
     key: string;
     owner: string;
     delayMs: number;
     reason?: string;
+    /**
+     * The work never began, so the attempt this claim spent is given back. Only for a refusal
+     * before anything ran, such as the conversation's lock being held when the turn first asked
+     * for it: anything later may already have had an effect, and must count.
+     */
+    unstarted?: boolean;
   }) => Promise<boolean>;
   /**
    * Drop what is done with, older than the retention window. Returns how many went.
@@ -191,6 +315,12 @@ export function createWorkQueue(database: Database): WorkQueue {
    * `finish` and `release` used to match on the key alone, so a replica whose lease had quietly
    * expired could delete or reschedule an item another replica was in the middle of executing. Only
    * `renew` got this right; all three ask the same question now.
+   *
+   * AND STILL LIVE, on the database's clock as `claim` reads it. The owner alone is not enough: a
+   * lease that expired on its last attempt is claimed by nobody, so it keeps its owner, while a
+   * serialised sibling ({@link SerialOrder}) is free to start in its place. A late heartbeat would
+   * revive it beside that sibling, a late finish or release would write its outcome over the
+   * sibling's, and a refund would hand it back an attempt it spent.
    */
   const ours = (kind: string, key: string, owner: string) =>
     and(
@@ -198,6 +328,7 @@ export function createWorkQueue(database: Database): WorkQueue {
       eq(workItems.key, key),
       eq(workItems.claimedBy, owner),
       isNull(workItems.finishedAt),
+      gt(workItems.leaseUntil, sql`now()`),
     );
 
   return {
@@ -271,36 +402,92 @@ export function createWorkQueue(database: Database): WorkQueue {
       leaseMs,
       limit = 1,
       maxAttempts = DEFAULT_MAX_ATTEMPTS,
+      serialBy,
+      runningAtMost,
     }) {
+      const order =
+        typeof serialBy === "string"
+          ? orderByField(kind, serialBy, maxAttempts)
+          : serialBy;
+      // Its lock below is waited for, and two claims each waiting on the other's would deadlock.
+      if (runningAtMost && limit !== 1)
+        throw new Error("A claim under a running cap takes one item.");
       return database.transaction(async (transaction) => {
         /*
          * `skip locked` is what makes this concurrent rather than merely correct. Without it a
          * second replica blocks on the first replica's rows and the queue serialises; with it, it
          * walks past them and takes the next free ones.
+         *
+         * A row its group holds back is left out here, before the limit, rather than taken and
+         * dropped below: an older insert that committed late would otherwise fill the only slot on
+         * every sweep and starve every other group.
          */
-        const due = await transaction.execute(sql`
-          select "kind", "key"
-          from "work_items"
+        const selected = await transaction.execute(sql`
+          select "kind", "key", ${order ? order.groupOf(due) : sql`null`} as "group",
+            ${runningAtMost ? runningAtMost.by(due) : sql`null`} as "runner"
+          from "work_items" as ${due}
           where "kind" = ${kind}
             and "finished_at" is null
             and "attempts" < ${maxAttempts}
             and "run_at" <= now()
             and ("lease_until" is null or "lease_until" <= now())
-          order by "run_at" asc
+            ${order ? sql`and not ${heldBack(order)}` : sql``}
+            ${runningAtMost ? sql`and not ${atCap(kind, runningAtMost)}` : sql``}
+          order by "run_at" asc, "created_at" asc, "key" asc
           limit ${limit}
           for update skip locked
         `);
 
         const rows = (
-          Array.isArray(due) ? due : ((due as { rows?: unknown[] })?.rows ?? [])
+          Array.isArray(selected)
+            ? selected
+            : ((selected as { rows?: unknown[] })?.rows ?? [])
         ) as {
           kind: string;
           key: string;
+          group: string | null;
+          runner: string | null;
         }[];
         if (rows.length === 0) return [];
 
         const claimed: WorkItem[] = [];
         for (const row of rows) {
+          if (order && row.group !== null) {
+            /*
+             * Asked again, one claimer per group at a time. The select above read one snapshot, and
+             * a sibling inserted or claimed since is not in it, so two replicas could each find the
+             * group free and each take a row of it. The lock makes them take turns and the check
+             * after it reads a fresh snapshot. A group another replica is claiming right now is
+             * skipped rather than waited for, as `skip locked` skips its rows.
+             */
+            const [lock] = await transaction.execute<{ locked: boolean }>(sql`
+              select pg_try_advisory_xact_lock(hashtext(${order.name}), hashtext(${row.group})) as "locked"
+            `);
+            if (!lock?.locked) continue;
+            const [check] = await transaction.execute<{ blocked: boolean }>(sql`
+              select ${heldBack(order)} as "blocked"
+              from "work_items" as ${due}
+              where ${due}.kind = ${kind} and ${due}.key = ${row.key}
+            `);
+            if (check?.blocked !== false) continue;
+          }
+          if (runningAtMost && row.runner !== null) {
+            /*
+             * Counted again, one claimer per value at a time: two replicas could each count one
+             * fewer running than the cap and each start another. Waited for, not skipped as a group
+             * is: a group runs one item anyway, but under a cap of three a claim that lost the race
+             * would leave a turn queued with room to run until something else looked.
+             */
+            await transaction.execute(sql`
+              select pg_advisory_xact_lock(hashtext(${`${kind}:running`}), hashtext(${row.runner}))
+            `);
+            const [check] = await transaction.execute<{ full: boolean }>(sql`
+              select ${atCap(kind, runningAtMost)} as "full"
+              from "work_items" as ${due}
+              where ${due}.kind = ${kind} and ${due}.key = ${row.key}
+            `);
+            if (check?.full !== false) continue;
+          }
           const [updated] = await transaction
             .update(workItems)
             .set({
@@ -336,16 +523,16 @@ export function createWorkQueue(database: Database): WorkQueue {
         .update(workItems)
         .set({ leaseUntil: fromNow(leaseMs), updatedAt: sql`now()` })
         /*
-         * Only while still ours. A lease that expired and was taken by somebody else must not be
-         * renewed back out from under them, which would put two replicas on one item believing they
-         * each held it.
+         * Only while still ours and still live. A lease that expired and was taken by somebody else
+         * must not be renewed back out from under them, which would put two replicas on one item
+         * believing they each held it.
          */
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });
       return Boolean(renewed);
     },
 
-    async finish({ kind, key, owner }) {
+    async finish({ kind, key, owner, payload }) {
       const [finished] = await database
         .update(workItems)
         /*
@@ -358,13 +545,19 @@ export function createWorkQueue(database: Database): WorkQueue {
           claimedBy: null,
           leaseUntil: null,
           updatedAt: sql`now()`,
+          ...(payload
+            ? {
+                // The object itself: the driver encodes it once, and a string would stay one.
+                payload: sql`${workItems.payload} || ${payload}::jsonb`,
+              }
+            : {}),
         })
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });
       return Boolean(finished);
     },
 
-    async release({ kind, key, owner, delayMs, reason }) {
+    async release({ kind, key, owner, delayMs, reason, unstarted }) {
       // Freed and pushed out, rather than finished: the work still wants doing, just not immediately
       // and not by whoever just gave up on it. The reason stays on the row so an item that runs out
       // of attempts says why rather than simply stopping.
@@ -376,6 +569,9 @@ export function createWorkQueue(database: Database): WorkQueue {
           runAt: fromNow(delayMs),
           updatedAt: sql`now()`,
           ...(reason === undefined ? {} : { lastError: reason }),
+          // Given back once: clearing the owner in the same write means a second release, or a
+          // stale owner's, matches nothing and refunds nothing.
+          ...(unstarted ? { attempts: sql`${workItems.attempts} - 1` } : {}),
         })
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });
