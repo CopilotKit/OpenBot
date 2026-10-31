@@ -1,7 +1,7 @@
 import { IconChevronLeft } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
   ConversationOrb,
@@ -21,6 +21,7 @@ import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen"
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
@@ -40,7 +41,7 @@ import {
 import { useConversationBusy } from "@/lib/tasks/use-task";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { beganLine, TaskReportView } from "./task-report";
+import { stampOf, TaskOpening, TaskReportView } from "./task-report";
 import { STATUS_TONE, TaskStatusWord } from "./task-status";
 
 /** The orb in a task's header, the size a conversation's header draws it. */
@@ -148,6 +149,17 @@ function TaskBody({
     inbox.data,
   );
   const report = useQuery(taskReportQueryOptions(task.id, status));
+  /*
+   * The report sits above the conversation. On a narrow screen it starts folded to the ask's one
+   * line, so the conversation keeps the screen; the person can open it either way.
+   */
+  const narrow = useIsMobile();
+  const [reportShown, setReportShown] = useState<boolean | null>(null);
+  const reportOpen = reportShown ?? !narrow;
+  const reportId = useId();
+  // Done is the person's own doing, said with when, never the Bot's last line.
+  const resolvedAt = status === "resolved" ? stampOf(task.resolvedAt) : "";
+  const nextLine = resolvedAt ? `${next} · ${resolvedAt}` : next;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
   const reply = useMutation(replyToTaskMutationOptions(queryClient));
@@ -250,7 +262,7 @@ function TaskBody({
                     STATUS_TONE[status],
                 )}
               >
-                {next}
+                {nextLine}
               </span>
             </p>
           </div>
@@ -304,20 +316,48 @@ function TaskBody({
         </p>
       ) : null}
       <div
-        className="max-h-[40%] shrink-0 overflow-y-auto border-border border-b"
+        className={cn(
+          "shrink-0 border-border border-b",
+          reportOpen && "max-h-[40%] overflow-y-auto",
+        )}
+        data-open={reportOpen ? "" : undefined}
         data-slot="task-report"
       >
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-3">
-          <p className="type-caption text-muted-foreground">
-            {beganLine(task)}
-          </p>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <TaskOpening
+                clamped={!reportOpen}
+                report={report.data}
+                task={task}
+              />
+            </div>
+            <Button
+              aria-controls={reportId}
+              aria-expanded={reportOpen}
+              className="-my-1 shrink-0 text-muted-foreground"
+              onClick={() => setReportShown(!reportOpen)}
+              size="sm"
+              variant="ghost"
+            >
+              {reportOpen ? "Hide report" : "Show report"}
+            </Button>
+          </div>
           {replyRunsTask ? (
             <p className="type-sub text-muted-foreground" role="status">
               Try again, or reply and {botName} runs it again with what you
               said.
             </p>
           ) : null}
-          <TaskReportView error={report.error} report={report.data} />
+          <div hidden={!reportOpen} id={reportId}>
+            {reportOpen ? (
+              <TaskReportView
+                error={report.error}
+                onReload={() => void report.refetch()}
+                report={report.data}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
       {conversation.isPending ? null : !conversation.data ? (

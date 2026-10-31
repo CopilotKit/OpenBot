@@ -230,6 +230,8 @@ function setUp(overrides: Partial<Task> = {}) {
   ];
   report = {
     taskId: "t-1",
+    ask: "Find a time for coffee with Sam next week.",
+    partial: false,
     entries: [
       {
         kind: "update",
@@ -305,6 +307,7 @@ const drawTask = (taskId = "t-1") =>
 
 test("the task page reads its title and where it stands, how it began, its report, then its conversation in the person's own words", async () => {
   setUp({ origin: "suggestion", why: "Sam asked last week" });
+  report = { ...(report as object), why: "Sam asked last week" };
   const { view } = drawTask();
   expect(
     await view.findByRole("heading", {
@@ -314,9 +317,14 @@ test("the task page reads its title and where it stands, how it began, its repor
   expect(view.getByText("Ready for review").getAttribute("data-status")).toBe(
     "ready_for_review",
   );
-  expect(
-    view.getByText(/^Suggested today at .* · Sam asked last week$/),
-  ).toBeTruthy();
+  const opening = await view.findByText(
+    (_, element) =>
+      element?.getAttribute("data-slot") === "task-opening" &&
+      /^Suggested: “Find a time for coffee with Sam next week\.”Today at .*Why: Sam asked last week$/.test(
+        element.textContent ?? "",
+      ),
+  );
+  expect(opening).toBeTruthy();
   const updates = await view.findByRole("list", {
     name: "Decisions and updates",
   });
@@ -337,6 +345,79 @@ test("the task page reads its title and where it stands, how it began, its repor
   expect(view.queryByText(/This conversation is a task/)).toBeNull();
   expect(view.getByRole("button", { name: "Mark done" })).toBeTruthy();
   expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+test("the report opens with the person's ask and when, and gives a why only when the report has one", async () => {
+  // The record carries the why start_task was given; the person never sees it for an ask.
+  setUp({ why: "The user wants a meeting" });
+  const { view } = drawTask();
+  const opening = await view.findByText(
+    (_, element) => element?.getAttribute("data-slot") === "task-opening",
+  );
+  expect(opening.textContent).toMatch(
+    /^You asked: “Find a time for coffee with Sam next week\.”Today at /,
+  );
+  expect(within(opening).queryByText("Why:")).toBeNull();
+  expect(view.queryByText(/The user wants a meeting/)).toBeNull();
+});
+
+test("a report that couldn't read the conversation in time says so, and Reload reads it again", async () => {
+  setUp();
+  report = { ...(report as { entries: unknown[] }), partial: true };
+  const { view, user } = drawTask();
+  const notice = await view.findByText(
+    /Couldn't read this task's conversation in time\. Only your decisions show here\./,
+  );
+  report = { ...(report as object), partial: false };
+  await user.click(within(notice).getByRole("button", { name: "Reload" }));
+  await waitFor(() =>
+    expect(
+      view.queryByText(/Couldn't read this task's conversation in time/),
+    ).toBeNull(),
+  );
+});
+
+test("a task marked done says so, with when, never the Bot's last line", async () => {
+  setUp({
+    status: "resolved",
+    resolvedAt: new Date().toISOString(),
+    next: "Marked done by you",
+  });
+  const { view } = drawTask();
+  const header = await view.findByText(/^Marked done by you · /);
+  expect(header.textContent).toMatch(/^Marked done by you · \d{1,2}:\d{2}/);
+  expect(view.queryByText(/I booked Tuesday at 10\. ·/)).toBeNull();
+});
+
+test("on a narrow screen the report starts folded to the ask's one line, and opens on request", async () => {
+  setUp();
+  const width = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: 375,
+  });
+  try {
+    const { view, user } = drawTask();
+    const toggle = await view.findByRole("button", { name: "Show report" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      view.queryByRole("list", { name: "Decisions and updates" }),
+    ).toBeNull();
+    await user.click(toggle);
+    expect(
+      await view.findByRole("list", { name: "Decisions and updates" }),
+    ).toBeTruthy();
+    expect(
+      view
+        .getByRole("button", { name: "Hide report" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  } finally {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: width,
+    });
+  }
 });
 
 test("a reply steers the task through the server: drawn at once under its id, never run in the browser", async () => {

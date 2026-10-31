@@ -4,6 +4,7 @@ import {
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
+import { Button } from "@/components/ui/button";
 import { describeApproval } from "@/lib/approval-view";
 import type {
   ReportDecision,
@@ -39,23 +40,68 @@ export function whenLine(iso: string, now = new Date()): string {
   return `on ${dayFormat.format(at)}`;
 }
 
-/**
- * How a task began and when, then why: "You asked today at 9:41 AM" for one asked for, "Suggested
- * today at 9:41 AM · Ana needs an answer by Friday" for one started from a suggestion.
- */
-export function beganLine(
-  task: {
-    origin: "asked" | "suggestion";
-    createdAt: string;
-    why: string | null;
-  },
-  now = new Date(),
-): string {
+type Opened = { origin: "asked" | "suggestion"; createdAt: string };
+
+const howOf = (task: Opened) =>
+  task.origin === "asked" ? "You asked" : "Suggested";
+
+/** How a task began and when: "You asked today at 9:41 AM", or "Suggested today at 9:41 AM". */
+export function beganLine(task: Opened, now = new Date()): string {
   const when = whenLine(task.createdAt, now);
-  const how = task.origin === "asked" ? "You asked" : "Suggested";
-  const opening = when ? `${how} ${when}` : how;
-  const why = task.why?.trim();
-  return why ? `${opening} · ${why}` : opening;
+  return when ? `${howOf(task)} ${when}` : howOf(task);
+}
+
+/**
+ * How a task began, from its report: "You asked: “…”" in the person's words, when, and for a task
+ * started from a suggestion, why. The why is the report's, which only a suggestion has; a task the
+ * person asked for is explained by their own words. Before the report arrives, how and when alone.
+ * `clamped` holds the ask to one line, for a report folded away.
+ */
+export function TaskOpening({
+  task,
+  report,
+  clamped = false,
+  now,
+}: {
+  task: Opened;
+  report: TaskReport | undefined;
+  clamped?: boolean;
+  now?: Date;
+}) {
+  if (!report)
+    return (
+      <p className="type-caption text-muted-foreground">
+        {beganLine(task, now)}
+      </p>
+    );
+  const when = whenLine(task.createdAt, now);
+  const why = report.why?.trim();
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5" data-slot="task-opening">
+      <p
+        className={cn(
+          "type-sub [overflow-wrap:anywhere]",
+          clamped && "line-clamp-1",
+        )}
+      >
+        <span className="font-medium">{howOf(task)}:</span> “{report.ask}”
+      </p>
+      {clamped ? null : (
+        <>
+          {when ? (
+            <p className="type-caption text-muted-foreground">
+              {when.charAt(0).toUpperCase() + when.slice(1)}
+            </p>
+          ) : null}
+          {why ? (
+            <p className="type-caption text-muted-foreground [overflow-wrap:anywhere]">
+              <span className="font-medium">Why:</span> {why}
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
 }
 
 /** A stamp on a report row: the time today, the day before that. Empty when no ledger saw it. */
@@ -106,10 +152,13 @@ function lookOf(entry: ReportEntry) {
 export function TaskReportView({
   report,
   error,
+  onReload,
   now,
 }: {
   report: TaskReport | undefined;
   error: Error | null;
+  /** Reads the report again, offered when it came back without the conversation. */
+  onReload?: () => void;
   now?: Date;
 }) {
   // A refresh that fails keeps the report already read, as the task's page keeps the task.
@@ -119,9 +168,30 @@ export function TaskReportView({
         Couldn't load this task's report. Reload the page.
       </p>
     ) : null;
-  if (report.entries.length === 0) return null;
+  // The conversation wasn't read in time: only the decisions came back, and the person is told so.
+  const partial = report.partial ? (
+    <p
+      className="type-sub flex flex-wrap items-center gap-x-2 text-muted-foreground"
+      role="status"
+    >
+      Couldn't read this task's conversation in time. Only your decisions show
+      here.
+      {onReload ? (
+        <Button
+          className="h-auto px-0"
+          onClick={onReload}
+          size="sm"
+          variant="link"
+        >
+          Reload
+        </Button>
+      ) : null}
+    </p>
+  ) : null;
+  if (report.entries.length === 0) return partial;
   return (
     <section aria-labelledby="task-report-heading">
+      {partial ? <div className="mb-3">{partial}</div> : null}
       <h2
         className="type-caption mb-2 font-medium text-muted-foreground"
         id="task-report-heading"

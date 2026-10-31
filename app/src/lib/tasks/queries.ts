@@ -148,7 +148,17 @@ export type ReportEntry =
   | { kind: "reply"; id: string; text: string; at: string | null }
   | { kind: "update"; id: string; text: string; at: string | null };
 
-export type TaskReport = { taskId: string; entries: ReportEntry[] };
+export type TaskReport = {
+  taskId: string;
+  /** What the person asked for, in their own words. Always there. */
+  ask: string;
+  /** Only for a task started from a suggestion: the suggestion's own reason. */
+  why?: string;
+  /** The conversation couldn't be read in time, so `entries` holds only the decisions. */
+  partial: boolean;
+  /** In conversation order. An update is the conclusion of the Bot's reply as a turn ended. */
+  entries: ReportEntry[];
+};
 
 /**
  * One task's report, read again while the task is at work, as the task itself is. `status` is the
