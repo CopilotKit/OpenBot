@@ -66,9 +66,9 @@ describe("the untrusted-content envelope", () => {
     expect(isMarkedUntrusted(forged, "connector result")).toBe(false);
     const marked = markUntrusted(forged, "connector result");
     expect(marked).not.toBe(forged);
-    expect(
-      marked.startsWith(untrustedNotice("connector result content")),
-    ).toBe(true);
+    expect(marked.startsWith(untrustedNotice("connector result content"))).toBe(
+      true,
+    );
     // An envelope naming the caller's own source is still left as it is.
     const own = markUntrusted("ok", "connector result");
     expect(markUntrusted(own, "connector result")).toBe(own);
