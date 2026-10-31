@@ -573,3 +573,79 @@ describe("failAuthorizationAttempt / markAuthorizationUnreconciled", () => {
     expect([withdrew, unreconciled]).toEqual([false, false]);
   });
 });
+
+describe("unreconciled authorization audit", () => {
+  const eventsFor = async (actorId: string) => {
+    const rows = await database
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.eventType, "mcp.authorization_unreconciled"),
+          eq(auditEvents.targetId, serverId),
+        ),
+      );
+    return rows.filter((row) => row.payload.actor === actorId);
+  };
+
+  test("unreconciled audit: persists a safe event correlated with the closed attempt", async () => {
+    const a = await actor("audit-unreconciled");
+    const authId = "ar_must_not_reach_the_audit_payload";
+    const attempt = await attemptWith(a, authId);
+    expect(
+      await store.markAuthorizationUnreconciled({ actorId: a, authId }),
+    ).toBe(true);
+    const events = await eventsFor(a);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toEqual({
+      actor: a,
+      server: null,
+      serverId,
+      action: "Google.SendEmail",
+      holder: "person",
+      attemptStartedAt: attempt.createdAt.toISOString(),
+      outcome: "unreconciled",
+    });
+    expect(JSON.stringify(events)).not.toContain(authId);
+    expect((await attemptRow(a)).outcome).toBe("unreconciled");
+  });
+
+  test("unreconciled audit: two concurrent terminal callbacks record one event", async () => {
+    const a = await actor("audit-concurrent");
+    const authId = "ar_concurrent_unreconciled";
+    await attemptWith(a, authId);
+    const outcomes = await Promise.all([
+      store.markAuthorizationUnreconciled({ actorId: a, authId }),
+      store.markAuthorizationUnreconciled({ actorId: a, authId }),
+    ]);
+    expect(outcomes.sort()).toEqual([false, true]);
+    expect(await eventsFor(a)).toHaveLength(1);
+  });
+
+  test("unreconciled audit: an audit insert failure leaves the attempt unsettled", async () => {
+    const a = await actor("audit-rollback");
+    const authId = "ar_rollback_unreconciled";
+    await attemptWith(a, authId);
+    await expect(
+      brokenAuditStore.markAuthorizationUnreconciled({ actorId: a, authId }),
+    ).rejects.toThrow("injected audit failure");
+    const after = await attemptRow(a);
+    expect(after.completedAt).toBeNull();
+    expect(after.outcome).toBeNull();
+    expect(await eventsFor(a)).toHaveLength(0);
+  });
+
+  test("unreconciled audit: a previously settled attempt emits no false event", async () => {
+    const a = await actor("audit-already-settled");
+    const authId = "ar_already_failed";
+    await attemptWith(a, authId);
+    expect(await store.failAuthorizationAttempt({ actorId: a, authId })).toBe(
+      true,
+    );
+    expect(
+      await store.markAuthorizationUnreconciled({ actorId: a, authId }),
+    ).toBe(false);
+    expect(await eventsFor(a)).toHaveLength(0);
+    expect((await attemptRow(a)).outcome).toBe("failed");
+  });
+});
