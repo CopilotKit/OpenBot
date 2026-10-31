@@ -78,16 +78,25 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
-### The default look: an inset page, slate greys and quieter headings
+### Refunds now go to the person
+
+The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
+(such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
+rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
+
+### The default look: an inset page, OpenBot's palette and Bots as orbs
 
 Each page now sits in a panel inset from the window, on a darker frame shared with the sidebar,
-with white cards on a light grey page; admin and settings scroll inside it like the rest of the
-app. The greys are Tailwind's slate rather than neutral, and page and section headings are lighter.
-Rows show an app's logo or initial instead of the same plug; Home shows Bots as compact cards; a
-Bot's page leads with its own one-liner; Connections tiles no longer cut their text off; and the
-Composio directory shows its rows loading. Empty states carry a faint dot pattern whose file,
-colour and strength are theme tokens (`--empty-pattern*` in `theme.css`), so a deployment can
-replace it or turn it off. Skins are unchanged.
+with white cards on a light page; admin and settings scroll inside it like the rest of the app.
+The palette leans towards CopilotKit's lilac, with a plum dark mode, and the type is Atkinson
+Hyperlegible. Each Bot appears as an orb in its own colors. The sidebar says "Waiting for you"
+on a conversation that needs you, and orange means nothing else. Home has a subheader and cycles
+through example jobs from your own Bots; a conversation opens with its Bot's orb, name and role.
+Rows show an app's logo or initial instead of the same plug; Home shows Bots as compact cards;
+Connections tiles no longer cut their text off; and the Composio directory shows its rows loading.
+Colors, card edges and shadows are theme tokens in `theme.css`, and empty states carry a faint dot
+pattern whose file, color and strength are tokens too (`--empty-pattern*`), so a deployment can
+restyle or turn them off. Skins keep their own look.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
