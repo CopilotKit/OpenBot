@@ -119,3 +119,15 @@ export function replyEnding(reply: string | null | undefined): {
 export function replyTail(reply: string | null | undefined): string | null {
   return replyEnding(reply).tail;
 }
+
+/**
+ * The reply's conclusion: the whole last paragraph the Bot wrote to the person, on one line. A
+ * reply often opens on a preamble ("Here's a thoughtful plan") and ends on what was done or found,
+ * so this, not its first sentence, is what a task's report says the turn did. Null when there is
+ * nothing to say.
+ */
+export function replyConclusion(
+  reply: string | null | undefined,
+): string | null {
+  return spokenParagraphs(reply).paragraphs.at(-1)?.join(" ") || null;
+}
