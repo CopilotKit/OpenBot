@@ -17,6 +17,7 @@ import {
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { SAVE_AFTER_MS } from "@/components/bot-profile/look";
 import { SetupSections } from "@/components/bot-profile/setup";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { agentListQueryOptions, agentQueryOptions } from "@/lib/agents/queries";
@@ -70,7 +71,9 @@ const waiting: (() => void)[] = [];
 
 /** Lets the oldest held save reach the server, once it has been sent. */
 async function letOneThrough() {
-  await waitFor(() => expect(waiting.length).toBeGreaterThan(0));
+  await waitFor(() => expect(waiting.length).toBeGreaterThan(0), {
+    timeout: SAVE_AFTER_MS * 4,
+  });
   waiting.shift()?.();
 }
 
@@ -209,6 +212,15 @@ async function lookOf(view: ReturnType<typeof render>) {
   return within(section);
 }
 
+/** Waits out a colour's pause, and as long again, so a save that was coming has come. */
+const pastThePause = () =>
+  new Promise((resolve) => setTimeout(resolve, SAVE_AFTER_MS * 2));
+
+/** What the Look section's live region says. */
+function heard(look: ReturnType<typeof within>) {
+  return look.getByRole("status").textContent;
+}
+
 /** The seeds the face is drawn from, in the Look section and everywhere else on the page. */
 function seeds(view: ReturnType<typeof render>) {
   const of = (root: Element) =>
@@ -261,9 +273,8 @@ test("the Look section shows the Bot's face large, and its colour named and chos
   expect(seeds(view).preview).toEqual(["expenses"]);
 });
 
-test("a colour saves at once, shows at once, and every avatar of the Bot follows", async () => {
+test("a colour shows at once, saves after a pause, and every avatar of the Bot follows", async () => {
   serve();
-  holding = true;
   const { view, user } = draw();
   const look = await lookOf(view);
   await waitFor(() =>
@@ -272,19 +283,21 @@ test("a colour saves at once, shows at once, and every avatar of the Bot follows
 
   await user.click(look.getByRole("radio", { name: "Green" }));
 
-  // The face shows it before the server has answered, and nothing else has changed yet.
+  // The face shows it before anything is saved, and nothing else has changed yet.
   expect(seeds(view)).toEqual({
     preview: ["moss:expenses"],
     elsewhere: ["expenses", "expenses"],
   });
+  expect(updates).toEqual([]);
   expect(
     (look.getByRole("radio", { name: "Green" }) as HTMLInputElement).checked,
   ).toBe(true);
   expect(look.getByText("Green")).toBeTruthy();
 
-  await letOneThrough();
-  await waitFor(() =>
-    expect(seeds(view).elsewhere).toEqual(["moss:expenses", "moss:expenses"]),
+  await waitFor(
+    () =>
+      expect(seeds(view).elsewhere).toEqual(["moss:expenses", "moss:expenses"]),
+    { timeout: SAVE_AFTER_MS * 4 },
   );
   expect(seeds(view).preview).toEqual(["moss:expenses"]);
   // The rest of the profile rode along as stored, and only the look changed.
@@ -297,10 +310,11 @@ test("a colour saves at once, shows at once, and every avatar of the Bot follows
       avatarSeed: "moss:expenses",
     },
   ]);
+  expect(heard(look)).toBe("Green, saved");
   expect(view.queryByRole("alert")).toBeNull();
 });
 
-test("New face keeps the colour and draws a face nobody had", async () => {
+test("New face keeps the colour, draws a face nobody had, and says so", async () => {
   serve();
   const { view, user } = draw();
   const look = await lookOf(view);
@@ -313,16 +327,92 @@ test("New face keeps the colour and draws a face nobody had", async () => {
   await waitFor(() => expect(seeds(view).elsewhere).toEqual([face, face]));
   expect(seeds(view).preview).toEqual([face]);
   expect(look.getByText("Blue")).toBeTruthy();
+  await waitFor(() => expect(heard(look)).toBe("Blue, new face"));
 
+  const first = look.getByRole("status").firstElementChild;
   await user.click(look.getByRole("button", { name: "New face" }));
   await waitFor(() => expect(updates).toHaveLength(2));
   expect(updates[1]?.avatarSeed).not.toBe(face);
   expect(String(updates[1]?.avatarSeed)).toMatch(/^ocean:/);
+  // The same words again are said again: the region's text is a new node.
+  await waitFor(() =>
+    expect(look.getByRole("status").firstElementChild).not.toBe(first),
+  );
+  expect(heard(look)).toBe("Blue, new face");
 });
 
-test("the arrow keys move through the colours, as in any radio group, and the newest choice wins", async () => {
+test("Undo puts back the look from before New face, and saves it", async () => {
   serve();
-  holding = true;
+  const { view, user } = draw();
+  const look = await lookOf(view);
+  expect(look.queryByRole("button", { name: "Undo" })).toBeNull();
+
+  await user.click(look.getByRole("button", { name: "New face" }));
+  await waitFor(() => expect(updates).toHaveLength(1));
+  const face = String(updates[0]?.avatarSeed);
+  await waitFor(() => expect(seeds(view).elsewhere).toEqual([face, face]));
+
+  await user.click(look.getByRole("button", { name: "Undo" }));
+
+  await waitFor(() =>
+    expect(seeds(view).elsewhere).toEqual(["expenses", "expenses"]),
+  );
+  expect(updates.map((update) => update.avatarSeed)).toEqual([
+    face,
+    "expenses",
+  ]);
+  expect(seeds(view).preview).toEqual(["expenses"]);
+  await waitFor(() => expect(heard(look)).toBe("Blue, look undone"));
+  // Nothing left to undo, and focus is not dropped with the button.
+  expect(look.queryByRole("button", { name: "Undo" })).toBeNull();
+  expect(document.activeElement).toBe(
+    look.getByRole("button", { name: "New face" }),
+  );
+});
+
+test("Undo puts back the look from before a saved colour", async () => {
+  serve();
+  const { view, user } = draw();
+  const look = await lookOf(view);
+
+  await user.click(look.getByRole("radio", { name: "Pink" }));
+  await waitFor(() => expect(updates).toHaveLength(1), {
+    timeout: SAVE_AFTER_MS * 4,
+  });
+  await waitFor(() =>
+    expect(seeds(view).elsewhere).toEqual(["berry:expenses", "berry:expenses"]),
+  );
+
+  await user.click(look.getByRole("button", { name: "Undo" }));
+
+  await waitFor(() =>
+    expect(seeds(view).elsewhere).toEqual(["expenses", "expenses"]),
+  );
+  expect(updates.map((update) => update.avatarSeed)).toEqual([
+    "berry:expenses",
+    "expenses",
+  ]);
+  expect(
+    (look.getByRole("radio", { name: "Blue" }) as HTMLInputElement).checked,
+  ).toBe(true);
+});
+
+test("Undo before the pause is over takes the colour back without saving anything", async () => {
+  serve();
+  const { view, user } = draw();
+  const look = await lookOf(view);
+
+  await user.click(look.getByRole("radio", { name: "Pink" }));
+  await user.click(look.getByRole("button", { name: "Undo" }));
+
+  expect(seeds(view).preview).toEqual(["expenses"]);
+  expect(heard(look)).toBe("Blue, look undone");
+  await pastThePause();
+  expect(updates).toEqual([]);
+});
+
+test("arrowing through the colours previews each, and saves only the one it stops on, once", async () => {
+  serve();
   const { view, user } = draw();
   const look = await lookOf(view);
   const radio = (name: string) =>
@@ -332,31 +422,63 @@ test("the arrow keys move through the colours, as in any radio group, and the ne
   await user.keyboard("{ArrowRight}");
   expect(document.activeElement).toBe(radio("Cyan"));
   expect(radio("Cyan").checked).toBe(true);
-
-  // Still live while that one saves, so the next arrow carries on from where focus is.
+  expect(seeds(view).preview).toEqual(["sky:expenses"]);
   await user.keyboard("{ArrowRight}");
-  expect(document.activeElement).toBe(radio("Red"));
-  expect(radio("Red").checked).toBe(true);
-  expect(seeds(view).preview).toEqual(["coral:expenses"]);
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(radio("Grey"));
+  expect(radio("Grey").checked).toBe(true);
+  expect(seeds(view).preview).toEqual(["slate:expenses"]);
+  expect(updates).toEqual([]);
 
-  // The first saves and the Bot is refetched with it; the face keeps the newer choice.
-  await letOneThrough();
-  await waitFor(() =>
-    expect(seeds(view).elsewhere).toEqual(["sky:expenses", "sky:expenses"]),
-  );
-  expect(seeds(view).preview).toEqual(["coral:expenses"]);
-  expect(radio("Red").checked).toBe(true);
-
-  await letOneThrough();
-  await waitFor(() =>
-    expect(seeds(view).elsewhere).toEqual(["coral:expenses", "coral:expenses"]),
-  );
+  await waitFor(() => expect(updates).toHaveLength(1), {
+    timeout: SAVE_AFTER_MS * 4,
+  });
+  await pastThePause();
   expect(updates.map((update) => update.avatarSeed)).toEqual([
-    "sky:expenses",
-    "coral:expenses",
+    "slate:expenses",
   ]);
-  expect(seeds(view).preview).toEqual(["coral:expenses"]);
-  expect(radio("Red").checked).toBe(true);
+  await waitFor(() =>
+    expect(seeds(view).elsewhere).toEqual(["slate:expenses", "slate:expenses"]),
+  );
+  expect(radio("Grey").checked).toBe(true);
+});
+
+test("leaving the colours saves the one picked at once, and arrowing back to the Bot's own saves nothing", async () => {
+  serve();
+  const { view, user } = draw();
+  const look = await lookOf(view);
+  const radio = (name: string) =>
+    look.getByRole("radio", { name }) as HTMLInputElement;
+
+  radio("Blue").focus();
+  await user.keyboard("{ArrowRight}");
+  await user.keyboard("{ArrowLeft}");
+  await user.tab();
+  await pastThePause();
+  expect(updates).toEqual([]);
+
+  radio("Blue").focus();
+  await user.keyboard("{ArrowLeft}");
+  await user.tab();
+  // Well inside the pause, so only leaving the group can have saved it.
+  await waitFor(() => expect(updates).toHaveLength(1), {
+    timeout: SAVE_AFTER_MS / 2,
+  });
+  expect(updates[0]?.avatarSeed).toBe("berry:expenses");
+});
+
+test("a colour still in its pause is saved when the page goes away", async () => {
+  serve();
+  const { view, user } = draw();
+  const look = await lookOf(view);
+
+  await user.click(look.getByRole("radio", { name: "Green" }));
+  view.unmount();
+
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0]?.avatarSeed).toBe("moss:expenses");
+  await pastThePause();
+  expect(updates).toHaveLength(1);
 });
 
 test("a look that can't be saved goes back, and says so in one sentence", async () => {
@@ -366,9 +488,10 @@ test("a look that can't be saved goes back, and says so in one sentence", async 
 
   await user.click(look.getByRole("radio", { name: "Pink" }));
 
-  expect((await look.findByRole("alert")).textContent).toBe(
-    "Couldn't save that look, so the last one is back.",
-  );
+  expect(
+    (await look.findByRole("alert", {}, { timeout: SAVE_AFTER_MS * 4 }))
+      .textContent,
+  ).toBe("Couldn't save that look, so the last one is back.");
   expect(seeds(view)).toEqual({
     preview: ["expenses"],
     elsewhere: ["expenses", "expenses"],
@@ -385,6 +508,8 @@ test("a look that can't be saved goes back, and says so in one sentence", async 
   await letOneThrough();
   expect(await look.findByRole("alert")).toBeTruthy();
   expect(updates).toHaveLength(2);
+  // A look that wasn't saved has nothing to undo.
+  expect(look.queryByRole("button", { name: "Undo" })).toBeNull();
 });
 
 test("someone who can't edit the Bot doesn't see the Look section", async () => {
