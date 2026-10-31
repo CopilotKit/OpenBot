@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A failed shared-app approval can be tried again
+
+Deciding a shared-app request now commits the decision and the access it grants together. If the
+approval or its audience cannot be saved, the request stays pending instead of disappearing as
+approved without granting access. An administrator can retry after the write failure is resolved.
+Concurrent direct approvals and request decisions take the same Bot/app transaction lock before
+writing either row, so they do not deadlock by acquiring those rows in opposite orders. An owner
+grant that races an administrator now leaves the administrator's approval and audience in place.
+
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
