@@ -4,6 +4,7 @@ import {
   beforeAll,
   describe,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -583,19 +584,28 @@ describe("<BotOrb>", () => {
     orbOf(view.container).getBoundingClientRect = () =>
       ({ left: 100, top: 100, width: size, height: size }) as DOMRect;
     const start = performance.now();
+    // Where the played frames have got to. A change of state starts its motion at the orb's clock,
+    // so `become` changes it then, not a few real milliseconds after mounting.
+    let now = start;
     return {
       play(from: number, to: number, fps = 60, each?: (t: number) => void) {
         const before = ctx.draws;
         for (let i = Math.ceil(from * fps); i < to * fps; i++) {
           each?.(i / fps);
-          frames.run(start + (i / fps) * 1000);
+          now = start + (i / fps) * 1000;
+          frames.run(now);
         }
         return ctx.draws - before;
       },
       become(next: BotOrbState) {
-        view.rerender(
-          <BotOrb seed="onboarding-buddy" size={size} state={next} />,
-        );
+        const clock = spyOn(performance, "now").mockReturnValue(now);
+        try {
+          view.rerender(
+            <BotOrb seed="onboarding-buddy" size={size} state={next} />,
+          );
+        } finally {
+          clock.mockRestore();
+        }
       },
       done() {
         cleanup();
