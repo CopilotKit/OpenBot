@@ -6,6 +6,9 @@ import {
 import { ComputerView, type ComputerViewHandle } from "./computer-view";
 import { StepLog } from "./step-log";
 
+/** The live screen's pane: wide enough for a readable screen and the steps under it. */
+export const SCREEN_PANEL_WIDTH = 440;
+
 /** The current live computer, separate from screenshots kept in historical tool results. */
 export function ComputerViewPanel({
   agentId,

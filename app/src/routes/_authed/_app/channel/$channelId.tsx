@@ -21,6 +21,7 @@ import {
 import {
   ComputerPaneTitle,
   ComputerViewPanel,
+  SCREEN_PANEL_WIDTH,
 } from "@/components/computer/computer-panel";
 import type { ComputerViewHandle } from "@/components/computer/computer-view";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
@@ -41,9 +42,6 @@ const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 const HEADING_ENTRANCE_SECONDS = 0.18;
 const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
-
-/** The live screen's pane: wide enough for a readable screen and the steps under it. */
-const SCREEN_PANEL_WIDTH = 440;
 
 /** A conversation's Bot in its header: 40px, the smallest orb that is fully animated. */
 const HEADER_ORB_SIZE = 40;

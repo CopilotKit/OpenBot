@@ -21,6 +21,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { BotActivityGlance } from "@/components/bot-profile/activity";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
@@ -474,6 +475,30 @@ test("a reply the server refuses says why and goes back in the box", async () =>
   );
   await waitFor(() => expect(box.textContent).toContain("One more thing"));
   expect(view.queryByText("One more thing", { selector: "span" })).toBeNull();
+});
+
+test("the Bot's computer opens beside the task from its header, with Take control, and closes again", async () => {
+  setUp();
+  function Watched() {
+    const [watching, setWatching] = useState(false);
+    return (
+      <TaskPage onWatchChange={setWatching} taskId="t-1" watching={watching} />
+    );
+  }
+  const { view, user } = drawAt("/here", () => <Watched />);
+  await user.click(await view.findByRole("button", { name: "Open Computer" }));
+  const pane = await view.findByRole("region", { name: "Computer sidebar" });
+  expect(pane).toBeTruthy();
+  expect(
+    view.getByRole("button", { name: "Take control" }).hasAttribute("disabled"),
+  ).toBe(true);
+  // Narrow here, so it opens as a sheet over the task, named for whose computer it is.
+  expect(view.getByRole("dialog", { name: "Scout's computer" })).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(view.queryByRole("region", { name: "Computer sidebar" })).toBeNull(),
+  );
+  expect(view.getByRole("button", { name: "Open Computer" })).toBeTruthy();
 });
 
 test("a task that isn't the person's, or is gone, says it couldn't be opened", async () => {

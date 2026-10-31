@@ -299,6 +299,19 @@ test("a done task opened from elsewhere keeps Done unfolded, so its row is in vi
   expect(await view.findByText("Send the invoice")).toBeTruthy();
 });
 
+test("the list folds away while the open task's computer is open beside it", async () => {
+  serve({ tasks: everyState });
+  const column = () =>
+    document.querySelector<HTMLElement>('[data-slot="task-list-column"]');
+  const { view, router } = draw("/tasks/run");
+  await view.findByRole("heading", { name: "Open task run" });
+  expect(column()?.hasAttribute("data-folded")).toBe(false);
+  expect(column()?.className).toContain("@4xl:flex");
+  await router.navigate({ to: "/tasks/run", search: { watch: true } } as never);
+  await waitFor(() => expect(column()?.hasAttribute("data-folded")).toBe(true));
+  expect(column()?.className).not.toContain("@4xl:flex");
+});
+
 test("the keyboard moves through the list with ↓ ↑ and j k, Enter opens a task and Escape closes it on its row", async () => {
   serve({ tasks: everyState });
   const { view, router, user } = draw();
