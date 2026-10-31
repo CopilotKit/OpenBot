@@ -1,4 +1,5 @@
 import { checkNavigationTarget } from "../computer/target";
+import { isManagedEndpoint } from "./managed-endpoint";
 
 /**
  * Where an external agent lives, and whether we are willing to talk to it.
@@ -71,6 +72,18 @@ export function checkAgentEndpoint(
   options: {
     allowPrivateHosts?: boolean;
     allowedHosts?: ReadonlySet<string>;
+    /**
+     * The agent addresses this deployment runs itself: the managed Bot, and the harness picked
+     * during setup.
+     *
+     * These are the deployment's own settings, not addresses a person typed into a form, so the
+     * private-network refusal that guards registrations must not refuse them — a local deployment
+     * keeps its managed Bot on loopback, and a Bot created in the app is bound to exactly that
+     * address. The match is EXACT, on the same identity the run path uses to decide whether the
+     * deployment token is attached (`isManagedEndpoint`): another path on the same host and port
+     * is not the deployment's agent, and stays refused.
+     */
+    managedEndpoints?: readonly (string | URL)[];
   } = {},
 ): EndpointVerdict {
   if (typeof raw !== "string" || !raw.trim()) {
@@ -78,6 +91,20 @@ export function checkAgentEndpoint(
   }
 
   const verdict = checkNavigationTarget(raw.trim(), options);
+  if (
+    !verdict.allowed &&
+    options.managedEndpoints !== undefined &&
+    isManagedEndpoint(raw.trim(), options.managedEndpoints) &&
+    /*
+     * The same floor `namedAsAllowed` keeps: being the deployment's own address only ever
+     * overrules a refusal for being private. The metadata address and anything that is not a web
+     * address are refused before this, whatever the configuration says — a managed endpoint that
+     * IS one of those is a broken deployment, not a reason to dial it.
+     */
+    checkNavigationTarget(raw.trim(), { allowPrivateHosts: true }).allowed
+  ) {
+    return { allowed: true, url: new URL(raw.trim()).toString() };
+  }
   if (!verdict.allowed && namedAsAllowed(raw.trim(), options.allowedHosts)) {
     /*
      * Named, one host at a time, by whoever runs this deployment.
@@ -258,6 +285,11 @@ export function createAgentFetch(
      * not be a way to arrive somewhere registration would have declined.
      */
     allowedHosts?: ReadonlySet<string>;
+    /**
+     * Carried to every hop, for the reason `allowedHosts` is: the deployment's own agent is
+     * reachable wherever it appears, and the match stays exact on every hop.
+     */
+    managedEndpoints?: readonly (string | URL)[];
     fetchImpl?: typeof fetch;
     /**
      * Told about every address this refused to dial, and why.
@@ -293,6 +325,9 @@ export function createAgentFetch(
         ? { allowPrivateHosts: options.allowPrivateHosts }
         : {}),
       ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
+      ...(options.managedEndpoints
+        ? { managedEndpoints: options.managedEndpoints }
+        : {}),
     });
 
   return async function guardedFetch(url: string, init?: RequestInit) {
