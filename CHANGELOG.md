@@ -78,6 +78,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Refunds now go to the person
+
+The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
+(such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
+rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
