@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { Button, Linking, Text, View } from "react-native";
+import { Linking, Pressable, Text, View } from "react-native";
 import {
   api,
   type BotTask,
@@ -49,6 +49,45 @@ function webLink(link: string | null) {
 }
 
 /**
+ * One choice on a card, drawn the way this app draws something to tap: link-coloured text, as the
+ * Bots list and a Bot's Customize rows are, never a system button. A system button is a filled,
+ * upper-cased bar on Android and on the web, so three of them stacked on every item outweighed the
+ * item itself and looked like no other screen. `primary` is the one choice the card leads with.
+ */
+function CardAction({
+  label,
+  onPress,
+  disabled,
+  primary,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+    >
+      <Text
+        style={{
+          color: disabled ? colors.muted : colors.link,
+          fontSize: 16,
+          fontWeight: primary ? "600" : "400",
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
  * One item: what it is, why, which Bot found it and where it read that, with Start, Hide and, when
  * the Bot gave a link, Open. `busy` is the action in flight on this screen, so no second tap lands.
  */
@@ -68,27 +107,35 @@ export function ItemCard({
   const link = webLink(item.sourceLink);
   return (
     <View style={card}>
-      <Text style={{ fontWeight: "600", fontSize: 16 }}>{item.title}</Text>
+      <Text style={{ fontSize: 17, fontWeight: "600" }}>{item.title}</Text>
       {item.detail ? <Text>{item.detail}</Text> : null}
       <Text style={muted}>
         {[botName, item.sourceApp ? `From ${item.sourceApp}` : null]
           .filter(Boolean)
           .join(" · ")}
       </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Button
-          title={busy === `start:${item.id}` ? "Starting…" : "Start"}
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: "wrap",
+          columnGap: 20,
+          rowGap: 8,
+        }}
+      >
+        <CardAction
+          label={busy === `start:${item.id}` ? "Starting…" : "Start"}
           disabled={Boolean(busy)}
           onPress={onStart}
+          primary
         />
-        <Button
-          title={busy === `hide:${item.id}` ? "Hiding…" : "Hide"}
+        <CardAction
+          label={busy === `hide:${item.id}` ? "Hiding…" : "Hide"}
           disabled={Boolean(busy)}
           onPress={onHide}
         />
         {link ? (
-          <Button
-            title={`Open ${link.hostname.replace(/^www\./, "")}`}
+          <CardAction
+            label={`Open ${link.hostname.replace(/^www\./, "")}`}
             onPress={() => {
               void Linking.openURL(link.href);
             }}
@@ -125,7 +172,11 @@ export function waitingTasks(tasks: readonly BotTask[]): BotTask[] {
     );
 }
 
-/** One task that waits on the person. A tap opens its conversation, where they read and reply. */
+/**
+ * One task that waits on the person. The whole card opens its conversation, where they read and
+ * reply, the way a row on the Bots list opens its Bot: its title in the link colour, nothing else to
+ * press.
+ */
 export function TaskCard({
   task,
   botName,
@@ -140,8 +191,20 @@ export function TaskCard({
         : "Couldn't finish."
       : task.next?.trim() || null;
   return (
-    <View style={card}>
-      <Text style={{ fontWeight: "600", fontSize: 16 }}>{task.title}</Text>
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`Open ${task.title}`}
+      onPress={() =>
+        router.push({
+          pathname: "/conversation",
+          params: { channelId: task.channelId, agentId: task.agentId },
+        })
+      }
+      style={card}
+    >
+      <Text style={{ fontSize: 17, fontWeight: "600", color: colors.link }}>
+        {task.title}
+      </Text>
       <Text
         style={{
           color: task.status === "failed" ? colors.error : colors.warning,
@@ -150,15 +213,6 @@ export function TaskCard({
         {botName} · {TASK_LABEL[task.status]}
       </Text>
       {next ? <Text numberOfLines={3}>{next}</Text> : null}
-      <Button
-        title="Open"
-        onPress={() =>
-          router.push({
-            pathname: "/conversation",
-            params: { channelId: task.channelId, agentId: task.agentId },
-          })
-        }
-      />
-    </View>
+    </Pressable>
   );
 }
