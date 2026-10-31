@@ -17,8 +17,15 @@ let watched: Document | null = null;
 function run(now: number) {
   frame = null;
   // A Set visits what is added during the loop and skips what is removed, so an orb that unmounts
-  // mid-frame is not drawn after it has gone.
-  for (const callback of subscribers) callback(now);
+  // mid-frame is not drawn after it has gone. One orb that throws is reported and skipped: it must
+  // not stop every other orb on the page, or the frames after this one.
+  for (const callback of subscribers) {
+    try {
+      callback(now);
+    } catch (error) {
+      console.error(error);
+    }
+  }
   schedule();
 }
 
@@ -90,6 +97,12 @@ const away = () => {
 const lifted = (event: PointerEvent) => {
   if (event.pointerType !== "mouse") lift = setTimeout(away, 1600);
 };
+// The browser took the touch for a scroll or a gesture: no pointerup follows, and the finger is no
+// longer anywhere the eyes should look.
+const cancelled = () => {
+  clearTimeout(lift);
+  away();
+};
 const left = (event: PointerEvent) => {
   if (!event.relatedTarget) away();
 };
@@ -101,6 +114,7 @@ function listen(target: Window) {
   target.addEventListener("pointermove", aim, { passive: true });
   target.addEventListener("pointerdown", aim, { passive: true });
   target.addEventListener("pointerup", lifted, { passive: true });
+  target.addEventListener("pointercancel", cancelled, { passive: true });
   target.document.addEventListener("pointerout", left, { passive: true });
   target.addEventListener("blur", away);
   target.addEventListener("scroll", moved, { capture: true, passive: true });
@@ -111,6 +125,7 @@ function unlisten(target: Window) {
   target.removeEventListener("pointermove", aim);
   target.removeEventListener("pointerdown", aim);
   target.removeEventListener("pointerup", lifted);
+  target.removeEventListener("pointercancel", cancelled);
   target.document.removeEventListener("pointerout", left);
   target.removeEventListener("blur", away);
   target.removeEventListener("scroll", moved, { capture: true });

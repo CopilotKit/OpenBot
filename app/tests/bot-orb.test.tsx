@@ -35,7 +35,10 @@ import {
   samePicture,
   track,
 } from "@/components/agents/orb/bot-orb-draw";
-import { subscribePointer } from "@/components/agents/orb/orb-clock";
+import {
+  subscribeFrame,
+  subscribePointer,
+} from "@/components/agents/orb/orb-clock";
 import { BOT_FACES_STORAGE_KEY, setBotFaces } from "@/lib/bot-faces";
 import { settleReactWork } from "./settle-react-work";
 
@@ -720,6 +723,32 @@ describe("<BotOrb>", () => {
     });
   });
 
+  test("one frame callback that throws stops no other orb", () => {
+    const frames = manualFrames();
+    const original = console.error;
+    const errors: unknown[] = [];
+    console.error = (...args: unknown[]) => errors.push(args[0]);
+    let drawn = 0;
+    const broken = subscribeFrame(() => {
+      throw new Error("a broken orb");
+    });
+    const fine = subscribeFrame(() => {
+      drawn++;
+    });
+    try {
+      frames.run();
+      frames.run();
+      expect(drawn).toBe(2);
+      expect(frames.pending).toBe(1);
+      expect(errors.length).toBe(2);
+    } finally {
+      broken();
+      fine();
+      console.error = original;
+      frames.restore();
+    }
+  });
+
   test("an orb off screen is not drawn", () => {
     withObserver(Sight, () => {
       const ctx = fakeContext();
@@ -830,6 +859,32 @@ describe("its eyes", () => {
       expect(Math.abs(idle.y)).toBeLessThan(0.05);
       expect(idle.w).toBeCloseTo(1, 2);
       expect(thinking.w).toBeCloseTo(0.35, 2);
+    } finally {
+      stop();
+    }
+  });
+
+  test("let go when a touch turns into a scroll, which cancels the pointer", () => {
+    const stop = subscribePointer();
+    try {
+      window.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          clientX: 600,
+          clientY: 120,
+          pointerType: "touch",
+        }),
+      );
+      const gaze = restingGaze();
+      watchFor(gaze, "idle");
+      expect(gaze.w).toBeGreaterThan(0.9);
+      // The browser takes the touch for a scroll: no pointerup, only a cancel.
+      window.dispatchEvent(
+        new PointerEvent("pointercancel", { pointerType: "touch" }),
+      );
+      watchFor(gaze, "idle", 1);
+      watchFor(gaze, "idle", 2);
+      expect(gaze.seen).toBe(false);
+      expect(gaze.w).toBeLessThan(0.01);
     } finally {
       stop();
     }
