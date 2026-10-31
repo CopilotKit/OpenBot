@@ -604,17 +604,131 @@ describe("dialling a stored agent endpoint", () => {
     const third = new Headers(calls[2]?.init.headers);
     expect(third.get("authorization")).toBeNull();
   });
+
+  test("the deployment's own agent is dialled where the form could not register it", async () => {
+    // The managed Bot on a local deployment lives on loopback: the private-network check refuses
+    // it, and this deployment's own setting is the one address that refusal must not apply to.
+    const managed = ["http://127.0.0.1:41706/ag-ui"];
+    const { calls, impl } = recorder([arrived]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      managedEndpoints: managed,
+    });
+    const response = await dial("http://127.0.0.1:41706/ag-ui", runRequest);
+    expect(response.status).toBe(200);
+    expect(calls.length).toBe(1);
+  });
+
+  test("a redirect to another path on the managed host is refused", async () => {
+    // The exemption is one exact URL, not the host and port: another service behind the same
+    // gateway stays refused, on a hop as much as at registration.
+    const managed = ["http://127.0.0.1:41706/ag-ui"];
+    const refusals: Array<{ address: string; reason: string }> = [];
+    const { calls, impl } = recorder([
+      redirectTo("http://127.0.0.1:41706/everything-else"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      managedEndpoints: managed,
+      onRefusal: (refusal) => refusals.push(refusal),
+    });
+    await expect(
+      dial("https://agent.example.com/ag-ui", runRequest),
+    ).rejects.toThrow(/redirected/i);
+    expect(calls.length).toBe(1);
+    expect(refusals.length).toBe(1);
+  });
+
+  test("a redirect to the exact managed URL is followed", async () => {
+    const managed = ["http://127.0.0.1:41706/ag-ui"];
+    const { calls, impl } = recorder([
+      redirectTo("http://127.0.0.1:41706/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      managedEndpoints: managed,
+    });
+    const response = await dial("https://agent.example.com/ag-ui", runRequest);
+    expect(response.status).toBe(200);
+    expect(calls.length).toBe(2);
+  });
 });
 
-/**
- * Naming a private address instead of opening the network.
- *
- * `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` is a floor: it permits this deployment's whole network, to
- * browsing and to agent endpoints alike, and a production deployment refuses to start with it on.
- * That left bring-your-own-agent unusable in the image people are told to deploy, because a company's
- * own agent lives at an internal address. Naming the address is the narrow answer, and these are the
- * cases that decide whether it stays narrow.
- */
+describe("the deployment's own agent addresses", () => {
+  // The managed Bot on a local deployment lives on loopback; the check must refuse a person who
+  // types a private address and must not refuse the address the deployment itself configured.
+  const managed = ["http://127.0.0.1:41706/ag-ui"];
+
+  test("the exact managed URL is allowed without the private-host opt-in", () => {
+    const verdict = checkAgentEndpoint("http://127.0.0.1:41706/ag-ui", {
+      managedEndpoints: managed,
+    });
+    expect(verdict).toEqual({
+      allowed: true,
+      url: "http://127.0.0.1:41706/ag-ui",
+    });
+  });
+
+  test("a trailing slash is still the same address", () => {
+    // The run path attaches the deployment token by this same identity, so the two must agree.
+    expect(
+      checkAgentEndpoint("http://127.0.0.1:41706/ag-ui/", {
+        managedEndpoints: managed,
+      }).allowed,
+    ).toBeTrue();
+  });
+
+  test("another path on the same host and port is refused", () => {
+    // The deployment's address is one URL, not the whole host:port. Anything wider and a shared
+    // internal gateway turns the exemption into one for every service behind it.
+    for (const address of [
+      "http://127.0.0.1:41706/other",
+      "http://127.0.0.1:41706/ag-ui/admin",
+      "http://127.0.0.1:41706/",
+    ]) {
+      expect(
+        checkAgentEndpoint(address, { managedEndpoints: managed }).allowed,
+      ).toBeFalse();
+    }
+  });
+
+  test("the same host on another port is refused", () => {
+    expect(
+      checkAgentEndpoint("http://127.0.0.1:9999/ag-ui", {
+        managedEndpoints: managed,
+      }).allowed,
+    ).toBeFalse();
+  });
+
+  test("a managed URL with no explicit port matches itself", () => {
+    // URL parsing drops a scheme's default port, so the comparison has to be on the parsed
+    // identity, not on a host:port string: pinning "host:80" never matches what the parser
+    // reports as "host".
+    const internal = ["http://10.0.3.7/agent/ag-ui"];
+    expect(
+      checkAgentEndpoint("http://10.0.3.7/agent/ag-ui", {
+        managedEndpoints: internal,
+      }).allowed,
+    ).toBeTrue();
+    expect(
+      checkAgentEndpoint("http://10.0.3.7:80/agent/ag-ui", {
+        managedEndpoints: internal,
+      }).allowed,
+    ).toBeTrue();
+  });
+
+  test("the metadata address is refused even when configured as managed", () => {
+    // Being the deployment's own address overrules a private-network refusal, nothing more.
+    expect(
+      checkAgentEndpoint("http://169.254.169.254/latest/meta-data/", {
+        managedEndpoints: ["http://169.254.169.254/latest/meta-data/"],
+      }).allowed,
+    ).toBeFalse();
+  });
+});
+
 describe("private addresses named one at a time", () => {
   const named = (...hosts: string[]) => new Set(hosts);
 
