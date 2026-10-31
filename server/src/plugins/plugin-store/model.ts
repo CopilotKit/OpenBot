@@ -417,6 +417,14 @@ export type _ProbeOutcomeLeaves = Decides<
   RecordedCheck | "untouched"
 >;
 
+/** A stored-client read failed. Never retains a vault error, parser error, or secret-bearing cause. */
+export class OAuthClientReadError extends Error {
+  constructor() {
+    super("The stored OAuth client could not be read.");
+    this.name = "OAuthClientReadError";
+  }
+}
+
 export class PluginRefusedError extends Error {
   constructor(
     message: string,

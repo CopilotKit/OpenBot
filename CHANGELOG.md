@@ -78,6 +78,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A client read failure does not replace a working app registration
+
+A server that cannot decrypt an app's stored OAuth client now fails that connection attempt without
+registering a replacement. A server with the correct encryption key can keep using the original
+client. Confirmed missing or revoked credentials and malformed stored clients still use the existing
+registration flow. Connect records a safe read-failure audit row for the person and app and returns a retryable error, without exposing the vault failure.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
