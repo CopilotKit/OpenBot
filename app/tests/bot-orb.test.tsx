@@ -1012,12 +1012,16 @@ describe("a Bot's face and OpenBot's mark", () => {
     );
     expect(view.queryByRole("img")).toBeNull();
     expect(view.queryByLabelText("Ticket triage")).toBeNull();
-    // Onboarding's roster names each Bot in a heading beside its face.
-    const onboarding = readFileSync(
-      new URL("../src/routes/_authed/onboarding.tsx", import.meta.url),
+    // Onboarding's team names each Bot in text beside a bare orb, which hides itself, so no
+    // onboarding face needs to be marked decorative.
+    const team = readFileSync(
+      new URL(
+        "../src/components/onboarding/demos/team-demo.tsx",
+        import.meta.url,
+      ),
       "utf8",
     );
-    expect(onboarding).toMatch(/<AbstractAvatar\s+decorative\b/);
+    expect(team).not.toContain("<AbstractAvatar");
   });
 
   test("two Bots with different seeds can differ in colour, the same seed never does", () => {
