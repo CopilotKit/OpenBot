@@ -16,6 +16,7 @@ import {
   guardDeliveryStore,
   guardHostAccess,
   installEnterpriseControls,
+  proactiveAdmin,
   skillSharingAllowed,
   skillSharingInSnapshot,
 } from "./admin/controls";
@@ -2232,6 +2233,8 @@ const proactiveEngine = createProactiveEngine({
       Promise.resolve(undefined),
   }),
   resolveScope: deliveryScopeFor,
+  // The organization's Check-ins switch and per-Bot daily cap, read fresh on every check.
+  admin: proactiveAdmin,
   // A ping: push once to each phone, one message per chat platform, the app list at once.
   attention: deliveryRouter,
   tasks: taskRunner,

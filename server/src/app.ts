@@ -5,7 +5,10 @@ import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { enterpriseControls } from "./admin/controls";
 import { createEnterpriseGate } from "./admin/gate";
-import { createEnterpriseAdminRoutes } from "./admin/routes";
+import {
+  createEnterpriseAdminRoutes,
+  createProactiveAdminRoutes,
+} from "./admin/routes";
 import {
   authoriseAgentCall,
   parseAgentToolCallInput,
@@ -661,6 +664,7 @@ export function createApp(
   // govern, the admin screen's API, and the SCIM verbs the GET/POST auth handler above does not take.
   app.use("/api/*", createEnterpriseGate(requireUser));
   app.route("/api/admin/enterprise", createEnterpriseAdminRoutes(requireUser));
+  app.route("/api/admin/proactive", createProactiveAdminRoutes(requireUser));
   app.on(["PUT", "PATCH", "DELETE"], "/api/auth/scim/*", (context) =>
     auth
       ? auth.handler(context.req.raw)

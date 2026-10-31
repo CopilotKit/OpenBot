@@ -311,7 +311,7 @@ function replica() {
       agentId,
       threadId: `${channelId}-thread`,
     }),
-    notify: async () => undefined,
+    attention: { notifyAttention: async () => {} },
     admin: proactiveAdmin,
     catalogue: plugins,
     deniedToolNames: async () => [],
