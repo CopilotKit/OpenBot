@@ -20,6 +20,7 @@ const DECLINED =
 
 test("a line that worked carries the done mark", () => {
   const view = render(<ToolLine label="Searched the web" />);
+  expect(view.queryByText("In progress")).toBeNull();
   expect(view.getByText("Searched the web")).toBeDefined();
   expect(view.container.querySelector(".text-status-done")).not.toBeNull();
 });
@@ -46,8 +47,9 @@ test("a refusal, a failure and a decline each say so, and none is marked done", 
   }
 });
 
-test("a running line shimmers and is not yet marked done", () => {
+test("a running line shimmers, says it is in progress, and is not yet marked done", () => {
   const view = render(<ToolLine label="Searching the web" running />);
+  expect(view.getByText("In progress").className).toContain("sr-only");
   expect(
     view.getByText("Searching the web").closest(".tool-line-running"),
   ).not.toBeNull();

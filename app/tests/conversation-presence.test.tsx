@@ -162,7 +162,8 @@ function renderConversation(
   {
     busy = false,
     inbox = inboxWith([]),
-  }: { busy?: boolean; inbox?: ApprovalInboxData } = {},
+    settleMs,
+  }: { busy?: boolean; inbox?: ApprovalInboxData; settleMs?: number } = {},
 ) {
   let show: (screen: ReactNode) => void = () => {};
   function Screen() {
@@ -181,7 +182,9 @@ function renderConversation(
       <CopilotKitProvider>
         <ConversationPresenceProvider channelId={CHANNEL} threadId={THREAD}>
           <OrbProbe />
-          <ConversationStatusLine />
+          <ConversationStatusLine
+            {...(settleMs === undefined ? {} : { settleMs })}
+          />
           <Screen />
         </ConversationPresenceProvider>
       </CopilotKitProvider>
@@ -197,6 +200,9 @@ function renderConversation(
         await new Promise((resolve) => setTimeout(resolve, 0));
       }),
     line: () =>
+      view.container.querySelector("[data-slot='conversation-status']")
+        ?.textContent ?? null,
+    said: () =>
       view.container.querySelector("[aria-live='polite']")?.textContent ?? null,
     orb: () =>
       view.container.querySelector("[data-probe='orb']")?.textContent ?? null,
@@ -248,6 +254,36 @@ describe("the header's orb and the line under the name", () => {
     expect(line()).toBe("");
     // An answer lands before the orb rests.
     expect(orb()).toBe("done");
+  });
+
+  test("the live region says the state as it changes, and a step only once it settles", async () => {
+    const { show, said, line } = renderConversation(
+      <Chat messages={ANSWERED} />,
+      { settleMs: 40 },
+    );
+    expect(said()).toBe("");
+    show(<Chat busy messages={RUNNING} />);
+    // The line shows the step at once; the live region waits for it to settle.
+    expect(line()).toBe("Working · Searching the web");
+    expect(said()).toBe("Working");
+    // Steps passing quickly are not read out one by one.
+    show(<Chat busy messages={ANSWERED} />);
+    show(<Chat busy messages={RUNNING} />);
+    expect(said()).toBe("Working");
+    await waitFor(() => expect(said()).toBe("Working · Searching the web"));
+    show(<Chat messages={ANSWERED} />);
+    expect(said()).toBe("Answered");
+  });
+
+  test("the live region says Needs you, and nothing after a stopped turn", () => {
+    const waiting = renderConversation(<Chat messages={ANSWERED} />, {
+      inbox: inboxWith([{ threadId: THREAD, status: "pending" }]),
+    });
+    expect(waiting.said()).toBe("Needs you");
+    cleanup();
+    const stopped = renderConversation(<Chat busy messages={RUNNING} />);
+    stopped.show(<Chat messages={RUNNING} stopped="You stopped this." />);
+    expect(stopped.said()).toBe("");
   });
 
   test("a stopped turn does not land", () => {
@@ -411,7 +447,8 @@ describe("the header's orb and the line under the name", () => {
       </QueryClientProvider>,
     );
     const line = () =>
-      view.container.querySelector("[aria-live='polite']")?.textContent;
+      view.container.querySelector("[data-slot='conversation-status']")
+        ?.textContent;
     expect(line()).toBe("Working · Searching the web");
 
     act(() => open("c-2"));
