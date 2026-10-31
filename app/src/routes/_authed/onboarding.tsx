@@ -27,7 +27,7 @@ import {
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
 import { SetupChecklist } from "@/components/setup/setup-checklist";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
@@ -38,7 +38,6 @@ import {
   completeOnboardingMutationOptions,
 } from "@/lib/onboarding/mutations";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
-import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 const PRODUCT = appConfig.brand.productName;
@@ -272,25 +271,7 @@ const selfhost: OnboardingStep = {
   id: "selfhost",
   title: "It runs on your machine",
   intro: () => (
-    <StepIntro
-      after={
-        /*
-         * The one real control on the intro, so it sits outside the picture: a frame means
-         * picture. A new tab, because following it must not cost this person their place.
-         */
-        <a
-          className={cn(
-            buttonVariants({ variant: "outline" }),
-            "h-auto min-h-(--target) max-w-full whitespace-normal text-center",
-          )}
-          href={SELF_HOST_URL}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          Talk to an engineer
-        </a>
-      }
-    >
+    <StepIntro>
       {/*
        * Said as it is: files and Bot settings stay here, but every request goes to the model
        * provider this install was set up with, and Intelligence keeps the conversations.
@@ -303,6 +284,21 @@ const selfhost: OnboardingStep = {
       <p>
         Any AG-UI agent can join as a Bot. For your organization, run one
         container image or a Helm chart.
+      </p>
+      {/*
+       * A link in the sentence, not a third button beside Back and Continue: it is a way to learn
+       * more, not a way through onboarding. A new tab, so following it doesn't cost the place.
+       */}
+      <p>
+        Taking it to your team?{" "}
+        <a
+          className="rounded-sm font-medium text-brand underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring"
+          href={SELF_HOST_URL}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Talk to an engineer
+        </a>
       </p>
     </StepIntro>
   ),
