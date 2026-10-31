@@ -234,3 +234,27 @@ test("a Bot with something waiting comes first, under Needs you, with its count"
   expect(view.getAllByText("Waiting")).toHaveLength(1);
   expect(view.getByText("2")).toBeTruthy();
 });
+
+test("a Bot's check-in items are counted in the words the badge and Needs you use", async () => {
+  serving(
+    [bot({ id: "scout", name: "Scout", mine: false })],
+    [],
+    [
+      {
+        agentId: "scout",
+        name: "Scout",
+        questions: 0,
+        approvals: 0,
+        handoffs: 0,
+        unread: 0,
+        paused: false,
+        notify: "all",
+        items: 2,
+        tasks: { needsInput: 0, ready: 0, failed: 0 },
+      },
+    ],
+  );
+  const view = draw();
+  expect(await view.findByText("2 things need you")).toBeTruthy();
+  expect(view.container.textContent).not.toContain("suggestion");
+});

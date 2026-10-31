@@ -1,3 +1,4 @@
+import { approvalWords } from "@openbot/shared/tool-name";
 import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
@@ -108,6 +109,7 @@ function RequestRow({
   botName: string;
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
+  const words = approvalWords(request.action);
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -115,13 +117,10 @@ function RequestRow({
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="line-clamp-none">
-          {botName} wants to{" "}
-          {request.action.toolRef
-            .replace(/^computer_|^host\//, "")
-            .replaceAll("_", " ")}
+          {botName} wants to {words.action}
         </ItemTitle>
         <ItemDescription className="line-clamp-none break-all">
-          {request.action.scope}
+          {words.place}
         </ItemDescription>
         {request.action.policy ? (
           <p className="text-sm">

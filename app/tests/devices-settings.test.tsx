@@ -62,8 +62,9 @@ test("a registered phone is listed and can be removed", async () => {
   );
 });
 
-test("recent deliveries are listed", async () => {
+test("recent deliveries are listed, each by its kind and channel", async () => {
   serving();
   const view = draw(<RecentDeliveries />);
-  expect(await view.findByText(/push · question/)).toBeTruthy();
+  expect(await view.findByText("Question")).toBeTruthy();
+  expect(view.getByText(/^Push · Sent · /)).toBeTruthy();
 });
