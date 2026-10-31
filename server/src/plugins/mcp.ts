@@ -74,7 +74,7 @@ function resourceLinkText(item: {
     typeof value === "string" && value.trim() !== "" ? value : null;
   const bounded = (value: string) =>
     value.length > LINK_FIELD_CHARS
-      ? `${value.slice(0, LINK_FIELD_CHARS)}…`
+      ? `${cutAtCodeUnits(value, LINK_FIELD_CHARS)}…`
       : value;
   const lines: string[] = [];
   const uri = field(item.uri);
@@ -274,7 +274,7 @@ function reasonFrom(error: unknown): string | null {
 
 /** Long enough for a sentence and a URL, short enough not to be the wall of JSON this replaced. */
 const trimmed = (value: string) =>
-  value.length > 400 ? `${value.slice(0, 400)}…` : value;
+  value.length > 400 ? `${cutAtCodeUnits(value, 400)}…` : value;
 
 /**
  * A vendor's failure, as one sentence an operator can act on.
