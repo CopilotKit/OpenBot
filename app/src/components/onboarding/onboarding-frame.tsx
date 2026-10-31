@@ -277,7 +277,7 @@ function StepMenu({
         Step {index + 1} of {titles.length}
         <IconChevronDown aria-hidden className="size-3.5" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 gap-1 p-1.5">
+      <PopoverContent align="end" className="w-88 gap-1 p-1.5">
         <PopoverTitle className="type-caption px-2 pt-1 text-muted-foreground">
           Steps
         </PopoverTitle>
