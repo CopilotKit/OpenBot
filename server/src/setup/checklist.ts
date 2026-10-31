@@ -10,9 +10,9 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
 /**
  * The setup checklist: one row for each thing this deployment depends on, and what it says about it.
  *
- * Onboarding's "Check your setup" step draws it. It answers what an admin is about to ask after a
- * first run, "what is set up, and what still needs doing", from the server's own configuration and
- * state rather than from a list the app keeps.
+ * Onboarding's "Check your setup" step and Settings → Setup draw it. It answers what an admin is
+ * about to ask after a first run, "what is set up, and what still needs doing", from the server's
+ * own configuration and state rather than from a list the app keeps.
  *
  * READY MEANS IT WORKS, NOT THAT SOMETHING IS SET. Intelligence is read from its own entitlement
  * answer (the server cannot boot without its address, so "set" would always be true), and the model
