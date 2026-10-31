@@ -13,6 +13,16 @@ describe("the configured browser runtime", () => {
     });
   });
 
+  test("a managed computer listens on every interface unless COMPUTER_BIND names one", () => {
+    expect(browserRuntimeFromEnv({}, "linux").hostname).toBeUndefined();
+    expect(
+      browserRuntimeFromEnv({ COMPUTER_BIND: " 127.0.0.1 " }, "win32").hostname,
+    ).toBe("127.0.0.1");
+    expect(
+      browserRuntimeFromEnv({ COMPUTER_BIND: "127.0.0.1" }, "win32").allowExec,
+    ).toBe(true);
+  });
+
   test.each(["darwin", "win32"])(
     "managed %s, a developer's own machine, stays headless",
     (platform) => {

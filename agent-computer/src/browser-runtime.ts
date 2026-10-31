@@ -5,7 +5,7 @@ export type BrowserRuntime = {
   channel: "chromium" | "chrome";
   mode: BrowserMode;
   useVirtualDisplay: boolean;
-  hostname?: "127.0.0.1";
+  hostname?: string;
   allowExec: boolean;
 };
 
@@ -21,6 +21,9 @@ export function browserRuntimeFromEnv(
     );
   }
   const local = backend === "local-chrome";
+  // Where the HTTP process listens. Native Chrome always listens on loopback. A managed computer listens on every interface unless COMPUTER_BIND names an address,
+  // so a computer that runs on a person's own machine (not in a container) can be kept off the network: COMPUTER_BIND=127.0.0.1.
+  const bind = env.COMPUTER_BIND?.trim();
   /*
    * Headed wherever a hosted computer runs, which is Linux: a container, a Kubernetes pod, the
    * desktop app's Podman machine. Headless Chromium is the browser bot checks are best at spotting
@@ -45,7 +48,7 @@ export function browserRuntimeFromEnv(
     channel: local ? "chrome" : "chromium",
     mode,
     useVirtualDisplay: platform === "linux" && mode === "headed",
-    ...(local ? { hostname: "127.0.0.1" as const } : {}),
+    ...(local ? { hostname: "127.0.0.1" } : bind ? { hostname: bind } : {}),
     allowExec: !local,
   };
 }
