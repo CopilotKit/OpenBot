@@ -85,6 +85,8 @@ let completed: boolean;
 let named: string | null;
 let localEvaluation: boolean;
 let role: "admin" | "user";
+/** What `GET /api/setup` answers. */
+let checklist: { audience: string; rows: unknown[] };
 /** The apps `GET /api/plugins/for/general/apps` answers with. */
 let appList: unknown[];
 /** Whether `/api/capabilities` answers, and how many times it was asked. */
@@ -105,6 +107,7 @@ beforeEach(() => {
   named = null;
   localEvaluation = false;
   role = "admin";
+  checklist = CHECKLIST;
   appList = [
     {
       key: "notion",
@@ -172,7 +175,7 @@ beforeEach(() => {
         return Response.json({ agents: [BOT] });
       if (path === "/api/plugins/for/general/apps")
         return Response.json({ apps: appList });
-      if (path === "/api/setup") return Response.json({ checklist: CHECKLIST });
+      if (path === "/api/setup") return Response.json({ checklist });
       return Response.json({});
     },
     { preconnect: originalFetch.preconnect },
@@ -358,6 +361,62 @@ test("on every step, its name in the list of steps is its heading", async () => 
     await waitFor(() => expect(searchOf(view).step).not.toBe(step));
   }
   expect(seen).toHaveLength(9);
+});
+
+/** A Bot computer row as the server sends it: none configured. */
+const NO_COMPUTER = {
+  id: "computer",
+  scope: "deployment",
+  title: "Bot computer",
+  required: false,
+  status: "needs_setup",
+  ready: false,
+  detail: "Your admin sets this up.",
+  fix: null,
+};
+
+test("with a Bot computer, step 2 says each Bot has its own browser and files", async () => {
+  checklist = {
+    audience: "admin",
+    rows: [{ ...NO_COMPUTER, status: "ready", ready: true }],
+  };
+  const view = open("/onboarding?step=computer");
+
+  expect(
+    await heading(view, "Each Bot has its own browser and files"),
+  ).toBeTruthy();
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+  expect(view.queryByText(/doesn't have one yet/)).toBeNull();
+});
+
+test("without a Bot computer, step 2 promises nothing it can't keep, and says who adds one", async () => {
+  checklist = { audience: "member", rows: [NO_COMPUTER] };
+  role = "user";
+  const view = open("/onboarding?step=computer");
+
+  expect(
+    await heading(view, "A Bot can have its own browser and files"),
+  ).toBeTruthy();
+  expect(
+    view.getByText("OpenBot doesn't have one yet. Your admin sets it up."),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("heading", {
+      name: "Each Bot has its own browser and files",
+    }),
+  ).toBeNull();
+});
+
+test("an admin without a Bot computer is pointed at Check your setup", async () => {
+  checklist = { audience: "admin", rows: [NO_COMPUTER] };
+  const view = open("/onboarding?step=computer");
+
+  await heading(view, "A Bot can have its own browser and files");
+  expect(
+    view.getByText(
+      "OpenBot doesn't have one yet. Check your setup shows how to add one.",
+    ),
+  ).toBeTruthy();
 });
 
 test("Continue and Back start the new step's picture at the top of its pane", async () => {
