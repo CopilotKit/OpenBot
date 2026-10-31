@@ -236,13 +236,13 @@ body {
 }
 
 /*
- * The type scale: five sizes, in rem so they follow the person's text size. Inter's tracking tightens
- * as it grows. Weights are not part of a size: 600 for titles, 500 for row titles, chips and
- * buttons, 400 otherwise. `cn` knows these as font sizes (`lib/utils.ts`), so one given later
+ * The type scale: five sizes, in rem so they follow the person's text size, each at least 2px from
+ * the next so every step shows. Inter's tracking tightens as it grows. Weights are not part of a
+ * size: 600 for titles, 500 for row titles, chips and buttons, 400 otherwise. `cn` knows these as font sizes (`lib/utils.ts`), so one given later
  * replaces a primitive's `text-*` and the `leading-*` that came with it.
  *
  *   type-display  24/28  screen titles
- *   type-nav      18/22  navigation rows, Settings rows
+ *   type-nav      20/24  navigation rows, Settings rows
  *   type-body     17/23  messages, task and card titles
  *   type-sub      15/20  status lines, chips, the composer, section headers, buttons
  *   type-caption  13/16  captions, labels, the footer, timestamps, tags
@@ -253,8 +253,8 @@ body {
   letter-spacing: -0.018em;
 }
 @utility type-nav {
-  font-size: 1.125rem;
-  line-height: 1.375rem;
+  font-size: 1.25rem;
+  line-height: 1.5rem;
   letter-spacing: -0.011em;
 }
 @utility type-body {

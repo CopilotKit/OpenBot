@@ -278,11 +278,26 @@ describe("the type scale", () => {
       sizes.set(match[1] as string, match[2] as string);
     expect(Object.fromEntries(sizes)).toEqual({
       "type-display": "1.5rem",
-      "type-nav": "1.125rem",
+      "type-nav": "1.25rem",
       "type-body": "1.0625rem",
       "type-sub": "0.9375rem",
       "type-caption": "0.8125rem",
     });
+  });
+
+  test("every step is at least 2px from the next, so each one shows", () => {
+    const px = [
+      ...styles.matchAll(
+        /@utility type-[\w-]+\s*\{\s*font-size:\s*([\d.]+)rem;/g,
+      ),
+    ]
+      .map((match) => Number(match[1]) * 16)
+      .sort((a, b) => b - a);
+    expect(px).toHaveLength(5);
+    for (let i = 1; i < px.length; i++)
+      expect((px[i - 1] as number) - (px[i] as number)).toBeGreaterThanOrEqual(
+        2,
+      );
   });
 
   test("Inter's single-storey a and flat-topped 3 are on for every screen", () => {
