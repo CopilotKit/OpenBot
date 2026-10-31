@@ -1,10 +1,10 @@
 import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import Avatar from "boring-avatars";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import * as React from "react";
 import useMeasure from "react-use-measure";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { Composer } from "@/components/channels/composer";
@@ -146,7 +146,7 @@ function RosterStep() {
               // Dimmed and labelled, so an invented name never reads as a Bot this deployment has.
               className={`bg-card p-4 rounded-lg flex flex-row gap-4 items-center ${a.example ? "opacity-70" : ""}`}
             >
-              <Avatar name={a.avatarSeed} size={40} />
+              <AbstractAvatar name={a.name} seed={a.avatarSeed} size={40} />
               <div className="flex min-w-0 flex-col">
                 <h3 className="line-clamp-1 text-base font-medium tracking-tight">
                   {a.name}
