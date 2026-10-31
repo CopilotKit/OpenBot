@@ -368,8 +368,10 @@ test("a pending change is drawn in the conversation where the action was, and de
       />
     </QueryClientProvider>,
   );
-  await view.findByRole("region", { name: "Waiting for your approval" });
-  expect(view.getByText("This needs you: Click on the page")).toBeTruthy();
+  // Named by its title, so two waiting cards are told apart.
+  await view.findByRole("region", {
+    name: "This needs you: Click on the page",
+  });
   expect(view.getByText("shop.example")).toBeTruthy();
   // A hand-off is the person's to do: nothing offers to let the Bot do it.
   expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
@@ -438,10 +440,10 @@ test("in the real transcript shape a waiting click is folded into browser activi
       <ToolActivity group={group} active={false} />
     </QueryClientProvider>,
   );
-  await view.findByRole("region", { name: "Waiting for your approval" });
+  await view.findByRole("region", { name: /^This needs you: / });
   // Only the waiting call gets a card; the finished navigate does not.
   expect(
-    view.getAllByRole("region", { name: "Waiting for your approval" }),
+    view.getAllByRole("region", { name: /^This needs you: / }),
   ).toHaveLength(1);
   expect(view.getByRole("button", { name: "I did it myself" })).toBeTruthy();
 });

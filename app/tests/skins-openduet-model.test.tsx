@@ -174,8 +174,7 @@ test("the Tasks badge counts exactly what OpenBot's Needs input list draws", asy
   await waitFor(() =>
     expect(
       view.container.querySelectorAll('[data-slot="item"]').length +
-        view.queryAllByRole("region", { name: "Waiting for your approval" })
-          .length,
+        view.container.querySelectorAll("[data-approval-waiting]").length,
     ).toBe(waitingCount(inbox)),
   );
   expect(waitingCount(inbox)).toBe(2);

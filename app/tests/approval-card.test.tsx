@@ -7,7 +7,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { ApprovalCard } from "@/components/approvals/approval-card";
 import type { ApprovalRequest } from "@/lib/approvals";
@@ -174,4 +180,63 @@ test("the card names whose rule asked, when the request says", () => {
       "One of your approval rules asks before this kind of action.",
     ),
   ).toBeTruthy();
+});
+
+test("two waiting cards are named by their titles, so each can be told apart", () => {
+  const view = render(
+    <>
+      <ApprovalCard onDecide={() => {}} request={click()} />
+      <ApprovalCard
+        onDecide={() => {}}
+        request={click(
+          { id: "approval-2" },
+          { toolRef: "computer_type", toolCallId: "call-2" },
+        )}
+      />
+    </>,
+  );
+  expect(view.getByRole("region", { name: "Click on the page" })).toBeTruthy();
+  expect(view.getByRole("region", { name: "Fill in a field" })).toBeTruthy();
+});
+
+test("deciding folds the card under the person's focus, which moves to its title", async () => {
+  const waiting = click();
+  const view = render(<ApprovalCard onDecide={() => {}} request={waiting} />);
+  const allow = view.getByRole("button", { name: "Allow once" });
+  allow.focus();
+  fireEvent.click(allow);
+  // The decision lands and the card folds: its buttons, focus with them, are gone.
+  await act(async () =>
+    view.rerender(
+      <ApprovalCard
+        onDecide={() => {}}
+        request={{ ...waiting, status: "approved", decision: "allow_once" }}
+      />,
+    ),
+  );
+  expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
+  expect(document.activeElement?.textContent).toBe("Click on the page");
+});
+
+test("a card folded by a decision made elsewhere leaves focus where it is", async () => {
+  const waiting = click();
+  const view = render(
+    <>
+      <input aria-label="Elsewhere" />
+      <ApprovalCard onDecide={() => {}} request={waiting} />
+    </>,
+  );
+  view.getByRole("textbox", { name: "Elsewhere" }).focus();
+  await act(async () =>
+    view.rerender(
+      <>
+        <input aria-label="Elsewhere" />
+        <ApprovalCard
+          onDecide={() => {}}
+          request={{ ...waiting, status: "approved", decision: "allow_once" }}
+        />
+      </>,
+    ),
+  );
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Elsewhere");
 });

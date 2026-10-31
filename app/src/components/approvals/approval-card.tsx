@@ -11,7 +11,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { Link, useRouter } from "@tanstack/react-router";
-import { Fragment, type ReactNode, useId } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   type ApprovalView,
@@ -94,12 +94,38 @@ export function ApprovalCard({
   const caption = [botName, view.app].filter(Boolean).join(" · ");
   const Icon = KIND_ICON[view.kind];
   const reachId = useId();
+  const titleId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
+  const titleRef = useRef<HTMLParagraphElement>(null);
+  /*
+   * Decided on this card, so the buttons the person pressed fold away under their focus. Focus then
+   * goes to the folded card's title, not to the page, so a keyboard or a screen reader stays where
+   * the person was. Moved only from the card itself or from nowhere, never from somewhere else.
+   */
+  const decidedHere = useRef(false);
+  useEffect(() => {
+    if (waiting || !decidedHere.current) return;
+    decidedHere.current = false;
+    const active = document.activeElement;
+    if (
+      !active ||
+      active === document.body ||
+      sectionRef.current?.contains(active)
+    )
+      titleRef.current?.focus();
+  }, [waiting]);
+  const decide = (choice: ApprovalDecision) => {
+    decidedHere.current = true;
+    onDecide?.(choice);
+  };
   const broad = alwaysAllowIsBroad(request);
 
   return (
     <section
-      // Named while it waits, so it is a region a screen reader can jump to; folded, it is not.
-      aria-label={waiting ? "Waiting for your approval" : undefined}
+      ref={sectionRef}
+      // Named by its title while it waits, so it is a region a screen reader can jump to and two
+      // waiting cards tell apart; folded, it is not.
+      aria-labelledby={waiting ? titleId : undefined}
       // The header's "Needs you" finds a waiting card by this, and moves focus to it.
       data-approval-waiting={waiting ? "" : undefined}
       tabIndex={waiting ? -1 : undefined}
@@ -118,7 +144,12 @@ export function ApprovalCard({
           <Icon className="size-4" stroke={1.9} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="type-body font-semibold [overflow-wrap:anywhere]">
+          <p
+            className="type-body rounded-sm font-semibold outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring"
+            id={titleId}
+            ref={titleRef}
+            tabIndex={-1}
+          >
             {handOff && waiting ? `This needs you: ${view.title}` : view.title}
           </p>
           {caption || place ? (
@@ -160,7 +191,7 @@ export function ApprovalCard({
             <Button
               className={cn(CHOICE, "bg-transparent dark:bg-transparent")}
               disabled={busy}
-              onClick={() => onDecide("deny")}
+              onClick={() => decide("deny")}
               variant="outline"
             >
               {handOff ? "Don't do it" : "Decline"}
@@ -168,7 +199,7 @@ export function ApprovalCard({
             <Button
               className={CHOICE}
               disabled={busy}
-              onClick={() => onDecide(handOff ? "handled" : "allow_once")}
+              onClick={() => decide(handOff ? "handled" : "allow_once")}
             >
               {handOff ? "I did it myself" : "Allow once"}
             </Button>
@@ -180,7 +211,7 @@ export function ApprovalCard({
                 aria-describedby={reachId}
                 className="mx-auto mt-1 flex h-(--target) rounded-full px-3 type-sub text-muted-foreground hover:text-foreground"
                 disabled={busy}
-                onClick={() => onDecide("allow_always")}
+                onClick={() => decide("allow_always")}
                 variant="ghost"
               >
                 Always allow here
