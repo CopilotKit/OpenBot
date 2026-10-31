@@ -3,7 +3,12 @@ import { z } from "zod";
 import { replyEnding, replyTail } from "../src/tasks/reply-ending";
 import { titleFrom } from "../src/tasks/routes";
 import { nextStepOf, plainFailure, taskStatus } from "../src/tasks/store";
-import { START_TASK_TOOL, taskTools } from "../src/tasks/tools";
+import {
+  ON_IT,
+  START_TASK_TOOL,
+  type TaskStarter,
+  taskTools,
+} from "../src/tasks/tools";
 
 describe("plainFailure", () => {
   test("says why a run couldn't finish without the error itself", () => {
@@ -263,5 +268,66 @@ describe("start_task's optional fields", () => {
       "never what kind of request it is or why it is a task",
     );
     expect(properties.link?.description).toContain("never one you made up");
+  });
+});
+
+/*
+ * When start_task is offered, and what the Bot says once it has handed work off. It fired on
+ * "anything bigger than a quick answer", so a single question went to Tasks and the person lost the
+ * answer in place; and the Bot's "On it." never said where the work went.
+ *
+ * Whether a model follows a description cannot be unit-tested. What this pins is what the model is
+ * told, in the description and in the tool's result.
+ */
+describe("start_task's description and result", () => {
+  const tool = async (
+    start: TaskStarter = async () => {
+      throw new Error("not started here");
+    },
+  ) => {
+    const [held] = await taskTools({
+      actorId: "person",
+      botId: "bot",
+      initiator: { kind: "person" },
+      start,
+      builtIn: async () => true,
+    });
+    if (held?.name !== START_TASK_TOOL)
+      throw new Error(`${START_TASK_TOOL} is not held`);
+    return held;
+  };
+
+  test("is for clearly multi-step or long-running work, and a short answer stays in the conversation", async () => {
+    const { description } = await tool();
+    expect(description).toContain(
+      "only for clearly multi-step or long-running work",
+    );
+    expect(description).toContain("research across several sources");
+    expect(description).toContain("drafting a document");
+    expect(description).toContain("work across several sites");
+    expect(description).toContain("more than a few replies");
+    expect(description).toContain(
+      "Answer a single question, or anything with a short answer, here in the conversation yourself",
+    );
+    expect(description).not.toContain("anything bigger than a quick answer");
+  });
+
+  test("has the Bot say it is on it and that the result will be in Tasks", async () => {
+    expect(ON_IT).toBe("On it. I'll put the result in Tasks.");
+    const held = await tool(async () => ({
+      id: "task-1",
+      channelId: "channel-1",
+      title: "Plan the Lisbon trip",
+    }));
+    expect(held.description).toContain(`reply only "${ON_IT}"`);
+    const result = JSON.parse(
+      String(
+        await held.execute({
+          title: "Plan the Lisbon trip",
+          instruction: "Plan a three-day trip to Lisbon.",
+        }),
+      ),
+    ) as { note: string };
+    expect(result.note).toContain(`Reply only "${ON_IT}"`);
   });
 });

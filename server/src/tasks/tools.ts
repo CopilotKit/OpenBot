@@ -8,6 +8,11 @@ import { agents } from "../db/schema";
 import type { AskedTask, OpenedTask } from "../proactive/engine";
 
 export { START_TASK_TOOL };
+/**
+ * What the Bot replies once it has handed work off: that it is under way, and where the result will
+ * be, in the words of the card it leaves ("Working in Tasks").
+ */
+export const ON_IT = "On it. I'll put the result in Tasks.";
 /** The whole ask, in the person's words or a faithful restatement. Room for a long paragraph. */
 export const MAX_INSTRUCTION = 4000;
 /**
@@ -97,12 +102,18 @@ const startParameters = z
   .strict();
 
 /**
- * `start_task`: anything bigger than a quick answer, handed off from a conversation to a task of its
- * own.
+ * `start_task`: clearly multi-step or long-running work, handed off from a conversation to a task of
+ * its own.
+ *
+ * NARROW ON PURPOSE. Handing work off takes it out of the conversation the person is in, so it is for
+ * work they would not wait on there: research across several sources, drafting a document, work
+ * across several sites, anything that takes more than a few replies. It fired on "anything bigger
+ * than a quick answer", so a single question went to Tasks and the person lost the answer in place.
  *
  * The conversation stays one thread. The work happens in the task's own conversation with the same
  * Bot, which the person opens from the card this leaves and can reply in to steer; the conversation
- * it was asked in only says "On it". Opening the task and starting its turn is the proactive engine's
+ * it was asked in only says "On it" and that the result will be in Tasks, the words its card uses
+ * ("Working in Tasks"). Opening the task and starting its turn is the proactive engine's
  * (`startAsked`), the path the + on Tasks takes, so both run, wait and finish the same way as a
  * started suggestion.
  *
@@ -134,8 +145,9 @@ export async function taskTools(options: {
       ref: `tasks/${START_TASK_TOOL}`,
       description: [
         "Hand work to a task of its own, which runs in the background in a separate conversation with you, and leave a card for it here.",
-        "Use it for anything bigger than a quick answer: drafting, researching, preparing something, or any job of several steps or more than one reply.",
-        'Call it once per piece of work; two separate asks are two tasks. Then reply only "On it.", or "On it" and one short clause, and do not do the work here.',
+        "Use it only for clearly multi-step or long-running work: research across several sources, drafting a document, work across several sites, or anything that will take more than a few replies.",
+        "Answer a single question, or anything with a short answer, here in the conversation yourself; never hand that off.",
+        `Call it once per piece of work; two separate asks are two tasks. Then reply only "${ON_IT}", and do not do the work here.`,
         "Never call it inside a task's own conversation; there, do the work.",
       ].join(" "),
       parameters: startParameters,
@@ -157,7 +169,7 @@ export async function taskTools(options: {
           taskId: task.id,
           channelId: task.channelId,
           title: task.title,
-          note: 'The task is under way in its own conversation, and its card is under your reply. Reply only "On it.", or "On it" and one short clause. Do not describe the task or what happens next, and do not do the work here.',
+          note: `The task is under way in its own conversation, and its card is under your reply. Reply only "${ON_IT}" Do not describe the task further, and do not do the work here.`,
         });
       },
     },
