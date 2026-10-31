@@ -195,6 +195,16 @@ describe("a result with something in it", () => {
     expect(text).toBe(`uri: file:///a.md\ndescription: ${"d".repeat(400)}…`);
   });
 
+  test("cuts a resource_link's long field between characters, not inside an emoji", () => {
+    // 399 units of text and then an emoji: the 400-unit cut lands between its two halves.
+    const description = `${"d".repeat(399)}${"🙂".repeat(10)}`;
+    const { text } = resultText([
+      { type: "resource_link", uri: "file:///a.md", description },
+    ]);
+    expect(text).toBe(`uri: file:///a.md\ndescription: ${"d".repeat(399)}…`);
+    expect(text.isWellFormed()).toBe(true);
+  });
+
   test("a resource_link that names nothing is still named, rather than dropped", () => {
     expect(resultText([{ type: "resource_link" }]).text).toBe(
       "[resource_link]",
