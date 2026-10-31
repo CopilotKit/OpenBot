@@ -486,10 +486,17 @@ describe("status", () => {
     expect(await statusOf(task.id)).toBe("needs_input");
     const resolved = await taskStore.resolve(owner.id, task.id);
     expect(resolved.status).toBe("resolved");
-    expect(await taskStore.get(owner.id, task.id)).toMatchObject({
+    // Done by the person: its next line says so, never the Bot's question as if it still waited.
+    const done = {
       status: "resolved",
       resolvedAt: resolved.resolvedAt,
-    });
+      next: "Marked done by you",
+    };
+    expect(resolved).toMatchObject(done);
+    expect(await taskStore.get(owner.id, task.id)).toMatchObject(done);
+    expect(
+      (await taskStore.list(owner.id)).find((row) => row.id === task.id),
+    ).toMatchObject(done);
 
     // A turn accepted after it was marked done supersedes that, without a write of its own...
     const reply = await turnFor(task.id);

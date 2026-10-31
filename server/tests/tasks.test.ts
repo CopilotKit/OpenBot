@@ -117,6 +117,31 @@ describe("a task's next step", () => {
     expect(replyTail(undefined)).toBeNull();
     expect(replyTail("x".repeat(500))?.length).toBe(240);
   });
+
+  /*
+   * A recording showed "Nothing is waiting on you." as a finished task's next line. That line only
+   * talks about the reply, so the Bot's closing words before it are the next line.
+   */
+  test("sets aside a closing line that only says nothing waits on you", () => {
+    expect(
+      replyTail(
+        "I put the three-day plan in your notes. Nothing is waiting on you.",
+      ),
+    ).toBe("I put the three-day plan in your notes.");
+    expect(
+      replyTail(
+        "I booked the Alfama tour for Friday.\n\nThere's nothing else waiting on you right now.",
+      ),
+    ).toBe("I booked the Alfama tour for Friday.");
+    expect(
+      replyTail("Drafted the reply. No further action needed from you."),
+    ).toBe("Drafted the reply.");
+    // A finding about the person's apps is kept.
+    expect(
+      replyTail("I checked your inbox. Nothing in it needs a reply from you."),
+    ).toBe("Nothing in it needs a reply from you.");
+    expect(replyTail("Nothing is waiting on you.")).toBeNull();
+  });
 });
 
 describe("how a reply ends", () => {

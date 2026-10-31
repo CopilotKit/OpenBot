@@ -52,8 +52,9 @@ export type TaskRecord = {
   failedAt: string | null;
   /**
    * The run's own next step, one line, for Tasks: the last sentence or question of the Bot's newest
-   * words in its conversation, or the person's own words in quotes while their reply is being
-   * worked on. Null before anything has been said there.
+   * words in its conversation, less a closing line that only says nothing waits on the person, or
+   * the person's own words in quotes while their reply is being worked on. "Marked done by you"
+   * once the person marked it done. Null before anything has been said there.
    */
   next: string | null;
   /** The person's replies still waiting their turn, oldest first. */
