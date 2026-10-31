@@ -342,7 +342,9 @@ test("search loads older history explicitly and includes new matches", async () 
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  const search = view.getByRole("textbox", { name: "Search conversations" });
+  const search = view.getByRole("textbox", {
+    name: "Search conversations and tasks",
+  });
   await user.type(search, "Archived");
   expect(
     await view.findByText("No loaded conversations match your search"),

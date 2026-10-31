@@ -1,4 +1,4 @@
-import { IconPlus } from "@tabler/icons-react";
+import { IconPlus, IconSearch } from "@tabler/icons-react";
 import {
   createFileRoute,
   Outlet,
@@ -11,6 +11,11 @@ import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
 import { TaskList, taskRows } from "@/components/tasks/task-list";
 import { Button } from "@/components/ui/button";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import {
   Tooltip,
   TooltipContent,
@@ -61,6 +66,7 @@ function TasksLayout() {
   const folded = Boolean(taskId) && watching;
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState("");
   const list = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -127,8 +133,22 @@ function TasksLayout() {
             <TooltipContent side="bottom">New task</TooltipContent>
           </Tooltip>
         </div>
+        {/* The list's own search, on a row of its own above the list, as the sidebar's is. */}
+        <div className="shrink-0 px-2 pt-2">
+          <InputGroup className="h-9 rounded-lg bg-muted text-sm">
+            <InputGroupInput
+              aria-label="Search tasks"
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Search tasks…"
+              value={filter}
+            />
+            <InputGroupAddon>
+              <IconSearch />
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto" ref={list}>
-          <TaskList openTaskId={taskId} />
+          <TaskList openTaskId={taskId} query={filter} />
         </div>
       </div>
       <div

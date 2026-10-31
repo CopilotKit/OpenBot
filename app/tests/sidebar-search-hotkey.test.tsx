@@ -168,7 +168,7 @@ function pressSearch(target: EventTarget = document.body) {
 
 function searchBox() {
   return document.querySelector<HTMLInputElement>(
-    'input[aria-label="Search conversations"]',
+    'input[aria-label="Search conversations and tasks"]',
   );
 }
 
@@ -186,7 +186,7 @@ test("⌘K opens a collapsed sidebar and puts the cursor in its search box", asy
   pressSearch();
 
   expect(state()).toBe("open");
-  await waitFor(() => expect(focused()).toBe("Search conversations"));
+  await waitFor(() => expect(focused()).toBe("Search conversations and tasks"));
 });
 
 test("⌘K works while somebody is typing in another field", async () => {
@@ -197,7 +197,7 @@ test("⌘K works while somebody is typing in another field", async () => {
   pressSearch(message);
 
   expect(state()).toBe("open");
-  await waitFor(() => expect(focused()).toBe("Search conversations"));
+  await waitFor(() => expect(focused()).toBe("Search conversations and tasks"));
 });
 
 test("on a narrow window, ⌘K opens the sidebar's sheet and focuses its search box", async () => {
@@ -208,7 +208,7 @@ test("on a narrow window, ⌘K opens the sidebar's sheet and focuses its search 
   pressSearch();
 
   expect(state()).toBe("open");
-  await waitFor(() => expect(focused()).toBe("Search conversations"));
+  await waitFor(() => expect(focused()).toBe("Search conversations and tasks"));
 });
 
 test("Settings lists the search shortcut with its keys, from the same list the listener reads", async () => {

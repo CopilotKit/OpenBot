@@ -13,8 +13,8 @@ import {
 } from "./queries";
 
 /*
- * Tasks' list, grouped by what each task needs from the person: Needs you, Working, Failed, Ready for
- * review, Done. Worked out here, away from the screen, so the order, the next-step line and the
+ * Tasks' list, grouped by what each task needs from the person: Needs you, Couldn't finish, Ready for
+ * review, Working, Done. Worked out here, away from the screen, so the order, the next-step line and the
  * sidebar's count can be read and tested without drawing anything, and so the count and the list
  * can never disagree: both are this function.
  *
@@ -23,14 +23,34 @@ import {
  * the Bot's own page, where OpenBot already lists it.
  */
 
-/** The groups, top to bottom. A task's status names the group it is in. */
+/**
+ * The groups, top to bottom, by what the person has to do: answer, try again or let go, read, then
+ * the work that needs nothing from them yet, and what is done. A task's status names its group.
+ */
 export const GROUP_ORDER: readonly TaskStatus[] = [
   "needs_input",
-  "working",
   "failed",
   "ready_for_review",
+  "working",
   "resolved",
 ];
+
+/**
+ * The tasks whose title or latest line has what the person typed, in the order given. An empty
+ * query gives the input back as it is.
+ */
+export function matchingTasks<T extends TaskRecord>(
+  tasks: readonly T[],
+  query: string,
+): readonly T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return tasks;
+  return tasks.filter((task) =>
+    [task.title, task.next, task.failure].some((field) =>
+      field?.toLowerCase().includes(needle),
+    ),
+  );
+}
 
 /** The groups that wait on the person, and so count toward the sidebar's number. */
 const WAITS_ON_YOU: ReadonlySet<TaskStatus> = new Set([

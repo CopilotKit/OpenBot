@@ -39,8 +39,8 @@ export const HOTKEYS = [
   },
   {
     id: "search",
-    label: "Search conversations",
-    description: "Open the sidebar and search your conversations.",
+    label: "Search conversations and tasks",
+    description: "Open the sidebar and search your conversations and tasks.",
     combo: { key: "k", mod: true },
   },
 ] as const satisfies readonly Hotkey[];

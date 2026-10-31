@@ -58,6 +58,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel, LIT } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
+import { TaskMatches, useTaskMatches } from "./task-matches";
 import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
@@ -290,6 +291,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
   const searching = search.trim().length > 0;
   const visibleChannels = pinnedFirst(matchingChannels(conversations, search));
+  // A task's conversation is listed under Tasks, so the search reaches tasks on their own.
+  const tasksFound = useTaskMatches(search);
   /*
    * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
    * list thrashing under somebody who is still typing — and the moving target is the very thing
@@ -355,7 +358,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuItem>
               <InputGroup className="bg-sidebar-accent text-sm rounded-lg h-9">
                 <InputGroupInput
-                  aria-label="Search conversations"
+                  aria-label="Search conversations and tasks"
                   ref={searchBox}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search…"
@@ -373,7 +376,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
              * the box has to say so and quote it back — told "you don't have channels yet" while
              * holding a typo, a person reads their conversations as gone.
              */}
-            {searching && visibleChannels.length === 0 ? (
+            {searching &&
+            visibleChannels.length === 0 &&
+            tasksFound.length === 0 ? (
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>
@@ -419,6 +424,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               scrollRoot={scrollRoot}
               searching={searching}
             />
+            <TaskMatches tasks={tasksFound} />
           </SidebarGroup>
         </SidebarMenu>
       </SidebarContent>
