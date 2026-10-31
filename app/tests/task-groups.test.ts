@@ -220,13 +220,23 @@ test("the line under a title: the Bot's own next step, or what each state is wai
   expect(next({ id: "f", status: "ready_for_review" })).toBe(
     "Open it to read what it did",
   );
+  // The record's why is what start_task was given, never a line for the person.
   expect(
     next({
       id: "g",
       status: "ready_for_review",
       why: "Ana needs it by Friday",
     }),
-  ).toBe("Ana needs it by Friday");
+  ).toBe("Open it to read what it did");
+  // Done is the person's own doing, whatever the Bot said last.
+  expect(
+    next({
+      id: "h",
+      status: "resolved",
+      resolvedAt: new Date().toISOString(),
+      next: "I booked Tuesday at 10.",
+    }),
+  ).toBe("Marked done by you");
   expect(couldNotFinish("a service didn't answer")).toBe(
     "Couldn't finish: a service didn't answer.",
   );

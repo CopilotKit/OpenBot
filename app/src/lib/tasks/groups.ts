@@ -83,6 +83,9 @@ function statusOf(task: TaskRecord, busy: boolean, waits: boolean) {
   return waits ? "needs_input" : liveStatus(task.status, busy);
 }
 
+/** A task the person marked done, as the server words it. */
+export const MARKED_DONE = "Marked done by you";
+
 const lowerFirst = (text: string) =>
   text.charAt(0).toLowerCase() + text.slice(1);
 
@@ -105,7 +108,9 @@ function nextOf(
     return said ?? "Open it to answer";
   }
   if (status === "working") return said ?? "Just started";
-  return said ?? task.why ?? "Open it to read what it did";
+  // Done is the person's own doing, whatever the Bot said last.
+  if (status === "resolved") return MARKED_DONE;
+  return said ?? "Open it to read what it did";
 }
 
 const time = (iso: string | null | undefined) => {
