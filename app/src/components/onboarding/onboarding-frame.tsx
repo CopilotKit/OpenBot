@@ -64,7 +64,6 @@ export function OnboardingFrame({
   reached: number;
   onBack: () => void;
   onPick: (index: number) => void;
-  /** Null when the step's own form carries its button. */
   primary: {
     label: string;
     onClick: () => void;
@@ -73,7 +72,9 @@ export function OnboardingFrame({
     done?: boolean;
     /** Waiting on an answer, such as the browser's prompt: a spinner beside the label. */
     pending?: boolean;
-  } | null;
+    /** Submits this form instead of calling `onClick`. */
+    form?: string;
+  };
   /** A way past the step, such as Not now or Skip intro. */
   secondary?: { label: string; onClick: () => void };
   /** Keep the second button's place while it has none, so the primary doesn't move. */
@@ -189,33 +190,32 @@ export function OnboardingFrame({
                 Back
               </button>
             ) : null}
-            {primary ? (
-              <button
-                aria-busy={primary.pending ? true : undefined}
-                className={cn(
-                  buttonVariants({ size: "lg" }),
-                  shape,
-                  "motion-reduce:transition-none",
-                  primary.done &&
-                    "bg-status-done-soft text-status-done hover:bg-status-done-soft",
-                )}
-                data-done={primary.done ? "" : undefined}
-                data-onboarding-primary=""
-                data-pending={primary.pending ? "" : undefined}
-                disabled={primary.disabled}
-                onClick={primary.onClick}
-                type="button"
-              >
-                {primary.done ? <IconCheck className="size-4.5" /> : null}
-                {primary.pending ? (
-                  <span
-                    aria-hidden
-                    className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
-                  />
-                ) : null}
-                {primary.label}
-              </button>
-            ) : null}
+            <button
+              aria-busy={primary.pending ? true : undefined}
+              className={cn(
+                buttonVariants({ size: "lg" }),
+                shape,
+                "motion-reduce:transition-none",
+                primary.done &&
+                  "bg-status-done-soft text-status-done hover:bg-status-done-soft",
+              )}
+              data-done={primary.done ? "" : undefined}
+              data-onboarding-primary=""
+              data-pending={primary.pending ? "" : undefined}
+              disabled={primary.disabled}
+              form={primary.form}
+              onClick={primary.form ? undefined : primary.onClick}
+              type={primary.form ? "submit" : "button"}
+            >
+              {primary.done ? <IconCheck className="size-4.5" /> : null}
+              {primary.pending ? (
+                <span
+                  aria-hidden
+                  className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+                />
+              ) : null}
+              {primary.label}
+            </button>
             {secondary ? (
               <button
                 className={cn(

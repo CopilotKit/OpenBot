@@ -19,6 +19,7 @@ import { ComputerDemo } from "@/components/onboarding/demos/computer-demo";
 import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
 import { TeamDemo } from "@/components/onboarding/demos/team-demo";
 import { WelcomeDemo } from "@/components/onboarding/demos/welcome-demo";
+import { useNameStep } from "@/components/onboarding/name-step";
 import { useNotifyStep } from "@/components/onboarding/notify-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import {
@@ -26,10 +27,6 @@ import {
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
 import { SetupChecklist } from "@/components/setup/setup-checklist";
-import {
-  OnboardingNameOrb,
-  OnboardingNameStep,
-} from "@/components/settings/profile";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -429,8 +426,8 @@ function RouteComponent() {
   /*
    * THE WAY OUT IS THE NAME STEP'S GET STARTED. It saves the name, then completion is saved, then
    * the orb plays its finish, the page fades, and the app opens: home, or the page a link on a step
-   * asked for. The promise Get started waits on lasts until the fade, so its button says Saving…
-   * and stays pressed the whole way out. A completion that fails is said by the form, under it.
+   * asked for. The button says Saving… until completion is saved, then All set while the orb
+   * finishes (see `useNameStep`). A completion that fails is said by the form, under it.
    */
   const reduced = useReducedMotion() === true;
   const [finished, setFinished] = React.useState(false);
@@ -473,6 +470,7 @@ function RouteComponent() {
   } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
   const notify = useNotifyStep(defaultAgentProfile(agents)?.name ?? PRODUCT);
+  const name = useNameStep({ finish, finished });
   // The checklist's answer names the page a carried link opens, so each step after it can say which.
   const { data: checklist } = useQuery({
     ...setupChecklistQueryOptions(),
@@ -582,14 +580,7 @@ function RouteComponent() {
       optional: true,
     },
     notify,
-    {
-      id: "name",
-      title: "What should we call you?",
-      intro: () => <OnboardingNameStep onSaved={finish} />,
-      demo: () => <OnboardingNameOrb finished={finished} size={128} />,
-      demoFirst: true,
-      ownAction: true,
-    },
+    name,
   ];
 
   // A self-hosting step in the address waits for the answer that puts it in the list, rather
