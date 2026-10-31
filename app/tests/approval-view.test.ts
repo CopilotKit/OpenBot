@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  alwaysAllowIsBroad,
   alwaysAllowReach,
   approvalOutcome,
   approvalPlace,
@@ -7,6 +8,7 @@ import {
   decisionReceipt,
   describeApproval,
   personWasAsked,
+  policyReason,
 } from "@/lib/approval-view";
 import type { ApprovalRequest } from "@/lib/approvals";
 
@@ -410,4 +412,53 @@ test("Always allow here says how far its rule reaches, past this one call", () =
   expect(reach("openbot/share_private_information")).toBe(
     "This Bot won't ask you again before sharing private information with these people.",
   );
+});
+
+test("a reach past one site or folder is broad: anywhere, the browser, the computer, a whole app", () => {
+  expect(alwaysAllowIsBroad(action("computer_click", {}, { scope: "*" }))).toBe(
+    true,
+  );
+  expect(
+    alwaysAllowIsBroad(action("computer_click", {}, { scope: "browser" })),
+  ).toBe(true);
+  expect(
+    alwaysAllowIsBroad(action("computer_type", {}, { scope: "workspace" })),
+  ).toBe(true);
+  expect(
+    alwaysAllowIsBroad(
+      action("gmail/GMAIL_SEND_EMAIL", {}, { scope: "gmail" }),
+    ),
+  ).toBe(true);
+  expect(
+    alwaysAllowIsBroad(action("computer_click", {}, { scope: "shop.example" })),
+  ).toBe(false);
+  expect(
+    alwaysAllowIsBroad(
+      action("host/run_command", {}, { target: { displayName: "Projects" } }),
+    ),
+  ).toBe(false);
+  expect(alwaysAllowIsBroad(action("bot/message_bot", {}))).toBe(false);
+});
+
+test("why it asked names whose rule it was, and leaves other reasons as they are", () => {
+  const asked = (source: string, reason: string) =>
+    policyReason(
+      action(
+        "computer_click",
+        {},
+        {
+          policy: { behaviour: "ask", source, reason },
+        },
+      ),
+    );
+  expect(
+    asked("personal_rule", "A rule asks before this kind of action."),
+  ).toBe("One of your approval rules asks before this kind of action.");
+  expect(asked("team_rule", "A rule asks before this kind of action.")).toBe(
+    "A rule set for your team asks before this kind of action.",
+  );
+  expect(
+    asked("default", "You asked to review changes before they happen."),
+  ).toBe("You asked to review changes before they happen.");
+  expect(policyReason(action("computer_click", {}))).toBeNull();
 });

@@ -1,4 +1,5 @@
 import {
+  IconAlertTriangle,
   IconCheck,
   IconChevronRight,
   IconCircleCheck,
@@ -8,10 +9,12 @@ import {
   IconWorld,
   IconX,
 } from "@tabler/icons-react";
+import { Link, useRouter } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";
 import {
   type ApprovalView,
+  alwaysAllowIsBroad,
   alwaysAllowReach,
   approvalOutcome,
   approvalPlace,
@@ -19,6 +22,7 @@ import {
   decisionReceipt,
   describeApproval,
   type OutcomeTone,
+  policyReason,
 } from "@/lib/approval-view";
 import type { ApprovalDecision, ApprovalRequest } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
@@ -83,6 +87,7 @@ export function ApprovalCard({
   const caption = [botName, view.app].filter(Boolean).join(" · ");
   const Icon = KIND_ICON[view.kind];
   const reachId = useId();
+  const broad = alwaysAllowIsBroad(request);
 
   return (
     <section
@@ -169,12 +174,24 @@ export function ApprovalCard({
               >
                 Always allow here
               </Button>
+              {/* A reach past one site or folder reads as a caution, in the needs colour. */}
               <p
-                className="type-caption text-balance text-center text-muted-foreground"
+                className={cn(
+                  "type-caption text-balance text-center",
+                  broad ? "text-status-needs" : "text-muted-foreground",
+                )}
                 id={reachId}
               >
+                {broad ? (
+                  <IconAlertTriangle
+                    aria-hidden
+                    className="mr-1 inline size-3.5 -translate-y-px"
+                    stroke={2}
+                  />
+                ) : null}
                 {alwaysAllowReach(request)}
               </p>
+              <RulesLine botId={request.action.botId} />
             </>
           )}
         </div>
@@ -186,6 +203,12 @@ export function ApprovalCard({
         >
           {receipt}
         </DecidedLine>
+      ) : null}
+      {request.decision === "allow_always" && receipt ? (
+        <RulesLine
+          botId={request.action.botId}
+          className="px-4 pb-3 text-left"
+        />
       ) : null}
     </section>
   );
@@ -202,6 +225,7 @@ function ApprovalContent({
   handOff: boolean;
 }) {
   const detailsId = useId();
+  const reason = policyReason(request);
   const { args, target } = request.action;
   // What it acts on travels beside the arguments: the page and the element a browser step presses.
   const details =
@@ -232,10 +256,10 @@ function ApprovalContent({
           </p>
         </>
       ) : null}
-      {request.action.policy?.reason ? (
+      {reason ? (
         <p className="type-caption px-4 pt-2 text-muted-foreground">
           {handOff ? "Handed to you: " : ""}
-          {request.action.policy.reason}
+          {reason}
         </p>
       ) : null}
       {/* Open by itself when the face above leaves out something the request would send. */}
@@ -261,6 +285,39 @@ function ApprovalContent({
         </pre>
       </details>
     </>
+  );
+}
+
+/**
+ * Where a rule "Always allow here" saves can be taken back: the Bot's Approval rules page. Drawn
+ * only inside the app's router, since a card drawn on its own has nowhere to send anybody.
+ */
+function RulesLine({
+  botId,
+  className,
+}: {
+  botId: string;
+  className?: string;
+}) {
+  const router = useRouter({ warn: false });
+  if (!router) return null;
+  return (
+    <p
+      className={cn(
+        "type-caption text-center text-muted-foreground",
+        className,
+      )}
+    >
+      You can remove this rule in{" "}
+      <Link
+        className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        params={{ agentId: botId }}
+        to="/bots/$agentId/approvals"
+      >
+        Approval rules
+      </Link>
+      .
+    </p>
   );
 }
 
