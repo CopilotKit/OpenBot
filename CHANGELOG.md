@@ -8,10 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- Authorization attempts whose vendor answer cannot be reconciled now leave a safe, correlated
-  audit event when they settle as unreconciled. If that event cannot be saved, the attempt remains
-  unsettled rather than losing the audit trail.
-
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
@@ -81,6 +77,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+
+### An unreconciled app authorization always reaches the audit trail
+
+An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
+When an attempt settles as unreconciled, its status and its audit row are written in one
+transaction, so the trail always says what happened to it, without the authorization's id, consent
+link or vendor account. If the audit row cannot be written, nothing changes and the attempt stays
+pending, rather than settling with no record.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
