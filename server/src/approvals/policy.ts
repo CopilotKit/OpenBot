@@ -118,7 +118,12 @@ function flatten(value: unknown, depth = 0): string {
     return value.map((entry) => flatten(entry, depth + 1)).join(" ");
   if (typeof value === "object")
     return Object.entries(value)
-      .map(([key, entry]) => `${key} ${flatten(entry, depth + 1)}`)
+      .map(([key, entry]) => {
+        // A field left empty says nothing about the action: match the arguments actually
+        // sent, not a name like "billing_address" with nothing in it.
+        const text = flatten(entry, depth + 1);
+        return text ? `${key} ${text}` : "";
+      })
       .join(" ");
   return "";
 }

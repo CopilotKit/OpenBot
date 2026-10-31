@@ -315,6 +315,22 @@ describe("built-in safety requirements", () => {
     expect(
       shopify("SHOPIFY_UPDATE_ORDER", { id: 123, note: "gift wrap" }),
     ).toBeUndefined();
+    // A field left empty is not an argument sent: the billing_address the Bot did not
+    // fill in must not hand the note off as money-moving (#890).
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", {
+        id: 123,
+        billing_address: null,
+        note: "gift wrap",
+      }),
+    ).toBeUndefined();
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", {
+        id: 123,
+        billing_address: {},
+        note: "",
+      }),
+    ).toBeUndefined();
   });
 });
 
