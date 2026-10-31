@@ -258,7 +258,8 @@ export function createApprovalStore(database: Database): ApprovalStore {
     /*
      * A check-in task's conversation, found by the thread an action names: the task's own turn, the
      * turn an approval carries on, and the person replying there all run in that thread. Started from
-     * a check-in, so it is work the person did not write out themselves, and every change in it asks.
+     * a check-in, so it is work the person did not write out themselves, and every step in it asks
+     * but a read of their own connected app (see `gate` in approvals/service.ts).
      */
     async asksEveryChange(owner, threadId) {
       const [row] = await database

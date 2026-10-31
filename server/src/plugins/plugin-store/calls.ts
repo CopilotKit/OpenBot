@@ -403,6 +403,8 @@ export function callMethods(context: StoreContext) {
           audience: share.audience,
           content: share.content,
           origin: { kind: "unknown" },
+          // The approval gate below is asked about this same send, with its arguments.
+          ...(options.approvalGate ? { gatedNext: true as const } : {}),
         });
         if (shareVerdict.status !== "allowed") {
           await recordAuditEvent(auditStore, {
@@ -496,6 +498,16 @@ export function callMethods(context: StoreContext) {
         args: vendorArgs,
         target: { serverId, toolName, url: row.url, effect },
         continuation: currentApprovalContext(),
+        /*
+         * Whether this is a read with the trust a check-in gives it: an app the person connected with
+         * their own account, and a tool whose server says it only reads. Chat judges the call by
+         * `effect` alone, as before; a task's conversation lets this, and only this, run unasked.
+         */
+        ...(access.ownCredential &&
+        advertised[0] &&
+        labelledRead(entry, toolName, advertised[0])
+          ? { ownConnectionRead: true as const }
+          : {}),
       });
       if (approval && "replay" in approval)
         return approval.replay as { text: string; isError: boolean };

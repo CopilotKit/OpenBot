@@ -104,16 +104,33 @@ describe("a task's next step", () => {
       expect(replyEnding(text).asks).toBe(false);
   });
 
-  test("is where the Bot's words leave things, or the person's own words while it works on them", () => {
+  test("is where the Bot's words leave things, and never the person's own words", () => {
     expect(
       nextStepOf(
         "I read Sam's email and the thread before it.\n\n- Draft A\n- Draft B\n\nShall I send draft A? It keeps the Friday date.",
         true,
       ),
     ).toBe("Shall I send draft A?");
-    expect(nextStepOf("Also copy Ana on it.", false)).toBe(
-      "“Also copy Ana on it.”",
-    );
+    expect(nextStepOf("Also copy Ana on it.", false)).toBeNull();
     expect(nextStepOf("   ", true)).toBeNull();
+  });
+
+  test("sets aside the source a Bot cites under its outcome", () => {
+    for (const [reply, outcome] of [
+      [
+        "I verified the request.\n\nI couldn't send the confirmation.\nSource: Requests connector, request r-oneone.",
+        "I couldn't send the confirmation.",
+      ],
+      [
+        "I can't approve it from here.\n\n**Source:** Jordan Kim's request `r-expense`, received 31 Oct 2026.",
+        "I can't approve it from here.",
+      ],
+      [
+        "Sent the reply to Sam.\n\nSources:\n- Sam's email\n- The spec page",
+        "Sent the reply to Sam.",
+      ],
+      ["Source: Requests connector.", null],
+    ] as const)
+      expect(nextStepOf(reply, true)).toBe(outcome);
   });
 });

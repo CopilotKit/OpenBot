@@ -3,6 +3,7 @@ import * as ReactCoreV2 from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
+import { channelKeys } from "@/lib/channels/queries";
 import { failedComputerCall } from "@/lib/computers/call";
 import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useFrontendTool } from "@/lib/copilot/approval-tools";
@@ -298,6 +299,11 @@ function LookTools() {
   return null;
 }
 
+/**
+ * One client for every look: the SDK keeps the handler from the first render, and the client with
+ * it, as the app's one client is kept.
+ */
+const lookQueries = new QueryClient();
 async function navigateWith(
   answer: (path: string) => Promise<Response>,
 ): Promise<{ result: unknown; paths: string[] }> {
@@ -312,7 +318,7 @@ async function navigateWith(
   );
   try {
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={lookQueries}>
         <LookTools />
       </QueryClientProvider>,
     );
@@ -393,6 +399,45 @@ test("a look nothing asks about goes straight to the computer and nowhere else",
   expect(looked).toHaveLength(1);
   expect(paths).toEqual([]);
   expect(result).toEqual({ ok: true, title: "Example Domain" });
+});
+
+test("in a task's own conversation a look goes to the gate first, never straight to the computer", async () => {
+  looked.length = 0;
+  stopped.length = 0;
+  lookOutcome = { ok: true, title: "Example Domain" };
+  // The conversation list as the app holds it: this run's thread is a task's conversation.
+  lookQueries.setQueryData(channelKeys.list(), {
+    pages: [
+      {
+        channels: [
+          {
+            id: "task-channel",
+            name: "Reply to Sam about the spec",
+            agentIds: ["default"],
+            threadId: "thread",
+            active: true,
+            lastMessageAt: null,
+            summary: null,
+            lastMessage: null,
+            lastMessageAgentId: null,
+            createdAt: "2026-10-31T05:50:00.000Z",
+            pinned: false,
+            lastReadAt: null,
+            task: true,
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+    pageParams: [""],
+  });
+  const { result, paths } = await navigateWith(async () =>
+    Response.json({ waiting: true, approvalId: "approval-3" }, { status: 202 }),
+  ).finally(() => lookQueries.clear());
+  expect(looked).toEqual([]);
+  expect(paths).toEqual(["/api/approvals/computer/default"]);
+  expect(result).toEqual({ waiting: true });
+  expect(stopped).toHaveLength(1);
 });
 
 test("needing a conversation is not read as stale refs", () => {
