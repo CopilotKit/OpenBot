@@ -58,8 +58,11 @@ const bare = (title: string) => title.trim().replace(/[.\s]+$/, "");
 const sentence = (title: string) =>
   /[!?]$/.test(bare(title)) ? bare(title) : `${bare(title)}.`;
 
-/** "One thing needs you", "3 things need you". */
-function headline(count: number) {
+/**
+ * "One thing needs you", "3 things need you": the first line of a ping's message, and the title of
+ * its push.
+ */
+export function pingHeadline(count: number) {
   return count === 1 ? "One thing needs you" : `${count} things need you`;
 }
 
@@ -78,9 +81,10 @@ function clip(text: string, max: number) {
 }
 
 /**
- * The folded message for Slack, Teams and SMS, and the one line a push shows. Each item is its Bot,
- * its title, why (the first sentence of it) and the app it came from, oldest first, so the message
- * reads as what has been waiting longest.
+ * The folded message for Slack, Teams and SMS, and the body a push shows under its title
+ * ({@link pingHeadline}). In the message each item is its Bot, its title, why (the first sentence of
+ * it) and the app it came from; in the push, its Bot and title, one line each. Oldest first, so both
+ * read as what has been waiting longest.
  */
 export function pingText(items: readonly AttentionItem[]): {
   text: string;
@@ -91,16 +95,22 @@ export function pingText(items: readonly AttentionItem[]): {
     return `• ${item.agentName}: ${sentence(item.title)}${why ? ` ${why}` : ""}${item.sourceApp ? ` (from ${item.sourceApp})` : ""}`;
   });
   const more = items.length - LISTED;
+  const andMore = more > 0 ? [`and ${more} more`] : [];
   const text = [
-    headline(items.length),
+    pingHeadline(items.length),
     ...lines,
-    ...(more > 0 ? [`and ${more} more`] : []),
+    ...andMore,
     items.length === 1
       ? "Start or hide it in OpenBot."
       : "Start or hide them in OpenBot.",
   ].join("\n");
   const pushBody = clip(
-    `${headline(items.length)}: ${items.map((item) => bare(item.title)).join("; ")}`,
+    [
+      ...items
+        .slice(0, LISTED)
+        .map((item) => `${item.agentName}: ${bare(item.title)}`),
+      ...andMore,
+    ].join("\n"),
     PUSH_BODY_MAX,
   );
   return { text, pushBody };

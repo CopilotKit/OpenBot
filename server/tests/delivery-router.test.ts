@@ -68,6 +68,8 @@ function fixture(
         : null,
     binding: async () => ownedBinding,
     bindingsFor: async () => [ownedBinding],
+    bindingsByUse: async () => [ownedBinding],
+    checkInConversations: async () => [],
     devices: async () => [],
     offerInbox: async (input: unknown) => {
       offered.push(input);
@@ -122,6 +124,7 @@ function fixture(
     queue,
     owner: "worker",
     authoriseScope: async () => live,
+    scopeFor: async () => null,
     runTurn: async (input) => {
       calls.push(input);
       await turnHook?.(router);
@@ -218,6 +221,7 @@ test("provider refusal persists failure while uncertain network persists unknown
     queue: f.queue,
     owner: "w",
     authoriseScope: async () => true,
+    scopeFor: async () => null,
     runTurn: async () => ({ replyText: "" }),
     providers: {
       slack: {
@@ -311,6 +315,7 @@ test("a suspended governed turn reports its pending approval", async () => {
     queue: f.queue,
     owner: "w",
     authoriseScope: async () => true,
+    scopeFor: async () => null,
     runTurn: async () => {
       throw suspended;
     },
@@ -357,6 +362,7 @@ test("chat sends carry the Bot's identity; SMS after STOP is recorded opted out,
     queue: refused.queue,
     owner: "w",
     authoriseScope: async () => true,
+    scopeFor: async () => null,
     runTurn: async () => ({ replyText: "" }),
     audit: async (event) => {
       refused.calls.push({ audit: event });
@@ -402,6 +408,7 @@ test("the person's update routing decides which transports carry each kind", asy
     queue: f.queue,
     owner: "w",
     authoriseScope: async () => true,
+    scopeFor: async () => null,
     runTurn: async () => ({ replyText: "" }),
     providers: {},
     routeFor: async ({ kind }) => {

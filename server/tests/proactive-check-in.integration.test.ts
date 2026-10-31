@@ -101,6 +101,12 @@ const router = createDeliveryRouter({
   queue,
   owner: `delivery-${suite}`,
   authoriseScope: async () => true,
+  scopeFor: async (ownerUserId, channelId, agentId) => ({
+    ownerUserId,
+    channelId,
+    agentId,
+    threadId: `${channelId}-thread`,
+  }),
   runTurn: async () => ({ replyText: "" }),
   providers: {},
 });
@@ -422,7 +428,7 @@ function replica(
       [inboxChannel, calendarChannel].includes(channelId)
         ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
         : null,
-    notify: (scope, input) => router.notify(scope, input),
+    attention: router,
     ...(options.admin ? { admin: options.admin } : {}),
     ...(options.tasks ? { tasks: options.tasks } : {}),
     ...(options.readableApps ? { readableApps: options.readableApps } : {}),
@@ -650,15 +656,20 @@ describe("a check-in", () => {
         "Start or hide it in OpenBot.",
       ].join("\n"),
     );
-    expect(ping?.pushBody).toBe(
-      "One thing needs you: Reply to Dana about Friday",
-    );
+    expect(ping?.pushBody).toBe("Inbox Bot: Reply to Dana about Friday");
     expect(ping?.offeredAt).toBeInstanceOf(Date);
     expect(item?.pingId).toBe(ping?.id as string);
-    // Until delivery takes pings itself, one notification through the Bot's conversation.
+    // Delivered as a ping: the person's one phone, titled for them, filed under the Bot's conversation.
     const outbox = await outboxOf();
-    expect(outbox.map((row) => [row.transport, row.dedupeKey])).toEqual([
-      ["push", `reply:ping:${ping?.id}:device:${device}`],
+    expect(
+      outbox.map((row) => [row.transport, row.kind, row.dedupeKey, row.text]),
+    ).toEqual([
+      [
+        "push",
+        "attention",
+        `attention:${ping?.id}:device:${device}`,
+        "One thing needs you\nInbox Bot: Reply to Dana about Friday",
+      ],
     ]);
     expect(outbox[0]?.channelId).toBe(inboxChannel);
   });
@@ -1276,7 +1287,7 @@ describe("the ping", () => {
     expect(await outboxOf()).toEqual([]);
   });
 
-  test("the ping lists five items, then how many more, and the push line stays short", async () => {
+  test("the ping lists five items, then how many more, and the push stays short, a line per item naming its Bot", async () => {
     const titles = Array.from(
       { length: 7 },
       (_, index) =>
@@ -1289,7 +1300,10 @@ describe("the ping", () => {
     expect(lines.filter((line) => line.startsWith("• "))).toHaveLength(5);
     expect(lines).toContain("and 2 more");
     expect(Array.from(ping?.pushBody ?? "").length).toBeLessThanOrEqual(200);
-    expect(ping?.pushBody).toStartWith(`7 things need you: ${titles[0]}; `);
+    // The push's title says how many (delivery titles it); its body names each item's Bot.
+    expect(ping?.pushBody).toStartWith(
+      `Inbox Bot: ${titles[0]}\nInbox Bot: ${titles[1]}\n`,
+    );
     expect(ping?.pushBody).toEndWith("…");
   });
 });

@@ -107,16 +107,8 @@ export type ProactiveEngineDeps = {
     channelId: string,
     agentId: string,
   ): Promise<ProactiveScope | null>;
-  /**
-   * The owner's routing preference, as any notification takes it. Carries a ping until `attention`
-   * is given: one message per ping, into one of the person's conversations with a Bot it names.
-   */
-  notify(
-    scope: ProactiveScope,
-    input: { id: string; text: string; kind: "reply" },
-  ): Promise<void>;
   /** Delivery of a ping to the person's push devices, Slack and Teams (`delivery/*`). */
-  attention?: AttentionDelivery;
+  attention: AttentionDelivery;
   /** The admin's switch and daily cap (`admin/*`). Without it, on for everyone and 24 a day. */
   admin?: ProactiveAdmin;
   /** Opens a task for an item the person started (`tasks/*`). Without it, Start is refused. */
@@ -338,36 +330,9 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     ];
   }
 
-  /**
-   * Until delivery takes pings itself: one notification, into the person's conversation with the
-   * Bot whose item is newest, falling back through the others. The text names every item's Bot.
-   */
-  async function notifyThroughConversation(ping: AttentionPing) {
-    const newestFirst = [
-      ...new Set(ping.items.map((item) => item.agentId).reverse()),
-    ];
-    for (const agentId of newestFirst) {
-      const setting = await deps.store.forBot(ping.ownerUserId, agentId);
-      if (!setting) continue;
-      const scope = await deps.resolveScope(
-        ping.ownerUserId,
-        setting.channelId,
-        agentId,
-      );
-      if (!scope) continue;
-      await deps.notify(scope, {
-        id: `ping:${ping.pingId}`,
-        kind: "reply",
-        text: ping.text,
-      });
-      return;
-    }
-  }
-
   /** Offer a written ping to delivery, then record that it was. Delivery dedupes a second offer. */
   async function offer(ping: AttentionPing) {
-    if (deps.attention) await deps.attention.notifyAttention(ping);
-    else await notifyThroughConversation(ping);
+    await deps.attention.notifyAttention(ping);
     await deps.store.pings.markOffered(ping.pingId);
   }
 
