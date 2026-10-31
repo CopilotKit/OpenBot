@@ -78,6 +78,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### The server image starts again
+
+The `server` image left out `agent-computer/src/egress.ts`, which the server imports to check a
+Bot's navigation against the network policy, so a container built from `server/Dockerfile` exited on
+start with a module-not-found error and restarted in a loop. The image now carries that file. The
+all-in-one `openbot` image was not affected.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
