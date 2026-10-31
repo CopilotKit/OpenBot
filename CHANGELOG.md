@@ -133,6 +133,36 @@ again when they come back to the end or press the arrow. A rail beside a convers
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
 
+### First run shows what OpenBot does, one step at a time
+
+- The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
+  own, a team of Bots, and asking before it acts), then Connect your apps, Get notified, Check your
+  setup, and the name step, whose Get started opens the app. On a desktop the steps are listed on the
+  left beside a picture of each; on a phone they come one at a time. A reload, browser Back and a
+  connection's return all keep the person's place, which is now saved as they go.
+- Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
+  more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
+  shown the page or the variables that close a gap; everybody else only that their admin sets it up.
+  Check again asks Intelligence and the model provider again, at most every 10 seconds. Reading the
+  checklist does the same once an answer has failed or is five minutes old, without waiting for it,
+  so the next read has the new answer. To check the Bot computer, the server sends each running
+  computer its network policy whenever it asks, and sees that it answers; it wakes none.
+- An app connected from Connect your apps comes back to that step from the app's own sign-in page,
+  whether it connected, failed or was cancelled there. A connection started from Connections or an
+  app's admin page comes back where it did before.
+
+### OpenBot has a new look
+
+- Every screen has new colours: cool neutral greys, a near-black primary button that turns light
+  in dark mode, a purple focus ring, slightly rounder corners and quicker easing. Text now follows
+  the browser's own size, so it is a little larger than before.
+- Dark mode follows the system by default. Settings → General → Appearance offers System, Light and
+  Dark, kept in this browser. Someone who had turned the old dark switch on stays dark.
+- Every Bot, and OpenBot's own mark, is an orb with eyes that blinks and follows the pointer. It
+  holds still with reduced motion.
+- Each Bot's orb takes its colour and pattern from the Bot, so two Bots in one colour still look
+  different. Violet is kept for OpenBot's own mark.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from CopilotKit's standard catalog on A2UI 1.0

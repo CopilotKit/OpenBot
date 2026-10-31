@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import type { AIState } from "@/components/agents/orb/ai-core";
+import type { AIState } from "@/components/agents/orb/agent-orb";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelWork,
