@@ -204,6 +204,12 @@ function ApprovalContent({
   handOff: boolean;
 }) {
   const detailsId = useId();
+  const { args, target } = request.action;
+  // What it acts on travels beside the arguments: the page and the element a browser step presses.
+  const details =
+    target && typeof target === "object" && Object.keys(target).length > 0
+      ? { args, target }
+      : args;
   return (
     <>
       {view.fields.map((field) => (
@@ -253,7 +259,7 @@ function ApprovalContent({
           // biome-ignore lint/a11y/noNoninteractiveTabindex: A long request scrolls, and a keyboard needs focus to scroll it.
           tabIndex={0}
         >
-          {JSON.stringify(request.action.args, null, 2)}
+          {JSON.stringify(details, null, 2)}
         </pre>
       </details>
     </>

@@ -110,11 +110,71 @@ function describeShare(args: Record<string, unknown>): ApprovalView {
   };
 }
 
+/** An element's role, as the word a person uses for it on a page. */
+const ROLE_WORDS: Record<string, string> = {
+  button: "Button",
+  link: "Link",
+  textbox: "Field",
+  searchbox: "Field",
+  combobox: "Field",
+  spinbutton: "Field",
+  checkbox: "Checkbox",
+  radio: "Option",
+  option: "Option",
+  menuitem: "Menu item",
+  menuitemcheckbox: "Menu item",
+  menuitemradio: "Menu item",
+  tab: "Tab",
+  switch: "Switch",
+  slider: "Slider",
+  img: "Image",
+  image: "Image",
+  heading: "Heading",
+};
+
+/**
+ * The element a browser step acts on, as the computer resolved it from the page: "Button: Place
+ * order", "Field: Search Wikipedia". The server attaches it to the request as `target.element`
+ * (`server/src/computer/gateway.ts`), from the snapshot the Bot cited, so it names what will really
+ * be pressed, whatever the Bot wrote in its own arguments. Null when the step names no element.
+ */
+function elementField(
+  target: unknown,
+): { label: string; value: string } | null {
+  const element = record(record(target)?.element);
+  if (!element) return null;
+  const role = display(element.role)?.toLowerCase() ?? "";
+  const word = ROLE_WORDS[role];
+  const name = display(element.name);
+  if (name) return { label: word ?? "Element", value: name };
+  if (!role) return null;
+  return {
+    label: "Element",
+    value: `A ${(word ?? role).toLowerCase()} with no name`,
+  };
+}
+
+/** The page's path, for the place line: "/checkout", or null for a site's front page. */
+function pagePath(target: unknown, host: string): string | null {
+  const pageUrl = display(record(target)?.pageUrl);
+  if (!pageUrl) return null;
+  try {
+    const url = new URL(pageUrl);
+    if (url.hostname.replace(/^www\./, "") !== host.replace(/^www\./, ""))
+      return null;
+    const path = url.pathname.replace(/\/+$/, "");
+    return path || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Where an action happens, as a person reads it, or null where the card already says it: the site a
- * browser step acts on, the folder a command runs in. The scope is the server's matching key, so it
- * is shown only where it is a place. An app's own id, a share's recipients and the Bot a hand-off
- * goes to are already on the card as the app and the To or Bot field.
+ * browser step acts on, with the page's path beside it, the folder a command runs in. The scope is
+ * the server's matching key, so it is shown only where it is a place. An app's own id, a share's
+ * recipients and the Bot a hand-off goes to are already on the card as the app and the To or Bot
+ * field.
  */
 export function approvalPlace(
   request: Pick<ApprovalRequest, "action">,
@@ -126,7 +186,9 @@ export function approvalPlace(
   if (server === "bot" || scope === server) return null;
   // The computer's own words for "no page" and "its workspace" are no place a person names.
   if (!scope || ["*", "browser", "workspace"].includes(scope)) return null;
-  return scope;
+  // A browser step's scope is the page's host; the path says which page of it.
+  const path = server === null ? pagePath(target, scope) : null;
+  return path ? `${scope}${path}` : scope;
 }
 
 /** Whether the person was asked about this request, rather than a saved rule deciding it. */
@@ -180,6 +242,17 @@ export function describeApproval(
     const hidden = (key: string) =>
       HIDDEN.test(key) || (server === "host" && HOST_HIDDEN.test(key));
     const shownKeys = new Set<string>();
+    /*
+     * A browser step leads with the element the computer resolved, which is what will be pressed.
+     * The Bot's own description of it (`element`) says the same thing less reliably, and is left to
+     * Details.
+     */
+    const element =
+      kind === "browser" ? elementField(request.action.target) : null;
+    if (element) {
+      fields.push(element);
+      shownKeys.add("element");
+    }
     // The first key matching, under `label` or, without one, under its own name.
     const pick = (pattern: RegExp, label?: string) => {
       for (const [key, value] of entries) {
@@ -206,6 +279,7 @@ export function describeApproval(
     }
     for (const [key, value] of entries) {
       if (fields.length >= MAX_FIELDS) break;
+      if (shownKeys.has(key)) continue;
       if ([RECIPIENT, SUBJECT, BODY].some((test) => test.test(key))) continue;
       if (hidden(key) || /^b?cc$/i.test(key)) continue;
       const shown = display(value);

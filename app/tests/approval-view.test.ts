@@ -79,6 +79,89 @@ test("a browser action keeps what it acts on and drops the page plumbing", () =>
   expect(approvalPlace(request)).toBe("shop.example");
 });
 
+test("a browser step names the element the computer resolved, and the page beside the site", () => {
+  const request = action(
+    "computer_click",
+    { element: "the order button", ref: "e7", snapshotId: 3 },
+    {
+      scope: "shop.example",
+      target: {
+        pageUrl: "https://shop.example/checkout/?step=2",
+        element: { ref: "e7", role: "button", name: "Place order" },
+        snapshotId: 3,
+      },
+    },
+  );
+  const view = describeApproval(request);
+  // The page's own name for it, not the Bot's description of it.
+  expect(view.fields).toEqual([{ label: "Button", value: "Place order" }]);
+  expect(view.unshown).toBe(0);
+  expect(approvalPlace(request)).toBe("shop.example/checkout");
+});
+
+test("a field and a link read in plain words; an unnamed element still says what it is", () => {
+  const typed = describeApproval(
+    action(
+      "computer_type",
+      { ref: "e2", text: "otters" },
+      {
+        scope: "en.wikipedia.org",
+        target: {
+          pageUrl: "https://en.wikipedia.org/",
+          element: { role: "searchbox", name: "Search Wikipedia" },
+        },
+      },
+    ),
+  );
+  expect(typed.fields[0]).toEqual({
+    label: "Field",
+    value: "Search Wikipedia",
+  });
+  const link = describeApproval(
+    action(
+      "computer_click",
+      { ref: "e3" },
+      { target: { element: { role: "link", name: "Pricing" } } },
+    ),
+  );
+  expect(link.fields).toEqual([{ label: "Link", value: "Pricing" }]);
+  const unnamed = describeApproval(
+    action(
+      "computer_click",
+      { ref: "e4" },
+      { target: { element: { role: "button", name: "" } } },
+    ),
+  );
+  expect(unnamed.fields).toEqual([
+    { label: "Element", value: "A button with no name" },
+  ]);
+});
+
+test("a browser step with no element, or a front page, keeps to what it has", () => {
+  const request = action(
+    "computer_navigate",
+    { url: "https://shop.example/" },
+    { scope: "shop.example", target: { pageUrl: "https://shop.example/" } },
+  );
+  expect(describeApproval(request).fields).toEqual([
+    { label: "Url", value: "https://shop.example/" },
+  ]);
+  expect(approvalPlace(request)).toBe("shop.example");
+  // A page on another host than the scope is not this place's path.
+  expect(
+    approvalPlace(
+      action(
+        "computer_click",
+        {},
+        {
+          scope: "shop.example",
+          target: { pageUrl: "https://elsewhere.example/x" },
+        },
+      ),
+    ),
+  ).toBe("shop.example");
+});
+
 test("a command on the person's computer names the command and its folder, not the grant", () => {
   const request = action(
     "host/run_command",
