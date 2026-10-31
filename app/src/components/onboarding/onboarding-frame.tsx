@@ -108,7 +108,7 @@ export function OnboardingFrame({
           {index > 0 ? (
             <button
               aria-label="Back"
-              className="glass absolute left-4 grid size-(--target) place-items-center rounded-full text-foreground shadow-(--shadow-glass) outline-none transition-transform focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-95 motion-reduce:transition-none"
+              className="glass absolute left-4 grid size-(--target) place-items-center rounded-full text-foreground shadow-(--shadow-glass) outline-none transition-transform focus-visible:ring-3 focus-visible:ring-ring active:scale-95 motion-reduce:transition-none"
               data-onboarding-back="phone"
               onClick={onBack}
               type="button"
@@ -248,6 +248,10 @@ export function OnboardingFrame({
  *
  * In the list each step has a mark, done ones ticked and the one on screen filled. A step already
  * reached is a button back to it, and picking one closes the list; one ahead is only its name.
+ *
+ * SAID, NOT ONLY DRAWN. The marks are pictures and hidden, so what they show is said in words a
+ * screen reader reads with the name: "Welcome to OpenBot, done", and "Get notified, not yet
+ * available" for a step ahead. The step on screen is `aria-current="step"`.
  */
 function StepMenu({
   titles,
@@ -303,6 +307,11 @@ function StepMenu({
                     )}
                   </span>
                   <span className="min-w-0 truncate">{title}</span>
+                  {done ? (
+                    <span className="sr-only">, done</span>
+                  ) : !current && !pickable ? (
+                    <span className="sr-only">, not yet available</span>
+                  ) : null}
                 </>
               );
               const row =
@@ -313,7 +322,7 @@ function StepMenu({
                     <button
                       className={cn(
                         row,
-                        "text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                        "text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring",
                       )}
                       data-onboarding-pick={at}
                       onClick={() => {

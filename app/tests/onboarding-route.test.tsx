@@ -290,7 +290,11 @@ test("the steps run welcome, computer, team, approval, setup, apps, notify, name
     expect(
       within(list)
         .getAllByRole("listitem")
-        .map((item) => item.textContent?.replace(/^\d/, "")),
+        .map((item) =>
+          item.textContent
+            ?.replace(/^\d/, "")
+            .replace(/, (done|not yet available)$/, ""),
+        ),
     ).toEqual([
       "Welcome to OpenBot",
       "Each Bot has its own browser and files",
