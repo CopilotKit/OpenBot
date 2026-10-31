@@ -17,7 +17,7 @@ import {
 } from "@testing-library/react";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
-import { SetupChecklist } from "@/components/onboarding/setup-checklist";
+import { SetupChecklist } from "@/components/setup/setup-checklist";
 import type {
   SetupChecklist as Checklist,
   SetupRow,

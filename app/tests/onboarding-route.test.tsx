@@ -84,6 +84,7 @@ let saves: number[];
 let completed: boolean;
 let named: string | null;
 let localEvaluation: boolean;
+let role: "admin" | "user";
 /** The apps `GET /api/plugins/for/general/apps` answers with. */
 let appList: unknown[];
 /** Whether `/api/capabilities` answers, and how many times it was asked. */
@@ -103,6 +104,7 @@ beforeEach(() => {
   completed = false;
   named = null;
   localEvaluation = false;
+  role = "admin";
   appList = [
     {
       key: "notion",
@@ -131,7 +133,7 @@ beforeEach(() => {
             email: "maya@example.com",
             name: named ?? "maya@example.com",
             needsName: named === null,
-            role: "admin",
+            role,
             onboarding: {
               step: saved,
               completedAt: completed ? "2026-10-23T00:00:00Z" : null,
@@ -559,6 +561,26 @@ test("an admin's Add apps keeps onboarding's place: on to Get notified, with Plu
   expect(searchOf(view)).toEqual({ step: "notify", open: "/admin/plugins" });
   expect(view.getByText("Plugins opens once you get started.")).toBeTruthy();
   expect(completed).toBe(false);
+});
+
+test("Check your setup tells an admin where to check again after onboarding", async () => {
+  const view = open("/onboarding?step=setup");
+  await heading(view, "Check your setup");
+
+  expect(
+    await view.findByText("Check again any time in Settings → Setup."),
+  ).toBeTruthy();
+});
+
+test("a member isn't pointed at a Settings page they don't get", async () => {
+  role = "user";
+  const view = open("/onboarding?step=setup");
+  await heading(view, "Check your setup");
+  await view.findByRole("list", { name: "Setup" });
+
+  expect(view.queryByText("Check again any time in Settings → Setup.")).toBe(
+    null,
+  );
 });
 
 test("a page to open that isn't one of this app's is dropped", async () => {
