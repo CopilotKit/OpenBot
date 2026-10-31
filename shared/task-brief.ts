@@ -5,7 +5,7 @@
  * ONE DECLARATION, READ FROM BOTH SIDES, for the reason `routine-firing.ts` gives. A task starts in a
  * conversation of its own with the person's ask as its first message (`start_task`, or Start on a
  * suggestion), and the turn is started by the server, not typed there. The model needs telling that
- * this conversation IS the task: its prompt says to hand anything bigger than a quick answer to
+ * this conversation IS the task: its prompt says to hand multi-step or long-running work to
  * `start_task`, and a task whose first message reads like that ask would hand itself on again,
  * forever. Two readers have to recognise the frame again: the transcript, to draw the person's ask
  * as their own words without the frame, and the titler, to name the conversation from the ask.
