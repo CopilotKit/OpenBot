@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ThreadAlreadyRunningError } from "@copilotkit/runtime/v2";
 import { frameTaskBrief, TASK_ENDING } from "@openbot/shared/task-brief";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { ThreadLockBusyError } from "@openbot/toolkit/lease";
@@ -6,6 +7,7 @@ import {
   HEADLESS_WAITING_FALLBACK,
   type TurnRunner,
 } from "@openbot/toolkit/run-turn";
+import { TaskTurnTimeoutError } from "../src/proactive/engine";
 import { createTaskTurn } from "../src/tasks/threads";
 
 const SCOPE = {
@@ -16,7 +18,10 @@ const SCOPE = {
 };
 const ASK = "Prepare notes for the Hearth & Co visit.";
 
-function turnWith(runTurn: TurnRunner, options: { final?: boolean } = {}) {
+function turnWith(
+  runTurn: TurnRunner,
+  options: { final?: boolean; signal?: AbortSignal } = {},
+) {
   const said: { text: string; agentId: string | null; id: string }[] = [];
   const busy: boolean[] = [];
   const run = createTaskTurn({
@@ -44,7 +49,7 @@ function turnWith(runTurn: TurnRunner, options: { final?: boolean } = {}) {
       run(SCOPE, {
         runId: "task-1",
         text: frameTaskBrief(ASK),
-        signal: new AbortController().signal,
+        signal: options.signal ?? new AbortController().signal,
         final: options.final ?? false,
       }),
   };
@@ -173,6 +178,38 @@ describe("a task's turn", () => {
     expect(turn.said).toEqual([
       { text: ASK, agentId: null, id: "task-1:input" },
     ]);
+  });
+
+  test("refused by the runner on its last run while a run before it winds down, it says nothing: it never ran", async () => {
+    const error = new ThreadAlreadyRunningError();
+    const turn = turnWith(
+      async () => {
+        throw error;
+      },
+      { final: true },
+    );
+    await expect(turn.start()).rejects.toBe(error);
+    expect(turn.said).toEqual([
+      { text: ASK, agentId: null, id: "task-1:input" },
+    ]);
+  });
+
+  test("stopped at its time limit on its last run, it says it took too long, not that it was cancelled", async () => {
+    const controller = new AbortController();
+    const turn = turnWith(
+      async ({ signal }) => {
+        controller.abort(new TaskTurnTimeoutError(7 * 60_000));
+        expect(signal?.aborted).toBe(true);
+        throw new Error("The headless turn was cancelled.");
+      },
+      { final: true, signal: controller.signal },
+    );
+    await expect(turn.start()).rejects.toThrow("cancelled");
+    expect(turn.said.at(-1)).toEqual({
+      text: "I couldn't finish this: the run took longer than 7 minutes.",
+      agentId: "assistant",
+      id: "task-1:failed",
+    });
   });
 
   test("that fails on its last run says so in the conversation, in plain words", async () => {

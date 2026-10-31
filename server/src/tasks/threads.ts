@@ -4,7 +4,10 @@ import {
   TASK_ENDING,
 } from "@openbot/shared/task-brief";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import { ThreadLockBusyError } from "@openbot/toolkit/lease";
+import {
+  isThreadAlreadyRunning,
+  ThreadLockBusyError,
+} from "@openbot/toolkit/lease";
 import {
   HEADLESS_WAITING_FALLBACK,
   type TurnRunner,
@@ -13,11 +16,12 @@ import type { AgentActor } from "../agents/profile-types";
 import { PERSON_INITIATOR } from "../audit";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
-import type {
-  ProactiveEngineDeps,
-  ProactiveScope,
-  TaskThreads,
-  TaskTurnEnding,
+import {
+  type ProactiveEngineDeps,
+  type ProactiveScope,
+  type TaskThreads,
+  type TaskTurnEnding,
+  TaskTurnTimeoutError,
 } from "../proactive/engine";
 import type { TaskReplyContextReader } from "./reply-context";
 import { replyEnding } from "./reply-ending";
@@ -129,7 +133,9 @@ function waitingLine(suspension: HeadlessToolSuspension): string {
  * FAILING ON ITS LAST RUN IS SAID. A turn that throws is thrown on, for the queue to hold and retry.
  * On its last run (`final`) the Bot's line says it couldn't finish and why, in plain words, so the
  * conversation does not end on the person's ask with nothing after it. A turn refused the
- * conversation's lock on its first ask never ran, and is put back on the queue without a word.
+ * conversation's lock on its first ask, or refused by the runner while a run before it winds down,
+ * never ran, and is put back on the queue without a word. A turn the engine stopped for taking too
+ * long says so (`TaskTurnTimeoutError`), not that it was cancelled.
  */
 export function createTaskTurn(deps: {
   channels: Pick<ChannelStore, "recordActivity" | "signalBusy">;
@@ -212,9 +218,16 @@ export function createTaskTurn(deps: {
       }
     } catch (error) {
       if (!(error instanceof HeadlessToolSuspension)) {
-        if (input.final && !(error instanceof ThreadLockBusyError))
+        const busy =
+          error instanceof ThreadLockBusyError || isThreadAlreadyRunning(error);
+        // Stopped by the engine's deadline, the runner says only that it was cancelled.
+        const reason =
+          input.signal.reason instanceof TaskTurnTimeoutError
+            ? input.signal.reason
+            : error;
+        if (input.final && !busy)
           await record(
-            `I couldn't finish this: ${plainFailure(error instanceof Error ? error.message : String(error))}.`,
+            `I couldn't finish this: ${plainFailure(reason instanceof Error ? reason.message : String(reason))}.`,
             scope.agentId,
             `${input.runId}:failed`,
           ).catch(() => {});

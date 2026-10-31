@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   isLockConflict,
+  isThreadAlreadyRunning,
   keepLease,
   LockLapsedError,
   ThreadLockBusyError,
@@ -62,6 +63,25 @@ describe("ThreadLockBusyError", () => {
     expect(busy.cause).toBe(conflict);
     // Not the platform's error itself, so nothing that stops on a lost lock mistakes it for one.
     expect(isLockConflict(busy)).toBe(false);
+  });
+});
+
+describe("isThreadAlreadyRunning", () => {
+  test("knows the runtime's refusal by its code or its name, and nothing else", () => {
+    const byCode = Object.assign(new Error("Thread already running"), {
+      code: "THREAD_ALREADY_RUNNING",
+    });
+    const byName = new Error("Thread already running");
+    byName.name = "ThreadAlreadyRunningError";
+    expect(isThreadAlreadyRunning(byCode)).toBe(true);
+    expect(isThreadAlreadyRunning(byName)).toBe(true);
+    expect(isThreadAlreadyRunning(new Error("Thread already running"))).toBe(
+      false,
+    );
+    expect(isThreadAlreadyRunning(platformError(409))).toBe(false);
+    expect(isThreadAlreadyRunning({ code: "THREAD_ALREADY_RUNNING" })).toBe(
+      false,
+    );
   });
 });
 

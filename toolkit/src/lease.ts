@@ -37,6 +37,23 @@ export class ThreadLockBusyError extends Error {
 }
 
 /**
+ * The runner refused the turn because it already has a run in this conversation: one before it
+ * hasn't let go yet, such as a turn that was stopped and is still being wound down. Refused before
+ * anything ran, so, like a lock refused on the first ask, the turn can go back on the queue without
+ * counting as an attempt.
+ *
+ * Matched on the runtime's code, as its own handler matches it, so a copy of
+ * `ThreadAlreadyRunningError` from another package version still counts.
+ */
+export function isThreadAlreadyRunning(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    ((error as { code?: unknown }).code === "THREAD_ALREADY_RUNNING" ||
+      error.name === "ThreadAlreadyRunningError")
+  );
+}
+
+/**
  * No renewal has succeeded for nearly as long as the lock lives, so it will have lapsed before the
  * next one could land, whatever the reason was.
  */

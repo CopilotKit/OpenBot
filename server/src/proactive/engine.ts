@@ -24,7 +24,10 @@ import {
   type HeadlessTool,
   HeadlessToolSuspension,
 } from "@openbot/toolkit/headless-tools";
-import { ThreadLockBusyError } from "@openbot/toolkit/lease";
+import {
+  isThreadAlreadyRunning,
+  ThreadLockBusyError,
+} from "@openbot/toolkit/lease";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
@@ -69,6 +72,25 @@ const RUN_LEASE_MS = 10 * 60_000;
 const TASK_LEASE_MS = 3 * 60_000;
 /** How long a task's turn that threw waits before its one retry. */
 const TASK_RETRY_MS = 10_000;
+/**
+ * The longest a task's turn may take, start to finish, before it is given up on. The turn runner
+ * stops the model's run at five minutes (`TURN_LIMITS.turnTimeoutMs`), but not the steps around it:
+ * reading the conversation, taking its lock, giving the lock back. A recording saw one of those never
+ * answer, and the turn's lease renewed for as long as it waited, so the task read Working for a
+ * quarter of an hour. Seven minutes leaves room for the runner's own stop and its wind-down.
+ */
+export const TASK_TURN_MS = 7 * 60_000;
+
+/**
+ * A task's turn ran past `TASK_TURN_MS`. Its message names the limit in the words `plainFailure`
+ * reads ("stopped after Ns"), so the task says it took too long rather than that it was cut off.
+ */
+export class TaskTurnTimeoutError extends Error {
+  override name = "TaskTurnTimeoutError";
+  constructor(limitMs: number) {
+    super(`The task's turn was stopped after ${Math.round(limitMs / 1000)}s.`);
+  }
+}
 /**
  * How many of one person's task turns run at once, across every replica. The rest wait on the
  * queue, still Working, and start as those finish, so a run of replies, suggestions or `start_task`
@@ -299,6 +321,8 @@ export type ProactiveEngineDeps = {
   taskRetryMs?: number;
   /** How many task turns this process runs at once. Tests pass fewer. */
   taskTurnsAtOnce?: number;
+  /** See `TASK_TURN_MS`. Tests pass less. */
+  taskTurnMs?: number;
 };
 
 /** What a setting suggested before, as `ProactiveStore.history` answers it. */
@@ -597,10 +621,17 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       serialBy?: SerialOrder;
       runningAtMost?: RunningCap;
       /**
-       * A turn refused the conversation's lock on its first ask is given back without spending
-       * its attempt. Only for work that is a single turn, with nothing earlier to repeat.
+       * A turn refused the conversation's lock on its first ask, or refused by the runner because a
+       * run before it still holds the conversation, is given back without spending its attempt.
+       * Only for work that is a single turn, with nothing earlier to repeat.
        */
       deferBusy?: boolean;
+      /**
+       * The longest the work may take. Past it the work's signal is aborted and the item let go
+       * with a `TaskTurnTimeoutError`, whether or not the work has wound down, so a step that
+       * never answers can't hold the item, renewing its lease, for ever.
+       */
+      deadlineMs?: number;
     } = { leaseMs: RUN_LEASE_MS, maxAttempts: 1, retryMs: 60_000 },
   ) {
     /*
@@ -640,13 +671,29 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         );
     }, options.leaseMs / 3);
     renew.unref?.();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-      const kept = await work(
+      const running = work(
         item.payload,
         controller.signal,
         item.attempts,
         item.key,
       );
+      const limit = options.deadlineMs;
+      const kept =
+        limit === undefined
+          ? await running
+          : await Promise.race([
+              running,
+              new Promise<never>((_resolve, reject) => {
+                deadline = setTimeout(() => {
+                  const error = new TaskTurnTimeoutError(limit);
+                  controller.abort(error);
+                  reject(error);
+                }, limit);
+                deadline.unref?.();
+              }),
+            ]);
       await deps.queue.finish({
         kind,
         key: item.key,
@@ -659,7 +706,8 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
        * or the lock lost once the run was under way, still spends its attempt and keeps its reason.
        */
       const unstarted =
-        options.deferBusy && error instanceof ThreadLockBusyError;
+        options.deferBusy &&
+        (error instanceof ThreadLockBusyError || isThreadAlreadyRunning(error));
       const released = await deps.queue.release({
         kind,
         key: item.key,
@@ -674,6 +722,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       if (!unstarted) throw error;
     } finally {
       clearInterval(renew);
+      clearTimeout(deadline);
       if (options.onSettled)
         await options.onSettled(item.payload).catch(() => undefined);
     }
@@ -816,6 +865,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         max: TASK_TURNS_PER_PERSON,
       },
       deferBusy: true,
+      deadlineMs: deps.taskTurnMs ?? TASK_TURN_MS,
       maxAttempts: TASK_RUNS,
       retryMs,
       onRetry: () => track(Bun.sleep(retryMs).then(startSoon)),
