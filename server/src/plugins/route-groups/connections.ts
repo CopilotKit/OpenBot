@@ -246,9 +246,10 @@ export function mountConnectionRoutes({
        * link attaches a second account behind a row that already says connected, so it is refused.
        * A broker that runs a correlated flow is not that: Arcade keeps one connection per name and
        * provider, and a consent over it adds the permissions it asks for to that same connection,
-       * as the per-action Authorize always has. So Connect over a standing Arcade row is let through,
-       * and it is what Reconnect on a Bot's card does for a call Arcade refused one action: it asks
-       * for everything the app needs, and the row the verifier then updates is the one that stood.
+       * as the per-action Authorize always has. So Connect over a standing Arcade row is let through.
+       * A Bot's card sends somebody whose call Arcade refused to the app's page, as it does on
+       * Composio, and the Reconnect there is this: it asks for everything the app needs, and the row
+       * the verifier then updates is the one that stood. No Disconnect comes first.
        */
       const existing = await store.brokeredConnection({ toolkit, account });
       if (existing && !composio.broker.authorizations) {

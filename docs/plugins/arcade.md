@@ -165,8 +165,10 @@ row from the answer, and Disconnect and offboarding end it at Arcade and then he
 checks each action itself on every call. A call it refuses for want of authorization shows the
 person the Reconnect card. The row is cleared only where Arcade then answers that the account holds
 nothing for the app, which is Composio's lost account; where it holds the app's other actions, the
-row stays, those actions go on working, and Reconnect asks for the whole app over the connection
-that stands.
+row stays and those actions go on working. Either way the card's Reconnect goes to the app's page
+under Connections, as on Composio, and a connected Arcade app there offers Reconnect beside
+Disconnect: one press asks for the whole app over the connection that stands, with no Disconnect
+first.
 
 A single-user deployment is filed at Arcade under its own name, not under `dev-local-user`; see
 [Configuration](../configuration.md#authentication).

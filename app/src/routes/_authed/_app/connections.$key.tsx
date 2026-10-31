@@ -272,6 +272,9 @@ function AppConnectionPage() {
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
+    /* The same capability the grant list below is drawn on: a broker that approves per action takes
+       a consent over the connection that stands. */
+    reconnectsInPlace: perActionGrants,
     brokered,
     configured: plugins.data?.composioConfigured ?? false,
     recorded: connection !== undefined,

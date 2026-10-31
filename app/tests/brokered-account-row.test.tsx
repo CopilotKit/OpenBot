@@ -16,7 +16,13 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   type BrokeredAccount,
@@ -1175,6 +1181,7 @@ test("the row names the app rather than calling it the app", async () => {
 function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
   return {
     configured: true,
+    reconnectsInPlace: false,
     connect: () => {},
     connected: false,
     connecting: false,
@@ -1274,6 +1281,34 @@ test("a consent app offers Connect, and Disconnect once it is connected", () => 
   expect(connected.getByText("Connected")).toBeTruthy();
   expect(connected.getByRole("button", { name: "Disconnect" })).toBeTruthy();
   expect(connected.queryByRole("button", { name: /Connect/ })).toBeNull();
+});
+
+test("a connected Arcade row offers Reconnect beside Disconnect, and a Composio row does not", () => {
+  /*
+   * WHERE A BOT'S CARD SENDS SOMEBODY TO RECONNECT, ON BOTH BROKERS. On Arcade a consent over the
+   * connection that stands adds what it asks for, so one press finishes reconnecting here. On
+   * Composio a second consent would attach a second account, so reconnecting is Disconnect first.
+   */
+  const pressed: string[] = [];
+  const arcade = renderRow(
+    accountState({
+      connected: true,
+      kind: "consent",
+      reconnectsInPlace: true,
+      connect: () => pressed.push("connect"),
+    }),
+  );
+  fireEvent.click(arcade.getByRole("button", { name: "Reconnect" }));
+  expect(pressed).toEqual(["connect"]);
+  expect(arcade.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+
+  cleanup();
+
+  const composio = renderRow(
+    accountState({ connected: true, kind: "consent" }),
+  );
+  expect(composio.queryByRole("button", { name: "Reconnect" })).toBeNull();
+  expect(composio.getByRole("button", { name: "Disconnect" })).toBeTruthy();
 });
 
 test("an app needing no account offers nothing to press", () => {
@@ -2488,6 +2523,7 @@ function AccountProbe() {
     verifiedAt: null,
     probe: null,
     checkable: true,
+    reconnectsInPlace: false,
     authScheme: "API_KEY",
     returnTo: "settings",
     report: () => {},

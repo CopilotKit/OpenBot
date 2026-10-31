@@ -403,6 +403,8 @@ function RouteComponent() {
    */
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
+    // Off the declared capability, never off the vendor's name. See the row's own field.
+    reconnectsInPlace: plugins.data?.authorizesPerAction ?? false,
     brokered: auth === "brokered",
     configured: plugins.data?.composioConfigured ?? false,
     recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,

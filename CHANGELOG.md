@@ -108,8 +108,9 @@ everything the app's actions need in one consent. The action list still approves
 time. Every Arcade connection is recorded in OpenBot when it is made or confirmed and removed when
 it is disconnected, and a Bot's call needs it, exactly as on Composio. A call Arcade refuses shows
 the Reconnect card, instead of a plain error. The connection is cleared only when Arcade holds
-nothing for the app, as a lost Composio account is, so actions already approved go on working, and
-Reconnect adds what was missing. See
+nothing for the app, as a lost Composio account is, so actions already approved go on working. The
+card's Reconnect goes to the app's page under Connections, as on Composio, and the Reconnect there
+adds what was missing in one press. See
 [Arcade](docs/plugins/arcade.md#connect-asks-for-the-whole-app-and-each-action-can-still-be-approved-alone).
 
 ### A computer closes browsers nobody is using when its memory runs high

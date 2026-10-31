@@ -346,6 +346,13 @@ for (const provider of ["composio", "arcade"] as const) {
   });
 }
 
+test("a connected Arcade page offers Reconnect, where a Bot's card sends somebody to finish it", async () => {
+  install({ provider: "arcade", connected: true });
+  const view = renderScreen();
+  await view.findByRole("button", { name: "Reconnect" });
+  expect(view.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+});
+
 test("a connected Composio page renders its sentences verbatim", async () => {
   install({ provider: "composio", connected: true });
   const view = renderScreen();

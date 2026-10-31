@@ -171,16 +171,6 @@ export type AppAccess = {
    * connection newer than the refusal is the reconnection, and the live state wins.
    */
   connectedAt: string | null;
-  /**
-   * Whether Connect takes a fresh consent over the account this person already has connected,
-   * adding to it, so Reconnect can start it from wherever it is offered.
-   *
-   * TRUE ON A BROKER WHOSE CONSENTS COME BACK THROUGH THE VERIFIER, which is Arcade: a call it
-   * refused one action keeps its row, and Connect asks for everything the app needs and adds it to
-   * the same connection. FALSE ELSEWHERE. A Composio Connect over a standing row would attach a
-   * second account and is refused, so Reconnect there goes to the app's page, where Disconnect is.
-   */
-  reconnectsInPlace: boolean;
   /** The request a press of Request access files for this state, and null where there is none. */
   requestKind: AppAccessRequestKind | null;
   /**

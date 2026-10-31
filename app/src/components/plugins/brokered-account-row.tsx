@@ -170,6 +170,17 @@ export type BrokeredAccount = {
    * below can do anything but fail.
    */
   configured: boolean;
+  /**
+   * Whether Connect takes a fresh consent over the account that stands, so a connected row can
+   * offer Reconnect in one press.
+   *
+   * TRUE WHERE THE BROKER AUTHORIZES PER ACTION, which is Arcade: a consent there adds what it asks
+   * for to the one connection, and the connect route lets it through over a standing row. A Bot's
+   * card sends a person here to reconnect on both brokers, and on Arcade this is where it finishes,
+   * with no Disconnect first. FALSE ON COMPOSIO, whose second consent would attach a second account
+   * and is refused, so reconnecting there is Disconnect and then Connect.
+   */
+  reconnectsInPlace: boolean;
   /** See {@link BrokeredAccountKind}. Derived here so no branch below re-asks. */
   kind: BrokeredAccountKind;
   /** Leave for the vendor's consent screen. */
@@ -276,6 +287,8 @@ export function useBrokeredAccount(input: {
    * from and never how an app connects. Null where the app is not brokered at all.
    */
   authScheme: string | null;
+  /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed in. */
+  reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
   /**
@@ -294,6 +307,7 @@ export function useBrokeredAccount(input: {
     configured,
     recorded,
     probe,
+    reconnectsInPlace,
     report,
     returnTo,
     serverId,
@@ -626,6 +640,7 @@ export function useBrokeredAccount(input: {
      * offered or withheld for an instant, not a sentence anybody is told.
      */
     checkable,
+    reconnectsInPlace,
     recheck: () => {
       report(null);
       recheck.mutate(serverId);
@@ -995,6 +1010,24 @@ export function BrokeredAccountRow({
                     variant="outline"
                   >
                     {account.rechecking ? "Checking…" : "Re-check"}
+                  </Button>
+                ) : null}
+                {/*
+                 * RECONNECT OVER THE ACCOUNT THAT STANDS, where the broker adds a consent to it.
+                 * This is where a Bot's card sends somebody whose call the vendor refused, and on
+                 * Arcade one press asks for everything the app needs. The arrow says it leaves
+                 * OpenBot for the vendor's consent page, as Connect's does.
+                 */}
+                {account.reconnectsInPlace && account.kind === "consent" ? (
+                  <Button
+                    disabled={account.connecting}
+                    onClick={account.connect}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Reconnect
+                    <IconArrowUpRight />
                   </Button>
                 ) : null}
                 <Button

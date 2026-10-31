@@ -241,10 +241,23 @@ test("an app connected with a typed key goes to its page in Settings, where the 
   expect(link?.getAttribute("href")).toBe("/connections/composio-gmail");
 });
 
-test("a Composio app to reconnect goes to Settings, because the connect route refuses a row that stands", async () => {
-  const { view } = mounted(appAccess({ state: "reconnect" }));
-  const link = (await view.findByText("Reconnect")).closest("a");
-  expect(link?.getAttribute("href")).toBe("/connections/composio-gmail");
+test("a brokered app to reconnect goes to its page in Settings, on Composio and on Arcade alike", async () => {
+  /*
+   * ONE DESTINATION FOR BOTH BROKERS, Composio's. A Composio row that stands is refused by the
+   * connect route until it is disconnected on that page. An Arcade row is not, and the same page
+   * offers Reconnect over it in one press, so the card sends both people to the same place.
+   */
+  const composio = mounted(appAccess({ state: "reconnect" }));
+  const toComposio = (await composio.view.findByText("Reconnect")).closest("a");
+  expect(toComposio?.getAttribute("href")).toBe("/connections/composio-gmail");
+  cleanup();
+
+  const arcade = mounted(
+    appAccess({ key: "arcade-Gmail", provider: "arcade", state: "reconnect" }),
+  );
+  const toArcade = (await arcade.view.findByText("Reconnect")).closest("a");
+  expect(toArcade?.getAttribute("href")).toBe("/connections/arcade-Gmail");
+  expect(arcade.opened).toEqual([]);
 });
 
 test("this deployment's own OAuth app reconnects in place, with a fresh consent", async () => {
@@ -261,27 +274,6 @@ test("this deployment's own OAuth app reconnects in place, with a fresh consent"
     await view.findByRole("button", { name: "Reconnect Notion" }),
   );
   await waitFor(() => expect(opened).toHaveLength(1));
-});
-
-test("an Arcade app to reconnect starts Connect here, because its consent adds to the connection that stands", async () => {
-  /*
-   * A call Arcade refused one action keeps its row, so the card reads Reconnect over a live
-   * `ready`. Sending the person to Settings would land them on a page that says Connected and offers
-   * only Disconnect; Connect over the row asks Arcade for everything the app needs instead.
-   */
-  const { view, sent, opened } = mounted(
-    appAccess({
-      key: "arcade-Gmail",
-      provider: "arcade",
-      state: "reconnect",
-      reconnectsInPlace: true,
-    }),
-  );
-  fireEvent.click(await view.findByRole("button", { name: "Reconnect Gmail" }));
-  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
-  expect(sent.map((call) => `${call.method} ${call.url}`)).toContain(
-    "POST /api/plugins/servers/arcade-Gmail/connect?returnTo=settings",
-  );
 });
 
 /** Whether this tab has the focus, as `document.hasFocus` answers it, for the length of `run`. */
