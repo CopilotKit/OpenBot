@@ -7,7 +7,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { BOT_COLOURS, seedFor } from "@openbot/shared/bot-look";
 import { act, cleanup, render } from "@testing-library/react";
@@ -308,6 +308,27 @@ describe("the colours", () => {
     for (const [i, a] of shipped.entries())
       for (const b of shipped.slice(i + 1))
         expect(distance(a, b)).toBeGreaterThan(APART * 1.5);
+  });
+
+  test("the catalog's Bots use every colour, and share as few as ten Bots in eight colours can", () => {
+    // `examples/fintech/catalog/*.yaml`, each with its own `avatar_seed`.
+    const catalog = new URL("../../examples/fintech/catalog/", import.meta.url);
+    const colours = readdirSync(catalog)
+      .filter((file) => file.endsWith(".yaml"))
+      .map((file) => {
+        const seed = readFileSync(new URL(file, catalog), "utf8").match(
+          /^avatar_seed: (\S+)$/m,
+        )?.[1];
+        if (!seed) throw new Error(`${file} has no avatar_seed.`);
+        return orbLookFor(seed).palette;
+      });
+    expect(colours).toHaveLength(10);
+    expect(new Set(colours)).toEqual(new Set(BOT_COLOURS));
+    // Ten in eight is two colours shared, by two Bots each, and no more.
+    const shared = BOT_COLOURS.filter(
+      (colour) => colours.filter((c) => c === colour).length > 1,
+    );
+    expect(shared).toHaveLength(colours.length - BOT_COLOURS.length);
   });
 
   test("every Bot that never chose a look keeps the face it had", () => {
