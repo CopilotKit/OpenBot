@@ -266,6 +266,20 @@ test("Tasks groups every task by what it needs, Needs you first, with Done folde
   expect(view.getByText("Just started")).toBeTruthy();
   expect(view.getByText("A service didn't answer.")).toBeTruthy();
   expect(view.getByText("I grouped it into three themes.")).toBeTruthy();
+  // Each row's name says its group first, so moving row to row says where it stands.
+  expect(
+    rows().map(
+      (id) =>
+        document
+          .querySelector(`[data-task-id="${id}"]`)
+          ?.textContent?.split(":")[0],
+    ),
+  ).toEqual(["Needs you", "Couldn't finish", "Ready for review", "Working"]);
+  expect(
+    view.getByRole("link", {
+      name: /^Couldn't finish: Scout Book the kiln repair/,
+    }),
+  ).toBeTruthy();
   // Each row wears its Bot's orb, named for the Bot.
   const rosa = view.getByRole("link", { name: /Reply to Rosa/ });
   expect(within(rosa).getByRole("img", { name: "Ana" })).toBeTruthy();

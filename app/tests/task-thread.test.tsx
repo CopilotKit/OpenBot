@@ -455,6 +455,15 @@ test("replies the server holds are drawn as Queued while the task's turn runs, a
   expect(
     view.queryByRole("button", { name: /Remove queued message/ }),
   ).toBeNull();
+  // Read after the conversation it follows, though drawn from a block that comes before the newest
+  // rows: the bubble is for the eye, and a line after the conversation says it.
+  const bubble = view.getByText("Make it shorter");
+  expect(bubble.closest('[aria-hidden="true"]')).toBeTruthy();
+  const said = view.getByText("Queued: Make it shorter");
+  const last = await view.findByText("I booked Tuesday at 10.");
+  expect(
+    last.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
 
 test("Mark done and Reopen", async () => {

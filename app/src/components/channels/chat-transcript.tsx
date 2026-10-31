@@ -390,10 +390,16 @@ function Queued({
   attachments,
   text,
   onRemove,
+  unread = false,
 }: {
   attachments: readonly Attachment[];
   text: string;
   onRemove?: (() => void) | undefined;
+  /**
+   * Drawn for the eye only, where its place in the page would read it out of turn. Something else
+   * on the page says it to a screen reader (`HeldReplies`).
+   */
+  unread?: boolean;
 }) {
   /*
    * THE FILES COME WITH IT, and until they did they were on NO SURFACE IN THE APP AT ALL. Parking
@@ -405,7 +411,7 @@ function Queued({
   const files = parkedTiles(attachments);
 
   return (
-    <MessageRow align="end">
+    <MessageRow align="end" aria-hidden={unread || undefined}>
       <MessageContent>
         {files.length > 0 ? (
           <AttachmentTiles attachments={files} className="opacity-60" />
@@ -456,6 +462,29 @@ function Queued({
         </MessageFooter>
       </MessageContent>
     </MessageRow>
+  );
+}
+
+/**
+ * A task's replies waiting their turn, said to a screen reader after the conversation they follow.
+ *
+ * On screen they are drawn as Queued bubbles at the bottom of the conversation, from a block that
+ * comes ahead of the newest rows in the page (see the note on that block in `ChatTranscript`), so
+ * read where they are drawn they would be heard before the conversation. Those bubbles are hidden
+ * from assistive tech, and this, placed after the conversation, says them instead. None of them can
+ * be taken back, so nothing here is focusable and the tab order is untouched.
+ */
+function HeldReplies({
+  held,
+}: {
+  held: readonly { messageId: string; text: string }[];
+}) {
+  return (
+    <div className="sr-only" data-slot="held-replies" role="status">
+      {held.map((message) => (
+        <p key={message.messageId}>Queued: {message.text}</p>
+      ))}
+    </div>
   );
 }
 
@@ -2462,6 +2491,7 @@ export function ChatTranscript({
                       attachments={NO_FILES}
                       key={message.messageId}
                       text={message.text}
+                      unread
                     />
                   ))}
                 </div>
@@ -2481,6 +2511,7 @@ export function ChatTranscript({
               newest={held.at(-1)?.messageId ?? queued.at(-1)?.id ?? null}
               onQueued={followOnQueued}
             />
+            {held.length > 0 ? <HeldReplies held={held} /> : null}
             <FollowScroll request={follow.request} />
             <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
           </MessageScroller>
