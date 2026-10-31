@@ -58,7 +58,7 @@ export type StepLogEntry =
       id: string;
       at: number;
       status: StepState;
-      /** "Opened page", "Clicked on page": the conversation's words for it. */
+      /** "Opened a page", "Clicked on the page": the conversation's words for it. */
       label: string;
       /** The page it opened, named. */
       detail?: string;
