@@ -24,6 +24,7 @@ import {
   ConversationPresenceProvider,
 } from "@/components/channels/conversation-presence";
 import { ConversationView } from "@/components/channels/conversation-view";
+import { stepDetails } from "@/components/channels/tool-activity";
 import { StepLog, stepLogEntries } from "@/components/computer/step-log";
 import type { ApprovalInboxData } from "@/lib/approvals";
 import { type ChannelPage, channelKeys } from "@/lib/channels/queries";
@@ -135,6 +136,28 @@ describe("the order", () => {
       "click",
       "read",
     ]);
+  });
+
+  test("a done step reads as a whole phrase, the same in the log and in its line", () => {
+    const done = [
+      ["computer_navigate", "Opened a page"],
+      ["computer_click", "Clicked on the page"],
+      ["computer_type", "Filled in a field"],
+      ["computer_key", "Pressed a key"],
+      ["computer_scroll", "Scrolled the page"],
+    ] as const;
+    const items = done.map(([name]) => call(name, name, {}, { ok: true }));
+    const entries = stepLogEntries(
+      items.map((item, index) => step(item, index)),
+      [],
+      at,
+    );
+    expect(
+      entries.map((entry) => (entry.kind === "browser" ? entry.label : "")),
+    ).toEqual(done.map(([, label]) => label));
+    expect(items.map((item) => stepDetails(item).label)).toEqual(
+      done.map(([, label]) => label),
+    );
   });
 
   test("steps seen at the same moment keep the conversation's order", () => {
@@ -472,15 +495,15 @@ describe("the step log under the screen", () => {
       { inbox: inboxWith(["click"]) },
     );
     const log = pane.log();
-    expect(log.getByText("Opened page")).toBeTruthy();
+    expect(log.getByText("Opened a page")).toBeTruthy();
     expect(log.getByText("Example Domain")).toBeTruthy();
     // Waiting on its card, it hasn't happened, so it says what it would do.
     expect(log.getByText("Click on the page")).toBeTruthy();
-    expect(log.queryByText("Clicked on page")).toBeNull();
+    expect(log.queryByText("Clicked on the page")).toBeNull();
     const waiting = log.getByText("Waiting for you");
     expect(waiting.className).toContain("text-status-needs");
     // Done is said by its mark, in the done colour.
-    const done = log.getByText("Opened page").closest("li");
+    const done = log.getByText("Opened a page").closest("li");
     expect(done?.querySelector(".text-status-done")).not.toBeNull();
   });
 

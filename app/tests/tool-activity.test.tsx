@@ -636,7 +636,7 @@ test("a browser step a policy refused reads Blocked, with the policy's reason", 
   expect(view.getByText("1 issue")).toBeDefined();
   const summary = view.container.querySelector("summary");
   expect(summary?.textContent).toContain("Blocked: Open a page");
-  expect(summary?.textContent).not.toContain("Opened page");
+  expect(summary?.textContent).not.toContain("Opened a page");
   expect(summary?.querySelector(".text-status-done")).toBeNull();
 });
 
@@ -813,13 +813,15 @@ test("an app's card is drawn once a turn, even when the Bot also asks to show it
 test("browser steps that opened no page are named for what they did, as the computer's log names them", () => {
   const done = (id: string, name: string) =>
     stepDetails(browser(id, name, { ok: true }));
-  expect(summarise([done("look", "computer_snapshot")])).toBe("Inspected page");
+  expect(summarise([done("look", "computer_snapshot")])).toBe(
+    "Inspected the page",
+  );
   expect(
     summarise([done("type", "computer_type"), done("key", "computer_key")]),
-  ).toBe("Filled in field and pressed key");
+  ).toBe("Filled in a field and pressed a key");
   expect(
     summarise([done("a", "computer_read"), done("b", "computer_read")]),
-  ).toBe("Read page");
+  ).toBe("Read the page");
   // Too many different things to list still reads as one phrase.
   expect(
     summarise([

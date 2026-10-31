@@ -361,10 +361,13 @@ test("a pending change is drawn in the conversation where the action was, and de
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <InlineApproval toolCallId="pay-call" fallback={<p>Clicked on page</p>} />
+      <InlineApproval
+        toolCallId="pay-call"
+        fallback={<p>Clicked on the page</p>}
+      />
       <InlineApproval
         toolCallId="other-call"
-        fallback={<p>Filled in field</p>}
+        fallback={<p>Filled in a field</p>}
       />
     </QueryClientProvider>,
   );
@@ -377,8 +380,8 @@ test("a pending change is drawn in the conversation where the action was, and de
   expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
   expect(view.getByRole("button", { name: "Don't do it" })).toBeTruthy();
   // Another call's line is left to its own renderer.
-  expect(view.getByText("Filled in field")).toBeTruthy();
-  expect(view.queryByText("Clicked on page")).toBeNull();
+  expect(view.getByText("Filled in a field")).toBeTruthy();
+  expect(view.queryByText("Clicked on the page")).toBeNull();
   fireEvent.click(view.getByRole("button", { name: "I did it myself" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
