@@ -91,12 +91,13 @@ const whats = (container: HTMLElement) =>
     (row) => row.querySelector("[data-column=what]")?.textContent,
   );
 
-test("the page is one viewport tall and only the table scrolls", async () => {
+test("the page fills the shell's panel and only the table scrolls", async () => {
   const view = await renderAudit();
   const heading = view.getByRole("heading", { name: "Audit" });
-  const page = heading.closest(".h-dvh");
+  const page = heading.closest(".overflow-hidden");
   expect(page).not.toBeNull();
-  expect(page?.className).toContain("overflow-hidden");
+  expect(page?.className).toContain("flex-1");
+  expect(page?.className).toContain("min-h-0");
   expect(heading.closest(".max-w-3xl")).toBeNull();
   const scroller = view.container.querySelector(
     "[data-slot=table-container]",

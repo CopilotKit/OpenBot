@@ -7,3 +7,11 @@
 @import "./openduet/skin.css";
 @import "./opendots/skin.css";
 @import "./openmuse/skin.css";
+
+/*
+ * The empty-state pattern is drawn for OpenBot's own palette, so a skin starts without it. A skin
+ * that wants one sets `--empty-pattern-opacity` (and its colour) in its own skin.css.
+ */
+:root[data-skin] {
+  --empty-pattern-opacity: 0;
+}
