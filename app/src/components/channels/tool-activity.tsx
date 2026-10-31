@@ -426,7 +426,7 @@ export function stepDetails(step: ToolItem): StepDetails {
 }
 
 /** It ran and it worked: the only kind of step a summary may say was done. */
-function isDone(step: StepDetails): boolean {
+export function isDone(step: StepDetails): boolean {
   return (
     !step.pending &&
     !step.failed &&
@@ -599,7 +599,7 @@ function StepStatus({
     );
   if (step.failed)
     return (
-      <span className="shrink-0 text-status-needs">{STEP_STATUS.failed}</span>
+      <span className="shrink-0 text-status-problem">{STEP_STATUS.failed}</span>
     );
   return null;
 }
@@ -773,6 +773,7 @@ export function ToolActivity({
         </ol>
       </ToolLine>
       <ToolCallApprovals
+        ran={steps.filter(isDone).map((step) => step.id)}
         toolCallIds={group.steps.map((step) => step.toolCall.id)}
       />
     </>

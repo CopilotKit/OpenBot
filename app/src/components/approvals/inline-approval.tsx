@@ -26,9 +26,12 @@ const decidedByPerson = (request: ApprovalRequest) =>
 export function InlineApproval({
   toolCallId,
   fallback,
+  ran = false,
 }: {
   toolCallId?: string;
   fallback: ReactNode;
+  /** The step this request held has run and worked, so an approved card reads Done. */
+  ran?: boolean;
 }) {
   const cache = useQueryClient();
   const inbox = useQuery(approvalInboxCacheOptions());
@@ -43,7 +46,7 @@ export function InlineApproval({
     if (!decidedByPerson(request)) return <>{fallback}</>;
     return (
       <div className="space-y-2">
-        <ApprovalCard request={request} />
+        <ApprovalCard ran={ran} request={request} />
         {fallback}
       </div>
     );
@@ -67,8 +70,11 @@ export function InlineApproval({
  */
 export function ToolCallApprovals({
   toolCallIds,
+  ran = [],
 }: {
   toolCallIds: readonly string[];
+  /** The calls among them whose step has run and worked. */
+  ran?: readonly string[];
 }) {
   const inbox = useQuery(approvalInboxCacheOptions());
   const asked = new Set(
@@ -85,7 +91,12 @@ export function ToolCallApprovals({
   return (
     <div className="mt-3 space-y-3">
       {ids.map((id) => (
-        <InlineApproval key={id} toolCallId={id} fallback={null} />
+        <InlineApproval
+          fallback={null}
+          key={id}
+          ran={ran.includes(id)}
+          toolCallId={id}
+        />
       ))}
     </div>
   );

@@ -92,6 +92,8 @@ import { TeamBotConsentCard } from "./team-bot-consent";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
+  isDone,
+  stepDetails,
   ToolActivity,
   type ToolGroup,
   type TranscriptItem,
@@ -1551,7 +1553,22 @@ const ToolCallBody = memo(function ToolCallBody({
               result={result}
               waiting={waiting}
             />
-            <ToolCallApprovals toolCallIds={[toolCallId]} />
+            <ToolCallApprovals
+              ran={
+                result !== undefined &&
+                isDone(
+                  stepDetails({
+                    kind: "tool",
+                    id: toolCallId,
+                    toolCall,
+                    result,
+                  }),
+                )
+                  ? [toolCallId]
+                  : []
+              }
+              toolCallIds={[toolCallId]}
+            />
           </>
         )}
       </ToolPlaceContext.Provider>

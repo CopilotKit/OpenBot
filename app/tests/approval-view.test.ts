@@ -225,16 +225,15 @@ test("who decided, in the person's words", () => {
 
 test("how it ended: allowed, sent, done, declined, or did not work", () => {
   const mail = action("gmail/GMAIL_SEND_EMAIL", {}).action;
+  const mailRequest = () => ({
+    status: "completed",
+    result: null,
+    decision: "allow_once" as const,
+    action: mail,
+  });
   const ended = (
     request: Partial<Pick<ApprovalRequest, "status" | "result" | "decision">>,
-  ) =>
-    approvalOutcome({
-      status: "completed",
-      result: null,
-      decision: "allow_once",
-      action: mail,
-      ...request,
-    });
+  ) => approvalOutcome({ ...mailRequest(), ...request });
   expect(ended({ status: "pending", decision: null })).toBeNull();
   expect(ended({ status: "approved" })).toEqual({
     label: "Allowed",
@@ -243,8 +242,21 @@ test("how it ended: allowed, sent, done, declined, or did not work", () => {
   expect(ended({})).toEqual({ label: "Sent", tone: "done" });
   expect(ended({ result: { error: "boom" } })).toEqual({
     label: "Didn't work",
-    tone: "needs",
+    tone: "problem",
   });
+  // Allowed, and its step has landed: done, whatever the inbox says yet.
+  expect(
+    approvalOutcome({ ...mailRequest(), status: "approved" }, true),
+  ).toEqual({ label: "Sent", tone: "done" });
+  expect(
+    approvalOutcome({ ...mailRequest(), status: "consumed" }, true),
+  ).toEqual({ label: "Sent", tone: "done" });
+  expect(
+    approvalOutcome(
+      { ...mailRequest(), status: "approved", decision: "deny" },
+      true,
+    ),
+  ).toEqual({ label: "Declined", tone: "neutral" });
   // Marked done by the person: nothing was sent by the Bot.
   expect(ended({ decision: "handled" })).toEqual({
     label: "Done",

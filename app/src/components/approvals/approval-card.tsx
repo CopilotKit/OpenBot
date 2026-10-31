@@ -67,6 +67,7 @@ export function ApprovalCard({
   error,
   onDecide,
   frame = "card",
+  ran = false,
   className,
 }: {
   request: ApprovalRequest;
@@ -76,12 +77,17 @@ export function ApprovalCard({
   error?: string | null;
   onDecide?: (choice: ApprovalDecision) => void;
   frame?: "card" | "row";
+  /**
+   * The step it held has run and worked, as the conversation saw it. The inbox can still say the
+   * request is allowed and running after that, and the card then reads Done.
+   */
+  ran?: boolean;
   className?: string;
 }) {
   const view = describeApproval(request);
   const waiting = request.status === "pending";
   const handOff = request.action.policy?.behaviour === "hand_off";
-  const outcome = approvalOutcome(request);
+  const outcome = approvalOutcome(request, ran);
   const receipt = waiting ? null : decisionReceipt(request);
   const place = approvalPlace(request);
   const caption = [botName, view.app].filter(Boolean).join(" · ");
