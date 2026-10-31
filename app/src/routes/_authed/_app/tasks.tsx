@@ -8,7 +8,11 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
-import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
+import {
+  EMPTY_DRAFT,
+  NewTaskDialog,
+  type TaskDraft,
+} from "@/components/tasks/new-task-dialog";
 import { TaskList, taskRows } from "@/components/tasks/task-list";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +65,8 @@ function TasksLayout() {
   const folded = Boolean(taskId) && watching;
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
+  // Kept here, so closing New task without starting it keeps what was typed.
+  const [draft, setDraft] = useState<TaskDraft>(EMPTY_DRAFT);
   const [filter, setFilter] = useState("");
   const list = useRef<HTMLDivElement>(null);
 
@@ -155,8 +161,15 @@ function TasksLayout() {
       </div>
       {adding ? (
         <NewTaskDialog
+          draft={draft}
+          onCancel={() => {
+            setDraft(EMPTY_DRAFT);
+            setAdding(false);
+          }}
           onClose={() => setAdding(false)}
+          onDraftChange={setDraft}
           onStarted={(task) => {
+            setDraft(EMPTY_DRAFT);
             setAdding(false);
             void navigate({
               to: "/tasks/$taskId",

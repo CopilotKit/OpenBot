@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +11,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -20,7 +26,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { formatHotkey } from "@/lib/hotkeys/hotkeys";
+import { newId } from "@/lib/new-id";
 import { startTaskMutationOptions } from "@/lib/tasks/mutations";
 import type { TaskRecord } from "@/lib/tasks/queries";
 import { queryClient } from "@/query-client";
@@ -28,28 +36,71 @@ import { queryClient } from "@/query-client";
 /** The longest ask the server takes (`POST /api/tasks`). */
 export const INSTRUCTION_MAX = 4000;
 
+/** What has been typed into New task, kept by whoever opens it so closing it loses nothing. */
+export type TaskDraft = { botId: string; instruction: string };
+
+export const EMPTY_DRAFT: TaskDraft = { botId: "", instruction: "" };
+
+/** ⌘ or Ctrl, as this keyboard writes it, then Enter. */
+const START_KEYS = `${formatHotkey({ key: "enter", mod: true })[0]} Enter`;
+
+/** A Bot as the picker shows it: its face, then its name. */
+function BotChoice({
+  bot,
+}: {
+  bot: Pick<AgentProfile, "name" | "avatarSeed">;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      {/* The name beside it says who it is, so the face isn't announced too. */}
+      <AbstractAvatar
+        decorative
+        name={bot.name}
+        seed={bot.avatarSeed}
+        size={20}
+      />
+      <span className="truncate">{bot.name}</span>
+    </span>
+  );
+}
+
 /**
  * The + on Tasks: which Bot, and what it should do. Start opens it as a task in a conversation of
  * its own and starts its turn there, as a Bot handing work to a task from Chat would, and the task's
  * page opens. The Bot is the person's default one until they choose another.
+ *
+ * What was typed is the caller's (`draft`), so Escape or a click outside closes the dialog and keeps
+ * the ask for next time; Cancel is the way to throw it away. Each opening sends its own `clientId`
+ * with every Start, so a Start pressed twice opens one task.
  */
 export function NewTaskDialog({
+  draft,
+  onDraftChange,
+  onCancel,
   onClose,
   onStarted,
 }: {
+  draft: TaskDraft;
+  onDraftChange: (draft: TaskDraft) => void;
+  /** Cancel: close, and throw the draft away. */
+  onCancel: () => void;
+  /** Escape or a click outside: close, and keep the draft. */
   onClose: () => void;
   onStarted: (task: TaskRecord) => void;
 }) {
   const formId = useId();
   const bots = useQuery(agentListQueryOptions());
-  const [picked, setPicked] = useState("");
-  const [instruction, setInstruction] = useState("");
+  const [clientId] = useState(newId);
   const start = useMutation(startTaskMutationOptions(queryClient));
-  const botId = picked || defaultAgentProfile(bots.data)?.id || "";
-  const ask = instruction.trim();
+  const botId = draft.botId || defaultAgentProfile(bots.data)?.id || "";
+  const chosen = bots.data?.find((bot) => bot.id === botId);
+  const ask = draft.instruction.trim();
   const send = () => {
     if (!botId || !ask || start.isPending) return;
-    start.mutate({ botId, instruction: ask }, { onSuccess: onStarted });
+    start.mutate(
+      { botId, instruction: ask, clientId },
+      { onSuccess: onStarted },
+    );
   };
   return (
     <Dialog
@@ -84,17 +135,25 @@ export function NewTaskDialog({
                   items={Object.fromEntries(
                     (bots.data ?? []).map((bot) => [bot.id, bot.name]),
                   )}
-                  onValueChange={(value) => setPicked(value ?? "")}
+                  onValueChange={(value) =>
+                    onDraftChange({ ...draft, botId: value ?? "" })
+                  }
                   required
                   value={botId || null}
                 >
                   <SelectTrigger className="w-full" id={`${formId}-bot`}>
-                    <SelectValue placeholder="Choose a Bot" />
+                    {chosen ? (
+                      <SelectValue>
+                        <BotChoice bot={chosen} />
+                      </SelectValue>
+                    ) : (
+                      <SelectValue placeholder="Choose a Bot" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
                     {(bots.data ?? []).map((bot) => (
                       <SelectItem key={bot.id} value={bot.id}>
-                        {bot.name}
+                        <BotChoice bot={bot} />
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -110,7 +169,10 @@ export function NewTaskDialog({
                   disabled={start.isPending}
                   id={`${formId}-instruction`}
                   maxLength={INSTRUCTION_MAX}
-                  onChange={(event) => setInstruction(event.target.value)}
+                  aria-describedby={`${formId}-keys`}
+                  onChange={(event) =>
+                    onDraftChange({ ...draft, instruction: event.target.value })
+                  }
                   onKeyDown={(event) => {
                     // ⌘ or Ctrl with Enter starts it, as the composer sends.
                     if (
@@ -123,8 +185,11 @@ export function NewTaskDialog({
                   }}
                   placeholder="Draft a reply, find a time, look something up…"
                   required
-                  value={instruction}
+                  value={draft.instruction}
                 />
+                <FieldDescription id={`${formId}-keys`}>
+                  Press {START_KEYS} to start it.
+                </FieldDescription>
               </Field>
             </FieldGroup>
           </form>
@@ -142,7 +207,7 @@ export function NewTaskDialog({
         <DialogFooter className="mt-4">
           <Button
             disabled={start.isPending}
-            onClick={onClose}
+            onClick={onCancel}
             size="sm"
             type="button"
             variant="outline"

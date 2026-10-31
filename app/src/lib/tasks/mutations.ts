@@ -4,8 +4,17 @@ import { client } from "@/lib/client";
 import { channelKeys } from "@/lib/channels/queries";
 import { type TaskRecord, taskKeys } from "./queries";
 
-/** What the + on Tasks sends: which Bot, and the ask in the person's words. */
-export type TaskInput = { botId: string; instruction: string; title?: string };
+/**
+ * What the + on Tasks sends: which Bot, and the ask in the person's words. `clientId` is made once
+ * per Start and sent again on any repeat of it, so the server opens one task however often it
+ * arrives.
+ */
+export type TaskInput = {
+  botId: string;
+  instruction: string;
+  title?: string;
+  clientId?: string;
+};
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
 const FALLBACK = "Couldn't save that change to the task. Try again.";
