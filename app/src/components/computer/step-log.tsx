@@ -26,6 +26,7 @@ import {
   STEP_STATUS,
   stepDetails,
   useHeldForPerson,
+  useResumingAfterApproval,
 } from "@/components/channels/tool-activity";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
@@ -77,7 +78,8 @@ export type StepLogEntry =
 /**
  * A browser step's state. One held on its approval card is waiting for the person, whatever its
  * result says yet. One with no result, or only the note that it went to the card, is running while
- * the Bot is on the turn it belongs to, and otherwise was cut off. One with a result is read by
+ * the Bot is on the turn it belongs to or the server carries it on after the person allowed it, and
+ * otherwise was cut off. One with a result is read by
  * `browserOutcome`, the same reading its line in the conversation uses: the person declined it,
  * somebody pressed Stop, a boundary refused it, the computer was still starting, it did not work,
  * or it worked. One not asked again because the same request was waiting waits with it while the
@@ -85,21 +87,28 @@ export type StepLogEntry =
  */
 function browserState(
   step: ConversationStep,
-  { working, held, waiting = false }: StepLogContext,
+  { working, held, waiting = false, resuming }: StepLogContext,
 ): StepState {
   if (held.has(step.item.toolCall.id)) return "waiting";
   const outcome = browserOutcome(step.item);
+  // Allowed and carried on by the server, it is running, whether or not the turn shows as busy yet.
   if (outcome === "pending")
-    return working && step.latest ? "running" : "stopped";
+    return (working && step.latest) || resuming?.has(step.item.toolCall.id)
+      ? "running"
+      : "stopped";
   if (outcome === "alreadyWaiting") return waiting ? "waiting" : "stopped";
   return outcome;
 }
 
-/** The turn, the calls held on their cards, and whether anything in the conversation waits. */
+/**
+ * The turn, the calls held on their cards, whether anything in the conversation waits, and the
+ * calls the person allowed that the server is carrying on with.
+ */
 type StepLogContext = {
   working: boolean;
   held: ReadonlySet<string>;
   waiting?: boolean;
+  resuming?: ReadonlySet<string>;
 };
 
 /**
@@ -257,8 +266,14 @@ export function StepLog({ computerId }: { computerId: string }) {
   );
   const working = useConversationStatus().kind === "working";
   const held = useHeldForPerson();
+  const resuming = useResumingAfterApproval();
   const waiting = useConversationWaiting();
-  const entries = stepLogEntries(steps, activity, { working, held, waiting });
+  const entries = stepLogEntries(steps, activity, {
+    working,
+    held,
+    waiting,
+    resuming,
+  });
 
   if (entries.length === 0) {
     return (
