@@ -207,6 +207,9 @@ function draw(path = "/tasks") {
   return { view, router, user: userEvent.setup({ document }) };
 }
 
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 const groupNames = (view: ReturnType<typeof render>) =>
   view
     .getAllByRole("region")
@@ -490,7 +493,11 @@ test("the + asks which Bot and what to do, starts with the default Bot, and open
     {
       method: "POST",
       path: "/api/tasks",
-      body: { botId: "scout", instruction: "Find a time for coffee with Sam." },
+      body: {
+        botId: "scout",
+        instruction: "Find a time for coffee with Sam.",
+        clientId: expect.stringMatching(UUID),
+      },
     },
   ]);
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
@@ -504,6 +511,90 @@ test("New task is a labelled button, unlike the sidebar's bare + for a new conve
   // Its words are on the button, not only in a label a sighted person never sees.
   expect(button.textContent).toBe("New task");
   expect(button.hasAttribute("aria-label")).toBe(false);
+});
+
+test("New task shows each Bot with its face, and says ⌘ Enter starts it", async () => {
+  serve({ tasks: [] });
+  const { view, user } = draw();
+  await view.findByText("No tasks yet");
+  await user.click(view.getByRole("button", { name: "New task" }));
+  const dialog = await view.findByRole("dialog", { name: "New task" });
+  const picker = within(dialog).getByRole("combobox");
+  await waitFor(() => expect(picker.textContent).toContain("Scout"));
+  // The chosen Bot's face beside its name, hidden from a screen reader, which reads the name.
+  const face = picker.querySelector("canvas")?.closest("[aria-hidden]");
+  expect(face).toBeTruthy();
+  const box = within(dialog).getByRole("textbox", {
+    name: "What should it do?",
+  });
+  expect(
+    document.getElementById(box.getAttribute("aria-describedby") ?? "")
+      ?.textContent,
+  ).toMatch(/^Press (⌘|Ctrl) Enter to start it\.$/);
+});
+
+test("Escape closes New task and keeps the ask; Cancel throws it away", async () => {
+  serve({ tasks: [] });
+  const { view, user } = draw();
+  await view.findByText("No tasks yet");
+  await user.click(view.getByRole("button", { name: "New task" }));
+  let dialog = await view.findByRole("dialog", { name: "New task" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "What should it do?" }),
+    "Find a time for coffee",
+  );
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: "New task" }));
+  dialog = await view.findByRole("dialog", { name: "New task" });
+  expect(within(dialog).getByRole<HTMLTextAreaElement>("textbox").value).toBe(
+    "Find a time for coffee",
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: "New task" }));
+  dialog = await view.findByRole("dialog", { name: "New task" });
+  expect(within(dialog).getByRole<HTMLTextAreaElement>("textbox").value).toBe(
+    "",
+  );
+});
+
+test("a Start sent again carries the same clientId, so it opens one task; the next New task makes a fresh one", async () => {
+  const sent = serve({
+    tasks: [],
+    writes: {
+      "/api/tasks": {
+        status: 503,
+        body: { error: "Couldn't load your tasks. Try again." },
+      },
+    },
+  });
+  const { view, user } = draw();
+  await view.findByText("No tasks yet");
+  await user.click(view.getByRole("button", { name: "New task" }));
+  let dialog = await view.findByRole("dialog", { name: "New task" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "What should it do?" }),
+    "Do it",
+  );
+  const startTask = () =>
+    within(dialog).getByRole("button", { name: "Start task" });
+  await user.click(startTask());
+  await within(dialog).findByRole("alert");
+  await user.click(startTask());
+  await waitFor(() => expect(sent).toHaveLength(2));
+  const idOf = (at: number) =>
+    (sent[at]?.body as { clientId?: string } | undefined)?.clientId;
+  expect(idOf(0)).toMatch(UUID);
+  expect(idOf(1)).toBe(idOf(0));
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: "New task" }));
+  dialog = await view.findByRole("dialog", { name: "New task" });
+  await user.click(startTask());
+  await waitFor(() => expect(sent).toHaveLength(3));
+  expect(idOf(2)).toMatch(UUID);
+  expect(idOf(2)).not.toBe(idOf(0));
 });
 
 test("a task the server refuses keeps the dialog open with the server's words", async () => {
