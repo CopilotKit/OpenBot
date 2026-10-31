@@ -136,15 +136,28 @@ export function toolResultFailed(result: string | undefined): boolean {
 }
 
 /**
+ * What a hand-off between Bots puts in front of the reason it was not sent. Declared at both ends
+ * like {@link REFUSAL_MARKER}: `server/src/agents/handoff-tool.ts` writes it.
+ */
+const HANDOFF_NOT_SENT = "That handoff was not sent:";
+
+/** The reason itself, past a door's own lead-in to it. */
+function withoutLeadIn(answer: string): string {
+  return answer.startsWith(HANDOFF_NOT_SENT)
+    ? answer.slice(HANDOFF_NOT_SENT.length).trim()
+    : answer;
+}
+
+/**
  * The server's reason for not carrying a call out, wherever the call's door put it.
  *
- * The same reason arrives in three shapes: on its own, once the person has answered a card; after
- * {@link REFUSAL_MARKER}, when a connector refuses a call the person has already answered; and in a
- * computer tool's JSON, as `error` from the server's computer or `reason` from the browser's. A
+ * The same reason arrives in four shapes: on its own, once the person has answered a card; after
+ * {@link REFUSAL_MARKER}, when a connector refuses a call the person has already answered; after
+ * {@link HANDOFF_NOT_SENT}, when a hand-off to another Bot was not sent; and in a computer tool's JSON, as `error` from the server's computer or `reason` from the browser's. A
  * computer's JSON that did not fail carries no reason, and reads as empty.
  */
 function reasonNotDone(result: string): string {
-  const answer = asText(result).trim();
+  const answer = withoutLeadIn(asText(result).trim());
   if (answer.startsWith(REFUSAL_MARKER))
     return answer.slice(REFUSAL_MARKER.length).trim();
   if (!answer.startsWith("{")) return answer;
