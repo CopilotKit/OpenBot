@@ -57,7 +57,9 @@ export function attentionSummary(bot: BotAttention): string {
         "tasks waiting on you",
       ),
     );
-  if (bot.items) parts.push(count(bot.items, "suggestion", "suggestions"));
+  // What its check-ins found, counted in the badge's words: "2 things need you".
+  if (bot.items)
+    parts.push(count(bot.items, "thing needs you", "things need you"));
   if (bot.tasks.ready)
     parts.push(count(bot.tasks.ready, "task to review", "tasks to review"));
   if (bot.tasks.failed)
