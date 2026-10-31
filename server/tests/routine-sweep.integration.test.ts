@@ -277,17 +277,36 @@ describe("offering the firings that are due", () => {
     const from = await makeDueAt(routine.id, new Date("2001-01-01T09:25:00Z"));
     const now = () => new Date("2001-01-01T09:26:00Z");
 
-    const outcomes = await Promise.all([
-      offerDueRoutines(sweepOptions({ now })),
-      offerDueRoutines(sweepOptions({ now })),
-    ]);
+    // Both sweeps must finish reading the same due stamp before either offers it. Promise.all
+    // alone does not ensure this: a slower reader can see the already-advanced stamp, which is
+    // still due by Postgres's real clock because this fixture deliberately dates its rows to 2001.
+    const dueRoutines = store.dueRoutines.bind(store);
+    const bothRead = Promise.withResolvers<void>();
+    let readers = 0;
+    const read = spyOn(store, "dueRoutines").mockImplementation(
+      async (limit) => {
+        const rows = await dueRoutines(limit);
+        if (++readers === 2) bothRead.resolve();
+        await bothRead.promise;
+        return rows;
+      },
+    );
+    try {
+      const outcomes = await Promise.all([
+        offerDueRoutines(sweepOptions({ now })),
+        offerDueRoutines(sweepOptions({ now })),
+      ]);
 
-    // Both sweeps saw it as due and both offered it, which is the honest report: each did put the
-    // work on the queue. What must be single is the row, and the clock.
-    for (const outcome of outcomes) {
-      expect(outcome.offered).toContain(routine.id);
+      // Both snapshots came from the real database. The real queue and compare-and-set must
+      // still collapse their two offers to one firing and one clock advance.
+      expect(readers).toBe(2);
+      for (const outcome of outcomes) {
+        expect(outcome.offered).toContain(routine.id);
+      }
+      expect(await firingsFor(routine.id)).toHaveLength(1);
+    } finally {
+      read.mockRestore();
     }
-    expect(await firingsFor(routine.id)).toHaveLength(1);
 
     const after = await readRoutine(routine.id);
     expect(after?.nextRunAt.getTime()).toBeGreaterThan(from.getTime());
