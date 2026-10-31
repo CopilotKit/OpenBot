@@ -10,6 +10,7 @@ import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
 import { FINISH_MS } from "@/components/agents/orb/bot-orb";
 import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
+import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import {
   type ConsentApp,
   ConnectAppsStep,
@@ -272,18 +273,19 @@ const team: OnboardingStep = {
 /*
  * Said as OpenBot behaves out of the box: "Ask before making changes" starts off, so a Bot asks only
  * where a rule says to, and paying or changing account security is always handed to the person
- * (`server/src/approvals/policy.ts`).
+ * (`server/src/approvals/policy.ts`). The switch is offered right here, the same preference as
+ * Settings → Approvals.
  */
 const approval: OnboardingStep = {
   id: "approval",
   title: "You decide what it asks about",
   intro: () => (
-    <StepIntro>
+    <StepIntro after={<AskFirstSwitch />}>
       <p>
         Paying for things and changing account security are always left to you.
-        For everything else, turn on Ask before making changes in Settings, or
-        give a Bot its own rules. When a Bot asks, allow it once or always allow
-        it there.
+        For everything else, turn on Ask before making changes, or give a Bot
+        its own rules in Settings. When a Bot asks, allow it once or always
+        allow it there.
       </p>
     </StepIntro>
   ),
