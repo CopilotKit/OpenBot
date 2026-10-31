@@ -406,13 +406,21 @@ export type OutcomeTone = "done" | "working" | "needs" | "problem" | "neutral";
  */
 export function approvalOutcome(
   request: Pick<ApprovalRequest, "status" | "result" | "action" | "decision">,
+  /** The step has run and worked, as the conversation saw it, whatever the inbox says yet. */
+  ran = false,
 ): { label: string; tone: OutcomeTone } | null {
   if (request.status === "pending") return null;
   if (request.decision === "deny")
     return { label: "Declined", tone: "neutral" };
-  switch (request.status) {
+  // An allowed step that has landed is done, though the inbox may still have it running.
+  const status =
+    ran && (request.status === "approved" || request.status === "consumed")
+      ? "completed"
+      : request.status;
+  switch (status) {
     case "completed":
-      if (request.result?.error) return { label: "Didn't work", tone: "needs" };
+      if (request.result?.error)
+        return { label: "Didn't work", tone: "problem" };
       // A share the person allowed sends nothing itself: the Bot is told to send it again.
       if (request.action.toolRef === PRIVATE_SHARE)
         return { label: "Allowed", tone: "done" };

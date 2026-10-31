@@ -27,14 +27,17 @@ test("a line that worked carries the done mark", () => {
 test("a refusal, a failure and a decline each say so, and none is marked done", () => {
   for (const [props, words, tone] of [
     [{ refused: true }, "Blocked: Send email", ".text-status-problem"],
-    [{ failed: true }, "Send email, didn't work", ".text-status-needs"],
+    // A failure is a problem, never the amber that means it is the person's turn.
+    [{ failed: true }, "Send email, didn't work", ".text-status-problem"],
     [{ declined: true }, "You declined: Send email", null],
   ] as const) {
     const view = render(<ToolLine label="Send email" {...props} />);
     const line = view.getByText(words);
     expect(view.container.querySelector(".text-status-done")).toBeNull();
-    if (tone) expect(line.closest(tone)).not.toBeNull();
-    else {
+    if (tone) {
+      expect(line.closest(tone)).not.toBeNull();
+      expect(line.closest(".text-status-needs")).toBeNull();
+    } else {
       // The person's own decision is not an error, so it is drawn in neither error colour.
       expect(line.closest(".text-status-problem")).toBeNull();
       expect(line.closest(".text-status-needs")).toBeNull();

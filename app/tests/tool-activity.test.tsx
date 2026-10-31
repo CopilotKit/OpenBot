@@ -382,7 +382,10 @@ test("a refusal and a failure each count as an issue on the folded line", () => 
   );
   expect(view.getByText("2 issues")).toBeDefined();
   expect(view.getByText("Blocked")).toBeDefined();
-  expect(view.getByText("Didn't work")).toBeDefined();
+  // Both are problems, in the problem colour; amber is for the person's turn.
+  expect(view.getByText("Didn't work").className).toContain(
+    "text-status-problem",
+  );
 });
 
 test("a group where nothing worked never shows a done mark", () => {

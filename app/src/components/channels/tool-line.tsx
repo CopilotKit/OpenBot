@@ -51,11 +51,9 @@ export function ToolLine({
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
 }) {
-  const tone = refused
-    ? "text-status-problem"
-    : failed
-      ? "text-status-needs"
-      : "text-muted-foreground";
+  // Refused or failed, it is a problem, in the problem colour; amber is for the person's turn.
+  const tone =
+    refused || failed ? "text-status-problem" : "text-muted-foreground";
   /*
    * A hairline hook, then a mark saying how it went, then what was done. Only a line that worked
    * gets the check, in the done colour; a group's own kinds come after the label, where they no
