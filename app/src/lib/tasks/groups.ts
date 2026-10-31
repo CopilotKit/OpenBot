@@ -5,7 +5,7 @@ import type {
   PersonQuestion,
 } from "@/lib/approvals";
 import {
-  couldNotFinish,
+  failureLine,
   liveStatus,
   TASK_STATUS_LABEL,
   type TaskRecord,
@@ -31,6 +31,12 @@ export const GROUP_ORDER: readonly TaskStatus[] = [
   "ready_for_review",
   "resolved",
 ];
+
+/** The groups that wait on the person, and so count toward the sidebar's number. */
+const WAITS_ON_YOU: ReadonlySet<TaskStatus> = new Set([
+  "needs_input",
+  "failed",
+]);
 
 /** What the conversation list knows about a task's conversation. */
 export type ConversationFacts = { busy: boolean; lastMessageAt: string | null };
@@ -100,7 +106,7 @@ function nextOf(
   task: TaskRecord,
 ): string {
   const said = task.next?.trim() || null;
-  if (status === "failed") return couldNotFinish(task.failure);
+  if (status === "failed") return failureLine(task.failure);
   if (status === "needs_input") {
     if (waiting?.question) return waiting.question.question;
     if (waiting?.request)
@@ -191,18 +197,19 @@ export function taskItem(
 }
 
 /**
- * How many tasks wait on the person: the Needs you group, counted from the same grouping the list
- * draws, so the sidebar's number and the list never disagree.
+ * How many tasks wait on the person, counted from the same grouping the list draws, so the
+ * sidebar's number and the list never disagree: Needs you, and Couldn't finish, which waits on them
+ * to try it again or let it go.
  */
 export function needsYouCount(
   tasks: readonly TaskRecord[] | undefined,
   inbox: ApprovalInboxData | undefined,
 ): number {
-  return (
-    taskGroups({
-      tasks: tasks ?? [],
-      requests: inbox?.requests,
-      questions: inbox?.questions,
-    }).find((group) => group.id === "needs_input")?.items.length ?? 0
-  );
+  return taskGroups({
+    tasks: tasks ?? [],
+    requests: inbox?.requests,
+    questions: inbox?.questions,
+  })
+    .filter((group) => WAITS_ON_YOU.has(group.id))
+    .reduce((total, group) => total + group.items.length, 0);
 }

@@ -492,9 +492,7 @@ test("a task that couldn't finish says why, and Try again runs it once more", as
     next: null,
   });
   const { view, user } = drawTask();
-  expect(
-    await view.findByText("Couldn't finish: a service didn't answer."),
-  ).toBeTruthy();
+  expect(await view.findByText("A service didn't answer.")).toBeTruthy();
   expect(view.getByText(/reply and Scout runs it again/)).toBeTruthy();
   await user.click(view.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
@@ -515,7 +513,7 @@ test("a reply typed on a failed task runs it again with the person's words, and 
     },
   };
   const { view, user } = drawTask();
-  await view.findByText("Couldn't finish: a service didn't answer.");
+  await view.findByText("A service didn't answer.");
   // Words only: there is nothing to attach while the reply tries the task again.
   expect(
     await view.findByLabelText("More message options unavailable"),

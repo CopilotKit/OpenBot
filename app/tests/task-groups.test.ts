@@ -21,7 +21,7 @@ import {
   taskItem,
 } from "@/lib/tasks/groups";
 import {
-  couldNotFinish,
+  failureLine,
   type TaskRecord,
   type TaskStatus,
   taskKeys,
@@ -118,7 +118,7 @@ test("the groups come in order, Needs you first and Done last, and an empty one 
   });
   expect(groups.map((group) => [group.id, group.label])).toEqual([
     ["needs_input", "Needs you"],
-    ["failed", "Failed"],
+    ["failed", "Couldn't finish"],
     ["ready_for_review", "Ready for review"],
     ["resolved", "Done"],
   ]);
@@ -179,11 +179,15 @@ test("a question a reply already answered no longer makes the task Needs you", (
   const questions = [question("old", "answered-thread")];
   const [group] = taskGroups({ tasks: [answered], questions });
   expect(group?.id).toBe("failed");
-  expect(group?.items[0]?.next).toBe(
-    "Couldn't finish: a service didn't answer.",
-  );
-  expect(needsYouCount([answered], inbox([], questions))).toBe(0);
-  // A new question in the same conversation still waits.
+  expect(group?.items[0]?.next).toBe("A service didn't answer.");
+  // It waits on the person once, to try it again or let it go, and the old question adds nothing.
+  expect(needsYouCount([answered], inbox([], questions))).toBe(1);
+  // A new question in the same conversation makes it Needs you, still counted once.
+  const asked = taskGroups({
+    tasks: [answered],
+    questions: [question("new", "answered-thread")],
+  });
+  expect(asked[0]?.id).toBe("needs_input");
   expect(
     needsYouCount([answered], inbox([], [question("new", "answered-thread")])),
   ).toBe(1);
@@ -216,7 +220,9 @@ test("the line under a title: the Bot's own next step, or what each state is wai
   expect(
     next({ id: "d", status: "needs_input", next: "Tuesday or Wednesday?" }),
   ).toBe("Tuesday or Wednesday?");
-  expect(next({ id: "e", status: "failed" })).toBe("Couldn't finish.");
+  expect(next({ id: "e", status: "failed" })).toBe(
+    "Try again, or mark it done.",
+  );
   expect(next({ id: "f", status: "ready_for_review" })).toBe(
     "Open it to read what it did",
   );
@@ -237,16 +243,28 @@ test("the line under a title: the Bot's own next step, or what each state is wai
       next: "I booked Tuesday at 10.",
     }),
   ).toBe("Marked done by you");
-  expect(couldNotFinish("a service didn't answer")).toBe(
-    "Couldn't finish: a service didn't answer.",
+  expect(failureLine("a service didn't answer")).toBe(
+    "A service didn't answer.",
+  );
+  expect(failureLine("the run took longer than 7 minutes.")).toBe(
+    "The run took longer than 7 minutes.",
   );
 });
 
-test("the sidebar's count is the Needs you group: waiting tasks once, nothing outside a task", () => {
+test("the sidebar's count is what waits on the person: Needs you and Couldn't finish, once each, nothing outside a task", () => {
   const tasks = [
     task({ id: "rosa", status: "needs_input" }),
     task({ id: "sam", status: "working" }),
     task({ id: "kai", status: "ready_for_review" }),
+    // Waits on the person to try it again or let it go.
+    task({ id: "lee", status: "failed", failure: "a service didn't answer" }),
+    // Let go: marked done after failing, it waits on nobody.
+    task({
+      id: "ivy",
+      status: "resolved",
+      failure: "a service didn't answer",
+      resolvedAt: at(1),
+    }),
   ];
   expect(
     needsYouCount(
@@ -260,7 +278,7 @@ test("the sidebar's count is the Needs you group: waiting tasks once, nothing ou
         [question("q", "chat-thread")],
       ),
     ),
-  ).toBe(2);
+  ).toBe(3);
   expect(needsYouCount(undefined, undefined)).toBe(0);
 });
 
