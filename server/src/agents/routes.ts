@@ -1,3 +1,4 @@
+import { avatarSeedProblem } from "@openbot/shared/bot-look";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AuditEventType, AuditStore } from "../audit";
@@ -37,6 +38,7 @@ type AgentInputObject = {
   endpoint?: unknown;
   auth?: unknown;
   isolated?: unknown;
+  avatarSeed?: unknown;
 };
 
 /**
@@ -147,6 +149,23 @@ export function parseAgentInput(
       ...(isolated === undefined ? {} : { isolated }),
     },
   };
+}
+
+/**
+ * A new look for a Bot, when an edit brings one; undefined leaves its face as it is.
+ *
+ * Checked by the rules the orb draws by (`@openbot/shared/bot-look`): a short safe token, and when
+ * it names a colour, one a Bot can have. Never violet, which is OpenBot's own.
+ */
+function parseAvatarSeed(
+  input: unknown,
+): { ok: true; value: string | undefined } | { ok: false; error: string } {
+  const seed = isAgentInputObject(input) ? input.avatarSeed : undefined;
+  if (seed === undefined) return { ok: true, value: undefined };
+  const problem = avatarSeedProblem(seed);
+  return problem === null
+    ? { ok: true, value: seed as string }
+    : { ok: false, error: problem };
 }
 
 function isAgentInputObject(input: unknown): input is AgentInputObject {
@@ -678,12 +697,12 @@ export function createAgentRoutes(
 
   routes.patch("/:agentId", requireUser, async (context) => {
     // Malformed JSON is a recoverable client-input error and is validated by the same parser.
-    const parsed = parseAgentInput(
-      await context.req.json().catch(() => null),
-      allowPrivateHosts,
-      allowedHosts,
-    );
+    const body = await context.req.json().catch(() => null);
+    const parsed = parseAgentInput(body, allowPrivateHosts, allowedHosts);
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    // Changed by whoever may change the rest of the profile: the store's manage check covers both.
+    const look = parseAvatarSeed(body);
+    if (!look.ok) return context.json({ error: look.error }, 400);
     if (parsed.value.isolated === true && !isolationAvailable) {
       return refuseIsolation(
         context,
@@ -698,7 +717,10 @@ export function createAgentRoutes(
       const agent = await store.update(
         context.var.actor,
         context.req.param("agentId"),
-        parsed.value,
+        {
+          ...parsed.value,
+          ...(look.value === undefined ? {} : { avatarSeed: look.value }),
+        },
       );
       /*
        * What changed, not the new values. Repointing the endpoint is the dangerous edit and is worth
@@ -722,6 +744,8 @@ export function createAgentRoutes(
         ...(parsed.value.isolated === undefined
           ? {}
           : { isolated: parsed.value.isolated }),
+        // The same for a new look. It is a picture, not a secret, so the trail names it.
+        ...(look.value === undefined ? {} : { avatarSeed: look.value }),
       });
       /*
        * Publishing is the owner's call, and a wider audience can outrun what an administrator

@@ -78,6 +78,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Choose how a Bot looks
+
+A Bot's Setup page has a Look section for whoever may edit the Bot: its face, large, the eight
+colours to pick from, and New face, which keeps the colour and draws a different face. A choice
+saves at once and shows wherever the Bot appears, the conversation list and a conversation's header
+included. The choice is the Bot's avatar seed, so nothing is migrated: `PATCH /api/agents/:agentId`
+takes an optional `avatarSeed`, and a seed may start with a colour, as `moss:knowledge`. A seed that
+names no colour, which is every Bot's until somebody chooses, draws exactly as before. Violet stays
+OpenBot's own, and a `violet:` seed or a colour no Bot has is refused. A tenant package's
+`avatar_seed` may name a colour the same way. A new look is named on the Bot's `bot.updated` audit
+row. `GET /api/agents` now lists Bots in the order they were made, so restyling or renaming a Bot no
+longer moves it to the end of the list.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
@@ -132,6 +145,18 @@ pace, and the view follows it until the person scrolls up or selects some of it,
 again when they come back to the end or press the arrow. A rail beside a conversation has a mark
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
+
+### OpenBot has a new look
+
+- Every screen has new colours: cool neutral greys, a near-black primary button that turns light
+  in dark mode, a purple focus ring, slightly rounder corners and quicker easing. Text now follows
+  the browser's own size, so it is a little larger than before.
+- Dark mode follows the system by default. Settings → General → Appearance offers System, Light and
+  Dark, kept in this browser. Someone who had turned the old dark switch on stays dark.
+- Every Bot, and OpenBot's own mark, is an orb with eyes that blinks and follows the pointer. It
+  holds still with reduced motion.
+- Each Bot's orb takes its colour and pattern from the Bot, so two Bots in one colour still look
+  different. Violet is kept for OpenBot's own mark.
 
 ### Generated interfaces use A2UI 1.0
 

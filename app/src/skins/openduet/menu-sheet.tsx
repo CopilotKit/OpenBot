@@ -29,7 +29,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -338,11 +337,6 @@ function ConversationRow({
 }) {
   const emphasis = useMessageListEmphasis();
   const navigate = useNavigate();
-  const bots = useQuery(agentListQueryOptions());
-  // Each Bot's own avatar, drawn from its seed as OpenBot's Bot pages draw it.
-  const seeds = channel.agentIds.map(
-    (id) => bots.data?.find((bot) => bot.id === id)?.avatarSeed ?? id,
-  );
   const isOpen = useParams({
     strict: false,
     select: (params) =>
@@ -375,7 +369,11 @@ function ConversationRow({
             to={group ? "/group/$channelId" : "/channel/$channelId"}
           >
             <span className="shrink-0">
-              <ChannelAvatar participantIds={seeds} size={28} typing={busy} />
+              <ChannelAvatar
+                participantIds={channel.agentIds}
+                size={28}
+                typing={busy}
+              />
             </span>
             <RowText line={line} name={name} strong={unread} />
             {channel.pinned ? (
