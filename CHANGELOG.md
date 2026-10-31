@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### An unreconciled app authorization always reaches the audit trail
+
+An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
+When an attempt settles as unreconciled, its status and its audit row are written in one
+transaction, so the trail always says what happened to it, without the authorization's id, consent
+link or vendor account. If the audit row cannot be written, nothing changes and the attempt stays
+pending, rather than settling with no record.
+
 ### Refunds now go to the person
 
 The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
