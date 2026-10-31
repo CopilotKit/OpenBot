@@ -738,7 +738,11 @@ test("Chat draws a Bot's start_task as the task's card under its On it, live, op
         note: "…",
       }),
     },
-    { id: "a-2", role: "assistant", content: "On it." },
+    {
+      id: "a-2",
+      role: "assistant",
+      content: "On it. I'll put the result in Tasks.",
+    },
   ];
   const { view, router } = drawAt("/here", () => (
     <ChannelChat
@@ -750,18 +754,22 @@ test("Chat draws a Bot's start_task as the task's card under its On it, live, op
     name: /Find a time for coffee with Sam/,
   });
   expect(card.getAttribute("href")).toBe("/tasks/t-1");
-  expect(within(card).getByText("Working").getAttribute("data-status")).toBe(
-    "working",
-  );
+  // In the voice of the Bot's "On it. I'll put the result in Tasks."
+  expect(
+    within(card).getByText("Working in Tasks").getAttribute("data-status"),
+  ).toBe("working");
   // Under the Bot's words, not above them.
-  const onIt = view.getByText("On it.");
+  const onIt = view.getByText("On it. I'll put the result in Tasks.");
   expect(
     onIt.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   // Where the task stands follows the task.
   current = task({ status: "ready_for_review" });
   await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-  expect(await within(card).findByText("Ready for review")).toBeTruthy();
+  // Something to read stands out: said with where to go, in a ring of the done colour.
+  const ready = await within(card).findByText(/^Ready for review/);
+  expect(ready.textContent).toBe("Ready for review · Open");
+  expect(card.className).toContain("ring-status-done/40");
   fireEvent.click(card);
   await waitFor(() =>
     expect(router.state.location.pathname).toBe("/tasks/t-1"),
