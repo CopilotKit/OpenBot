@@ -41,8 +41,12 @@ starts, the platform reports the deploy a success, and the URL serves a 502. Mou
 leaves `data` as an ordinary subdirectory, which is what PostgreSQL asks for. A Docker named volume
 works either way; a platform volume does not. Platforms that offer no persistent volume are the ones to
 point at a managed database instead: set `DATABASE_URL` and leave `EMBEDDED_POSTGRES` off. The
-`vector` extension must be enabled there; RDS, Cloud SQL and Azure Database all support it, none
-enable it for you.
+`vector` extension must be available there, and the role in `DATABASE_URL` has to be the one that
+creates it. The first migration creates it and migration `0010` drops it again, since nothing stores
+vectors any more, and only the extension's owner can drop it. So do not enable it ahead of time as
+an administrator: that leaves the migrations failing with `must be owner of extension vector`. RDS,
+Cloud SQL and Azure Database all offer it; [Your own database](../charts/openbot/README.md#your-own-database-which-is-what-a-real-deployment-uses)
+has the grant each one needs.
 
 **Not in it:**
 
@@ -116,7 +120,7 @@ and the fix would not be available.
 
 | Variable | |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL with the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
+| `DATABASE_URL` | PostgreSQL where this role can create the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
 | an identity provider | `GOOGLE_OAUTH_*`, `MICROSOFT_OAUTH_*` or `OKTA_OAUTH_*`, with `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` and `INITIAL_ADMIN_EMAILS`. See the README |
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |

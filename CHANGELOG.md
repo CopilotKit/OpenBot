@@ -86,6 +86,12 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
 
+### Refunds now go to the person
+
+The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
+(such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
+rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
