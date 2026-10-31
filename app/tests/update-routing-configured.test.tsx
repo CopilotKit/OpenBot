@@ -32,7 +32,12 @@ function serving(available: {
     const url = String(input);
     if (url.endsWith("/api/bots/routing")) {
       return Response.json({
-        routing: { progress: "all", decision: "all", question: "all" },
+        routing: {
+          progress: "all",
+          decision: "all",
+          question: "all",
+          attention: "all",
+        },
       });
     }
     if (url.endsWith("/api/delivery")) {

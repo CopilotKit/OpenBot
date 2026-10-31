@@ -23,13 +23,15 @@ afterEach(() => {
 });
 
 const writes: { request: string; body: unknown }[] = [];
-let routing: Record<string, unknown> = {
+const everyKind = {
   progress: ["push"],
   decision: "all",
   question: "all",
+  attention: "all",
 };
+let routing: Record<string, unknown> = everyKind;
 afterEach(() => {
-  routing = { progress: ["push"], decision: "all", question: "all" };
+  routing = everyKind;
 });
 function serving() {
   writes.length = 0;
@@ -73,7 +75,7 @@ test("switching a transport on for one kind of update saves that kind's transpor
   });
 });
 
-test("pings get their own row, Something needs you, once the server routes them", async () => {
+test("pings get their own row, Something needs you", async () => {
   routing = {
     progress: ["push"],
     decision: "all",
@@ -98,18 +100,4 @@ test("pings get their own row, Something needs you, once the server routes them"
     request: "PUT /api/bots/routing/attention",
     body: { transports: ["push", "slack", "sms"] },
   });
-});
-
-test("with no ping routing from the server there is no row for it to promise", async () => {
-  serving();
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  const view = render(
-    <QueryClientProvider client={client}>
-      <UpdateRoutingSection />
-    </QueryClientProvider>,
-  );
-  expect(await view.findByText("Questions")).toBeTruthy();
-  expect(view.queryByText("Something needs you")).toBeNull();
 });
