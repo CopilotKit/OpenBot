@@ -51,9 +51,6 @@ const TRANSPORTS: { id: UpdateTransport; label: string }[] = [
 /**
  * Which channels each kind of update may use, for every one of the person's Bots at once. How much
  * a given Bot sends is that Bot's own Notifications setting, on its page.
- *
- * A kind the server does not answer for has no row: "Something needs you" appears once the server
- * delivers check-in pings, since a switch for a kind nothing sends would be a promise it can't keep.
  */
 export function UpdateRoutingSection() {
   const routing = useQuery(updateRoutingQueryOptions());
@@ -79,9 +76,8 @@ export function UpdateRoutingSection() {
         </p>
       ) : (
         <PageRows>
-          {(Object.keys(KIND_LABEL) as UpdateKind[]).flatMap((kind, index) => {
+          {(Object.keys(KIND_LABEL) as UpdateKind[]).map((kind, index) => {
             const current = routing.data[kind];
-            if (current === undefined) return [];
             const allowed = (transport: UpdateTransport) =>
               current === "all" || current.includes(transport);
             return (

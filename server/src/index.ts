@@ -2111,6 +2111,7 @@ const deliveryRouter = createDeliveryRouter({
   owner: workOwner("delivery"),
   providers: deliveryProviders,
   authoriseScope: authoriseDeliveryScope,
+  scopeFor: deliveryScopeFor,
   notifyEvent: (event) => responsibilityEngine.ingest(event),
   runTurn: async (input) => {
     if (!(await authoriseDeliveryScope(input)))
@@ -2231,7 +2232,8 @@ const proactiveEngine = createProactiveEngine({
       Promise.resolve(undefined),
   }),
   resolveScope: deliveryScopeFor,
-  notify: (scope, input) => deliveryNotifications(scope, input),
+  // A ping: push once to each phone, one message per chat platform, the app list at once.
+  attention: deliveryRouter,
   tasks: taskRunner,
   /*
    * Nothing the person connected that this Bot can read means a check-in could find nothing: it

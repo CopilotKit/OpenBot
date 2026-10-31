@@ -81,14 +81,8 @@ export type ResetPlan = {
   standingApprovals: number;
 };
 
-/**
- * Where each kind of update may go. `attention` is answered once the server delivers pings; until
- * then the kind is absent, and the routing screen leaves its row out.
- */
-export type UpdateRouting = Record<
-  Exclude<UpdateKind, "attention">,
-  UpdateTransport[] | "all"
-> & { attention?: UpdateTransport[] | "all" };
+/** Where each kind of update may go. */
+export type UpdateRouting = Record<UpdateKind, UpdateTransport[] | "all">;
 
 export const botLifecycleKeys = {
   all: ["bot-lifecycle"] as const,
