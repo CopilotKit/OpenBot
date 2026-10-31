@@ -7948,6 +7948,71 @@ test("offboarding a brokered account nobody held any more withdraws nothing, and
 });
 
 /**
+ * The offboarding sweep must not touch another provider's rows.
+ *
+ * CRITERION. `retireConnectionsFor` on somebody holding a foreign-provider row revokes only the
+ * active broker's rows: the foreign row is not revoked, not deleted, and never audited as
+ * disconnected.
+ *
+ * REASON. The sweep revokes through the ACTIVE broker, so a foreign row would be a revocation
+ * requested at a vendor that would not recognise the connection, while the audit row claimed
+ * `vendorRevocationRequested` about access that was never removed — the one reading of that field
+ * that must never be written. Unreachable while `assertActivatable` refuses to boot a mixed
+ * deployment; this is what keeps the sweep correct when any flow relaxes that refusal (#783).
+ *
+ * THE FOREIGN ROW IS READ BACK, not inferred from the revoke count. An implementation that revoked
+ * it and deleted it also answers a smaller count once the sweep is otherwise correct, so only the
+ * standing row distinguishes "left alone" from "silently taken" — and the audit read beside it
+ * says the trail never claimed a withdrawal this deployment could not have performed.
+ */
+test("offboarding does not revoke or audit another provider's rows", async () => {
+  const { broker, order } = brokerSpy({ revoke: async () => true });
+  const { store, auditStore } = await freshStore({ broker });
+
+  // The active provider's own row, so the sweep still retires something.
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: "gmail",
+    holder: "person",
+    userId: "user_leaver",
+    vendorUserId: "user_leaver",
+  });
+  // A row filed under the provider this deployment does not use.
+  await database.insert(brokeredConnections).values({
+    provider: "arcade",
+    app: "slack",
+    holder: "person",
+    userId: "user_leaver",
+    vendorUserId: "user_leaver",
+  });
+
+  expect(await store.retireConnectionsFor("user_leaver", "admin")).toEqual({
+    // One, because the arcade row is not this broker's to revoke.
+    retired: 1,
+  });
+  expect(order).toEqual(["revoke:user_leaver"]);
+
+  const standing = await database
+    .select({
+      provider: brokeredConnections.provider,
+      app: brokeredConnections.app,
+    })
+    .from(brokeredConnections)
+    .where(eq(brokeredConnections.userId, "user_leaver"));
+  expect(standing).toEqual([{ provider: "arcade", app: "slack" }]);
+
+  const disconnected = auditStore
+    .recorded()
+    .filter((event) => event.eventType === "mcp.account_disconnected");
+  expect(disconnected.map((event) => event.targetId)).toEqual(["gmail"]);
+  expect(
+    disconnected.every(
+      (event) => event.payload.vendorRevocationRequested === true,
+    ),
+  ).toBe(true);
+});
+
+/**
  * The same false, on the other act that ends a brokered connection.
  *
  * CRITERION. `removeServer` on a brokered row whose broker answers `false` records
