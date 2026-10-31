@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A group reached in two ways can be approved for a shared app
+
+Approving a Bot for a shared app now succeeds when the same group appears in its published audience
+and its assigned groups. Repeated people or groups are stored once; a person and a group with the
+same name remain separate, and no additional audience is approved.
+
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the

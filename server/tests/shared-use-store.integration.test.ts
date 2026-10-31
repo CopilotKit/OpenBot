@@ -12,6 +12,7 @@ import {
   responsibilities,
   sharedUseRequests,
   teamBotAudience,
+  teamBotAssignments,
   teamBotPublications,
   users,
 } from "../src/db/schema";
@@ -270,6 +271,64 @@ describe("the shared-use gate", () => {
     expect((await call("owner", { kind: "handoff", id: "x" })).allowed).toBe(
       false,
     );
+  });
+});
+
+describe("approval members", () => {
+  test("repeated people and groups store one exact membership without widening access", async () => {
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: {
+        audience: "people",
+        outsideInput: false,
+        members: [
+          { kind: "user", value: id("named") },
+          { kind: "user", value: id("named") },
+          { kind: "group", value: "platform" },
+          { kind: "group", value: "platform" },
+          { kind: "group", value: id("named") },
+        ],
+      },
+    });
+    const approval = await store.approvalFor(bot, app);
+    expect(approval?.members).toHaveLength(3);
+    expect(approval?.members).toEqual(
+      expect.arrayContaining([
+        { kind: "user", value: id("named") },
+        { kind: "group", value: "platform" },
+        { kind: "group", value: id("named") },
+      ]),
+    );
+    expect((await call("named")).allowed).toBe(true);
+    expect((await call("newhire")).allowed).toBe(true);
+    expect((await call("stranger")).allowed).toBe(false);
+  });
+
+  test("an audience also assigned to the Bot can be approved", async () => {
+    await database
+      .insert(teamBotPublications)
+      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
+    await database
+      .insert(teamBotAudience)
+      .values({ agentId: bot, kind: "group", value: "platform" });
+    await database
+      .insert(teamBotAssignments)
+      .values({ agentId: bot, groupName: "platform", assignedBy: id("owner") });
+    await call("newhire");
+    const [pending] = await store.pendingFor(bot);
+    expect(pending?.proposed.members).toHaveLength(2);
+    await store.decide({
+      id: pending!.id,
+      by: id("admin"),
+      decision: "approve",
+    });
+    expect((await store.approvalFor(bot, app))?.members).toEqual([
+      { kind: "group", value: "platform" },
+    ]);
+    expect((await call("newhire")).allowed).toBe(true);
+    expect((await call("stranger")).allowed).toBe(false);
   });
 });
 
