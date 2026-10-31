@@ -5,10 +5,12 @@ import {
   api,
   type Bot,
   type BotLifecycle,
+  type CheckInItem,
   type Conversation,
   type Routine,
 } from "../src/api";
 import { authClient } from "../src/auth";
+import { hideItem, ItemCard, startItem } from "../src/check-ins";
 import {
   ADD_ROUTINE_DRAFT,
   RUN_COLORS,
@@ -27,7 +29,10 @@ import {
 } from "../src/ui";
 import { useLoad } from "../src/use-load";
 
-/** The Bot profile: pause, its computer, its routines, and what customizes it. */
+/**
+ * The Bot profile: what its check-ins found for the person, pause, its computer, its routines, and
+ * what customizes it.
+ */
 export default function BotScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
@@ -50,9 +55,17 @@ export default function BotScreen() {
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
+  const loadItems = useCallback(
+    () => api<{ suggestions: CheckInItem[] }>("/api/proactive/suggestions"),
+    [],
+  );
+  const items = useLoad(loadItems, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const mine = routines.data?.routines.filter(
     (routine) => routine.agentId === botId,
+  );
+  const found = items.data?.suggestions.filter(
+    (item) => item.agentId === botId,
   );
   const paused = lifecycle.data?.lifecycle.paused;
   const name = bot.data?.agent.name ?? "This Bot";
@@ -100,11 +113,14 @@ export default function BotScreen() {
 
   return (
     <Screen
-      refreshing={bot.pending || lifecycle.pending || routines.pending}
+      refreshing={
+        bot.pending || lifecycle.pending || routines.pending || items.pending
+      }
       onRefresh={() => {
         void bot.refresh();
         void lifecycle.refresh();
         void routines.refresh();
+        void items.refresh();
       }}
     >
       <Text style={heading}>{name}</Text>
@@ -112,8 +128,38 @@ export default function BotScreen() {
         <Text style={muted}>{bot.data.agent.title}</Text>
       ) : null}
       <Problem
-        message={action.error || bot.error || lifecycle.error || routines.error}
+        message={
+          action.error ||
+          bot.error ||
+          lifecycle.error ||
+          routines.error ||
+          items.error
+        }
       />
+      {found?.length ? (
+        <Section title="Needs you">
+          {found.map((item) => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              botName={name}
+              busy={action.busy}
+              onStart={() => {
+                void action.run(`start:${item.id}`, async () => {
+                  await startItem(item);
+                  void items.refresh();
+                });
+              }}
+              onHide={() => {
+                void action.run(`hide:${item.id}`, async () => {
+                  await hideItem(item);
+                  await items.refresh();
+                });
+              }}
+            />
+          ))}
+        </Section>
+      ) : null}
       <View style={card}>
         <View
           style={{

@@ -135,6 +135,9 @@ export default function Home() {
         </View>
       ) : (
         <>
+          <Link href="/needs-you" style={{ fontSize: 18, color: "#2563eb" }}>
+            Needs you
+          </Link>
           <Link href="/approvals" style={{ fontSize: 18, color: "#2563eb" }}>
             Questions and approvals
           </Link>

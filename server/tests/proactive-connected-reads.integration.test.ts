@@ -633,7 +633,7 @@ function deployment(pluginStore: ReturnType<typeof pluginStoreFor>) {
       ownerUserId === owner && channelId === channelOf(agentId)
         ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
         : null,
-    notify: async () => undefined,
+    attention: { notifyAttention: async () => {} },
     ...checkInToolsFor((ownerUserId) => load(ownerUserId), scope),
     catalogue: pluginStore,
     mintThreadId: () => `connected-thread-${randomUUID()}`,

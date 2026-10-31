@@ -29,12 +29,17 @@ export class BotPausedError extends Error {
 }
 
 export type BotNotify = "all" | "needs_input" | "none";
-export type UpdateKind = "progress" | "decision" | "question";
+/**
+ * The kinds of update a person routes. `attention` is a ping: what their Bots' check-ins found that
+ * needs them, at most once an hour, every Bot in one message ("Something needs you").
+ */
+export type UpdateKind = "progress" | "decision" | "question" | "attention";
 export type UpdateTransport = "slack" | "teams" | "sms" | "push";
 export const UPDATE_KINDS: readonly UpdateKind[] = [
   "progress",
   "decision",
   "question",
+  "attention",
 ];
 export const UPDATE_TRANSPORTS: readonly UpdateTransport[] = [
   "slack",
@@ -362,13 +367,30 @@ export function createBotLifecycleStore(database: Database) {
   };
 }
 
-/** What the delivery router calls its three kinds, as the update kinds a person routes. */
-const KIND_OF_DELIVERY: Record<"reply" | "question" | "approval", UpdateKind> =
-  {
-    reply: "progress",
-    approval: "decision",
-    question: "question",
-  };
+/** What the delivery router calls its kinds, as the update kinds a person routes. */
+const KIND_OF_DELIVERY: Record<
+  "reply" | "question" | "approval" | "attention",
+  UpdateKind
+> = {
+  reply: "progress",
+  approval: "decision",
+  question: "question",
+  attention: "attention",
+};
+
+/**
+ * What a delivery asks the route for. One Bot's reply, question or approval names that Bot. A ping
+ * names none: it folds several Bots' items, and each Bot's notification preference was applied to
+ * its own items before the ping was written (a Bot set to notify nothing contributes no item to one,
+ * see proactive/ping.ts), so only the person's routing is left to decide here.
+ */
+export type UpdateRouteInput =
+  | {
+      ownerUserId: string;
+      agentId: string;
+      kind: "reply" | "question" | "approval";
+    }
+  | { ownerUserId: string; kind: "attention" };
 
 export type UpdateRoute = {
   /** Which update kind this delivery is, as the person's preferences name it. */
@@ -390,24 +412,23 @@ export type UpdateRoute = {
  * that already happened, and a read that fails must not silently swallow a question somebody is
  * waiting to be asked. Unwired, it allows everything, which is the behaviour before this existed.
  */
-export async function resolveUpdateRoute(input: {
-  ownerUserId: string;
-  agentId: string;
-  kind: "reply" | "question" | "approval";
-}): Promise<UpdateRoute> {
+export async function resolveUpdateRoute(
+  input: UpdateRouteInput,
+): Promise<UpdateRoute> {
   const kind = KIND_OF_DELIVERY[input.kind];
   const everything: UpdateRoute = { kind, notify: true, allows: () => true };
   const database = state.database;
   if (!database) return everything;
   try {
     const store = createBotLifecycleStore(database);
-    const [lifecycle, routing] = await Promise.all([
-      store.get(input.ownerUserId, input.agentId),
+    const [level, routing] = await Promise.all([
+      "agentId" in input
+        ? store.get(input.ownerUserId, input.agentId).then((row) => row.notify)
+        : Promise.resolve<BotNotify>("all"),
       store.routing(input.ownerUserId),
     ]);
     const notify =
-      lifecycle.notify === "all" ||
-      (lifecycle.notify === "needs_input" && kind !== "progress");
+      level === "all" || (level === "needs_input" && kind !== "progress");
     const transports = routing[kind];
     return {
       kind,

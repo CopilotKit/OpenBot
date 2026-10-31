@@ -1,11 +1,19 @@
 import type { DrawnComponent } from "@openbot/toolkit/run-turn";
-import { resolveUpdateRoute, type UpdateRoute } from "../agents/lifecycle";
+import {
+  resolveUpdateRoute,
+  type UpdateRoute,
+  type UpdateRouteInput,
+} from "../agents/lifecycle";
+import type { AttentionPing } from "../proactive/contracts";
+import { pingHeadline } from "../proactive/ping";
 import type { WorkItem, WorkQueue } from "../work/queue";
 import type { ExpoPushTransport } from "./push";
 import type { DeliveryStore } from "./store";
 import {
+  type BindingTransport,
   type ChatTransport,
   type DeliveryBinding,
+  type DeliveryKind,
   DeliveryProviderError,
   DeliveryRefusedError,
   type DeliveryScope,
@@ -51,6 +59,8 @@ type RouterStore = Pick<
   | "findBinding"
   | "binding"
   | "bindingsFor"
+  | "bindingsByUse"
+  | "checkInConversations"
   | "devices"
   | "device"
   | "removeDevice"
@@ -71,6 +81,15 @@ export function createDeliveryRouter(deps: {
   queue: Pick<WorkQueue, "claim" | "renew" | "finish" | "release">;
   owner: string;
   authoriseScope(scope: DeliveryScope): Promise<boolean>;
+  /**
+   * The person's conversation with a Bot, as delivery addresses it, or null when they can no longer
+   * reach either. A ping's push is filed under one of these.
+   */
+  scopeFor(
+    ownerUserId: string,
+    channelId: string,
+    agentId: string,
+  ): Promise<DeliveryScope | null>;
   runTurn(
     input: DeliveryScope & { runId: string; text: string; signal: AbortSignal },
   ): Promise<{
@@ -86,11 +105,7 @@ export function createDeliveryRouter(deps: {
     push?: ExpoPushTransport;
   };
   /** The person's routing by kind; defaults to the lifecycle lane's `resolveUpdateRoute`. */
-  routeFor?(input: {
-    ownerUserId: string;
-    agentId: string;
-    kind: "reply" | "question" | "approval";
-  }): Promise<UpdateRoute>;
+  routeFor?(input: UpdateRouteInput): Promise<UpdateRoute>;
   /** Unused since Slack events feed `ingestSlackEvent` from the pairing route; kept for assembly. */
   notifyEvent?(event: {
     ownerUserId: string;
@@ -119,7 +134,7 @@ export function createDeliveryRouter(deps: {
     input: {
       id: string;
       text: string;
-      kind: "reply" | "question" | "approval";
+      kind: Exclude<DeliveryKind, "attention">;
       requestId?: string | null;
     },
     includeBindings = true,
@@ -177,6 +192,80 @@ export function createDeliveryRouter(deps: {
           kind: input.kind,
           requestId: input.requestId ?? null,
         });
+  }
+  /**
+   * Offer one ping (proactive/ping.ts): once to each of the person's push devices, and one message
+   * on each chat platform they use, into the account they used there last. That conversation's Bot
+   * posts it, naming each item's Bot, and a reply there reaches that Bot as any reply does. A person
+   * with no chat account connected gets the push, and the app lists the items either way. Their
+   * routing for "Something needs you" picks the transports.
+   *
+   * SAFE TO OFFER AGAIN. A replica that stopped between writing a ping and marking it offered leaves
+   * it to be offered again (`unoffered`). The keys are per platform and per device, not per account,
+   * so a second offer sends nothing new even after the person has used another account since.
+   */
+  async function notifyAttention(ping: AttentionPing) {
+    if (ping.items.length === 0) return;
+    const route = await (deps.routeFor ?? resolveUpdateRoute)({
+      ownerUserId: ping.ownerUserId,
+      kind: "attention",
+    });
+    const chosen = new Map<BindingTransport, DeliveryBinding>();
+    for (const binding of await deps.store.bindingsByUse(ping.ownerUserId)) {
+      if (chosen.has(binding.transport) || !route.allows(binding.transport))
+        continue;
+      // An account whose conversation the person lost is passed over for the next one they used.
+      if (!(await deps.authoriseScope(binding))) continue;
+      chosen.set(binding.transport, binding);
+    }
+    for (const [transport, binding] of chosen)
+      await deps.store.offerOutbox({
+        ownerUserId: binding.ownerUserId,
+        channelId: binding.channelId,
+        agentId: binding.agentId,
+        threadId: binding.threadId,
+        dedupeKey: `attention:${ping.pingId}:${transport}`,
+        bindingId: binding.id,
+        deviceId: null,
+        transport,
+        text: ping.text,
+        kind: "attention",
+        requestId: null,
+      });
+    if (!route.allows("push")) return;
+    const devices = await deps.store.devices(ping.ownerUserId);
+    if (devices.length === 0) return;
+    const scope = await pingScope(ping);
+    if (!scope) return;
+    for (const device of devices)
+      await deps.store.offerOutbox({
+        ...scope,
+        dedupeKey: `attention:${ping.pingId}:device:${device.id}`,
+        bindingId: null,
+        deviceId: device.id,
+        transport: "push",
+        text: `${pingHeadline(ping.items.length)}\n${ping.pushBody}`,
+        kind: "attention",
+        requestId: null,
+      });
+  }
+  /**
+   * The conversation a ping's push is filed under: the check-in conversation of its newest item the
+   * person can still reach, so the send is refused, as any is, once they can reach none of them.
+   */
+  async function pingScope(ping: AttentionPing) {
+    const tried = new Set<string>();
+    for (const { agentId, channelId } of await deps.store.checkInConversations(
+      ping.ownerUserId,
+      ping.items.map((item) => item.suggestionId),
+    )) {
+      const key = JSON.stringify([agentId, channelId]);
+      if (tried.has(key)) continue;
+      tried.add(key);
+      const scope = await deps.scopeFor(ping.ownerUserId, channelId, agentId);
+      if (scope) return scope;
+    }
+    return null;
   }
   async function receive(input: {
     source: "sms";
@@ -474,10 +563,14 @@ export function createDeliveryRouter(deps: {
           !deps.providers.push
         )
           throw new DeliveryRefusedError("Push device unavailable.");
+        const [title, body] =
+          row.kind === "attention"
+            ? headedText(row.text)
+            : ["OpenBot", row.text];
         result = await deps.providers.push.send({
           token: device.token,
-          title: "OpenBot",
-          body: row.text,
+          title,
+          body,
           channelId: row.channelId,
           kind: row.kind,
           requestId: row.requestId,
@@ -594,6 +687,7 @@ export function createDeliveryRouter(deps: {
     receive,
     converse,
     notify,
+    notifyAttention,
     smsOptOut,
     async receiveNative(
       scope: DeliveryScope,
@@ -684,5 +778,10 @@ export function createDeliveryRouter(deps: {
       }
     },
   };
+}
+/** A ping's push row: its title on the first line, its body after it. */
+function headedText(text: string): [title: string, body: string] {
+  const end = text.indexOf("\n");
+  return end < 0 ? [text, ""] : [text.slice(0, end), text.slice(end + 1)];
 }
 export type DeliveryRouter = ReturnType<typeof createDeliveryRouter>;

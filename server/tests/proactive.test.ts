@@ -351,7 +351,8 @@ describe("the ping's words", () => {
       ]),
     ).toEqual({
       text: "One thing needs you\n• Inbox Bot: Reply to Rosa. Rosa needs a yes or no on Oat Satin by 4pm. (from Gmail)\nStart or hide it in OpenBot.",
-      pushBody: "One thing needs you: Reply to Rosa",
+      // The push is titled "One thing needs you" by delivery; its body names the Bot.
+      pushBody: "Inbox Bot: Reply to Rosa",
     });
   });
 
@@ -374,11 +375,15 @@ describe("the ping's words", () => {
       "and 2 more",
       "Start or hide them in OpenBot.",
     ]);
-    expect(
-      pushBody.startsWith(
-        "7 things need you: Reply to Rosa; Can the standup move?; ",
-      ),
-    ).toBe(true);
+    // A line per item naming its Bot, the same five, then how many more.
+    expect(pushBody.split("\n")).toEqual([
+      "Inbox Bot: Reply to Rosa",
+      "Calendar Bot: Can the standup move?",
+      "Inbox Bot: Answer supplier 1",
+      "Inbox Bot: Answer supplier 2",
+      "Inbox Bot: Answer supplier 3",
+      "and 2 more",
+    ]);
     expect(Array.from(pushBody).length).toBeLessThanOrEqual(200);
   });
 

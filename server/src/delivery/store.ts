@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { agents } from "../db/schema/core";
 import { agentProfiles } from "../db/schema/coworker";
@@ -11,10 +11,15 @@ import {
   deliveryOutbox,
   pushDevices,
 } from "../db/schema/delivery";
+import {
+  proactiveSettings,
+  proactiveSuggestions,
+} from "../db/schema/proactive";
 import { workItems } from "../db/schema/work";
 import {
   type BindingTransport,
   type DeliveryBinding,
+  type DeliveryKind,
   DeliveryNotFoundError,
   DeliveryRefusedError,
   type DeliveryScope,
@@ -86,6 +91,54 @@ export function createDeliveryStore(database: Database) {
             eq(deliveryBindings.threadId, scope.threadId),
             eq(deliveryBindings.enabled, true),
           ),
+        );
+    },
+    /**
+     * The person's connected chat and SMS accounts, most recently used first: by the last message
+     * they sent through one, or when it was connected if they never have. A ping goes into the first
+     * one on each platform, the conversation they are most likely looking at.
+     */
+    async bindingsByUse(owner: string): Promise<DeliveryBinding[]> {
+      const usedAt = sql`greatest(${deliveryBindings.createdAt}, (select max(${deliveryInbox.createdAt}) from ${deliveryInbox} where ${deliveryInbox.ownerUserId} = ${deliveryBindings.ownerUserId} and ${deliveryInbox.bindingId} = ${deliveryBindings.id}))`;
+      return database
+        .select()
+        .from(deliveryBindings)
+        .where(
+          and(
+            eq(deliveryBindings.ownerUserId, owner),
+            eq(deliveryBindings.enabled, true),
+          ),
+        )
+        .orderBy(desc(usedAt), asc(deliveryBindings.id));
+    },
+    /**
+     * Where the items a ping carries were found: each one's check-in conversation with its Bot,
+     * newest item first. A ping's push is filed under the first of these the person can still reach.
+     */
+    async checkInConversations(
+      owner: string,
+      suggestionIds: string[],
+    ): Promise<{ agentId: string; channelId: string }[]> {
+      if (suggestionIds.length === 0) return [];
+      return database
+        .select({
+          agentId: proactiveSuggestions.agentId,
+          channelId: proactiveSettings.channelId,
+        })
+        .from(proactiveSuggestions)
+        .innerJoin(
+          proactiveSettings,
+          eq(proactiveSettings.id, proactiveSuggestions.settingId),
+        )
+        .where(
+          and(
+            eq(proactiveSuggestions.ownerUserId, owner),
+            inArray(proactiveSuggestions.id, suggestionIds),
+          ),
+        )
+        .orderBy(
+          desc(proactiveSuggestions.createdAt),
+          desc(proactiveSuggestions.id),
         );
     },
     async bind(input: Omit<DeliveryBinding, "id" | "enabled">) {
@@ -374,7 +427,7 @@ export function createDeliveryStore(database: Database) {
         deviceId: string | null;
         transport: BindingTransport | "push";
         text: string;
-        kind: "reply" | "question" | "approval";
+        kind: DeliveryKind;
         requestId: string | null;
       },
     ) {
