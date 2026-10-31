@@ -200,20 +200,27 @@ export function createDeliveryRouter(deps: {
    * with no chat account connected gets the push, and the app lists the items either way. Their
    * routing for "Something needs you" picks the transports.
    *
+   * AS THAT BOT, SO BY THAT BOT'S RULE. Whether an account may carry the message is the route that
+   * conversation's Bot gets for its own updates, asked for `attention`: a Bot the person told to
+   * notify them of nothing never posts one, and the next account they used on that platform carries
+   * it instead. A platform left with none gets nothing; the push and the app still have it.
+   *
    * SAFE TO OFFER AGAIN. A replica that stopped between writing a ping and marking it offered leaves
    * it to be offered again (`unoffered`). The keys are per platform and per device, not per account,
    * so a second offer sends nothing new even after the person has used another account since.
    */
   async function notifyAttention(ping: AttentionPing) {
     if (ping.items.length === 0) return;
-    const route = await (deps.routeFor ?? resolveUpdateRoute)({
-      ownerUserId: ping.ownerUserId,
-      kind: "attention",
-    });
+    const routeFor = deps.routeFor ?? resolveUpdateRoute;
     const chosen = new Map<BindingTransport, DeliveryBinding>();
     for (const binding of await deps.store.bindingsByUse(ping.ownerUserId)) {
-      if (chosen.has(binding.transport) || !route.allows(binding.transport))
-        continue;
+      if (chosen.has(binding.transport)) continue;
+      const carrier = await routeFor({
+        ownerUserId: ping.ownerUserId,
+        agentId: binding.agentId,
+        kind: "attention",
+      });
+      if (!carrier.allows(binding.transport)) continue;
       // An account whose conversation the person lost is passed over for the next one they used.
       if (!(await deps.authoriseScope(binding))) continue;
       chosen.set(binding.transport, binding);
@@ -232,6 +239,10 @@ export function createDeliveryRouter(deps: {
         kind: "attention",
         requestId: null,
       });
+    const route = await routeFor({
+      ownerUserId: ping.ownerUserId,
+      kind: "attention",
+    });
     if (!route.allows("push")) return;
     const devices = await deps.store.devices(ping.ownerUserId);
     if (devices.length === 0) return;
