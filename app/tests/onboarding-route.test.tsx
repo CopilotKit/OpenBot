@@ -87,6 +87,9 @@ let localEvaluation: boolean;
 let role: "admin" | "user";
 /** What `GET /api/setup` answers. */
 let checklist: { audience: string; rows: unknown[] };
+/** Ask before making changes, as `GET /api/approvals` says it, and every change asked for. */
+let askFirst: boolean;
+let askFirstChanges: unknown[];
 /** The apps `GET /api/plugins/for/general/apps` answers with. */
 let appList: unknown[];
 /** Whether `/api/capabilities` answers, and how many times it was asked. */
@@ -108,6 +111,8 @@ beforeEach(() => {
   localEvaluation = false;
   role = "admin";
   checklist = CHECKLIST;
+  askFirst = false;
+  askFirstChanges = [];
   appList = [
     {
       key: "notion",
@@ -176,6 +181,14 @@ beforeEach(() => {
       if (path === "/api/plugins/for/general/apps")
         return Response.json({ apps: appList });
       if (path === "/api/setup") return Response.json({ checklist });
+      if (path === "/api/approvals")
+        return Response.json({ enabled: askFirst, rules: [], pending: [] });
+      if (path === "/api/approvals/preferences" && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as { enabled?: boolean };
+        askFirstChanges.push(body);
+        if (body.enabled !== undefined) askFirst = body.enabled;
+        return Response.json({ enabled: askFirst });
+      }
       return Response.json({});
     },
     { preconnect: originalFetch.preconnect },
@@ -417,6 +430,30 @@ test("an admin without a Bot computer is pointed at Check your setup", async () 
       "OpenBot doesn't have one yet. Check your setup shows how to add one.",
     ),
   ).toBeTruthy();
+});
+
+test("the approval step offers Ask before making changes right there, and switching it saves it", async () => {
+  const view = open("/onboarding?step=approval");
+  await heading(view, "You decide what it asks about");
+
+  const ask = await view.findByRole("switch", {
+    name: "Ask before making changes",
+  });
+  await waitFor(() => expect(ask.hasAttribute("data-disabled")).toBe(false));
+  expect(ask.getAttribute("aria-checked")).toBe("false");
+
+  fireEvent.click(ask);
+
+  await waitFor(() => expect(askFirstChanges).toEqual([{ enabled: true }]));
+  await waitFor(() =>
+    expect(
+      view
+        .getByRole("switch", { name: "Ask before making changes" })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
+  // Still on the step: switching it moves nothing on.
+  expect(searchOf(view).step).toBe("approval");
 });
 
 test("Continue and Back start the new step's picture at the top of its pane", async () => {
