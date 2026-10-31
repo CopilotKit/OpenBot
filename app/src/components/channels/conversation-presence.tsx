@@ -163,6 +163,8 @@ type ServerFacts = {
   waiting: boolean;
   /** This conversation's approvals, so a declined step stops being named before its result. */
   approvals: readonly StepApproval[];
+  /** The conversation's thread, so a card is matched to its call here and not in another one. */
+  threadId?: string;
 };
 
 const NOTHING_ON_SERVER: ServerFacts = {
@@ -245,8 +247,8 @@ export function ConversationPresenceProvider({
       });
   }, [cache, held]);
   const facts = useMemo(
-    () => ({ working, waiting, approvals }),
-    [working, waiting, approvals],
+    () => ({ working, waiting, approvals, threadId }),
+    [working, waiting, approvals, threadId],
   );
   return (
     <StoreContext.Provider value={presence}>
@@ -339,6 +341,14 @@ export function useConversationStatus(): ConversationStatus {
  */
 export function useConversationWaiting(): boolean {
   return useContext(ServerContext).waiting;
+}
+
+/**
+ * The thread of the conversation on screen, for matching its approvals to its calls. Undefined
+ * outside a conversation route and while the conversation loads.
+ */
+export function useConversationThread(): string | undefined {
+  return useContext(ServerContext).threadId;
 }
 
 /**

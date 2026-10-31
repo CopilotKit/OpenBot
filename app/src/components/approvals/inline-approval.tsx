@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { personWasAsked } from "@/lib/approval-view";
+import { useConversationThread } from "@/components/channels/conversation-presence";
 import {
   type ApprovalRequest,
   approvalInboxCacheOptions,
   decideApprovalMutationOptions,
+  holdsCall,
+  inThread,
 } from "@/lib/approvals";
 import { ApprovalCard } from "./approval-card";
 
@@ -36,9 +39,10 @@ export function InlineApproval({
   const cache = useQueryClient();
   const inbox = useQuery(approvalInboxCacheOptions());
   const decision = useMutation(decideApprovalMutationOptions(cache));
+  const threadId = useConversationThread();
   const request = toolCallId
-    ? inbox.data?.requests.find(
-        (candidate) => candidate.action.toolCallId === toolCallId,
+    ? inbox.data?.requests.find((candidate) =>
+        holdsCall(candidate, toolCallId, threadId),
       )
     : undefined;
   if (!request) return <>{fallback}</>;
@@ -78,10 +82,13 @@ export function ToolCallApprovals({
   ran?: readonly string[];
 }) {
   const inbox = useQuery(approvalInboxCacheOptions());
+  const threadId = useConversationThread();
   const asked = new Set(
     (inbox.data?.requests ?? [])
       .filter(
-        (request) => request.status === "pending" || decidedByPerson(request),
+        (request) =>
+          inThread(request, threadId) &&
+          (request.status === "pending" || decidedByPerson(request)),
       )
       .flatMap((request) =>
         request.action.toolCallId ? [request.action.toolCallId] : [],

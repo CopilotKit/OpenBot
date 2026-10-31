@@ -16,7 +16,7 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { ToolCallApprovals } from "@/components/approvals/inline-approval";
-import { approvalInboxCacheOptions } from "@/lib/approvals";
+import { approvalInboxCacheOptions, inThread } from "@/lib/approvals";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
@@ -41,7 +41,10 @@ import {
 } from "./browser-activity";
 import { codingOutcome, lookStep } from "./coding-tool-cards";
 import type { VisibleChatItem } from "./chat-messages";
-import { useConversationWaiting } from "./conversation-presence";
+import {
+  useConversationThread,
+  useConversationWaiting,
+} from "./conversation-presence";
 import { ToolLine } from "./tool-line";
 
 type ToolItem = Extract<VisibleChatItem, { kind: "tool" }>;
@@ -769,16 +772,19 @@ export function StepRow({
  */
 export function useHeldForPerson(): ReadonlySet<string> {
   const inbox = useQuery(approvalInboxCacheOptions());
+  const threadId = useConversationThread();
   return useMemo(
     () =>
       new Set(
         (inbox.data?.requests ?? []).flatMap((request) =>
-          request.status === "pending" && request.action.toolCallId
+          request.status === "pending" &&
+          inThread(request, threadId) &&
+          request.action.toolCallId
             ? [request.action.toolCallId]
             : [],
         ),
       ),
-    [inbox.data],
+    [inbox.data, threadId],
   );
 }
 
@@ -790,6 +796,7 @@ export function useHeldForPerson(): ReadonlySet<string> {
  */
 export function useResumingAfterApproval(): ReadonlySet<string> {
   const inbox = useQuery(approvalInboxCacheOptions());
+  const threadId = useConversationThread();
   return useMemo(
     () =>
       new Set(
@@ -797,12 +804,13 @@ export function useResumingAfterApproval(): ReadonlySet<string> {
           (request.status === "approved" || request.status === "consumed") &&
           (request.decision === "allow_once" ||
             request.decision === "allow_always") &&
+          inThread(request, threadId) &&
           request.action.toolCallId
             ? [request.action.toolCallId]
             : [],
         ),
       ),
-    [inbox.data],
+    [inbox.data, threadId],
   );
 }
 

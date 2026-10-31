@@ -102,6 +102,30 @@ export const approvalInboxOptions = () =>
     refetchInterval: INBOX_POLL_MS,
   });
 /**
+ * Whether a request holds this tool call, in this conversation's thread. A call id is the model's,
+ * and nothing makes it unique across conversations, so where the thread is known it must match
+ * too. Outside a conversation (`threadId` undefined) the call id is all there is.
+ */
+export function holdsCall(
+  request: ApprovalRequest,
+  toolCallId: string,
+  threadId: string | undefined,
+): boolean {
+  return (
+    request.action.toolCallId === toolCallId &&
+    (threadId === undefined || request.action.threadId === threadId)
+  );
+}
+
+/** The requests in this conversation's thread, or every one outside a conversation. */
+export function inThread(
+  request: ApprovalRequest,
+  threadId: string | undefined,
+): boolean {
+  return threadId === undefined || request.action.threadId === threadId;
+}
+
+/**
  * The conversations waiting on the person, by thread: an approval pending in them, or a question.
  * Sorted, so an unchanged answer keeps its identity across polls and no row redraws for nothing.
  */
