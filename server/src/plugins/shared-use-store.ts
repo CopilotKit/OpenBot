@@ -257,12 +257,28 @@ export function createSharedUseStore(
   };
 
   async function setApproval(input: ApprovalInput) {
-    await database.transaction((tx) => writeApproval(tx, input));
+    await database.transaction(async (tx) => {
+      const serverId = await lockApproval(tx, input.botId, input.serverId);
+      await writeApproval(tx, { ...input, serverId });
+    });
   }
 
-  /** Share the decision transaction so a refused write cannot leave a decided request. */
+  /** Lock the canonical Bot/app before either a request or its approval row is written. */
+  async function lockApproval(
+    tx: Transaction,
+    botId: string,
+    serverId: string,
+  ) {
+    const appId = await appIdOf(serverId, tx);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${JSON.stringify(["shared-use-approval", botId, appId])}))`,
+    );
+    return appId;
+  }
+
+  /** Share the decision transaction; callers already hold the canonical Bot/app lock. */
   async function writeApproval(tx: Transaction, input: ApprovalInput) {
-    const serverId = await appIdOf(input.serverId, tx);
+    const serverId = input.serverId;
     const approvedAs = input.as ?? "admin";
     await tx
       .insert(sharedUseApprovals)
@@ -750,6 +766,21 @@ export function createSharedUseStore(
     decision: "approve" | "decline";
   }) {
     await database.transaction(async (tx) => {
+      const [request] = await tx
+        .select({
+          botId: sharedUseRequests.agentId,
+          serverId: sharedUseRequests.serverId,
+        })
+        .from(sharedUseRequests)
+        .where(
+          and(
+            eq(sharedUseRequests.id, input.id),
+            eq(sharedUseRequests.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (!request) throw new SharedUseRequestDecidedError();
+      const serverId = await lockApproval(tx, request.botId, request.serverId);
       const [claimed] = await tx
         .update(sharedUseRequests)
         .set({
@@ -768,7 +799,7 @@ export function createSharedUseStore(
       if (input.decision === "approve") {
         await writeApproval(tx, {
           botId: claimed.agentId,
-          serverId: claimed.serverId,
+          serverId,
           by: input.by,
           approval: {
             audience: claimed.proposedAudience,

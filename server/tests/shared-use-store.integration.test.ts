@@ -274,6 +274,84 @@ describe("the shared-use gate", () => {
 });
 
 describe("decision durability", () => {
+  test("a direct approval and an administrator decision complete without a lock-order deadlock", async () => {
+    await call("stranger");
+    const [pending] = await store.pendingFor(bot);
+    const blocker = createDatabase(testDatabaseUrl(), { max: 1 });
+    const deciding = createDatabase(testDatabaseUrl(), { max: 1 });
+    const setting = createDatabase(testDatabaseUrl(), { max: 1 });
+    const decidingName = `approval_deciding_${suite}`;
+    const settingName = `approval_setting_${suite}`;
+    await deciding.execute(
+      sql`select set_config('application_name', ${decidingName}, false)`,
+    );
+    await setting.execute(
+      sql`select set_config('application_name', ${settingName}, false)`,
+    );
+    const locked = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const gate = blocker.transaction(async (tx) => {
+      await tx
+        .select()
+        .from(sharedUseRequests)
+        .where(eq(sharedUseRequests.id, pending!.id))
+        .for("update");
+      locked.resolve();
+      await release.promise;
+    });
+    void gate.catch(locked.reject);
+    const operations: Promise<unknown>[] = [];
+    async function waitForDatabaseLock(name: string) {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const rows = await database.execute(
+          sql`select wait_event_type from pg_stat_activity where application_name = ${name} and datname = current_database()`,
+        );
+        if (rows.some((row) => row.wait_event_type === "Lock")) return;
+      }
+      throw new Error(
+        `The database did not report the expected lock wait for ${name}`,
+      );
+    }
+    try {
+      await locked.promise;
+      operations.push(
+        createSharedUseStore(deciding, "composio").decide({
+          id: pending!.id,
+          by: id("admin"),
+          decision: "approve",
+        }),
+      );
+      await waitForDatabaseLock(decidingName);
+      operations.push(
+        createSharedUseStore(setting, "composio").setApproval({
+          botId: bot,
+          serverId: app,
+          by: id("owner"),
+          approval: { audience: "team", outsideInput: true, members: [] },
+        }),
+      );
+      await waitForDatabaseLock(settingName);
+      release.resolve();
+      await gate;
+      const outcomes = await Promise.allSettled(operations);
+      expect(outcomes.map((outcome) => outcome.status)).toEqual([
+        "fulfilled",
+        "fulfilled",
+      ]);
+      expect((await store.approvalFor(bot, app))?.audience).toBe("team");
+      expect(await store.pendingFor(bot)).toHaveLength(0);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([gate, ...operations]);
+      await Promise.all([
+        blocker.$client.end(),
+        deciding.$client.end(),
+        setting.$client.end(),
+      ]);
+    }
+  }, 15000);
+
   test.each(["shared_use_approvals", "shared_use_approval_members"] as const)(
     "a failed %s write leaves an approval request pending and retryable",
     async (table) => {

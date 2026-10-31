@@ -13,6 +13,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 Deciding a shared-app request now commits the decision and the access it grants together. If the
 approval or its audience cannot be saved, the request stays pending instead of disappearing as
 approved without granting access. An administrator can retry after the write failure is resolved.
+Concurrent direct approvals and request decisions take the same Bot/app transaction lock before
+writing either row, so they do not deadlock by acquiring those rows in opposite orders.
 
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
