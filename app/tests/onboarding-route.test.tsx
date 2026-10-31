@@ -536,7 +536,7 @@ test("the failed line goes once the person moves on, and doesn't come back with 
 test("Get started on the name step saves the name, finishes, plays the orb's finish, then opens the app", async () => {
   const view = open("/onboarding?step=name");
   await heading(view, "What should we call you?");
-  // The name step's own form carries the way out; the frame draws no Continue.
+  // The frame's primary is the name form's Get started, not a Continue.
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   // Under the orb: on a phone the picture comes first.
   expect(
@@ -556,8 +556,9 @@ test("Get started on the name step saves the name, finishes, plays the orb's fin
   expect(named).toBe("Maya");
   expect(completed).toBe(true);
   expect(view.queryByText("Home")).toBeNull();
+  // While the orb finishes, the button says what has happened.
   expect(
-    view.getByRole("button", { name: "Saving…" }).hasAttribute("disabled"),
+    view.getByRole("button", { name: "All set" }).hasAttribute("data-done"),
   ).toBe(true);
   await waitFor(() => expect(view.getByText("Home")).toBeTruthy(), {
     timeout: 3000,
