@@ -475,42 +475,104 @@ export function showWaitingCard() {
   card.focus({ preventScroll: true });
 }
 
+/** How long a step has to stay the step before the line's live region says it. */
+export const STEP_SETTLE_MS = 3000;
+
+/**
+ * The latest value that has stayed the same for `ms`, or null. Holds the last settled value while a
+ * new one is still changing, so it never steps back; null clears it at once.
+ */
+function useSettled(value: string | null, ms: number): string | null {
+  const [settled, setSettled] = useState<string | null>(null);
+  useEffect(() => {
+    if (value === null) {
+      setSettled(null);
+      return;
+    }
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
+
+/**
+ * What the line's live region says: the conversation's state as it changes (working, needs you,
+ * answered) and the step only once it has settled. A run of thirty quick steps would otherwise be
+ * read out step by step, over whatever the person was reading.
+ */
+function useStatusAnnouncement(
+  status: ConversationStatus,
+  settleMs: number,
+): string {
+  const presence = useContext(StoreContext);
+  const answers = useSyncExternalStore(
+    presence?.store.subscribe ?? unsubscribed,
+    () => presence?.store.read().answers ?? 0,
+  );
+  // The count of answers when the last turn began, so a turn that answers is told from one that stopped.
+  const [before, setBefore] = useState(answers);
+  useEffect(() => {
+    if (status.kind === "working") setBefore(answers);
+  }, [status.kind, answers]);
+  const step = useSettled(
+    status.kind === "working" ? status.step : null,
+    settleMs,
+  );
+  if (status.kind === "needs-you") return "Needs you";
+  if (status.kind === "working") return step ? `Working · ${step}` : "Working";
+  return answers > before ? "Answered" : "";
+}
+
 /**
  * The line under the conversation's name: "Working · Searching the web" while the Bot works,
  * "Working" alone for a run the server resumed, "Needs you" while an approval waits here, and
- * nothing at rest. "Needs you" is a button that takes the person to the card waiting on them. Empty, it takes no height, so the name sits level with the orb.
+ * nothing at rest. "Needs you" is a button that takes the person to the card waiting on them. Empty,
+ * it takes no height, so the name sits level with the orb. The step shimmers as a running tool line
+ * does, and stops for somebody who asked for less motion.
  *
- * Always mounted, so the live region is there before the first step arrives: a region added with
- * its text already in it is not announced. The step shimmers as a running tool line does, and stops
- * for somebody who asked for less motion.
+ * What a screen reader hears is a live region beside it (`useStatusAnnouncement`), always mounted
+ * so it is there before the first change: a region added with its text already in it is not
+ * announced.
  */
-export function ConversationStatusLine({ className }: { className?: string }) {
+export function ConversationStatusLine({
+  className,
+  settleMs = STEP_SETTLE_MS,
+}: {
+  className?: string;
+  /** How long a step has to stay the step before it is announced. */
+  settleMs?: number;
+}) {
   const status = useConversationStatus();
+  const announcement = useStatusAnnouncement(status, settleMs);
   return (
-    <p
-      aria-atomic
-      aria-live="polite"
-      className={cn("type-caption truncate text-muted-foreground", className)}
-    >
-      {status.kind === "needs-you" ? (
-        <button
-          className="rounded-sm font-medium text-status-needs underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={showWaitingCard}
-          type="button"
-        >
-          Needs you
-        </button>
-      ) : status.kind === "working" ? (
-        <>
-          <span className="font-medium text-status-working">Working</span>
-          {status.step ? (
-            <>
-              {" · "}
-              <span className="tool-line-running">{status.step}</span>
-            </>
-          ) : null}
-        </>
-      ) : null}
-    </p>
+    <>
+      <p
+        className={cn("type-caption truncate text-muted-foreground", className)}
+        data-slot="conversation-status"
+      >
+        {status.kind === "needs-you" ? (
+          <button
+            className="rounded-sm font-medium text-status-needs underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={showWaitingCard}
+            type="button"
+          >
+            Needs you
+          </button>
+        ) : status.kind === "working" ? (
+          <>
+            <span className="font-medium text-status-working">Working</span>
+            {status.step ? (
+              <>
+                {" · "}
+                <span className="tool-line-running">{status.step}</span>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </p>
+      <span aria-atomic aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
+    </>
   );
 }

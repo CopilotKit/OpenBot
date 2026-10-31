@@ -115,6 +115,8 @@ export function ToolLine({
                     : label}
         </span>
         {detail ? <span className="truncate opacity-70">{detail}</span> : null}
+        {/* The shimmer says it is running to the eye; this says it to a screen reader. */}
+        {running ? <span className="sr-only">In progress</span> : null}
       </span>
       {icon ? (
         <span className="shrink-0 self-center text-muted-foreground">
