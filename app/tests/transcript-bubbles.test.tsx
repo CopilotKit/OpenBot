@@ -51,6 +51,29 @@ test("a Bot's reply is drawn one bubble per thought", () => {
     );
 });
 
+test("a long structured reply draws a heading with its section, a label with its source, and no empty bubble", () => {
+  const text = [
+    "I looked into the Q3 budget.",
+    "## What changed",
+    "Travel went up by 12%.",
+    "---",
+    "### Next steps",
+    "- Ask Ana for receipts",
+    "- Move the offsite",
+    "Source:",
+    "[Q3 budget sheet](https://example.com/q3)",
+  ].join("\n\n");
+  const view = render(<ChatTranscript messages={[asked, reply(text)]} />);
+  const bubbles = botBubbles(view.container);
+  expect(bubbles).toHaveLength(4);
+  for (const bubble of bubbles) expect(bubble.textContent?.trim()).not.toBe("");
+  expect(bubbles[1]?.querySelector("h2")?.textContent).toBe("What changed");
+  expect(bubbles[1]?.textContent).toContain("Travel went up by 12%.");
+  expect(bubbles[2]?.querySelectorAll("li")).toHaveLength(2);
+  expect(bubbles[3]?.textContent).toContain("Source:");
+  expect(bubbles[3]?.querySelector("a")?.textContent).toBe("Q3 budget sheet");
+});
+
 test("a thought still arriving joins its bubble rather than starting another", async () => {
   const view = render(
     <ChatTranscript busy messages={[asked, reply("Here are three:")]} />,
@@ -77,7 +100,7 @@ test("a bubble holding a code block or a table spans the column on a wide screen
       messages={[
         asked,
         reply(
-          "Run this:\n\n```sh\nbun test\n```\n\n| Day | Time |\n|---|---|\n| Mon | 10 |",
+          "It ran.\n\n```sh\nbun test\n```\n\n| Day | Time |\n|---|---|\n| Mon | 10 |",
         ),
       ]}
     />,
