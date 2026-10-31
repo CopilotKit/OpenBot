@@ -317,6 +317,8 @@ export type ProactiveAdmin = {
 export type BotProactiveMetrics = {
   agentId: string;
   name: string;
+  /** What the Bot's picture is drawn from, as everywhere else the app draws a Bot. */
+  avatarSeed: string;
   /** People with check-ins on for this Bot. */
   peopleOn: number;
   runs: {
