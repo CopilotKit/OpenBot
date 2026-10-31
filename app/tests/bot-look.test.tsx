@@ -20,6 +20,7 @@ import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { SAVE_AFTER_MS } from "@/components/bot-profile/look";
 import { SetupSections } from "@/components/bot-profile/setup";
 import { ChannelAvatar } from "@/components/channels/avatar";
+import { BOT_FACES_STORAGE_KEY, setBotFaces } from "@/lib/bot-faces";
 import { agentListQueryOptions, agentQueryOptions } from "@/lib/agents/queries";
 import { queryClient } from "@/query-client";
 import {
@@ -43,6 +44,7 @@ beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   cleanup();
   queryClient.clear();
+  window.localStorage.removeItem(BOT_FACES_STORAGE_KEY);
 });
 afterAll(async () => {
   await settleReactWork();
@@ -550,4 +552,53 @@ test("a conversation's face, which knows only the Bot's id, waits for the Bots l
   await waitFor(() =>
     expect(drawn()).toEqual(["coral:k2p9x7aq", "coral:k2p9x7aq", "not-listed"]),
   );
+});
+
+test("with Bot faces set to still, the preview is painted again in each colour picked, and the conversation's face follows", async () => {
+  // Every canvas paints on one context, which counts the pictures begun on it.
+  let paints = 0;
+  const ctx = new Proxy(
+    {
+      clearRect: () => {
+        paints++;
+      },
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+    } as Record<string | symbol, unknown>,
+    {
+      get: (target, key) => (key in target ? target[key] : () => {}),
+      set: (target, key, value) => {
+        target[key] = value;
+        return true;
+      },
+    },
+  );
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = (() =>
+    ctx) as unknown as typeof getContext;
+  try {
+    setBotFaces("still");
+    serve();
+    const { view, user } = draw();
+    const look = await lookOf(view);
+    const palettes = () =>
+      [...view.container.querySelectorAll("[data-palette]")].map((orb) =>
+        orb.getAttribute("data-palette"),
+      );
+    await waitFor(() =>
+      expect(palettes()).toEqual(["ocean", "ocean", "ocean"]),
+    );
+    await settleReactWork();
+    const before = paints;
+
+    await user.click(look.getByRole("radio", { name: "Green" }));
+
+    expect(palettes()).toEqual(["moss", "ocean", "ocean"]);
+    expect(paints).toBeGreaterThan(before);
+    await waitFor(() => expect(palettes()).toEqual(["moss", "moss", "moss"]), {
+      timeout: SAVE_AFTER_MS * 4,
+    });
+  } finally {
+    HTMLCanvasElement.prototype.getContext = getContext;
+  }
 });
