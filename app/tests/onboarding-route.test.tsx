@@ -692,6 +692,15 @@ test("somebody trying OpenBot alone gets the self-hosting step, with Talk to an 
   expect(searchOf(view).step).toBe("selfhost");
   const engineer = view.getByRole("link", { name: "Talk to an engineer" });
   expect(engineer.getAttribute("target")).toBe("_blank");
+  // Two actions, Back and Continue: no Skip intro, and the engineer is a link in the words.
+  expect(
+    Array.from(view.container.querySelectorAll("footer button")).map(
+      (button) => button.textContent,
+    ),
+  ).toEqual(["Back", "Continue"]);
+  expect(engineer.closest("p")?.textContent).toBe(
+    "Taking it to your team? Talk to an engineer",
+  );
   fireEvent.click(await continueButton(view));
   expect(await heading(view, "Check your setup")).toBeTruthy();
 });
