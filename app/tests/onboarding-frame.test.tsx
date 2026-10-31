@@ -368,18 +368,45 @@ test("a waiting primary shows a spinner, says it is busy, and can't be pressed a
   expect(waiting.querySelector(".animate-spin")).not.toBeNull();
 });
 
-test("a step whose own form moves on gets no primary, and keeps Back", () => {
+test("a step with a form submits it from the frame's primary, with Back beside it as anywhere else", () => {
+  const submitted: string[] = [];
   const view = draw({
     initialStepId: "three",
     steps: [
       ...STEPS.slice(0, 2),
-      { ...plain("three", "Three"), ownAction: true },
+      {
+        ...plain("three", "Three"),
+        intro: () => (
+          <StepIntro
+            after={
+              <form
+                id="three-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitted.push("three");
+                }}
+              />
+            }
+          />
+        ),
+        primaryForm: "three-form",
+        primaryLabel: "Get started",
+      },
     ],
   });
 
-  expect(footer(view).querySelector("[data-onboarding-primary]")).toBeNull();
-  expect(phoneBack(view)).not.toBeNull();
-  expect(desktopBack(view)).not.toBeNull();
+  const button = primary(view);
+  expect(button.getAttribute("type")).toBe("submit");
+  expect(button.getAttribute("form")).toBe("three-form");
+  // Back is in the same row, before it, as on every other step.
+  const back = desktopBack(view);
+  expect(back?.parentElement).toBe(button.parentElement);
+  expect(back?.className).toContain("lg:order-first");
+
+  fireEvent.click(button);
+  expect(submitted).toEqual(["three"]);
+  // The form decides: the frame doesn't move on by itself.
+  expect(view.getByRole("heading", { name: "Three" })).toBeTruthy();
 });
 
 test("held by its caller, it asks to move and draws whatever step it is handed", async () => {

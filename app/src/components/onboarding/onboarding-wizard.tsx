@@ -15,8 +15,8 @@ import { OnboardingFrame, StepTitle } from "./onboarding-frame";
  * The buttons are the frame's, so a step describes them rather than drawing them: the primary's
  * words where the step has its own action ("Turn on notifications"), what that action does given
  * the move to the next step, and, on an optional step, a second button such as "Not now" that
- * moves on and writes nothing. A step whose own form carries its button (`ownAction`) gets no
- * primary at all.
+ * moves on and writes nothing. A step with a form in its words has the primary submit it
+ * (`primaryForm`), so its button sits where every other step's does, with Back beside it.
  */
 export type OnboardingStep = {
   id: string;
@@ -33,13 +33,16 @@ export type OnboardingStep = {
   primaryLabel?: string;
   /** What the primary does, given the move to the next step. Moving on when absent. */
   onPrimary?: (next: () => void) => void;
+  /**
+   * The id of a form in the step's words that the primary submits, in place of `onPrimary`: the
+   * name step's. The form's own submit handler decides what happens.
+   */
+  primaryForm?: string;
   /** The primary reads as done, green with a check. */
   primaryDone?: boolean;
   /** The primary is waiting on something, such as the browser's permission prompt. */
   primaryPending?: boolean;
   primaryDisabled?: boolean;
-  /** The step's own form has the button that moves on, so the frame draws none. */
-  ownAction?: boolean;
   /** A way past it, beside the primary. Moves on when it has no action of its own. */
   secondary?: { label: string; onClick?: (next: () => void) => void };
   /**
@@ -245,22 +248,18 @@ export function OnboardingWizard({
           onPick={(at) => {
             if (at <= reachedAt) go(at);
           }}
-          primary={
-            step?.ownAction
-              ? null
-              : {
-                  label: step?.primaryLabel ?? "Continue",
-                  disabled:
-                    step?.primaryDisabled === true ||
-                    step?.primaryPending === true,
-                  done: step?.primaryDone === true,
-                  pending: step?.primaryPending === true,
-                  onClick: () => {
-                    if (step?.onPrimary) return step.onPrimary(next);
-                    next();
-                  },
-                }
-          }
+          primary={{
+            label: step?.primaryLabel ?? "Continue",
+            disabled:
+              step?.primaryDisabled === true || step?.primaryPending === true,
+            done: step?.primaryDone === true,
+            pending: step?.primaryPending === true,
+            form: step?.primaryForm,
+            onClick: () => {
+              if (step?.onPrimary) return step.onPrimary(next);
+              next();
+            },
+          }}
           reached={reachedAt}
           reserveSecondary={step?.optional === true}
           secondary={
