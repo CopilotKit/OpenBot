@@ -301,14 +301,19 @@ test("open items stay open across check-ins until the person starts or hides one
     (row) => row.settingId === setting.id,
   );
   expect(open.map((row) => row.id).sort()).toEqual([kept.id, fresh.id].sort());
-  // What the next check-in is told and refuses against: this Bot's, the person's own decisions.
+  /*
+   * What the next check-in refuses against: the person's own decisions, on every one of their Bots,
+   * each naming its Bot ("Second" is the first Bot's, still open). Started is this Bot's alone.
+   */
   const prior = await proactive.priorItems(owner, secondBot);
-  expect(prior.open.map((row) => row.title).sort()).toEqual([
-    "Reply to Sam",
-    "Send the invoice",
+  expect(prior.open.map((row) => [row.agentId, row.title]).sort()).toEqual([
+    [bot, "Second"],
+    [secondBot, "Reply to Sam"],
+    [secondBot, "Send the invoice"],
   ]);
   expect(prior.hidden).toEqual([
     {
+      agentId: secondBot,
       title: "Archive old tickets",
       sourceLink: null,
       sourceApp: "Issue tracker",

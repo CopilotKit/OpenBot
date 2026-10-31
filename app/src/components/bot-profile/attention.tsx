@@ -80,27 +80,51 @@ function notificationsAllowed() {
 
 /** A push body is cut here too, so the browser says what the phone says. */
 const PING_BODY_LIMIT = 200;
+/** How many items a ping's notice lists before it says how many more there are, as the phone does. */
+const PING_LISTED = 5;
+
+/** A title as the server compares titles: case, runs of spacing and a closing stop are not news. */
+const titleKey = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s.!?]+$/, "")
+    .trim();
 
 /**
- * What one ping says in the browser, the way a phone push says it: the Bot's name over "One thing
- * needs you: …", or "Your Bots" over "3 things need you: A; B; C" when it folds several Bots' items.
- * `items` are the ones the ping carried that are still open; when the person already acted on all of
- * them in another tab, the notice still says something needs them, without a title it cannot name.
+ * What one ping says in the browser, the way a phone push says it: "3 things need you" over a line
+ * per item naming its Bot, "Expenses: Approve the March invoice", and how many more past five. Each
+ * thing is listed once, even when two Bots raised it. `items` are the ones the ping carried that are
+ * still open; when the person already acted on all of them in another tab, the notice still says
+ * something needs them, without a title it cannot name.
  */
 export function pingNotice(
   items: Pick<ProactiveSuggestion, "agentId" | "title">[],
   botName: (agentId: string) => string | undefined,
 ): { title: string; body: string } {
-  const bots = new Set(items.map((item) => item.agentId));
-  const only = bots.size === 1 ? botName([...bots][0] ?? "") : undefined;
-  const title = only ?? "Your Bots";
-  if (items.length === 0) return { title, body: "Something needs you." };
-  const body =
-    items.length === 1
-      ? `One thing needs you: ${items[0]?.title}`
-      : `${items.length} things need you: ${items.map((item) => item.title).join("; ")}`;
+  const seen = new Set<string>();
+  const once = items.filter((item) => {
+    const key = titleKey(item.title);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (once.length === 0)
+    return {
+      title: "Something needs you",
+      body: "Open Bots to see what's waiting.",
+    };
+  const lines = once.slice(0, PING_LISTED).map((item) => {
+    const bot = botName(item.agentId);
+    return bot ? `${bot}: ${item.title}` : item.title;
+  });
+  const more = once.length - PING_LISTED;
+  const body = [...lines, ...(more > 0 ? [`and ${more} more`] : [])].join("\n");
   return {
-    title,
+    title:
+      once.length === 1
+        ? "One thing needs you"
+        : `${once.length} things need you`,
     body:
       body.length > PING_BODY_LIMIT
         ? `${body.slice(0, PING_BODY_LIMIT - 1).trimEnd()}…`

@@ -17,16 +17,17 @@
  *
  * WHAT IT RAISES IS AN ITEM, NOT A MESSAGE. An item needs a source the check-in actually read, and
  * is refused if it repeats something open, something the person already has a task for, or something
- * they hid in the last thirty days. Open items stay until the person starts or hides one, or a later
- * check-in clears it as no longer needed. They reach the person through the ping (`ping.ts`): at most
- * one an hour per person, every Bot's waiting items folded into it, and in the app at once.
+ * they hid in the last thirty days, from any of their Bots: the same request is raised once for the
+ * person, whichever Bot finds it first. Open items stay until the person starts or hides one, or a
+ * later check-in clears it as no longer needed. They reach the person through the ping (`ping.ts`):
+ * at most one an hour per person, every Bot's waiting items folded into it, and in the app at once.
  *
  * STARTED WORK IS A TASK, in a conversation of its own (`tasks/*`). This engine marks the item
  * started and hands it over; it runs no task turns of its own.
  */
 
 import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
+import { EmptyTurnError, type TurnRunner } from "@openbot/toolkit/run-turn";
 import { z } from "zod";
 import { recordHeadlessUsage } from "../admin/controls";
 import type { AuditInitiator } from "../audit";
@@ -53,18 +54,18 @@ import {
   type PriorItems,
   type ProactiveRead,
   type ProactiveStore,
+  unreachedError,
 } from "./store";
 import {
   clearInputSchema,
-  linkKey,
   MAX_MEMORIES_PER_RUN,
   MAX_SUGGESTIONS_PER_RUN,
   ProactiveRefusedError,
   type ProactiveSetting,
   proactiveMemoryInputSchema,
   SKIPPED_BECAUSE,
+  sameThing,
   suggestionInputSchema,
-  titleKey,
 } from "./types";
 import {
   type CheckInContext,
@@ -85,6 +86,8 @@ const RUN_NOW_GAP_MS = 10 * 60_000;
  * that the replica which wrote it is plainly not about to.
  */
 const UNOFFERED_AFTER_MS = 60_000;
+/** How many of its own open items, tasks and hidden items a check-in is told of, newest first. */
+const OWN_LISTED = 50;
 /** Check-ins one Bot may run for one person in a day, until an admin says otherwise: hourly. */
 export const DEFAULT_DAILY_RUNS = 24;
 
@@ -132,37 +135,94 @@ export type ProactiveEngineDeps = {
 
 /**
  * Why a new item repeats one the person already has, or null. Compared by normalized title and by
- * source link: the same mail raised under another wording is the same thing to them.
+ * source link (`sameThing`), against every one of their Bots: the same request is one thing to them
+ * whichever Bot found it, so it is raised once, and what they hid stays hidden from all of them.
+ *
+ * Another Bot's item is never quoted back. This Bot may not be able to read what that one read, and
+ * a title is written from somebody's mail.
  */
 export function repeatOf(
   prior: PriorItems,
-  input: { title: string; sourceLink?: string | null },
+  input: { agentId: string; title: string; sourceLink?: string | null },
 ): string | null {
-  const key = titleKey(input.title);
-  const link = linkKey(input.sourceLink);
   const same = (item: { title: string; sourceLink: string | null }) =>
-    titleKey(item.title) === key ||
-    (link !== null && linkKey(item.sourceLink) === link);
+    sameThing(input, item);
   const open = prior.open.find(same);
   if (open)
-    return `"${open.title}" is already raised and still open. Do not raise it again.`;
+    return open.agentId === input.agentId
+      ? `"${open.title}" is already raised and still open. Do not raise it again.`
+      : "Another of their Bots already raised this, and it is still open. Do not raise it again.";
   const task = prior.tasks.find(same);
   if (task)
-    return `They already have a task for "${task.title}". Do not raise it again.`;
+    return task.agentId === input.agentId
+      ? `They already have a task for "${task.title}". Do not raise it again.`
+      : "They already have a task for this from another of their Bots. Do not raise it again.";
   const hidden = prior.hidden.find(same);
   if (hidden)
-    return `They hid "${hidden.title}". Do not raise it, or anything like it, again.`;
+    return hidden.agentId === input.agentId
+      ? `They hid "${hidden.title}". Do not raise it, or anything like it, again.`
+      : "They hid this when another of their Bots raised it. Do not raise it, or anything like it, again.";
   return null;
 }
 
-/** What the check-in is told of the past, from what the repeat check reads. */
-function contextOf(prior: PriorItems): CheckInContext {
+/**
+ * What the check-in is told of the past, from what the repeat check reads: this Bot's own items and
+ * tasks only. Another Bot's are kept from it for the reason {@link repeatOf} never quotes them.
+ */
+function contextOf(prior: PriorItems, agentId: string): CheckInContext {
+  const own = <T extends { agentId: string }>(items: T[]) =>
+    items.filter((item) => item.agentId === agentId);
   return {
-    open: prior.open.map(({ id, title }) => ({ id, title })),
-    tasks: prior.tasks.map((task) => task.title),
-    hidden: prior.hidden.map(({ title, sourceApp }) => ({ title, sourceApp })),
+    open: own(prior.open)
+      .slice(0, OWN_LISTED)
+      .map(({ id, title }) => ({ id, title })),
+    tasks: own(prior.tasks)
+      .slice(0, OWN_LISTED)
+      .map((task) => task.title),
+    hidden: own(prior.hidden)
+      .slice(0, OWN_LISTED)
+      .map(({ title, sourceApp }) => ({ title, sourceApp })),
     started: prior.started.map((item) => item.title),
   };
+}
+
+/**
+ * How a check-in ended, from how its turn ended, what it raised, and what the audit trail says it
+ * read: the outcome its ledger row records, and the error with it.
+ *
+ * - A turn that broke off failed, whatever it read.
+ * - An app it could not reach, with nothing raised, is a failure too, never quiet: the person would
+ *   read "nothing needed you" about an app nobody could open. Its error names the apps, which is the
+ *   reason they read (`unreachedError`).
+ * - A turn that read and said nothing ended as the instruction allows: most check-ins should record
+ *   nothing, and a model that found nothing often adds no closing line either. That is quiet, or
+ *   raised when it raised something. One that said nothing and read nothing is still a failure.
+ * - Raised with an app it could not reach is raised, and keeps that error, so the next check-in's
+ *   window opens from before it (`windowStart`) and reads what that app had meanwhile.
+ */
+function outcomeOf(input: {
+  thrown: unknown;
+  raised: number;
+  reads: number;
+  unreached: readonly string[];
+}): { outcome: "quiet" | "raised" | "failed"; error: string | null } {
+  const silent = input.thrown instanceof EmptyTurnError;
+  if (input.thrown && !silent)
+    return {
+      outcome: "failed",
+      error:
+        input.thrown instanceof Error
+          ? input.thrown.message
+          : "The check-in failed.",
+    };
+  const missed =
+    input.unreached.length > 0 ? unreachedError(input.unreached) : null;
+  if (missed && input.raised === 0) return { outcome: "failed", error: missed };
+  if (silent && input.reads === 0)
+    return { outcome: "failed", error: (input.thrown as Error).message };
+  return input.raised > 0
+    ? { outcome: "raised", error: missed }
+    : { outcome: "quiet", error: null };
 }
 
 const logged = (type: string) => (error: unknown) =>
@@ -198,6 +258,26 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     return servers.find((server) =>
       server.tools.some((tool) => tool.ref === ref),
     );
+  }
+  /** The app a tool belongs to, by the name the person knows it by. */
+  async function appOf(ref: string) {
+    return (await serverFor(ref))?.title ?? ref.split("/")[0] ?? ref;
+  }
+  /**
+   * The apps this run tried to read and could not: every call to them failed, and none answered.
+   * One that answered once was reached, so a lookup that came back "not found" after a listing, or
+   * a call that worked when the model tried it again, is not an app that was down.
+   */
+  async function unreached(reads: ProactiveRead[], runId: string) {
+    const serverOf = (ref: string) => ref.split("/")[0] ?? ref;
+    const answered = new Set(reads.map((read) => serverOf(read.ref)));
+    const failed = new Map<string, string>();
+    for (const ref of await deps.store.failedReadsFor(runId))
+      if (!answered.has(serverOf(ref)) && !failed.has(serverOf(ref)))
+        failed.set(serverOf(ref), ref);
+    return [
+      ...new Set(await Promise.all([...failed.values()].map(appOf))),
+    ].sort();
   }
   /** A read this run actually made, matched by ref or by the model-facing tool name. */
   function readMatching(reads: ProactiveRead[], named: string) {
@@ -260,25 +340,22 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
             throw new ProactiveRefusedError(
               "Name a tool you successfully read with in this check-in as sourceTool. A next step needs a source.",
             );
-          const repeat = repeatOf(
-            await deps.store.priorItems(setting.ownerUserId, setting.agentId),
-            input,
+          const sourceApp = await appOf(read.ref);
+          // Refused if any of the person's Bots already has it, checked and written under one lock.
+          const row = await deps.store.raise(
+            {
+              ownerUserId: setting.ownerUserId,
+              agentId: setting.agentId,
+              settingId: setting.id,
+              runId,
+              title: input.title,
+              detail: input.detail,
+              sourceApp,
+              sourceRef: read.ref,
+              sourceLink: input.sourceLink ?? null,
+            },
+            (prior) => repeatOf(prior, { ...input, agentId: setting.agentId }),
           );
-          if (repeat) throw new ProactiveRefusedError(repeat);
-          const row = await deps.store.addSuggestion({
-            ownerUserId: setting.ownerUserId,
-            agentId: setting.agentId,
-            settingId: setting.id,
-            runId,
-            title: input.title,
-            detail: input.detail,
-            sourceApp:
-              (await serverFor(read.ref))?.title ??
-              read.ref.split("/")[0] ??
-              read.ref,
-            sourceRef: read.ref,
-            sourceLink: input.sourceLink ?? null,
-          });
           return { suggested: row.id };
         },
       ),
@@ -417,8 +494,8 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     if (!setting?.enabled) return;
     const gate = await gateOf(setting);
     if ("skip" in gate) return skip(setting, runId, trigger, gate.skip);
-    // Read before this run is in the ledger, so the window opens at the check-in before it.
-    const last = await deps.store.lastCheckIn(setting.id);
+    // Read before this run is in the ledger, so the window opens at a check-in before it.
+    const lastRead = await deps.store.windowStart(setting.id);
     const threadId = deps.mintThreadId();
     if (!(await deps.store.beginRun({ id: runId, setting, trigger, threadId })))
       return skip(setting, runId, trigger, "busy");
@@ -431,12 +508,12 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     running.set(runId, turn);
     const instruction = researchInstruction(
       setting,
-      checkInWindow(last, now()),
-      contextOf(prior),
+      checkInWindow(lastRead, now()),
+      contextOf(prior, setting.agentId),
       trigger,
       gate.apps.map((app) => app.title),
     );
-    let failure: string | null = null;
+    let thrown: unknown = null;
     try {
       await deps.runTurn({
         ownerUserId: setting.ownerUserId,
@@ -460,7 +537,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         signal,
       });
     } catch (error) {
-      failure = error instanceof Error ? error.message : "The check-in failed.";
+      thrown = error;
     } finally {
       running.delete(runId);
     }
@@ -476,16 +553,22 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       deps.store.countSuggestions(runId),
       deps.store.readsFor(runId),
     ]);
+    const { outcome, error } = outcomeOf({
+      thrown,
+      raised,
+      reads: reads.length,
+      unreached: await unreached(reads, runId),
+    });
     await deps.store.finishRun(runId, {
-      outcome: failure ? "failed" : raised > 0 ? "raised" : "quiet",
+      outcome,
       itemsRaised: raised,
       reads: reads.length,
-      error: failure,
+      error,
     });
     await deps.store.recordRun(
       setting.id,
-      failure ? "error" : "succeeded",
-      failure,
+      outcome === "failed" ? "error" : "succeeded",
+      error,
     );
     // Items recorded before a failure are still the person's, so they wait for a ping too.
     if (raised > 0)

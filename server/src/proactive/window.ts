@@ -3,9 +3,12 @@
  *
  * A CHECK-IN READS ONLY WHAT IS NEW. Hourly and on by default, a run that read the whole of a
  * person's mail each time would cost the same every hour and find the same things every hour. So
- * each one is given a window: since the start of the setting's last check-in that finished (`quiet`
- * or `raised`), or the last day when there is none, or when the last one failed and its reads are
- * not to be trusted. "Since" comes from the run ledger (`proactive_runs`), never from the setting's
+ * each one is given a window: since the start of the setting's last check-in that read everything it
+ * tried to (`quiet`, or `raised` with no app left unread), or the last day when there is none. One
+ * that failed, because its turn broke off or an app could not be reached, never moves the window on:
+ * the next one reads from where the last good one started, so nothing that arrived meanwhile is
+ * missed, and the repeat check keeps what was already raised from coming back. "Since" comes from
+ * the run ledger (`proactive_runs`, see `windowStart` in `store.ts`), never from the setting's
  * `last_run_at`, which a Run now overwrites whether or not that run got anywhere.
  *
  * WHAT THE PAST LOOKS LIKE TO IT. Each check-in runs in a fresh thread, so it carries no earlier run
@@ -25,7 +28,7 @@ import {
   type ProactiveSetting,
 } from "./types";
 
-/** How far back the first check-in looks, and any check-in after one that failed. */
+/** How far back a check-in looks when no earlier one read everything it tried to. */
 export const FIRST_WINDOW_MS = 24 * 60 * 60_000;
 
 /** The setting's last check-in that reached the model and ended, as the ledger has it. */
@@ -36,23 +39,20 @@ export type LastCheckIn = {
 
 /** Where one check-in's reading starts and why. */
 export type CheckInWindow = {
-  /** The start of the last check-in that finished, or a day back. */
+  /** The start of the last check-in that read everything, or a day back. */
   since: Date;
-  /** No finished check-in to start from (the first one, or the last one failed): the last day. */
+  /** No such check-in to start from (the first one, or none has read everything yet): the last day. */
   firstRun: boolean;
   now: Date;
 };
 
 /**
- * Since the start of the last check-in that finished, or the last day when there was none. A failed
- * one does not count: what it read may have stopped halfway, so the next one goes back a day.
+ * Since `lastRead`, the start of the last check-in that read everything it tried to, or the last day
+ * when there was none.
  */
-export function checkInWindow(
-  last: LastCheckIn | null,
-  now: Date,
-): CheckInWindow {
-  return last && last.outcome !== "failed"
-    ? { since: last.startedAt, firstRun: false, now }
+export function checkInWindow(lastRead: Date | null, now: Date): CheckInWindow {
+  return lastRead
+    ? { since: lastRead, firstRun: false, now }
     : {
         since: new Date(now.getTime() - FIRST_WINDOW_MS),
         firstRun: true,

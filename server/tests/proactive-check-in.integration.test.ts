@@ -50,7 +50,10 @@ import {
 import { proactiveInitiator } from "../src/proactive/restriction";
 import { createProactiveRoutes } from "../src/proactive/routes";
 import type { CheckInApp } from "../src/proactive/scope";
-import { createProactiveStore } from "../src/proactive/store";
+import {
+  createProactiveStore,
+  type ProactiveStore,
+} from "../src/proactive/store";
 import {
   ProactiveRefusedError,
   type ProactiveSetting,
@@ -77,6 +80,9 @@ const listMessages = `${mail}/list_messages`;
 const READ_TOOL = `mcp__${mail}__list_messages`;
 /** The one app the inbox Bot can read, as the engine is told it. */
 const mailApp = [{ title: "Mail", refs: [listMessages] }];
+/** A second app, for a check-in that reads two and can reach only one. */
+const diary = `check-in-diary-${suite}`;
+const listEvents = `${diary}/list_events`;
 const inboxChannel = `check-in-inbox-channel-${suite}`;
 const calendarChannel = `check-in-calendar-channel-${suite}`;
 const taskChannel = `check-in-task-channel-${suite}`;
@@ -136,20 +142,38 @@ beforeAll(async () => {
       description: "",
     })),
   );
-  await database.insert(mcpServers).values({
-    id: mail,
-    title: "Mail",
-    vendor: "Fixture",
-    url: "https://mail.example.test/mcp",
-    provenance: "custom",
-  });
-  await database.insert(mcpTools).values({
-    serverId: mail,
-    name: "list_messages",
-    vendorName: "list_messages",
-    effect: "read",
-    inputSchema: {},
-  });
+  await database.insert(mcpServers).values([
+    {
+      id: mail,
+      title: "Mail",
+      vendor: "Fixture",
+      url: "https://mail.example.test/mcp",
+      provenance: "custom",
+    },
+    {
+      id: diary,
+      title: "Calendar",
+      vendor: "Fixture",
+      url: "https://calendar.example.test/mcp",
+      provenance: "custom",
+    },
+  ]);
+  await database.insert(mcpTools).values([
+    {
+      serverId: mail,
+      name: "list_messages",
+      vendorName: "list_messages",
+      effect: "read",
+      inputSchema: {},
+    },
+    {
+      serverId: diary,
+      name: "list_events",
+      vendorName: "list_events",
+      effect: "read",
+      inputSchema: {},
+    },
+  ]);
   await deliveries.registerDevice({
     id: device,
     ownerUserId: owner,
@@ -241,7 +265,9 @@ afterAll(async () => {
   await database
     .delete(channels)
     .where(inArray(channels.id, [inboxChannel, calendarChannel, taskChannel]));
-  await database.delete(mcpServers).where(eq(mcpServers.id, mail));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, [mail, diary]));
   await database.$client.close();
 });
 
@@ -301,6 +327,21 @@ async function readMail(runId: string) {
     actorUserId: owner,
     initiator: proactiveInitiator(runId),
     payload: {},
+  });
+}
+
+/**
+ * The audit row a connector call writes when it fails: the app is down, refused the account, or
+ * answered with an error. Written by the plugin store as the call happens, as a read's is.
+ */
+async function failRead(runId: string, ref = listMessages) {
+  await auditStore.insert({
+    eventType: "mcp.call_failed",
+    targetType: "mcp_tool",
+    targetId: ref,
+    actorUserId: owner,
+    initiator: proactiveInitiator(runId),
+    payload: { failure: "connect ECONNREFUSED 127.0.0.1:443" },
   });
 }
 
@@ -374,6 +415,8 @@ function replica(
     ) => Promise<CheckInApp[]>;
     denied?: string[];
     reachable?: boolean;
+    /** Its own connection pool, as another replica has. */
+    store?: ProactiveStore;
   } = {},
 ) {
   const requests: RunAgentInput[] = [];
@@ -414,7 +457,7 @@ function replica(
     toolsForTurn: (input) => (engine as ProactiveEngine).toolsForTurn(input),
   });
   engine = createProactiveEngine({
-    store,
+    store: options.store ?? store,
     memory,
     queue,
     owner: `replica-${randomUUID()}`,
@@ -544,6 +587,18 @@ async function seedRuns(
     }),
   );
 }
+/**
+ * Move a check-in back, as if it started `hoursAgo` hours ago, so the windows of runs made a moment
+ * apart are told apart by more than the second they share. Returns the Unix time the window names.
+ */
+async function ranHoursAgo(run: { id: string } | undefined, hoursAgo: number) {
+  const startedAt = new Date(Date.now() - hoursAgo * 3_600_000);
+  await database
+    .update(proactiveRuns)
+    .set({ startedAt, finishedAt: new Date(startedAt.getTime() + 30_000) })
+    .where(eq(proactiveRuns.id, run?.id as string));
+  return Math.floor(startedAt.getTime() / 1000);
+}
 const afterOf = (instruction: string | undefined) =>
   Number(instruction?.match(/\(Unix time (\d+)\)/)?.[1] ?? Number.NaN);
 
@@ -560,6 +615,15 @@ function routes(engine: ProactiveEngine) {
     "/api/proactive",
     createProactiveRoutes(store, engine, requireUser as never),
   );
+}
+/** The setting's last check-in as the Bot's check-ins read it: how it ended, and why in plain words. */
+async function lastRunOf(engine: ProactiveEngine, setting = inbox) {
+  const { settings } = (await (
+    await routes(engine).request("http://t/api/proactive/settings")
+  ).json()) as {
+    settings: { id: string; lastRun: Record<string, unknown> | null }[];
+  };
+  return settings.find((entry) => entry.id === setting.id)?.lastRun;
 }
 /** The model's own message in a check-in's first request: what the turn was asked. */
 const askedOf = (request: RunAgentInput | undefined) =>
@@ -870,7 +934,7 @@ describe("the gates, before any model call", () => {
 });
 
 describe("the window", () => {
-  test("the first check-in reads the last day; after a quiet or raised one, since it started; after a failed one, a day", async () => {
+  test("the first check-in reads the last day; after a quiet or raised one, since it started; after a failed one, since the last one that read everything", async () => {
     const dayBack = () => Math.floor((Date.now() - 86_400_000) / 1000);
 
     await due(inbox);
@@ -905,7 +969,10 @@ describe("the window", () => {
       Math.floor((raisedRun?.startedAt.getTime() ?? 0) / 1000),
     );
 
-    // A check-in whose turn fails leaves the next one reading the whole last day again.
+    // A check-in whose turn fails never moves the window: the next one reads from the last good one.
+    await ranHoursAgo(quietRun, 4);
+    await ranHoursAgo(raisedRun, 3);
+    const thirdStarted = await ranHoursAgo((await runsOf(inbox))[0], 2);
     await due(inbox);
     const failing = replica({
       model: async () => {
@@ -913,14 +980,175 @@ describe("the window", () => {
       },
     });
     await failing.engine.sweep();
-    expect((await runsOf(inbox))[0]).toMatchObject({ outcome: "failed" });
+    const [failedRun] = await runsOf(inbox);
+    expect(failedRun).toMatchObject({ outcome: "failed" });
+    await ranHoursAgo(failedRun, 1);
     expect((await store.get(owner, inbox.id)).lastStatus).toBe("error");
     await due(inbox);
     const after = replica();
     await after.engine.sweep();
-    expect(
-      Math.abs(afterOf(after.turns[0]?.instruction) - dayBack()),
-    ).toBeLessThan(5);
+    expect(afterOf(after.turns[0]?.instruction)).toBe(thirdStarted);
+  });
+});
+
+describe("how a check-in ends", () => {
+  /** A model that reads the inbox, raises nothing and ends without a word, as models do on a quiet hour. */
+  const readsAndSaysNothing: Model = async (input) => {
+    await readMail(input.runId);
+    return [];
+  };
+
+  test("one that read, found nothing new and said nothing is quiet, and the next one reads only from it", async () => {
+    await due(inbox);
+    const silent = replica({ model: readsAndSaysNothing });
+    await silent.engine.sweep();
+    const [run] = await runsOf(inbox);
+    expect(run).toMatchObject({
+      outcome: "quiet",
+      reads: 1,
+      itemsRaised: 0,
+      error: null,
+    });
+    const started = await ranHoursAgo(run, 1);
+    expect((await store.get(owner, inbox.id)).lastStatus).toBe("succeeded");
+    expect(await lastRunOf(silent.engine)).toMatchObject({
+      outcome: "quiet",
+      why: null,
+    });
+
+    // The next check-in reads what is new since that one, not the whole last day again.
+    await due(inbox);
+    const next = replica();
+    await next.engine.sweep();
+    expect(afterOf(next.turns[0]?.instruction)).toBe(started);
+  });
+
+  test("one that raised something and then said nothing raised it; one that read nothing and said nothing still couldn't finish", async () => {
+    await due(inbox);
+    await replica({
+      model: async (input, afterTools) =>
+        afterTools
+          ? []
+          : calling([raise("Send the venue deposit", "The hold ends Friday.")])(
+              input,
+              false,
+            ),
+    }).engine.sweep();
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "raised",
+      itemsRaised: 1,
+      error: null,
+    });
+    expect(await pingsOf()).toHaveLength(1);
+
+    // Nothing read and nothing said: that turn checked nothing, so its empty end is still a failure.
+    await due(inbox);
+    const empty = replica({ model: async () => [] });
+    await empty.engine.sweep();
+    expect((await runsOf(inbox))[0]).toMatchObject({ outcome: "failed" });
+    expect(await lastRunOf(empty.engine)).toMatchObject({
+      outcome: "failed",
+      why: "Couldn't finish: the run ended without a reply.",
+    });
+  });
+
+  test("one that couldn't reach an app is failed and says so; the next reads from the last one that read everything, so a request that arrived meanwhile is raised", async () => {
+    await due(inbox);
+    await replica({ model: calling([]) }).engine.sweep();
+    const [good] = await runsOf(inbox);
+    expect(good?.outcome).toBe("quiet");
+    const goodStarted = await ranHoursAgo(good, 3);
+    let hoursAgo = 2;
+
+    // Mail is down: every read fails. Whether the model says so or says nothing, nothing was checked.
+    for (const model of [
+      async (input: RunAgentInput) => {
+        await failRead(input.runId);
+        return reply("Couldn't open the inbox.");
+      },
+      async (input: RunAgentInput) => {
+        await failRead(input.runId);
+        return [];
+      },
+    ]) {
+      await due(inbox);
+      const down = replica({ model });
+      await down.engine.sweep();
+      const [run] = await runsOf(inbox);
+      expect(run).toMatchObject({
+        outcome: "failed",
+        reads: 0,
+        itemsRaised: 0,
+      });
+      await ranHoursAgo(run, hoursAgo--);
+      expect((await store.get(owner, inbox.id)).lastStatus).toBe("error");
+      expect(await lastRunOf(down.engine)).toMatchObject({
+        outcome: "failed",
+        why: "Couldn't reach Mail. The next check-in will try again.",
+      });
+    }
+
+    // Mail is back. What arrived while it was down is inside the window, and is raised.
+    await due(inbox);
+    const back = replica({
+      model: calling([
+        raise(
+          "Sign off the Q3 audit letter",
+          "The auditors need your sign-off by noon tomorrow.",
+        ),
+      ]),
+    });
+    await back.engine.sweep();
+    expect(afterOf(back.turns[0]?.instruction)).toBe(goodStarted);
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "raised",
+      itemsRaised: 1,
+      error: null,
+    });
+    expect((await itemsOf()).map((item) => item.title)).toEqual([
+      "Sign off the Q3 audit letter",
+    ]);
+  });
+
+  test("a lookup that failed after the app answered is not an app that was down; one app down while another raised keeps the window from before it", async () => {
+    // The list answered and one message it named could not be fetched: Mail was reached.
+    await due(inbox);
+    await replica({
+      model: async (input) => {
+        await readMail(input.runId);
+        await failRead(input.runId, `${mail}/get_message`);
+        return reply("Read the inbox. One message would not open.");
+      },
+    }).engine.sweep();
+    const [reached] = await runsOf(inbox);
+    expect(reached).toMatchObject({ outcome: "quiet", error: null });
+    const reachedStarted = await ranHoursAgo(reached, 2);
+
+    // Mail answered and raised something; the calendar did not answer at all.
+    await due(inbox);
+    const raising = calling([
+      raise("Send the venue deposit", "The hold ends Friday."),
+    ]);
+    const down = replica({
+      model: async (input, afterTools) => {
+        if (!afterTools) await failRead(input.runId, listEvents);
+        return raising(input, afterTools);
+      },
+    });
+    await down.engine.sweep();
+    const [partly] = await runsOf(inbox);
+    expect(partly).toMatchObject({ outcome: "raised", itemsRaised: 1 });
+    expect(await lastRunOf(down.engine)).toMatchObject({
+      outcome: "raised",
+      why: null,
+    });
+    await ranHoursAgo(partly, 1);
+
+    // The calendar's news since then is still to be read: the window opens from before that run.
+    await due(inbox);
+    const next = replica();
+    await next.engine.sweep();
+    expect(afterOf(next.turns[0]?.instruction)).toBe(reachedStarted);
   });
 });
 
@@ -968,7 +1196,7 @@ describe("what a check-in may raise", () => {
     await hiddenDaysAgo(inbox, "Order more clay", 31);
     const started = await openItem(inbox, "Pay the studio rent");
     await store.resolveSuggestion(owner, started.id, "started");
-    // Another Bot's open item is not this Bot's repeat.
+    // Another of the person's Bots raised this one: it is a repeat, but this Bot is never told of it.
     await openItem(calendar, "Confirm the class schedule");
 
     await due(inbox);
@@ -1011,13 +1239,14 @@ describe("what a check-in may raise", () => {
     expect(results[2]).toContain("already have a task");
     expect(results[3]).toContain("They hid");
     expect(results[4]).toContain("suggested");
-    expect(results[5]).toContain("suggested");
+    expect(results[5]).toBe(
+      "Refused. Another of their Bots already raised this, and it is still open. Do not raise it again.",
+    );
     const raised = (await itemsOf()).filter(
       (item) => item.agentId === inboxBot && item.status === "open",
     );
     expect(raised.map((item) => item.title).sort()).toEqual([
       "Answer the supplier",
-      "Confirm the class schedule",
       "Order more clay",
       "Reply to Rosa about the glaze substitute",
     ]);
@@ -1086,6 +1315,124 @@ describe("what a check-in may raise", () => {
     expect(byId.get(decided.id)?.status).toBe("dismissed");
     // Clearing is not raising.
     expect((await runsOf(inbox))[0]).toMatchObject({ outcome: "quiet" });
+  });
+});
+
+describe("one thing, once, whichever of the person's Bots finds it", () => {
+  const link = "https://requests.example.test/requests/r-late2";
+  const ANOTHER_OPEN =
+    "Refused. Another of their Bots already raised this, and it is still open. Do not raise it again.";
+
+  test("the same request found by two of the person's Bots is raised and pinged once; hidden, none of their Bots raises it again", async () => {
+    await due(inbox);
+    await replica({
+      model: calling([
+        raise(
+          "Sign off the Q3 audit letter",
+          "The auditors need your sign-off by noon tomorrow.",
+          { sourceLink: link },
+        ),
+      ]),
+    }).engine.sweep();
+
+    // The calendar Bot reads the same source and finds the same request: in its own words, and by title.
+    await due(calendar);
+    const second = replica({
+      model: calling([
+        raise("Sign the Q3 audit letter by noon", "Dana asked.", {
+          sourceLink: link,
+        }),
+        raise("sign off the Q3 audit letter.", "Dana asked."),
+      ]),
+    });
+    await second.engine.sweep();
+    expect(answers(second.requests)).toEqual([ANOTHER_OPEN, ANOTHER_OPEN]);
+    // The other Bot's item is never put in this one's instruction.
+    expect(second.turns[0]?.instruction).not.toContain("Q3 audit letter");
+    expect((await runsOf(calendar))[0]).toMatchObject({
+      outcome: "quiet",
+      itemsRaised: 0,
+    });
+
+    const open = await store.suggestions(owner);
+    expect(open.map((item) => [item.agentId, item.title])).toEqual([
+      [inboxBot, "Sign off the Q3 audit letter"],
+    ]);
+    const counts = await activity.attention(owner);
+    expect(counts.reduce((total, bot) => total + bot.items, 0)).toBe(1);
+    const pings = await pingsOf();
+    expect(pings.map((ping) => ping.itemCount)).toEqual([1]);
+
+    // Hidden where the inbox Bot raised it, it is refused to every one of the person's Bots.
+    await replica().engine.dismiss(owner, open[0]?.id as string);
+    for (const [setting, refusal] of [
+      [
+        calendar,
+        "Refused. They hid this when another of their Bots raised it. Do not raise it, or anything like it, again.",
+      ],
+      [
+        inbox,
+        'Refused. They hid "Sign off the Q3 audit letter". Do not raise it, or anything like it, again.',
+      ],
+    ] as const) {
+      await due(setting);
+      const again = replica({
+        model: calling([
+          raise("Sign the Q3 audit letter", "Still waiting on it.", {
+            sourceLink: link,
+          }),
+        ]),
+      });
+      await again.engine.sweep();
+      expect(answers(again.requests)).toEqual([refusal]);
+    }
+    expect(await store.suggestions(owner)).toEqual([]);
+  });
+
+  test("two of the person's Bots raising the same thing at once, on two replicas, open it once", async () => {
+    // Both check-ins ask to raise it before either has: as when two Bots check in the same minute.
+    let arrived = 0;
+    let release: () => void = () => {};
+    const together = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const model: Model = async (input, afterTools) => {
+      if (afterTools) return reply("Read the inbox since the last check-in.");
+      await readMail(input.runId);
+      arrived += 1;
+      if (arrived === 2) release();
+      await together;
+      return toolCall(
+        "suggest_next_step",
+        {
+          title: "Sign off the Q3 audit letter",
+          detail: "The auditors need your sign-off by noon tomorrow.",
+          sourceTool: READ_TOOL,
+          sourceLink: link,
+        },
+        `${input.runId}-0`,
+      );
+    };
+    const elsewhere = createDatabase(testDatabaseUrl(), TEST_POOL);
+    try {
+      const first = replica({ model });
+      const second = replica({ model, store: createProactiveStore(elsewhere) });
+      await first.engine.runNow(owner, inbox.id);
+      await second.engine.runNow(owner, calendar.id);
+      await Promise.all([first.engine.sweep(), second.engine.sweep()]);
+
+      const said = [
+        ...answers(first.requests),
+        ...answers(second.requests),
+      ].sort();
+      expect(said).toHaveLength(2);
+      expect(said.filter((text) => text === ANOTHER_OPEN)).toHaveLength(1);
+      expect(
+        (await store.suggestions(owner)).map((item) => item.title),
+      ).toEqual(["Sign off the Q3 audit letter"]);
+    } finally {
+      await elsewhere.$client.close();
+    }
   });
 });
 
@@ -1542,14 +1889,6 @@ describe("Run now", () => {
     routes(engine).request(`http://t/api/proactive/settings/${inbox.id}/run`, {
       method: "POST",
     });
-  const lastRunOf = async (engine: ProactiveEngine) => {
-    const { settings } = (await (
-      await routes(engine).request("http://t/api/proactive/settings")
-    ).json()) as {
-      settings: { id: string; lastRun: Record<string, unknown> | null }[];
-    };
-    return settings.find((setting) => setting.id === inbox.id)?.lastRun;
-  };
   const nothingToRead =
     "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.";
 
