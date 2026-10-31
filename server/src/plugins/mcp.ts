@@ -449,9 +449,17 @@ export type McpCallResult = {
   /**
    * The vendor no longer holds the account this call was made in, though this deployment still has
    * a row for it. Only the Composio transport sets it, and only on an `isError` result; the store
-   * turns it into a refusal that offers Reconnect. Absent everywhere else.
+   * turns it into a refusal that offers Reconnect and ends the row. Absent everywhere else.
    */
   accountGone?: true;
+  /**
+   * The vendor refused this account THIS ACTION, and did not say whether the account itself is
+   * still there. Only the Arcade transport sets it, and only on an `isError` result: Arcade answers
+   * the same way for a connection that is gone and for one that holds other actions but not this
+   * one. The store offers Reconnect either way, and ends the row only where the broker then confirms
+   * the account holds nothing for the app, which is {@link accountGone} reached by asking.
+   */
+  actionNotAllowed?: true;
 };
 
 /**

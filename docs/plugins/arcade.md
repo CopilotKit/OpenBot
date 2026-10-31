@@ -149,6 +149,30 @@ The shape is Composio's: enable an app, grant its actions to a Bot, and each per
 own account (or an administrator connects a Shared app's account). Two things are different and
 worth reading before pressing **Add**.
 
+### Connect asks for the whole app, and each action can still be approved alone
+
+**Connect works as it does on Composio.** It asks Arcade for one consent covering every scope the
+app's actions publish (the `auth.authorize` call, with the app's own authorization requirement read
+off its listing), and the consent comes back through the verifier below, which records the
+connection. An app whose actions name more than one authorization requirement cannot be connected
+in one consent, and Connect says so.
+
+**The action list under Connections still approves one action at a time**, for somebody who wants
+to grant less than the whole app. Either way, the connection is recorded in this deployment's
+`brokered_connections`, as Composio's are: a Bot's call needs that row before it reaches Arcade, a
+page that opens the app asks Arcade whether the connection is still there and writes or clears the
+row from the answer, and Disconnect and offboarding end it at Arcade and then here. Arcade still
+checks each action itself on every call. A call it refuses for want of authorization shows the
+person the Reconnect card. The row is cleared only where Arcade then answers that the account holds
+nothing for the app, which is Composio's lost account; where it holds the app's other actions, the
+row stays and those actions go on working. Either way the card's Reconnect goes to the app's page
+under Connections, as on Composio, and a connected Arcade app there offers Reconnect beside
+Disconnect: one press asks for the whole app over the connection that stands, with no Disconnect
+first.
+
+A single-user deployment is filed at Arcade under its own name, not under `dev-local-user`; see
+[Configuration](../configuration.md#authentication).
+
 ### Toolkits are curated or they are wrappers, and the difference was measured
 
 Every action carries a classification — whether it reads or writes, whether it is destructive — and
@@ -198,7 +222,9 @@ fixed when the app is registered, and no request can ask for fewer.
 
 So when somebody asks whether connecting an app "only lets it read", the answer is whatever that
 app's measurement says, not what Arcade says in general. The pre-redirect consent copy names the
-permission being asked for and lists the actions that share it, grouped on scopes.
+permission being asked for and lists the actions that share it, grouped on scopes. **Connect asks
+for every scope the app publishes**, so least privilege on a provider that has it means approving
+actions one at a time from the action list instead.
 
 ## Scope versus tool grant
 

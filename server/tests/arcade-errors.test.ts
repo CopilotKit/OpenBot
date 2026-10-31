@@ -64,8 +64,11 @@ describe("callTool failures", () => {
     const result = await callTool(connection, "Gmail.SendEmail", {});
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
+      "Arcade does not allow Gmail.SendEmail on this account.",
     );
+    // Handed to the store, which shows the Reconnect card and asks whether the account is gone.
+    expect(result.actionNotAllowed).toBe(true);
+    expect(result.accountGone).toBeUndefined();
     expect(result.text).not.toContain("http");
     expect(result.text).not.toContain("SECRET");
   });
@@ -78,8 +81,8 @@ describe("callTool failures", () => {
       toolName: "Other.Thing",
     });
     const result = await callTool(connection, "Slack.Post", {});
-    expect(result.text.startsWith("Slack.Post has not been authorized")).toBe(
-      true,
+    expect(result.text).toBe(
+      "Arcade does not allow Slack.Post on this account.",
     );
   });
 
@@ -87,7 +90,8 @@ describe("callTool failures", () => {
     failing({ status: 403, name: "permission_denied", message: "key revoked" });
     const result = await callTool(connection, "Gmail.SendEmail", {});
     expect(result.isError).toBe(true);
-    expect(result.text).not.toContain("has not been authorized");
+    expect(result.text).not.toContain("does not allow");
+    expect(result.actionNotAllowed).toBeUndefined();
     expect(result.text).not.toContain("Connected accounts");
     expect(result.text).not.toContain("http");
   });
@@ -97,7 +101,8 @@ describe("callTool failures", () => {
       failing(thrown);
       const result = await callTool(connection, "Gmail.SendEmail", {});
       expect(result.isError).toBe(true);
-      expect(result.text).not.toContain("has not been authorized");
+      expect(result.text).not.toContain("does not allow");
+      expect(result.actionNotAllowed).toBeUndefined();
     }
   });
 });
@@ -153,8 +158,11 @@ describe("callTool successes", () => {
     expect(result.text).not.toContain("SECRET");
     expect(result.text).not.toContain("LEAKME");
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
+      "Arcade does not allow Gmail.SendEmail on this account.",
     );
+    // Handed to the store, which shows the Reconnect card and asks whether the account is gone.
+    expect(result.actionNotAllowed).toBe(true);
+    expect(result.accountGone).toBeUndefined();
     expect(result.isError).toBe(true);
   });
 

@@ -24,7 +24,7 @@ import {
   askAction as composioAskAction,
   VERSION_ARG,
 } from "../composio";
-import { type AccountRef, personAccount } from "../shared-accounts";
+import type { AccountRef } from "../shared-accounts";
 import type { StoreContext } from "./context";
 import {
   attemptNamed,
@@ -46,6 +46,7 @@ export function connectionMethods(context: StoreContext) {
     credentials,
     registerClient,
     broker,
+    personAccountOf,
     accountRow,
     swapUserCredential,
     withOAuthClientLock,
@@ -996,6 +997,18 @@ export function connectionMethods(context: StoreContext) {
     },
 
     /**
+     * The name a person's grants are filed under at this deployment's broker NOW: their own id, or
+     * the one `brokered_identities` holds for them, which only a single-user deployment's one person
+     * has. Read the way every resolution reads it ({@link personAccountOf}).
+     *
+     * For the verifier, which has to tell an attempt minted under that name from one minted under a
+     * name the person has since been given a replacement for. See `/arcade/verify`.
+     */
+    async personAccount(userId: string): Promise<AccountRef> {
+      return personAccountOf(userId);
+    },
+
+    /**
      * The other apps this deployment holds a connection for that share THIS app's connection: the
      * apps on the same vendor identity AND the same AUTH PROVIDER, never the provider alone. The
      * reason is written out on {@link connectionSiblings}; this is that computation over the rows
@@ -1343,7 +1356,17 @@ export function connectionMethods(context: StoreContext) {
                   // The identity the grant was just made under, for `recordBrokeredConnection`'s
                   // reason: calls go out under the row's id, so a re-consent that left the old one
                   // standing sent them to an account this consent says nothing about.
-                  set: { ...set, vendorUserId: input.account.vendorUserId },
+                  //
+                  // AND WHEN, because a consent over a standing row is a reconnection. A call Arcade
+                  // refused one action keeps its row and shows Reconnect; `connectedAt` newer than
+                  // that refusal is how the card knows the Connect it offered has happened (see
+                  // `AppAccess.connectedAt`). Left at the first consent, the card went on offering
+                  // Reconnect over an account that now allowed the action.
+                  set: {
+                    ...set,
+                    vendorUserId: input.account.vendorUserId,
+                    connectedAt: verifiedAt,
+                  },
                 }
               : {
                   target: [
@@ -1355,6 +1378,7 @@ export function connectionMethods(context: StoreContext) {
                     ...set,
                     vendorUserId: input.account.vendorUserId,
                     connectedBy,
+                    connectedAt: verifiedAt,
                   },
                 },
           );
@@ -3304,7 +3328,7 @@ export function connectionMethods(context: StoreContext) {
        * DISTINCT TOOLKITS this person holds rather than that number squared. Empty with no broker
        * configured, where nothing is asked of anybody and the `false` below is the whole truth.
        */
-      const account = personAccount(userId);
+      const account = await personAccountOf(userId);
       const authProviders = new Map<string, Promise<string | null>>();
       const endedBesides = new Map<
         string,

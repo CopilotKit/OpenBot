@@ -10,6 +10,7 @@ import {
 } from "../../credentials";
 import {
   brokeredConnections,
+  brokeredIdentities,
   credentials as credentialRows,
   mcpServers,
   mcpTools,
@@ -238,6 +239,28 @@ export function createStoreContext(options: PluginStoreOptions) {
   }
 
   /**
+   * A person's own account at this deployment's broker: filed under their own id, or under the name
+   * `brokered_identities` holds for them, which only a single-user deployment's one person has.
+   *
+   * READ HERE, ON EVERY RESOLUTION, RATHER THAN HANDED TO THE STORE AT STARTUP, so that every
+   * replica answers from the one row the database holds and none can keep a name another has
+   * replaced. One primary-key read, beside the vendor round trip it decides the identity of.
+   */
+  async function personAccountOf(userId: string): Promise<AccountRef> {
+    const [filed] = await database
+      .select({ vendorUserId: brokeredIdentities.vendorUserId })
+      .from(brokeredIdentities)
+      .where(
+        and(
+          eq(brokeredIdentities.provider, brokerProvider),
+          eq(brokeredIdentities.userId, userId),
+        ),
+      )
+      .limit(1);
+    return personAccount(userId, filed?.vendorUserId ?? null);
+  }
+
+  /**
    * The account a call, a connect or a check acts for, from the row and the person — never from a
    * request. A Shared app answers with the deployment's stored identity whoever asks.
    */
@@ -321,10 +344,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         };
       /*
        * The actor's id is both the local id and the vendor id, deliberately and for both
-       * providers. See {@link personAccount} for why, before changing it.
+       * providers, except for a single-user deployment's one person. See {@link personAccount}
+       * for why, before changing it.
        */
       return {
-        ref: personAccount(actorId),
+        ref: await personAccountOf(actorId),
         title: row.title,
         mode: "personal",
         appId,
@@ -352,7 +376,9 @@ export function createStoreContext(options: PluginStoreOptions) {
    * begun under Shared identity A, the app flipped Shared → Personal → Shared (minting B) and B
    * connected, and the admin's return then withdrew A at the vendor, correctly, and deleted B's row
    * here, so the app read as disconnected while B stood live at Arcade. A person's row needs no
-   * such clause: their vendor id is their user id ({@link personAccount}).
+   * such clause: they have one vendor id, their user id or the one name
+   * `brokered_identities` holds for them, and it never changes while they hold a row
+   * ({@link personAccountOf}).
    */
   const accountRow = (toolkit: string, account: AccountRef) =>
     account.holder === "person"
@@ -630,6 +656,13 @@ export function createStoreContext(options: PluginStoreOptions) {
        * second, weaker copy of that check — and it is the copy that forces a Connect button, which
        * forces an arbitrary first consent before anybody knows which action they want. Here the
        * call proceeds and the vendor's own typed refusal is the authoritative answer.
+       *
+       * NEITHER BROKER TAKES THIS WAIVER TODAY. Arcade declared `false` and took it until its grants
+       * were recorded here as Composio's are: with no row, this deployment could not say whose
+       * grants it had asked Arcade to use, which is what kept every single-user deployment on one
+       * Arcade key sharing `dev-local-user`'s. It now declares `true`, a call needs its row as a
+       * Composio call does, and Arcade still checks the action itself. The branch stays for a
+       * broker that declares otherwise, under the rules above.
        *
        * ONLY A PRECONDITION IS REMOVED; THE IDENTITY IS UNCHANGED. The id returned is
        * `resolved.ref.vendorUserId` — the very value the branch below returns out of the row —
@@ -2054,6 +2087,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     toolsDeclaredBy,
     knownToolRefs,
     secretFor,
+    personAccountOf,
     accountRefFor,
     accountRow,
     connectionTokenFor,

@@ -143,35 +143,6 @@ export function brokeredDisconnectNote(provider: PluginsProvider): string {
   return `Disconnecting also ends the account at ${VOCABULARY[provider].name}.`;
 }
 
-/**
- * What an admin's own brokered row says where the broker authorizes PER ACTION, in place of a
- * consent trip.
- *
- * NOT A CONSENT TRIP WITH A WORD CHANGED, because it is not the same offer. Under a per-action broker
- * there is no whole-app press to name — the row withholds Connect entirely — so this says where the
- * act actually is instead. A person reading "Connecting takes you to…" beside no Connect button is
- * being told about a button that is not there.
- *
- * The person's own page under Connections names no vendor, so it says this in its own words; the
- * admin setup page may name the broker, and reads it from here.
- *
- * `where` IS NOT DECORATION AND HAS NO DEFAULT. The two screens that draw this row do not both
- * draw the action list: the Connections page has it directly underneath, and the admin setup page
- * has none at all, so a single sentence saying "below" is a true direction on one screen and a
- * wrong one on the other — pointing somebody at a list that is not on their page is the same
- * failure as the Connect button this sentence replaces, one step further on. Each caller says
- * which it is rather than being assumed into the commoner case.
- */
-export function brokeredPerActionTrip(
-  provider: PluginsProvider,
-  where: "below" | "settings",
-): string {
-  const stem = `${VOCABULARY[provider].name} approves one action at a time, so there's nothing to connect for the whole app.`;
-  return where === "below"
-    ? `${stem} Authorize the actions you want below.`
-    : `${stem} Authorize them from Connections.`;
-}
-
 /** What a person is told where the deployment has no key for the active broker. */
 export function brokeredKeyMissing(provider: PluginsProvider): string {
   return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;

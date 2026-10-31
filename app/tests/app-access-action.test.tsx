@@ -241,10 +241,23 @@ test("an app connected with a typed key goes to its page in Settings, where the 
   expect(link?.getAttribute("href")).toBe("/connections/composio-gmail");
 });
 
-test("a Composio app to reconnect goes to Settings, because the connect route refuses a row that stands", async () => {
-  const { view } = mounted(appAccess({ state: "reconnect" }));
-  const link = (await view.findByText("Reconnect")).closest("a");
-  expect(link?.getAttribute("href")).toBe("/connections/composio-gmail");
+test("a brokered app to reconnect goes to its page in Settings, on Composio and on Arcade alike", async () => {
+  /*
+   * ONE DESTINATION FOR BOTH BROKERS, Composio's. A Composio row that stands is refused by the
+   * connect route until it is disconnected on that page. An Arcade row is not, and the same page
+   * offers Reconnect over it in one press, so the card sends both people to the same place.
+   */
+  const composio = mounted(appAccess({ state: "reconnect" }));
+  const toComposio = (await composio.view.findByText("Reconnect")).closest("a");
+  expect(toComposio?.getAttribute("href")).toBe("/connections/composio-gmail");
+  cleanup();
+
+  const arcade = mounted(
+    appAccess({ key: "arcade-Gmail", provider: "arcade", state: "reconnect" }),
+  );
+  const toArcade = (await arcade.view.findByText("Reconnect")).closest("a");
+  expect(toArcade?.getAttribute("href")).toBe("/connections/arcade-Gmail");
+  expect(arcade.opened).toEqual([]);
 });
 
 test("this deployment's own OAuth app reconnects in place, with a fresh consent", async () => {

@@ -41,6 +41,7 @@ export function callMethods(context: StoreContext) {
     injectedVendor,
     connectionTokenFor,
     requireServer,
+    broker,
     brokerProvider,
   } = context;
   return {
@@ -470,6 +471,10 @@ export function callMethods(context: StoreContext) {
        * itself failed has not completed the call, and a reader counting successes should not be told
        * it did.
        */
+      /** How the vendor refused the account, where it did: see below the catch. */
+      let refused: "account" | "action" = "account";
+      /** The vendor identity the call went out as, for the broker to be asked about below. */
+      let reachedVendorAs: string | undefined;
       try {
         const { token, vendorUserId } = await connectionTokenFor(
           row,
@@ -535,7 +540,9 @@ export function callMethods(context: StoreContext) {
          * The one answer that leaves this block without returning: see below the catch. Thrown
          * from in here, the catch would write a second `mcp.call_failed` row about the same call.
          */
-        if (!result.accountGone) return answer;
+        if (!result.accountGone && !result.actionNotAllowed) return answer;
+        refused = result.accountGone ? "account" : "action";
+        reachedVendorAs = vendorUserId;
       } catch (error) {
         /*
          * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is
@@ -572,6 +579,38 @@ export function callMethods(context: StoreContext) {
         throw error;
       }
       /*
+       * WHETHER THE ACCOUNT IS GONE, OR ONLY THIS ACTION, AND ONLY THE FIRST ENDS THE ROW.
+       *
+       * Composio says its account is gone in so many words (`accountGone`). Arcade refuses one action
+       * (`actionNotAllowed`) and the same answer covers a connection that is gone and one that holds
+       * the app's other actions and not this one, approved one at a time. Ending the row for the
+       * second would refuse every action the person did approve, so the broker is asked about the
+       * account itself, and the row ends only where it answers that nothing is held for the app.
+       * An answer that cannot be had keeps the row: a row cleared on a guess is a connection every
+       * screen then calls missing, and the next call that works says otherwise.
+       */
+      const toolkit = access.toolkit;
+      const gone =
+        refused === "account" ||
+        (broker !== undefined &&
+          broker !== null &&
+          toolkit !== null &&
+          toolkit !== undefined &&
+          reachedVendorAs !== undefined &&
+          (await broker
+            .isConnected({
+              account:
+                gatedMode === "shared"
+                  ? { holder: "deployment", vendorUserId: reachedVendorAs }
+                  : {
+                      holder: "person",
+                      userId: input.credentialActorId ?? input.actorId,
+                      vendorUserId: reachedVendorAs,
+                    },
+              toolkit,
+            })
+            .catch(() => true)) === false);
+      /*
        * THE ACCOUNT IS GONE AT THE VENDOR, AND THE PERSON CAN PUT IT BACK FROM WHERE THEY ARE. The
        * only way here: every other answer returned inside the block and every throw left the catch.
        *
@@ -581,7 +620,8 @@ export function callMethods(context: StoreContext) {
        * the card is the one place the person is told, with Reconnect beside it. A Shared app's
        * account is the deployment's, so there the card says an administrator has to reconnect it.
        *
-       * AND THE ROW GOES, as it does when a confirm hears the same no from the vendor: the row is
+       * AND WHERE THE ACCOUNT IS GONE, THE ROW GOES, as it does when a confirm hears the same no
+       * from the vendor: the row is
        * only the vendor's last answer, and one that outlived the account would go on reading
        * `ready` on every screen — `show_app_access` telling the model to use the app straight after
        * this card — and would make the connect route refuse a fresh connection until somebody
@@ -589,7 +629,7 @@ export function callMethods(context: StoreContext) {
        * not connected for everybody, which is the truth and the state whose button fixes it. Like
        * the confirm's, the delete files no trail entry: nobody disconnected anything here.
        */
-      if (access.credential === "brokered" && access.toolkit)
+      if (gone && access.credential === "brokered" && access.toolkit)
         await database
           .delete(brokeredConnections)
           .where(
@@ -613,10 +653,18 @@ export function callMethods(context: StoreContext) {
         connectAppRefusal({
           serverId: row.id,
           title: row.title,
-          message:
-            gatedMode === "shared"
+          /*
+           * The same card either way, and the words say which. An account still connected that
+           * does not allow this action is put right by the same Reconnect, which asks for
+           * everything the app needs.
+           */
+          message: gone
+            ? gatedMode === "shared"
               ? `The shared ${row.title} account is no longer connected, so this wasn't done. Ask an admin to reconnect it.`
-              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`,
+              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`
+            : gatedMode === "shared"
+              ? `The shared ${row.title} account doesn't allow this yet, so this wasn't done. Ask an admin to reconnect it.`
+              : `Your ${row.title} account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.`,
           reason: gatedMode === "shared" ? "shared" : "reconnect",
           at: new Date().toISOString(),
         }),
