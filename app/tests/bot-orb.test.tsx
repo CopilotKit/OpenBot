@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb, { type AIState } from "@/components/agents/orb/agent-orb";
 import {
@@ -36,10 +36,14 @@ import {
   track,
 } from "@/components/agents/orb/bot-orb-draw";
 import { subscribePointer } from "@/components/agents/orb/orb-clock";
+import { BOT_FACES_STORAGE_KEY, setBotFaces } from "@/lib/bot-faces";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  window.localStorage.removeItem(BOT_FACES_STORAGE_KEY);
+});
 afterAll(async () => {
   await settleReactWork();
   await GlobalRegistrator.unregister();
@@ -561,15 +565,17 @@ describe("<BotOrb>", () => {
     );
 
   /**
-   * One orb `size` px across, its corner at (100, 100) on screen. `play` runs its frames from `from`
-   * to `to` seconds after it mounts, `fps` a second, calling `each` before every frame, and says how
-   * many of them it drew.
+   * One orb `size` px across in `state`, its corner at (100, 100) on screen. `play` runs its frames
+   * from `from` to `to` seconds after it mounts, `fps` a second, calling `each` before every frame,
+   * and says how many of them it drew. `become` changes its state.
    */
-  function onScreen(size: number) {
+  function onScreen(size: number, state: BotOrbState = "idle") {
     const ctx = fakeContext();
     const frames = manualFrames();
     const restore = withContext(ctx);
-    const view = render(<BotOrb seed="onboarding-buddy" size={size} />);
+    const view = render(
+      <BotOrb seed="onboarding-buddy" size={size} state={state} />,
+    );
     orbOf(view.container).getBoundingClientRect = () =>
       ({ left: 100, top: 100, width: size, height: size }) as DOMRect;
     const start = performance.now();
@@ -582,6 +588,11 @@ describe("<BotOrb>", () => {
         }
         return ctx.draws - before;
       },
+      become(next: BotOrbState) {
+        view.rerender(
+          <BotOrb seed="onboarding-buddy" size={size} state={next} />,
+        );
+      },
       done() {
         cleanup();
         frames.restore();
@@ -590,20 +601,25 @@ describe("<BotOrb>", () => {
     };
   }
 
-  test("a small orb at rest with the pointer still draws nothing once it settles, and draws again when the pointer moves", () => {
+  /** A pointer circling (114, 114) once a second, so eyes that follow it always have somewhere new to look. */
+  const circle = (t: number) =>
+    pointAt(
+      114 + 200 * Math.cos(2 * Math.PI * t),
+      114 + 200 * Math.sin(2 * Math.PI * t),
+    );
+
+  test("a small orb at rest is still: it never blinks or follows the pointer, and moves while it works", () => {
     withObserver(undefined, () => {
       const orb = onScreen(28);
       try {
-        pointAt(400, 114);
-        // It turns to the pointer, settles and blinks once, all before 3.2s.
-        expect(orb.play(0, 3.2)).toBeGreaterThan(0);
-        // Its next blink is 5.5s in at the soonest.
-        expect(orb.play(3.2, 4.4)).toBe(0);
+        expect(orb.play(0, 0.1)).toBe(1);
+        // Ten seconds, two blinks' worth at the usual pace, with the pointer circling it.
+        expect(orb.play(0.1, 10, 60, circle)).toBe(0);
         // A theme flip is drawn once, though nothing else has moved.
         document.documentElement.classList.add("dark");
-        expect(orb.play(4.4, 4.8)).toBe(1);
-        pointAt(114, 400);
-        expect(orb.play(4.8, 5.4)).toBeGreaterThan(0);
+        expect(orb.play(10, 10.4)).toBe(1);
+        orb.become("thinking");
+        expect(orb.play(10.4, 11)).toBeGreaterThan(5);
       } finally {
         document.documentElement.classList.remove("dark");
         orb.done();
@@ -611,17 +627,85 @@ describe("<BotOrb>", () => {
     });
   });
 
+  test("a large orb at rest blinks and follows the pointer", () => {
+    withObserver(undefined, () => {
+      const orb = onScreen(56);
+      try {
+        expect(orb.play(0, 10, 60, circle)).toBeGreaterThan(500);
+      } finally {
+        orb.done();
+      }
+    });
+  });
+
+  test("Bot faces set to move only while working: a large orb at rest is still too, and moves while it works", () => {
+    withObserver(undefined, () => {
+      setBotFaces("working");
+      const orb = onScreen(56);
+      try {
+        expect(orb.play(0, 0.1)).toBe(1);
+        expect(orb.play(0.1, 10, 60, circle)).toBe(0);
+        orb.become("thinking");
+        expect(orb.play(10, 10.6)).toBeGreaterThan(20);
+        // Back at rest, it eases out of the work and then holds.
+        orb.become("idle");
+        expect(orb.play(10.6, 11)).toBeGreaterThan(0);
+        orb.play(11, 13);
+        expect(orb.play(13, 23, 60, circle)).toBe(0);
+      } finally {
+        orb.done();
+      }
+    });
+  });
+
+  test("Bot faces set to still: every orb is a still, and choosing it stills the ones on screen", () => {
+    withObserver(undefined, () => {
+      const orb = onScreen(56, "thinking");
+      try {
+        expect(orb.play(0, 0.5)).toBeGreaterThan(20);
+        act(() => setBotFaces("still"));
+        // Drawn once as a still, then never on a frame.
+        expect(orb.play(0.5, 5, 60, circle)).toBe(0);
+        orb.become("done");
+        expect(orb.play(5, 8, 60, circle)).toBe(0);
+        act(() => setBotFaces("animated"));
+        expect(orb.play(8, 9, 60, circle)).toBeGreaterThan(20);
+      } finally {
+        orb.done();
+      }
+    });
+  });
+
+  test("reduced motion stills every orb, whatever Bot faces says", () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    })) as unknown as typeof window.matchMedia;
+    const frames = manualFrames();
+    const ctx = fakeContext();
+    const restore = withContext(ctx);
+    try {
+      setBotFaces("animated");
+      render(<BotOrb seed="expense-review" size={56} state="thinking" />);
+      expect(ctx.draws).toBe(1);
+      expect(frames.requested).toBe(0);
+    } finally {
+      cleanup();
+      frames.restore();
+      restore();
+      window.matchMedia = original;
+    }
+  });
+
   test("a small orb draws about thirty frames a second on a 120Hz screen, a large one every frame", () => {
     withObserver(undefined, () => {
-      // A pointer circling the orb, so its eyes always have somewhere new to look.
-      const circle = (t: number) =>
-        pointAt(
-          114 + 200 * Math.cos(2 * Math.PI * t),
-          114 + 200 * Math.sin(2 * Math.PI * t),
-        );
-      const small = onScreen(28);
+      // Landing, it nods for two seconds, so a small one has a new picture on every frame it draws.
+      const small = onScreen(28, "done");
       try {
-        const drawn = small.play(0, 1, 120, circle);
+        const drawn = small.play(0, 1, 120);
         expect(drawn).toBeGreaterThanOrEqual(28);
         expect(drawn).toBeLessThanOrEqual(31);
       } finally {

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useBotFaces, usePrefersReducedMotion } from "@/lib/bot-faces";
 import { cn } from "@/lib/utils";
 import {
   blinkCurve,
@@ -55,7 +56,10 @@ const BLINK_EVERY = 4.2;
 const SPILL = 0.5;
 /** Backing pixels per CSS pixel, at most: sharp on a 3× screen without a huge canvas. */
 const MAX_DPR = 3;
-/** Below this footprint, in CSS px, an orb only blinks and watches: no glances, no breath, no drift. */
+/**
+ * Below this footprint, in CSS px, an orb is a face in a list: no glances, no breath, no drift, and
+ * no eyes on the pointer. At rest it is still; it moves only while it listens, works or lands.
+ */
 const SMALL = 40;
 /**
  * The least time between two frames of a small orb, in ms: about thirty a second, plenty for eyes a
@@ -166,22 +170,29 @@ function enter(m: Motion, state: BotOrbState, now: number): Motion {
 
 /**
  * The pose at `t` seconds on the orb's clock. `seed` keeps two orbs from blinking and glancing in
- * step. A small orb keeps still apart from its blinks, its colour included, so a list of them
- * doesn't fidget and, once its eyes settle, has nothing new to draw.
+ * step. A small orb keeps its colour still, so a list of them doesn't fidget. `restingSince` is when
+ * an orb that moves only while busy came to rest: from then on what its clock drives, its drift,
+ * glances and breath, holds where it was and it stops blinking, while a change of state still plays
+ * out, so it settles into a still with nothing new to draw.
  */
 function poseAt(
   m: Motion,
   t: number,
   seed: number,
-  { reduced, small }: { reduced: boolean; small: boolean },
+  {
+    reduced,
+    small,
+    restingSince = null,
+  }: { reduced: boolean; small: boolean; restingSince?: number | null },
 ): OrbPose {
   const listen = track(m.listen, t);
   const think = clamp(track(m.think, t));
+  const clockT = restingSince ?? t;
   // Left alone it glances about now and then; while it listens or works it keeps its eyes on that.
   const calm = reduced || small ? 0 : (1 - clamp(listen)) * (1 - think);
-  const glance = restLook(t, 3.6, seed);
+  const glance = restLook(clockT, 3.6, seed);
   let blink = 0;
-  if (!reduced) {
+  if (!reduced && restingSince === null) {
     const k = Math.floor(t / BLINK_EVERY);
     for (const n of [k - 1, k]) {
       const at = n * BLINK_EVERY + 1.3 + mulberry32(seed + n)() * 1.6;
@@ -189,7 +200,7 @@ function poseAt(
     }
   }
   return {
-    ta: small ? STILL_T : t,
+    ta: small ? STILL_T : clockT,
     listen,
     think,
     done: Math.max(0, track(m.done, t)),
@@ -203,7 +214,7 @@ function poseAt(
     noticeAge: m.noticedAt < 0 ? -1 : t - m.noticedAt,
     // Still, a finish is its check without the burst.
     finishAge: m.finishedAt < 0 ? -1 : reduced ? FINISH_HELD : t - m.finishedAt,
-    breath: small ? 0 : Math.sin((Math.PI * 2 * t) / 5.5),
+    breath: small ? 0 : Math.sin((Math.PI * 2 * clockT) / 5.5),
   };
 }
 
@@ -253,6 +264,7 @@ export function followPointer(
   t: number,
   state: BotOrbState,
   measure: () => Box,
+  watching = true,
 ): boolean {
   const dt = gaze.last < 0 ? 0 : Math.min(1 / 30, Math.max(0, t - gaze.last));
   gaze.last = t;
@@ -270,14 +282,16 @@ export function followPointer(
     gaze.seen = pointer.on && box.width > 0;
     const near =
       gaze.seen && d < box.width * (gaze.near ? NOTICE_FAR : NOTICE_NEAR);
-    perked = near && !gaze.near && state !== "listening";
+    perked = watching && near && !gaze.near && state !== "listening";
     gaze.near = near;
   }
   gaze.vx += ((gaze.tx - gaze.x) * 150 - gaze.vx * 19) * dt;
   gaze.vy += ((gaze.ty - gaze.y) * 150 - gaze.vy * 19) * dt;
   gaze.x += gaze.vx * dt;
   gaze.y += gaze.vy * dt;
-  gaze.w += ((gaze.seen ? WATCH[state] : 0) - gaze.w) * (1 - Math.exp(-dt * 5));
+  // An orb that has stopped watching lets its eyes ease back rather than jump.
+  const target = watching && gaze.seen ? WATCH[state] : 0;
+  gaze.w += (target - gaze.w) * (1 - Math.exp(-dt * 5));
   return perked;
 }
 
@@ -345,27 +359,6 @@ function watchResolution(onChange: () => void): () => void {
   return () => query?.removeEventListener("change", fire);
 }
 
-const REDUCE_MOTION = "(prefers-reduced-motion: reduce)";
-
-/**
- * Whether the person asks for less motion, kept current: turning it on while the app is open stills
- * every orb already on screen, not only the ones drawn afterwards.
- */
-function usePrefersReducedMotion(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      if (typeof window.matchMedia !== "function") return () => {};
-      const query = window.matchMedia(REDUCE_MOTION);
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    },
-    () =>
-      typeof window.matchMedia === "function" &&
-      window.matchMedia(REDUCE_MOTION).matches,
-    () => false,
-  );
-}
-
 let staggers = 0;
 const secondsSince = (start: number) => (performance.now() - start) / 1000;
 
@@ -375,12 +368,16 @@ const secondsSince = (start: number) => (performance.now() - start) / 1000;
  * what you type when listening, swirls while thinking, and lands with a ping and a smile when done.
  * Passed `finished`, its eyes give way to a check while short rays burst out round it, and then it
  * is back as it was. Wherever the pointer is, its eyes follow it: fully at rest, partly while it
- * listens or works, with a small perk when the pointer comes close. An orb under 40 px only blinks
- * and watches, at about thirty frames a second.
+ * listens or works, with a small perk when the pointer comes close.
+ *
+ * An orb under 40 px is a face in a list: it never follows the pointer, it is still at rest, and it
+ * moves only while it listens, works or lands, at about thirty frames a second. The person's Bot
+ * faces setting (`useBotFaces`) can make every orb move only while busy, the same way, or never.
  *
  * Every orb on the page draws on one shared animation frame, and only while it is on screen, the
- * tab is shown and its picture has changed. With reduced motion, or `still`, it is a still in the
- * state's pose, drawn again only when the state or the theme changes, and its eyes stay put.
+ * tab is shown and its picture has changed. With reduced motion, Bot faces set to still, or `still`,
+ * it is a still in the state's pose, drawn again only when the state or the theme changes, and its
+ * eyes stay put.
  */
 export function BotOrb({
   className,
@@ -397,7 +394,10 @@ export function BotOrb({
 }) {
   const boxRef = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const reduced = usePrefersReducedMotion() || still;
+  const faces = useBotFaces();
+  const reduced = usePrefersReducedMotion() || still || faces === "still";
+  // Whether it moves only while busy: every orb when the person asks, and a face in a list always.
+  const busyOnly = faces === "working" || size < SMALL;
   const look = useMemo(
     () => (seed === undefined ? OPENBOT_LOOK : orbLookFor(seed)),
     [seed],
@@ -477,17 +477,25 @@ export function BotOrb({
     const small = size < SMALL;
     const measure = () => box.getBoundingClientRect();
     let ticked = Number.NEGATIVE_INFINITY;
+    let restingSince: number | null = null;
     const frame = (now: number) => {
       if (small && now - ticked < SMALL_FRAME_MS) return;
       ticked = now;
       const t = Math.max(0, (now - start) / 1000);
       const state = current.current;
-      if (followPointer(eyes, t, state, measure) && motion.current) {
+      const resting = busyOnly && state === "idle";
+      if (!resting) restingSince = null;
+      else restingSince ??= t;
+      if (
+        followPointer(eyes, t, state, measure, !small && !resting) &&
+        motion.current
+      ) {
         motion.current = { ...motion.current, noticedAt: t };
       }
       const pose = poseAt(motion.current ?? settled(state), t, stagger, {
         reduced: false,
         small,
+        restingSince,
       });
       draw(lookAt(pose, eyes));
     };
@@ -508,13 +516,14 @@ export function BotOrb({
         : null;
     sight?.observe(box);
     onScreen(true);
-    const unwatch = subscribePointer();
+    // A face in a list never follows the pointer, so it needs no word of where it is.
+    const unwatch = small ? () => {} : subscribePointer();
     return () => {
       sight?.disconnect();
       onScreen(false);
       unwatch();
     };
-  }, [reduced, size, look]);
+  }, [reduced, size, look, busyOnly]);
 
   const spill = size * SPILL;
   return (
