@@ -465,6 +465,7 @@ describe("deployment configuration", () => {
       clientId: "entra-client-id",
       clientSecret: "entra-client-secret",
       tenantId: "common",
+      apiScope: "api://entra-client-id/.default",
     });
     expect(configuredAuthProviders(config.auth)).toEqual(["microsoft"]);
   });

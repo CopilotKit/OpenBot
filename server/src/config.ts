@@ -104,6 +104,11 @@ export type AuthProviderId = "google" | "microsoft" | "okta";
 /** An OAuth client, as every provider here needs one. */
 export type OAuthClient = { clientId: string; clientSecret: string };
 
+export type MicrosoftAuthConfig = OAuthClient & {
+  tenantId: string;
+  apiScope: string;
+};
+
 export type GithubAppConfig = {
   clientId: string;
   clientSecret: string;
@@ -126,8 +131,13 @@ export type AuthConfig = {
    * `tenantId` decides who may sign in at all, so it is not a detail. `common` admits any Microsoft
    * account including personal ones, `organizations` any work or school account anywhere, and a GUID
    * admits one directory. A deployment that wants only its own company needs the GUID.
+   *
+   * `apiScope` is OpenBot's own API in Entra, as a scope: what a person's app asks for a token to
+   * OpenBot with, and what OpenBot asks for from a person's stored sign-in before exchanging it on
+   * their behalf (`auth/entra.ts`). `api://<client id>/.default` unless MICROSOFT_OAUTH_API_SCOPE says
+   * otherwise.
    */
-  microsoft?: OAuthClient & { tenantId: string };
+  microsoft?: MicrosoftAuthConfig;
   /** Okta is an OIDC provider rather than a named one, so it is identified by its issuer. */
   okta?: OAuthClient & { issuer: string };
 };
@@ -795,7 +805,7 @@ const MULTI_TENANT_AUDIENCES = new Set([
   "consumers",
 ]);
 
-function namesNoDirectory(tenantId: string | undefined): boolean {
+export function namesNoDirectory(tenantId: string | undefined): boolean {
   return (
     tenantId !== undefined &&
     MULTI_TENANT_AUDIENCES.has(tenantId.trim().toLowerCase())
@@ -949,12 +959,15 @@ function authConfig(
  */
 function microsoftAuth(
   environment: Environment,
-): (OAuthClient & { tenantId: string }) | undefined {
+): MicrosoftAuthConfig | undefined {
   const client = oauthClient(environment, "MICROSOFT");
   if (!client) return undefined;
   return {
     ...client,
     tenantId: optional(environment, "MICROSOFT_OAUTH_TENANT_ID") ?? "common",
+    apiScope:
+      optional(environment, "MICROSOFT_OAUTH_API_SCOPE") ??
+      `api://${client.clientId}/.default`,
   };
 }
 

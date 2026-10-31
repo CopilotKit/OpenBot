@@ -6,6 +6,7 @@ import type {
   CredentialSecretReader,
   CredentialStore,
 } from "../../credentials";
+import type { EntraTokens } from "../../auth/entra-refusal";
 import type { Database } from "../../db/client";
 import { isQueryFailure, withoutStatement } from "../../db/query-failure";
 import { pendingAuthorizations } from "../../db/schema";
@@ -151,6 +152,11 @@ export type ServerRecord = {
    * Null on a row that needs no account at all, and on every row that is not brokered.
    */
   accountMode: "personal" | "shared" | null;
+  /**
+   * The Entra scope a server added by URL is reached with as the signed-in person, or null where it
+   * is reached on the deployment's own credential. See `mcpServers.entraScope`.
+   */
+  entraScope: string | null;
   /**
    * Whether a Shared app's deployment-held account is connected yet.
    *
@@ -1251,6 +1257,12 @@ export type PluginStoreOptions = {
    * a shared account's vendor identity, read only when an app is switched to Shared.
    */
   deploymentId?: string;
+  /**
+   * Tokens Entra issues for a person on their behalf, for a server an admin marked as reached as
+   * the signed-in person (`auth/entra.ts`). Absent on a deployment with no Microsoft sign-in, where
+   * such a server cannot be added and a call to one already stored is refused.
+   */
+  entra?: EntraTokens;
 };
 
 /** One in-flight Arcade authorization attempt, as the table stores it. */

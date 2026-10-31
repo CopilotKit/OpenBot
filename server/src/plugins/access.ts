@@ -40,6 +40,11 @@ export type CredentialSource =
   | "deployment-token"
   /** The asking person's own OAuth grant, exchanged per call. */
   | "person-oauth"
+  /**
+   * The asking person's own Microsoft sign-in, exchanged with Entra on their behalf for a token to
+   * the server's scope. Their own credential, as `person-oauth` is: it reaches only what they can.
+   */
+  | "person-entra"
   /** One key the deployment holds, with the broker keeping people apart by an id we send. */
   | "brokered"
   /** None at all, because the call never leaves this process. */
@@ -56,9 +61,11 @@ export type ServerAccess = {
    * where the deployment holds the key but the call runs in one person's mailbox, which is the whole
    * point of the connector and therefore the only useful thing the trail can say about it — or this
    * deployment's own tables read as them. `deployment` means the opposite: not any one person's
-   * account. That covers a shared token, a server an administrator added by URL, and a public
-   * endpoint reached with no credential at all, where every person's call sees the same data and
-   * naming the asker would assert an attribution that does not exist.
+   * account. That covers a shared token, a server an administrator added by URL on that token, and
+   * a public endpoint reached with no credential at all, where every person's call sees the same
+   * data and naming the asker would assert an attribution that does not exist. A person's own
+   * Microsoft sign-in, exchanged with Entra on their behalf, is `person` for the same reason their
+   * OAuth grant is.
    */
   reachedAs: "person" | "deployment";
   /**
@@ -351,6 +358,11 @@ export function accessFor(
      * brokered call lands in nobody's account in particular. See the `reachedAs` branch below.
      */
     accountMode?: string | null;
+    /**
+     * The Entra scope an admin marked a server added by URL to be reached with as the signed-in
+     * person, or null for one reached on the deployment's own credential. See the last branch below.
+     */
+    entraScope?: string | null;
   },
   entry: CatalogueEntry | null,
 ): ServerAccess {
@@ -417,6 +429,20 @@ export function accessFor(
           ? "deployment"
           : "person",
       toolkit: TOOLKIT_OF[provider](row.url),
+    };
+  }
+
+  /*
+   * A server added by URL that an admin marked as reached as the signed-in person: each call goes
+   * out on a token Entra issued for the person asking, so it lands in their account and nobody
+   * else's, and the trail names them.
+   */
+  if (row.entraScope) {
+    return {
+      transport: "mcp",
+      credential: "person-entra",
+      reachedAs: "person",
+      toolkit: null,
     };
   }
 

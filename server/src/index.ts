@@ -72,6 +72,7 @@ import {
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth, sessionLifetimeMs } from "./auth";
+import { createEntra, withEntraBearer } from "./auth/entra";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
@@ -528,10 +529,32 @@ const betterAuth =
         database,
         (email) => peopleStore.isRevoked(email),
         signInAuditStore,
-        { signOutRecorders },
+        {
+          signOutRecorders,
+          // Read when somebody signs in, by which time `entra` below exists.
+          vouchesForMicrosoftToken: (token: string): boolean =>
+            entra?.vouches(token) ?? false,
+        },
       )
     : undefined;
-const auth: AuthService | undefined = organizationAuth ?? betterAuth;
+/*
+ * Microsoft Entra on both sides: a person's app calling OpenBot with their Entra token, and a server
+ * an admin marked as reached as the signed-in person called with a token Entra issues for them.
+ * Built on Better Auth's sign-in, so only where Microsoft sign-in is what this deployment runs.
+ */
+const entra: ReturnType<typeof createEntra> | undefined =
+  betterAuth && config.auth?.microsoft
+    ? createEntra({
+        microsoft: config.auth.microsoft,
+        authConfig: config.auth,
+        auth: betterAuth,
+        database,
+        isRevoked: (email) => peopleStore.isRevoked(email),
+      })
+    : undefined;
+const auth: AuthService | undefined =
+  organizationAuth ??
+  (betterAuth && entra ? withEntraBearer(betterAuth, entra) : betterAuth);
 const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
   {
     singleUser: config.singleUser,
@@ -1033,6 +1056,7 @@ const pluginStore = createPluginStore({
    */
   broker: composio?.broker,
   brokerProvider,
+  ...(entra ? { entra } : {}),
 });
 
 /*

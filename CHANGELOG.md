@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Company systems behind Microsoft Entra, reached as the signed-in person
+
+An admin can mark a server added by URL with an Entra scope, and each call then carries a token
+Entra issues for the person asking through the on-behalf-of exchange, from their app's Entra token
+or, for routines, their stored Microsoft sign-in. Apps can also call OpenBot's API with a person's
+Entra token. Migration `0070_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
+without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
