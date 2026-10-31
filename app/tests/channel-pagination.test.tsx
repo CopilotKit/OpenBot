@@ -188,6 +188,18 @@ function renderSidebar() {
     bots: [],
     lastPingId: null,
   });
+  // The roster polls the approvals inbox for its needs dots; answered here for the same reason.
+  queryClient.setQueryDefaults(["approvals"], {
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: false,
+  });
+  queryClient.setQueryData(["approvals"], {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
   // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
   queryClient.setQueryData(browserKeys.state, {
     available: false,
