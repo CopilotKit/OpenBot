@@ -181,6 +181,7 @@ describe("how each step stands", () => {
       working: boolean;
       held: ReadonlySet<string>;
       waiting?: boolean;
+      resuming?: ReadonlySet<string>;
     } = at,
   ) => stepLogEntries(steps, [], context).map((entry) => entry.status);
 
@@ -210,6 +211,15 @@ describe("how each step stands", () => {
     // Allowed, the server runs it, and until its result arrives it is in progress.
     expect(
       states([step(noted, 1)], { working: true, held: new Set() }),
+    ).toEqual(["running"]);
+    // Just after Allow once the asking turn is over and the resumed run may not show yet: still
+    // in progress, never "Not completed".
+    expect(
+      states([step(noted, 1)], {
+        working: false,
+        held: new Set(),
+        resuming: new Set(["click"]),
+      }),
     ).toEqual(["running"]);
   });
 

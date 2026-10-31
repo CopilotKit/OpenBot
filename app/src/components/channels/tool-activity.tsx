@@ -713,6 +713,30 @@ export function useHeldForPerson(): ReadonlySet<string> {
   );
 }
 
+/**
+ * The tool calls the person has just allowed, which the server is carrying on with: allowed, and
+ * not finished yet. Between Allow once and the step's result the turn that asked has ended and the
+ * server's resumed run may not show as busy yet, so without this the step reads as cut off ("not
+ * done yet", "Not completed") for a moment before it lands. It is working.
+ */
+export function useResumingAfterApproval(): ReadonlySet<string> {
+  const inbox = useQuery(approvalInboxCacheOptions());
+  return useMemo(
+    () =>
+      new Set(
+        (inbox.data?.requests ?? []).flatMap((request) =>
+          (request.status === "approved" || request.status === "consumed") &&
+          (request.decision === "allow_once" ||
+            request.decision === "allow_always") &&
+          request.action.toolCallId
+            ? [request.action.toolCallId]
+            : [],
+        ),
+      ),
+    [inbox.data],
+  );
+}
+
 export function ToolActivity({
   group,
   active,
@@ -727,8 +751,12 @@ export function ToolActivity({
   // On its own card, or with the identical request it repeated while that one still waits.
   const waitsForPerson = (step: StepDetails) =>
     held.has(step.id) || (step.alreadyWaiting && waitingHere);
-  const running = active && steps.some((step) => step.pending);
-  const current = steps.find((step) => step.pending);
+  const resuming = useResumingAfterApproval();
+  // Running in the turn in flight, or carried on by the server once the person allowed it.
+  const runsNow = (step: StepDetails) =>
+    step.pending && (active || resuming.has(step.id));
+  const running = steps.some(runsNow);
+  const current = steps.find(runsNow) ?? steps.find((step) => step.pending);
   const issues = steps.filter((step) => step.failed || step.refused).length;
   const kinds = [...new Set(steps.map((step) => step.kind))];
   /*
@@ -764,7 +792,7 @@ export function ToolActivity({
         <ol className="space-y-2 py-1">
           {steps.map((step) => (
             <StepRow
-              active={active}
+              active={active || resuming.has(step.id)}
               key={step.id}
               step={step}
               waiting={waitsForPerson(step)}

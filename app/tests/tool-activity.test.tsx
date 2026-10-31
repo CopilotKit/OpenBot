@@ -831,3 +831,53 @@ test("browser steps that opened no page are named for what they did, as the comp
     ]),
   ).toBe("Used the browser");
 });
+
+test("a step just allowed, which the server is carrying on, reads as working, not as cut off", () => {
+  const client = idle();
+  client.setQueryData(["approvals"], {
+    enabled: true,
+    requests: [
+      {
+        id: "approval-3",
+        status: "approved",
+        decision: "allow_once",
+        createdAt: new Date(0).toISOString(),
+        action: {
+          botId: "b",
+          toolRef: "computer_click",
+          effect: "write",
+          scope: "shop.example",
+          threadId: "t",
+          toolCallId: "pay",
+          args: { ref: "e7" },
+          target: {},
+          policy: { behaviour: "ask", source: "default", reason: "Asked." },
+        },
+      },
+    ],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToolActivity
+        active={false}
+        group={{
+          kind: "tools",
+          id: "a",
+          steps: [
+            call("pay", "computer_click", { ref: "e7" }, '{"waiting":true}'),
+          ],
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  const summary = view.container.querySelector("summary");
+  expect(summary?.textContent).not.toContain("not done yet");
+  expect(summary?.querySelector(".tool-line-running")).not.toBeNull();
+  const steps = view.container.querySelector("ol");
+  if (!steps) throw new Error("no steps");
+  expect(within(steps).getByText("In progress")).toBeDefined();
+  expect(within(steps).queryByText("Not completed")).toBeNull();
+});
