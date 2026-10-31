@@ -280,26 +280,34 @@ export function createSharedUseStore(
   async function writeApproval(tx: Transaction, input: ApprovalInput) {
     const serverId = input.serverId;
     const approvedAs = input.as ?? "admin";
-    await tx
-      .insert(sharedUseApprovals)
-      .values({
-        agentId: input.botId,
-        serverId,
-        audience: input.approval.audience,
-        outsideInput: input.approval.outsideInput,
-        approvedBy: input.by,
-        approvedAs,
-      })
-      .onConflictDoUpdate({
-        target: [sharedUseApprovals.agentId, sharedUseApprovals.serverId],
-        set: {
-          audience: input.approval.audience,
-          outsideInput: input.approval.outsideInput,
-          approvedBy: input.by,
-          approvedAs,
-          approvedAt: new Date(),
-        },
-      });
+    const insertion = tx.insert(sharedUseApprovals).values({
+      agentId: input.botId,
+      serverId,
+      audience: input.approval.audience,
+      outsideInput: input.approval.outsideInput,
+      approvedBy: input.by,
+      approvedAs,
+    });
+    const target = [sharedUseApprovals.agentId, sharedUseApprovals.serverId];
+    // An owner may fill an absence, never replace an approval another transaction just committed.
+    const written =
+      approvedAs === "owner"
+        ? await insertion
+            .onConflictDoNothing({ target })
+            .returning({ botId: sharedUseApprovals.agentId })
+        : await insertion
+            .onConflictDoUpdate({
+              target,
+              set: {
+                audience: input.approval.audience,
+                outsideInput: input.approval.outsideInput,
+                approvedBy: input.by,
+                approvedAs,
+                approvedAt: new Date(),
+              },
+            })
+            .returning({ botId: sharedUseApprovals.agentId });
+    if (written.length === 0) return false;
     await tx
       .delete(sharedUseApprovalMembers)
       .where(
@@ -348,6 +356,7 @@ export function createSharedUseStore(
           .where(eq(sharedUseRequests.id, request.id));
       }
     }
+    return true;
   }
 
   /*
@@ -399,14 +408,17 @@ export function createSharedUseStore(
       ...exposureOf(await botFacts(input.botId)),
       outsideInput: false,
     };
-    await setApproval({
-      botId: input.botId,
-      serverId,
-      approval,
-      by: input.by,
-      as: "owner",
+    const written = await database.transaction(async (tx) => {
+      const appId = await lockApproval(tx, input.botId, serverId);
+      return writeApproval(tx, {
+        botId: input.botId,
+        serverId: appId,
+        approval,
+        by: input.by,
+        as: "owner",
+      });
     });
-    return approval;
+    return written ? approval : null;
   }
 
   /**

@@ -408,6 +408,108 @@ describe("decision durability", () => {
   );
 });
 
+describe("owner approvals", () => {
+  test.each(["owner", "people"] as const)(
+    "a concurrent owner grant cannot replace an administrator's %s approval",
+    async (audience) => {
+      const approval = {
+        audience,
+        outsideInput: false,
+        members:
+          audience === "people"
+            ? [{ kind: "user" as const, value: id("named") }]
+            : [],
+      };
+      await database
+        .update(mcpServers)
+        .set({ ownerGrants: "any" })
+        .where(eq(mcpServers.id, app));
+      await database
+        .update(agentProfiles)
+        .set({ visibility: "public" })
+        .where(eq(agentProfiles.agentId, bot));
+      const request = await store.fileRequest({
+        botId: bot,
+        serverId: app,
+        reason: "grant",
+        requestedBy: id("owner"),
+        proposed: approval,
+      });
+      const blocker = createDatabase(testDatabaseUrl(), { max: 1 });
+      const admin = createDatabase(testDatabaseUrl(), { max: 1 });
+      const owner = createDatabase(testDatabaseUrl(), { max: 1 });
+      const adminName = `owner_grant_admin_${suite}`;
+      const ownerName = `owner_grant_owner_${suite}`;
+      await admin.execute(
+        sql`select set_config('application_name', ${adminName}, false)`,
+      );
+      await owner.execute(
+        sql`select set_config('application_name', ${ownerName}, false)`,
+      );
+      const locked = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const gate = blocker.transaction(async (tx) => {
+        await tx
+          .select()
+          .from(sharedUseRequests)
+          .where(eq(sharedUseRequests.id, request.id))
+          .for("update");
+        locked.resolve();
+        await release.promise;
+      });
+      void gate.catch(locked.reject);
+      const adminStore = createSharedUseStore(admin, "composio");
+      const ownerStore = createSharedUseStore(owner, "composio");
+      const operations: Promise<unknown>[] = [];
+      async function waitForDatabaseLock(name: string) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const rows = await database.execute(
+            sql`select wait_event_type from pg_stat_activity where application_name = ${name} and datname = current_database()`,
+          );
+          if (rows.some((row) => row.wait_event_type === "Lock")) return;
+        }
+        throw new Error(
+          `The database did not report the expected lock wait for ${name}`,
+        );
+      }
+      try {
+        await locked.promise;
+        const adminWork = adminStore.setApproval({
+          botId: bot,
+          serverId: app,
+          by: id("admin"),
+          approval,
+        });
+        operations.push(adminWork);
+        await waitForDatabaseLock(adminName);
+        const ownerWork = ownerStore.approveOwnerGrant({
+          botId: bot,
+          serverId: app,
+          by: id("owner"),
+        });
+        operations.push(ownerWork);
+        await waitForDatabaseLock(ownerName);
+        release.resolve();
+        await gate;
+        await adminWork;
+        expect(await ownerWork).toBeNull();
+        expect(await store.approvalSource(bot, app)).toBe("admin");
+        expect(await store.approvalFor(bot, app)).toEqual(approval);
+      } finally {
+        release.resolve();
+        await Promise.allSettled([gate, ...operations]);
+        await Promise.all([
+          blocker.$client.end(),
+          admin.$client.end(),
+          owner.$client.end(),
+        ]);
+      }
+    },
+    15000,
+  );
+});
+
 describe("decide", () => {
   test("two admins deciding one request record exactly one decision", async () => {
     await call("stranger");
