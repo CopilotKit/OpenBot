@@ -386,13 +386,17 @@ function ConnectAction({ access }: { access: AppAccess }) {
 
   /*
    * A FORM, OR A CONNECTION THAT ALREADY HAS A ROW, IS SETTINGS' JOB. A typed key has nowhere to be
-   * typed but the app's page, and a Composio app whose row still stands — a refused key, an account
-   * the vendor lost — is refused by the connect route until it is disconnected there. Only this
-   * deployment's own OAuth flow takes a fresh consent over a withdrawn one.
+   * typed but the app's page, and a Composio app whose row still stands (a refused key, an account
+   * the vendor lost) is refused by the connect route until it is disconnected there. This
+   * deployment's own OAuth flow takes a fresh consent over a withdrawn one, and so does an app whose
+   * broker adds a consent to the connection that stands (`reconnectsInPlace`, Arcade's), so
+   * Reconnect starts both from here.
    */
   const viaSettings =
     access.connect === "key" ||
-    (access.state === "reconnect" && access.connect !== "oauth") ||
+    (access.state === "reconnect" &&
+      access.connect !== "oauth" &&
+      !access.reconnectsInPlace) ||
     tab.needsKey;
   if (viaSettings)
     return (

@@ -60,7 +60,7 @@ import { seedPeople } from "./support/people";
  * `dev-local-user` keeps that name, the name survives a restart, and a deployment that signs people
  * in files them under their own ids as before.
  *
- * AND THE TWO EDGES OF RECORDING GRANTS HERE. A Bot's call that Arcade no longer allows is answered
+ * AND THE TWO EDGES OF RECORDING GRANTS HERE. A Bot's call that Arcade does not allow is answered
  * with the card a lost Composio account shows, and the row goes. A consent begun under the shared
  * name before an upgrade gave the deployment its own is refused when it comes back, and nothing held
  * at Arcade under `dev-local-user`, which other installs share, is confirmed or withdrawn.
@@ -954,6 +954,69 @@ describe("a deployment that signs people in", () => {
   });
 });
 
+describe("a Bot's call on an action Arcade was never asked to allow", () => {
+  /** What a refused call threw, read as the card it carries. */
+  async function refusalOf(call: Promise<unknown>) {
+    const refused = await call.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(PluginRefusedError);
+    return readConnectPrompt((refused as Error).message);
+  }
+
+  test("shows the Reconnect card and keeps the record, so the approved action still runs, until Arcade holds nothing at all", async () => {
+    const deployment = await newDeployment();
+    // Reading mail approved, one action at a time. Sending was never asked for.
+    await authorizeAction(deployment, READ, "me@example.test");
+    const approved = await rowsIn(deployment.database);
+
+    // The Bot sends: Arcade refuses that one action. The card is the Reconnect card, and says so.
+    expect(await refusalOf(deployment.call(SEND))).toEqual({
+      serverId: ROW,
+      title: "Gmail",
+      reason: "reconnect",
+      at: expect.any(String),
+      message:
+        "Your Gmail account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.",
+    });
+    // The record stands, and the action that was approved still runs.
+    expect(await rowsIn(deployment.database)).toEqual(approved);
+    expect(await listed(deployment)).toContain(ROW);
+    expect((await deployment.call(READ)).text).toContain("me@example.test");
+
+    // The person removes OpenBot's access at Google: Arcade now holds nothing for Gmail here.
+    project.connections.splice(0);
+    expect(await refusalOf(deployment.call(READ))).toMatchObject({
+      reason: "reconnect",
+      message:
+        "Your Gmail account is no longer connected, so this wasn't done. Reconnect it and ask again.",
+    });
+    expect(await rowsIn(deployment.database)).toEqual([]);
+    expect(project.unexpected).toEqual([]);
+  });
+
+  test("Reconnect over the record that stands fills in the missing permission, and the card sees it", async () => {
+    const deployment = await newDeployment();
+    await authorizeAction(deployment, READ, "me@example.test");
+    const refusal = await refusalOf(deployment.call(SEND));
+
+    // Connect over the standing record: one consent for the whole app, under the same name.
+    await connectGmail(deployment, "me@example.test");
+    expect((await deployment.call(SEND)).text).toContain("me@example.test");
+    expect((await deployment.call(READ)).text).toContain("me@example.test");
+
+    // Connected again since the refusal, which is how the card stops offering Reconnect.
+    const [row] = await deployment.database
+      .select({ connectedAt: brokeredConnections.connectedAt })
+      .from(brokeredConnections);
+    expect(row?.connectedAt.getTime()).toBeGreaterThan(
+      Date.parse(refusal?.at ?? ""),
+    );
+    expect(project.unexpected).toEqual([]);
+  });
+});
+
 describe("a Bot's call on an Arcade grant that is gone", () => {
   test("shows the card a lost Composio account shows, ends the row, and Connect puts it back", async () => {
     const deployment = await newDeployment();
@@ -986,7 +1049,7 @@ describe("a Bot's call on an Arcade grant that is gone", () => {
       {
         payload: {
           tool: "SendEmail",
-          failure: "Arcade no longer allows Gmail.SendEmail on this account.",
+          failure: "Arcade does not allow Gmail.SendEmail on this account.",
         },
       },
     ]);

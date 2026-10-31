@@ -1356,7 +1356,17 @@ export function connectionMethods(context: StoreContext) {
                   // The identity the grant was just made under, for `recordBrokeredConnection`'s
                   // reason: calls go out under the row's id, so a re-consent that left the old one
                   // standing sent them to an account this consent says nothing about.
-                  set: { ...set, vendorUserId: input.account.vendorUserId },
+                  //
+                  // AND WHEN, because a consent over a standing row is a reconnection. A call Arcade
+                  // refused one action keeps its row and shows Reconnect; `connectedAt` newer than
+                  // that refusal is how the card knows the Connect it offered has happened (see
+                  // `AppAccess.connectedAt`). Left at the first consent, the card went on offering
+                  // Reconnect over an account that now allowed the action.
+                  set: {
+                    ...set,
+                    vendorUserId: input.account.vendorUserId,
+                    connectedAt: verifiedAt,
+                  },
                 }
               : {
                   target: [
@@ -1368,6 +1378,7 @@ export function connectionMethods(context: StoreContext) {
                     ...set,
                     vendorUserId: input.account.vendorUserId,
                     connectedBy,
+                    connectedAt: verifiedAt,
                   },
                 },
           );

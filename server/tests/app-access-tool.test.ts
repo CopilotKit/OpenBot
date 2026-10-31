@@ -40,6 +40,7 @@ function access(state: AppAccessState): AppAccess {
     givenByOwner: false,
     needsConnect: false,
     connectedAt: null,
+    reconnectsInPlace: false,
     requestKind: null,
     request: null,
   };

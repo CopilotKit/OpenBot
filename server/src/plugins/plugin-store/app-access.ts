@@ -182,7 +182,8 @@ function isUniqueViolation(error: unknown): boolean {
  * no brokered app to any other reader in the store.
  */
 export function appAccessMethods(context: StoreContext) {
-  const { database, auditStore, brokeredAppRowsAt, brokerProvider } = context;
+  const { database, auditStore, broker, brokeredAppRowsAt, brokerProvider } =
+    context;
   const { scheme, idPrefix } = BROKERED_PROFILE[brokerProvider];
   /** Whether an id is in the namespace `addBrokeredApp` mints this broker's rows into. */
   const isBrokeredId = (id: string) => id.startsWith(idPrefix);
@@ -808,6 +809,10 @@ export function appAccessMethods(context: StoreContext) {
                 : account === "personal"
                   ? (personal?.connectedAt ?? null)
                   : null,
+            // A presence test on the declared flow, as the connect route makes it.
+            reconnectsInPlace:
+              brokeredProvenance(app.provider) &&
+              Boolean(broker?.authorizations),
             requestKind,
             request: request
               ? {

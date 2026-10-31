@@ -241,8 +241,17 @@ export function mountConnectionRoutes({
        * could break it. For a Shared app the account is the deployment's rather than whoever is
        * signed in, decided above and never by anything the request carries.
        */
+      /*
+       * ONE ACCOUNT PER APP, WHERE A SECOND CONSENT WOULD MAKE A SECOND ONE. On Composio a second
+       * link attaches a second account behind a row that already says connected, so it is refused.
+       * A broker that runs a correlated flow is not that: Arcade keeps one connection per name and
+       * provider, and a consent over it adds the permissions it asks for to that same connection,
+       * as the per-action Authorize always has. So Connect over a standing Arcade row is let through,
+       * and it is what Reconnect on a Bot's card does for a call Arcade refused one action: it asks
+       * for everything the app needs, and the row the verifier then updates is the one that stood.
+       */
       const existing = await store.brokeredConnection({ toolkit, account });
-      if (existing) {
+      if (existing && !composio.broker.authorizations) {
         /*
          * Named with the step to take rather than only refused: a second link would attach a
          * second account behind a row that already says connected, and the way to a new one is
@@ -732,9 +741,9 @@ export function mountConnectionRoutes({
        * THE VENDOR ALREADY HOLDS THIS ACCOUNT, AND THIS DEPLOYMENT HAS NO ROW FOR IT: RECORD IT,
        * DON'T REFUSE IT.
        *
-       * The one-account guard above already refused wherever a row stands here, so this can
-       * only be the other half of that rule: an account the vendor holds that this deployment
-       * lost track of. A fresh or upgraded install meets it, and so did every local install in
+       * On Composio the one-account guard above already refused wherever a row stands here, so
+       * this can only be the other half of that rule: an account the vendor holds that this
+       * deployment lost track of. On Arcade a row may stand, and the confirm leaves it as it is. A fresh or upgraded install meets it, and so did every local install in
        * single-user mode while they all signed in as the same person against one vendor key.
        * Refused, the person read a sentence telling them to disconnect an account on a page
        * that drew the app as not connected and offered no Disconnect. Nothing they could press

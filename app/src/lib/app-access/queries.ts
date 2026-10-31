@@ -94,6 +94,12 @@ export type AppAccess = {
    * to tell an account lost at the vendor from one connected again since. See `AppAccessCard`.
    */
   connectedAt: string | null;
+  /**
+   * Whether Connect takes a fresh consent over the account already connected, so Reconnect starts
+   * it from here. True on Arcade, where a refused action keeps its row and Connect adds what the
+   * app needs; false on Composio, where Reconnect goes to the app's page to disconnect first.
+   */
+  reconnectsInPlace: boolean;
   /** The request Request access files for this state; null where the next step is the person's. */
   requestKind: AppAccessRequestKind | null;
   /** This person's pending request of exactly that kind — drawn as "Requested". */

@@ -263,6 +263,27 @@ test("this deployment's own OAuth app reconnects in place, with a fresh consent"
   await waitFor(() => expect(opened).toHaveLength(1));
 });
 
+test("an Arcade app to reconnect starts Connect here, because its consent adds to the connection that stands", async () => {
+  /*
+   * A call Arcade refused one action keeps its row, so the card reads Reconnect over a live
+   * `ready`. Sending the person to Settings would land them on a page that says Connected and offers
+   * only Disconnect; Connect over the row asks Arcade for everything the app needs instead.
+   */
+  const { view, sent, opened } = mounted(
+    appAccess({
+      key: "arcade-Gmail",
+      provider: "arcade",
+      state: "reconnect",
+      reconnectsInPlace: true,
+    }),
+  );
+  fireEvent.click(await view.findByRole("button", { name: "Reconnect Gmail" }));
+  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  expect(sent.map((call) => `${call.method} ${call.url}`)).toContain(
+    "POST /api/plugins/servers/arcade-Gmail/connect?returnTo=settings",
+  );
+});
+
 /** Whether this tab has the focus, as `document.hasFocus` answers it, for the length of `run`. */
 async function withFocus(focused: boolean, run: () => Promise<void>) {
   const real = document.hasFocus;

@@ -23,6 +23,7 @@ export function appAccess(overrides: Partial<AppAccess> = {}): AppAccess {
     givenByOwner: false,
     needsConnect: false,
     connectedAt: null,
+    reconnectsInPlace: false,
     requestKind: null,
     request: null,
     ...overrides,

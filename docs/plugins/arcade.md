@@ -162,8 +162,11 @@ to grant less than the whole app. Either way, the connection is recorded in this
 `brokered_connections`, as Composio's are: a Bot's call needs that row before it reaches Arcade, a
 page that opens the app asks Arcade whether the connection is still there and writes or clears the
 row from the answer, and Disconnect and offboarding end it at Arcade and then here. Arcade still
-checks each action itself on every call. A call it refuses for want of authorization is answered as
-Composio's lost account is: the row is cleared and the person is shown the Reconnect card.
+checks each action itself on every call. A call it refuses for want of authorization shows the
+person the Reconnect card. The row is cleared only where Arcade then answers that the account holds
+nothing for the app, which is Composio's lost account; where it holds the app's other actions, the
+row stays, those actions go on working, and Reconnect asks for the whole app over the connection
+that stands.
 
 A single-user deployment is filed at Arcade under its own name, not under `dev-local-user`; see
 [Configuration](../configuration.md#authentication).

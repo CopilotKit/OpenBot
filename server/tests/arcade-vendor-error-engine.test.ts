@@ -209,10 +209,11 @@ describe("a refusal from Arcade is an Error this deployment wrote", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Arcade no longer allows Gmail.SendEmail on this account.",
+      "Arcade does not allow Gmail.SendEmail on this account.",
     );
-    // Answered as a lost account, which the store turns into the Reconnect card.
-    expect(result.accountGone).toBe(true);
+    // Handed to the store, which shows the Reconnect card and asks whether the account is gone.
+    expect(result.actionNotAllowed).toBe(true);
+    expect(result.accountGone).toBeUndefined();
     // AND THE VENDOR'S WORDS ARE NOT IN WHAT A MODEL IS HANDED.
     expect(result.text).not.toContain(BEARER);
   });
