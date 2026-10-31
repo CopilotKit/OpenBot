@@ -25,7 +25,7 @@ import {
   type OnboardingStep,
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
-import { SetupChecklist } from "@/components/onboarding/setup-checklist";
+import { SetupChecklist } from "@/components/setup/setup-checklist";
 import {
   OnboardingNameOrb,
   OnboardingNameStep,
@@ -40,7 +40,7 @@ import {
   advanceOnboardingMutationOptions,
   completeOnboardingMutationOptions,
 } from "@/lib/onboarding/mutations";
-import { setupChecklistQueryOptions } from "@/lib/setup/queries";
+import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -550,6 +550,10 @@ function RouteComponent() {
       intro: () => (
         <StepIntro title="Check your setup">
           <p>See what's ready and what still needs setting up.</p>
+          {/* Its fixes end in a restart, after which onboarding is over: say where it lives. */}
+          {mayOpenSetup(me.data, capabilities) ? (
+            <p>Check again any time in Settings → Setup.</p>
+          ) : null}
         </StepIntro>
       ),
       demo: () => (

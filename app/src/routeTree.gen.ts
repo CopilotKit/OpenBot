@@ -45,6 +45,7 @@ import { Route as AuthedSettingsLearningRouteImport } from './routes/_authed/set
 import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/settings/memory'
 import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authed/settings/notifications'
 import { Route as AuthedSettingsPasswordsRouteImport } from './routes/_authed/settings/passwords'
+import { Route as AuthedSettingsSetupRouteImport } from './routes/_authed/settings/setup'
 import { Route as AuthedSignInRequestIdRouteImport } from './routes/_authed/sign-in/$requestId'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
 import { Route as AuthedAppBotsIndexRouteImport } from './routes/_authed/_app/bots.index'
@@ -263,6 +264,11 @@ const AuthedSettingsNotificationsRoute =
 const AuthedSettingsPasswordsRoute = AuthedSettingsPasswordsRouteImport.update({
   id: '/passwords',
   path: '/passwords',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
+const AuthedSettingsSetupRoute = AuthedSettingsSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
 const AuthedSignInRequestIdRoute = AuthedSignInRequestIdRouteImport.update({
@@ -517,6 +523,7 @@ export interface FileRoutesByFullPath {
   '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
+  '/settings/setup': typeof AuthedSettingsSetupRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
@@ -588,6 +595,7 @@ export interface FileRoutesByTo {
   '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
+  '/settings/setup': typeof AuthedSettingsSetupRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/settings': typeof AuthedSettingsIndexRoute
@@ -664,6 +672,7 @@ export interface FileRoutesById {
   '/_authed/settings/memory': typeof AuthedSettingsMemoryRoute
   '/_authed/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/_authed/settings/passwords': typeof AuthedSettingsPasswordsRoute
+  '/_authed/settings/setup': typeof AuthedSettingsSetupRoute
   '/_authed/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
@@ -741,6 +750,7 @@ export interface FileRouteTypes {
     | '/settings/memory'
     | '/settings/notifications'
     | '/settings/passwords'
+    | '/settings/setup'
     | '/sign-in/$requestId'
     | '/admin/'
     | '/settings/'
@@ -812,6 +822,7 @@ export interface FileRouteTypes {
     | '/settings/memory'
     | '/settings/notifications'
     | '/settings/passwords'
+    | '/settings/setup'
     | '/sign-in/$requestId'
     | '/admin'
     | '/settings'
@@ -887,6 +898,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/memory'
     | '/_authed/settings/notifications'
     | '/_authed/settings/passwords'
+    | '/_authed/settings/setup'
     | '/_authed/sign-in/$requestId'
     | '/_authed/_app/'
     | '/_authed/admin/'
@@ -1187,6 +1199,13 @@ declare module '@tanstack/react-router' {
       path: '/passwords'
       fullPath: '/settings/passwords'
       preLoaderRoute: typeof AuthedSettingsPasswordsRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/setup': {
+      id: '/_authed/settings/setup'
+      path: '/setup'
+      fullPath: '/settings/setup'
+      preLoaderRoute: typeof AuthedSettingsSetupRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
     '/_authed/sign-in/$requestId': {
@@ -1520,6 +1539,7 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsMemoryRoute: typeof AuthedSettingsMemoryRoute
   AuthedSettingsNotificationsRoute: typeof AuthedSettingsNotificationsRoute
   AuthedSettingsPasswordsRoute: typeof AuthedSettingsPasswordsRoute
+  AuthedSettingsSetupRoute: typeof AuthedSettingsSetupRoute
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
   AuthedSettingsComponentsGalleryNameRoute: typeof AuthedSettingsComponentsGalleryNameRoute
   AuthedSettingsConnectedAccountsKeyRoute: typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -1534,6 +1554,7 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsMemoryRoute: AuthedSettingsMemoryRoute,
   AuthedSettingsNotificationsRoute: AuthedSettingsNotificationsRoute,
   AuthedSettingsPasswordsRoute: AuthedSettingsPasswordsRoute,
+  AuthedSettingsSetupRoute: AuthedSettingsSetupRoute,
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
   AuthedSettingsComponentsGalleryNameRoute:
     AuthedSettingsComponentsGalleryNameRoute,

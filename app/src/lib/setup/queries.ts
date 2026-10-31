@@ -68,3 +68,15 @@ export function setupChecklistQueryOptions() {
       }),
   });
 }
+
+/**
+ * Who may open Settings → Setup: an admin, or the one person running OpenBot on their own machine.
+ * The same readers the server answers as `audience: "admin"`, decided from what the browser already
+ * holds, so the page and its sidebar entry never wait on the checklist itself.
+ */
+export function mayOpenSetup(
+  user: { role?: string } | null | undefined,
+  capabilities: { localEvaluation: boolean } | undefined,
+): boolean {
+  return user?.role === "admin" || capabilities?.localEvaluation === true;
+}
