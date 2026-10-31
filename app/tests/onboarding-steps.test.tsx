@@ -89,6 +89,8 @@ let apps: AppAccess[] | "error";
 let connectAnswer: Record<string, unknown>;
 let confirmed: boolean;
 let requests: { path: string; method: string }[];
+/** What `GET /api/setup` answers, or nothing when it fails. */
+let checklist: unknown;
 
 let permission: NotificationPermission;
 let prompted: NotificationPermission;
@@ -111,6 +113,7 @@ beforeEach(() => {
     authorizationUrl: "https://accounts.example/consent?state=s",
   };
   confirmed = true;
+  checklist = undefined;
   permission = "default";
   prompted = "granted";
   asked = 0;
@@ -141,6 +144,10 @@ beforeEach(() => {
         return Response.json(connectAnswer);
       if (path.startsWith("/api/agents"))
         return Response.json({ agents: [BOT] });
+      if (path === "/api/setup")
+        return checklist
+          ? Response.json({ checklist })
+          : Response.json({ error: "nope" }, { status: 503 });
       return Response.json({});
     },
     { preconnect: originalFetch.preconnect },
@@ -389,17 +396,47 @@ test("a list that could not be read says so, and never claims Connected", async 
   expect(view.queryByText("Connected")).toBeNull();
 });
 
-test("no apps to connect says how they arrive", async () => {
+test("no apps to connect says why, and how they arrive", async () => {
   apps = [];
   const view = drawConnect({ role: "member" });
 
   expect(await view.findByText("No apps to connect yet")).toBeTruthy();
   expect(
     view.getByText(
-      "When an admin adds apps, you can connect them in Connections.",
+      "An admin hasn't added any apps yet. When they do, you can connect them in Connections.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("button", { name: "Add apps" })).toBeNull();
+});
+
+test("an admin's empty list says more apps aren't set up, and the key that turns them on", async () => {
+  apps = [];
+  checklist = {
+    audience: "admin",
+    rows: [
+      {
+        id: "apps",
+        scope: "deployment",
+        title: "More apps",
+        required: false,
+        status: "needs_setup",
+        ready: false,
+        detail: "Without it, people can connect only the apps an admin adds.",
+        fix: {
+          kind: "env",
+          names: ["COMPOSIO_API_KEY"],
+          docsUrl: "https://example.test/composio.md",
+        },
+      },
+    ],
+  };
+  const view = drawConnect({ role: "admin" });
+
+  expect(
+    await view.findByText(
+      "Nobody has added apps yet, and more apps aren't set up. Add apps for everyone in Plugins, or set COMPOSIO_API_KEY so people can connect more.",
+    ),
+  ).toBeTruthy();
 });
 
 test("an admin with no apps to connect is offered the page where apps are added", async () => {

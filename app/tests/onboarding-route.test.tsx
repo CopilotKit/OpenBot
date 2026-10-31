@@ -84,6 +84,8 @@ let saves: number[];
 let completed: boolean;
 let named: string | null;
 let localEvaluation: boolean;
+/** The apps `GET /api/plugins/for/general/apps` answers with. */
+let appList: unknown[];
 /** Whether `/api/capabilities` answers, and how many times it was asked. */
 let capabilitiesFail: boolean;
 let capabilitiesAsked: number;
@@ -101,6 +103,16 @@ beforeEach(() => {
   completed = false;
   named = null;
   localEvaluation = false;
+  appList = [
+    {
+      key: "notion",
+      displayName: "Notion",
+      logo: null,
+      account: "personal",
+      connect: "oauth",
+      state: "not_connected",
+    },
+  ];
   capabilitiesFail = false;
   capabilitiesAsked = 0;
   (globalThis as { Notification?: unknown }).Notification = {
@@ -157,18 +169,7 @@ beforeEach(() => {
       if (path.startsWith("/api/agents"))
         return Response.json({ agents: [BOT] });
       if (path === "/api/plugins/for/general/apps")
-        return Response.json({
-          apps: [
-            {
-              key: "notion",
-              displayName: "Notion",
-              logo: null,
-              account: "personal",
-              connect: "oauth",
-              state: "not_connected",
-            },
-          ],
-        });
+        return Response.json({ apps: appList });
       if (path === "/api/setup") return Response.json({ checklist: CHECKLIST });
       return Response.json({});
     },
@@ -271,7 +272,7 @@ test("Continue adds a step to the address and to history, and saves it", async (
   await waitFor(() => expect(saves).toContain(2));
 });
 
-test("the steps run welcome, computer, team, approval, apps, notify, setup, name", async () => {
+test("the steps run welcome, computer, team, approval, setup, apps, notify, name", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
@@ -286,9 +287,9 @@ test("the steps run welcome, computer, team, approval, apps, notify, setup, name
       "A browser and files of its own",
       "Your team of Bots",
       "You decide what it asks",
+      "Check your setup",
       "Connect apps",
       "Get notified",
-      "Check your setup",
       "Your name",
     ]),
   );
@@ -300,6 +301,8 @@ test("the steps run welcome, computer, team, approval, apps, notify, setup, name
     fireEvent.click(await continueButton(view));
     await heading(view, next);
   }
+  fireEvent.click(await continueButton(view));
+  await heading(view, "Check your setup");
   fireEvent.click(await continueButton(view));
   await heading(view, "Connect your apps");
 });
@@ -465,7 +468,7 @@ test("back from a consent, browser Back goes to the step before, not to the vend
   ).toBeNull();
 
   await act(async () => view.history.back());
-  expect(await heading(view, "You decide what it asks about")).toBeTruthy();
+  expect(await heading(view, "Check your setup")).toBeTruthy();
 });
 
 test("the failed line goes once the person moves on, and doesn't come back with Back", async () => {
@@ -512,16 +515,28 @@ test("Get started on the name step saves the name, finishes, plays the orb's fin
   });
 });
 
-test("a checklist link goes through the name step, says what opens, and opens it after", async () => {
+test("a checklist link moves on, says on every step after it what opens, and opens it at the end", async () => {
   const view = open("/onboarding?step=setup");
   await heading(view, "Check your setup");
 
   fireEvent.click(await view.findByRole("link", { name: "Credentials" }));
 
+  // On to the next step, not straight to the end: the steps between still come.
+  await heading(view, "Connect your apps");
+  expect(searchOf(view)).toEqual({ step: "apps", open: "/admin/credentials" });
+  expect(
+    await view.findByText("Credentials opens once you get started."),
+  ).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "Not now" }));
+  await heading(view, "Get notified");
+  expect(
+    view.getByText("Credentials opens once you get started."),
+  ).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "Not now" }));
   await heading(view, "Let's get to it.");
   expect(searchOf(view)).toEqual({ step: "name", open: "/admin/credentials" });
   expect(
-    await view.findByText("Credentials opens once you get started."),
+    view.getByText("Credentials opens once you get started."),
   ).toBeTruthy();
   expect(completed).toBe(false);
 
@@ -533,6 +548,19 @@ test("a checklist link goes through the name step, says what opens, and opens it
   expect(completed).toBe(true);
 });
 
+test("an admin's Add apps keeps onboarding's place: on to Get notified, with Plugins opening at the end", async () => {
+  appList = [];
+  const view = open("/onboarding?step=apps");
+  await heading(view, "Connect your apps");
+
+  fireEvent.click(await view.findByRole("button", { name: "Add apps" }));
+
+  await heading(view, "Get notified");
+  expect(searchOf(view)).toEqual({ step: "notify", open: "/admin/plugins" });
+  expect(view.getByText("Plugins opens once you get started.")).toBeTruthy();
+  expect(completed).toBe(false);
+});
+
 test("a page to open that isn't one of this app's is dropped", async () => {
   const view = open("/onboarding?step=name&open=https%3A%2F%2Fevil.test");
 
@@ -540,7 +568,7 @@ test("a page to open that isn't one of this app's is dropped", async () => {
   expect(searchOf(view).open).toBeUndefined();
 });
 
-test("Skip intro reaches Connect your apps, survives reload, and Back returns to the step it skipped from", async () => {
+test("Skip intro reaches Check your setup, survives reload, and Back returns to the step it skipped from", async () => {
   localEvaluation = true;
   const first = open("/onboarding?step=welcome");
   await heading(first, "Welcome to OpenBot");
@@ -550,24 +578,37 @@ test("Skip intro reaches Connect your apps, survives reload, and Back returns to
     ),
   );
   fireEvent.click(first.getByRole("button", { name: "Skip intro" }));
-  await heading(first, "Connect your apps");
-  await waitFor(() => expect(saves).toContain(6));
+  await heading(first, "Check your setup");
+  await waitFor(() => expect(saves).toContain(8));
   expect(completed).toBe(false);
   const history = first.history;
   first.unmount();
   queryClient.clear();
 
-  const view = open("/onboarding?step=apps", history);
-  await heading(view, "Connect your apps");
+  const view = open("/onboarding?step=setup", history);
+  await heading(view, "Check your setup");
   fireEvent.click(back(view));
   await heading(view, "Welcome to OpenBot");
   await act(async () => history.forward());
+  await heading(view, "Check your setup");
+  fireEvent.click(await continueButton(view));
   await heading(view, "Connect your apps");
   fireEvent.click(view.getByRole("button", { name: "Not now" }));
   await heading(view, "Get notified");
-  fireEvent.click(view.getByRole("button", { name: "Not now" }));
-  await heading(view, "Check your setup");
   expect(completed).toBe(false);
+});
+
+test("the last intro step has no Skip intro, since Continue goes to the same place", async () => {
+  const view = open("/onboarding?step=team");
+  await heading(view, "Pick a Bot or make your own");
+  expect(view.getByRole("button", { name: "Skip intro" })).toBeTruthy();
+
+  fireEvent.click(await continueButton(view));
+
+  await heading(view, "You decide what it asks about");
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Skip intro" })).toBeNull(),
+  );
 });
 
 test("somebody trying OpenBot alone gets the self-hosting step, with Talk to an engineer", async () => {
@@ -582,7 +623,7 @@ test("somebody trying OpenBot alone gets the self-hosting step, with Talk to an 
   const engineer = view.getByRole("link", { name: "Talk to an engineer" });
   expect(engineer.getAttribute("target")).toBe("_blank");
   fireEvent.click(await continueButton(view));
-  expect(await heading(view, "Connect your apps")).toBeTruthy();
+  expect(await heading(view, "Check your setup")).toBeTruthy();
 });
 
 test("an organization's people never see the self-hosting step", async () => {
@@ -591,7 +632,7 @@ test("an organization's people never see the self-hosting step", async () => {
 
   fireEvent.click(await continueButton(view));
 
-  expect(await heading(view, "Connect your apps")).toBeTruthy();
+  expect(await heading(view, "Check your setup")).toBeTruthy();
   expect(view.queryByText("Running it yourself")).toBeNull();
 });
 
@@ -632,7 +673,7 @@ test("until the deployment answers, the intro's Continue waits; a failure says s
   ).toBeNull();
 });
 
-test("a consent after Skip intro returns Back to the skipped-from step", async () => {
+test("a consent returns Back to the step it was reached from, wherever that was", async () => {
   window.sessionStorage.setItem(
     "openbot-onboarding-consent",
     JSON.stringify({

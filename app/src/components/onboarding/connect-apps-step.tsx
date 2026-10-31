@@ -22,6 +22,7 @@ import {
   connectAccountMutationOptions,
   invalidatePlugins,
 } from "@/lib/plugins/mutations";
+import { setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
 
 /** An app this step left for, to be told about when the browser comes back. */
@@ -96,6 +97,18 @@ export function ConnectAppsStep({
     enabled: bot !== undefined,
   });
   const rows = apps.data?.filter((app) => app.account === "personal");
+  /*
+   * Why the list can be empty: the step before reads the setup checklist, and its More apps row says
+   * whether people can connect apps beyond the ones an admin adds. An admin is handed its fix.
+   */
+  const moreApps = useQuery({
+    ...setupChecklistQueryOptions(),
+    enabled: rows?.length === 0,
+  }).data?.rows.find((row) => row.id === "apps");
+  const moreAppsKey =
+    moreApps && !moreApps.ready && moreApps.fix?.kind === "env"
+      ? moreApps.fix.names[0]
+      : undefined;
   const nameOf = (serverId: string | undefined) =>
     apps.data?.find((app) => app.key === serverId)?.displayName;
 
@@ -181,8 +194,10 @@ export function ConnectAppsStep({
           title="No apps to connect yet"
         >
           {isAdmin
-            ? "Add apps for everyone in Plugins, then connect your own here or in Connections."
-            : "When an admin adds apps, you can connect them in Connections."}
+            ? moreAppsKey
+              ? `Nobody has added apps yet, and more apps aren't set up. Add apps for everyone in Plugins, or set ${moreAppsKey} so people can connect more.`
+              : "Nobody has added apps yet. Add apps for everyone in Plugins, then connect your own in Connections."
+            : "An admin hasn't added any apps yet. When they do, you can connect them in Connections."}
         </PageEmpty>
       ) : (
         <PageRows>
