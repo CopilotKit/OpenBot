@@ -93,8 +93,11 @@ export function ApprovalCard({
     <section
       // Named while it waits, so it is a region a screen reader can jump to; folded, it is not.
       aria-label={waiting ? "Waiting for your approval" : undefined}
+      // The header's "Needs you" finds a waiting card by this, and moves focus to it.
+      data-approval-waiting={waiting ? "" : undefined}
+      tabIndex={waiting ? -1 : undefined}
       className={cn(
-        "w-full min-w-0",
+        "w-full min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-ring",
         frame === "card" &&
           "max-w-xl overflow-hidden rounded-xl bg-card text-card-foreground shadow-(--shadow-raised)",
         className,
