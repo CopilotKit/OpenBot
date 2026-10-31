@@ -242,17 +242,17 @@ import {
   REFUSAL_MARKER,
   vendorAnswer,
 } from "./plugins/tools";
-import { appReads, createProactiveEngine } from "./proactive/engine";
+import { createProactiveEngine } from "./proactive/engine";
 import {
   createPrivateShareCheck,
   PRIVATE_SHARE_TOOL_REF,
 } from "./proactive/private-share";
 import {
-  createReadOnlyClassifier,
   guardProactiveCallback,
   restrictCoordinationForRun,
   restrictToolsForRun,
 } from "./proactive/restriction";
+import { checkInToolsFor, createCheckInScope } from "./proactive/scope";
 import { createProactiveStore } from "./proactive/store";
 import { createProviderOAuthProxy } from "./provider-oauth";
 import { createRecorderExtension } from "./recorder/wiring";
@@ -1380,8 +1380,6 @@ const memoryIngestion = createMemoryIngestion({
     (await pluginStore.agentOwner(bot)) === owner ||
     (await agentProfileStore.get(await actorFor(owner), bot)) !== null,
 });
-// Proactive research may only read; see proactive/restriction.ts. Read from the catalogue per call.
-const proactiveReadOnlyRefs = createReadOnlyClassifier(pluginStore);
 /** Team Bots: published Bots, their audiences, and teammates' consent to their own accounts. */
 const teamBots = createTeamBots({
   database,
@@ -1392,6 +1390,18 @@ const teamBots = createTeamBots({
         ...(await pluginStore.brokeredConnectionsFor(userId)),
       ].map((connection) => connection.serverId),
     ),
+});
+/*
+ * What a check-in may read: the apps each person connected with their own account, through the
+ * tools that say they only read, and never another person's account through a Team Bot. See
+ * proactive/scope.ts and proactive/restriction.ts. Read afresh per question, so a connection
+ * withdrawn or a label changed applies on the next call.
+ */
+const checkInScope = createCheckInScope({
+  catalogue: pluginStore,
+  ownConnections: (userId) => pluginStore.ownConnections(userId),
+  unaskedOwnAccount: (ownerUserId, agentId) =>
+    teamBots.unaskedOwnAccount(ownerUserId, agentId),
 });
 const deliveryScopeFor: DeliveryScopeResolver = async (
   ownerUserId,
@@ -1817,8 +1827,9 @@ const actorAgentResolver = createActorAgentResolver({
   loadToolsForActor: (actorId, initiator) =>
     restrictToolsForRun(
       initiator,
+      actorId,
       loadToolsForActor(actorId, initiator),
-      proactiveReadOnlyRefs,
+      checkInScope,
     ),
   signRunForActor,
   computerGuidance: config.computer ? computerGuidance : undefined,
@@ -2222,22 +2233,16 @@ const proactiveEngine = createProactiveEngine({
   resolveScope: deliveryScopeFor,
   notify: (scope, input) => deliveryNotifications(scope, input),
   tasks: taskRunner,
-  // None of the person's apps to read means a check-in could find nothing: it never reaches the model.
-  readableApps: async (ownerUserId, agentId) =>
-    appReads(
-      await loadToolsForActor(ownerUserId)(agentId),
-      await proactiveReadOnlyRefs(),
-    ),
+  /*
+   * Nothing the person connected that this Bot can read means a check-in could find nothing: it
+   * never reaches the model. Otherwise these are the apps its instruction names, and every other
+   * tool the Bot holds is answered with a refusal if the model calls it anyway.
+   */
+  ...checkInToolsFor(
+    (ownerUserId) => loadToolsForActor(ownerUserId),
+    checkInScope,
+  ),
   catalogue: pluginStore,
-  deniedToolNames: async (ownerUserId, agentId) => {
-    const [tools, allowed] = await Promise.all([
-      loadToolsForActor(ownerUserId)(agentId),
-      proactiveReadOnlyRefs(),
-    ]);
-    return tools
-      .filter((tool) => !allowed.has(tool.ref) && !allowed.has(tool.name))
-      .map((tool) => tool.name);
-  },
   mintThreadId: () => threadIdentity.mint(),
 });
 const proactiveSweep = repeatAfterEach(async () => {
@@ -2599,10 +2604,7 @@ const app = createApp(
   hostAccessBroker,
   process.env.OPENBOT_DESKTOP_HOST_TOKEN,
   async (input) => {
-    const proactiveRefusal = await guardProactiveCallback(
-      input,
-      proactiveReadOnlyRefs,
-    );
+    const proactiveRefusal = await guardProactiveCallback(input, checkInScope);
     if (proactiveRefusal) return proactiveRefusal;
     const coordinated = await coordination.call(input);
     if (coordinated) return coordinated;

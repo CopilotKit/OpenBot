@@ -2,32 +2,45 @@ import { describe, expect, test } from "bun:test";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import type { ApprovalRecord } from "../src/approvals/types";
-import { appReads, repeatOf } from "../src/proactive/engine";
+import { repeatOf } from "../src/proactive/engine";
 import { pingText } from "../src/proactive/ping";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import {
-  createReadOnlyClassifier,
   guardProactiveCallback,
   proactiveInitiator,
   restrictCoordinationForRun,
   restrictToolsForRun,
 } from "../src/proactive/restriction";
+import { appsOf, createCheckInScope } from "../src/proactive/scope";
 import { linkKey, titleKey } from "../src/proactive/types";
 import { checkInWindow, researchInstruction } from "../src/proactive/window";
 
-const catalogue = (effects: Record<string, "read" | "write">) => ({
-  listServers: async () => [
-    {
-      id: "linear",
-      title: "Linear",
-      tools: Object.entries(effects).map(([name, effect]) => ({
-        ref: `linear/${name}`,
-        effect,
-        destructive: false,
-      })),
+/**
+ * One app, Linear, as the catalogue lists it: whether a call goes out on the person's own credential,
+ * and which of its tools say they only read. The person has connected it.
+ */
+function scopeOf(
+  labels: Record<string, boolean>,
+  options: { ownCredential?: boolean; connected?: boolean } = {},
+) {
+  return createCheckInScope({
+    catalogue: {
+      listServers: async () => [
+        {
+          id: "linear",
+          title: "Linear",
+          ownCredential: options.ownCredential ?? true,
+          tools: Object.entries(labels).map(([name, labelledRead]) => ({
+            ref: `linear/${name}`,
+            labelledRead,
+          })),
+        },
+      ],
     },
-  ],
-});
+    ownConnections: async () =>
+      new Set(options.connected === false ? [] : ["linear"]),
+  });
+}
 
 function granted(ref: string, calls: string[]): GrantedTool {
   return {
@@ -45,9 +58,9 @@ function granted(ref: string, calls: string[]): GrantedTool {
 describe("proactive read-only restriction", () => {
   test("a proactive run is offered only reads and a write is never dispatched", async () => {
     const calls: string[] = [];
-    const effects: Record<string, "read" | "write"> = {
-      list_issues: "read",
-      create_issue: "write",
+    const labels: Record<string, boolean> = {
+      list_issues: true,
+      create_issue: false,
     };
     const load = async () => [
       granted("linear/list_issues", calls),
@@ -55,23 +68,23 @@ describe("proactive read-only restriction", () => {
     ];
     const restricted = restrictToolsForRun(
       proactiveInitiator("run-1"),
+      "person",
       load,
-      createReadOnlyClassifier(catalogue(effects)),
+      scopeOf(labels),
     );
-    const tools = await restricted();
+    const tools = await restricted("bot");
     expect(tools.map((tool) => tool.ref)).toEqual(["linear/list_issues"]);
     // A read relabelled as a write mid-run is refused on its next call.
-    effects.list_issues = "write";
+    labels.list_issues = false;
     expect(await tools[0]?.execute({})).toStartWith("Refused.");
     expect(calls).toEqual([]);
   });
 
   test("other initiators are untouched and a proactive run gets no coordination", async () => {
     const load = async () => [granted("linear/create_issue", [])];
-    const classifier = createReadOnlyClassifier(catalogue({}));
-    expect(restrictToolsForRun({ kind: "person" }, load, classifier)).toBe(
-      load,
-    );
+    expect(
+      restrictToolsForRun({ kind: "person" }, "person", load, scopeOf({})),
+    ).toBe(load);
     const coordination = async () => ["message_bot"];
     expect(
       await restrictCoordinationForRun(proactiveInitiator("r"), coordination)(),
@@ -82,42 +95,43 @@ describe("proactive read-only restriction", () => {
   });
 
   test("the remote callback door refuses writes, host tools and coordination, and fails closed", async () => {
-    const classifier = createReadOnlyClassifier(
-      catalogue({ list_issues: "read", create_issue: "write" }),
-    );
+    const scope = scopeOf({ list_issues: true, create_issue: false });
     const run = { initiator: proactiveInitiator("r") };
+    const who = { botId: "bot", actorId: "person" };
     for (const name of [
       "linear/create_issue",
       "message_bot",
       "host_write_file",
       "remember_personal_fact",
       "unknown/tool",
+      // A server added under the memory tools' own id is not the person's memory.
+      "memory/recall_personal_memory",
     ])
       expect(
-        (await guardProactiveCallback({ name, run }, classifier))?.text,
+        (await guardProactiveCallback({ name, run, ...who }, scope))?.text,
       ).toStartWith("Refused.");
     expect(
       await guardProactiveCallback(
-        { name: "linear/list_issues", run },
-        classifier,
+        { name: "linear/list_issues", run, ...who },
+        scope,
       ),
     ).toBeNull();
     expect(
       await guardProactiveCallback(
-        { name: "recall_personal_memory", run },
-        classifier,
+        { name: "recall_personal_memory", run, ...who },
+        scope,
       ),
     ).toBeNull();
     expect(
       await guardProactiveCallback(
-        { name: "linear/create_issue", initiator: { kind: "person" } },
-        classifier,
+        { name: "linear/create_issue", initiator: { kind: "person" }, ...who },
+        scope,
       ),
     ).toBeNull();
     expect(
       (
         await guardProactiveCallback(
-          { name: "linear/list_issues", run },
+          { name: "linear/list_issues", run, ...who },
           async () => {
             throw new Error("catalogue down");
           },
@@ -143,11 +157,10 @@ describe("the window a check-in reads", () => {
     expect(window.since.toISOString()).toBe("2026-10-21T17:30:00.000Z");
     const prompt = researchInstruction({ focus: "" }, window);
     const after = Math.floor(window.since.getTime() / 1000);
-    expect(prompt).toContain(`after:${after}`);
+    expect(prompt).toContain(`(Unix time ${after})`);
     expect(prompt).toContain(
       "the last day, because no earlier check-in finished",
     );
-    expect(prompt).toContain("today's and tomorrow's events");
   });
 
   test("after a quiet or raised check-in it reads only what is new since that one started", () => {
@@ -156,7 +169,7 @@ describe("the window a check-in reads", () => {
       const window = checkInWindow({ outcome, startedAt: last }, NOW);
       expect(window).toMatchObject({ firstRun: false, since: last });
       expect(researchInstruction({ focus: "" }, window)).toContain(
-        `"in:inbox after:${Math.floor(last.getTime() / 1000)}"`,
+        `(Unix time ${Math.floor(last.getTime() / 1000)})`,
       );
     }
   });
@@ -217,6 +230,26 @@ describe("the window a check-in reads", () => {
     expect(prompt).toContain("They asked you to focus on: Supplier orders");
     expect(prompt).toContain("Nothing you raised before is still open.");
     expect(prompt).not.toContain("They hid these");
+  });
+
+  test("it asks one question of what the person connected, names those apps, and says nothing about mail or a calendar", () => {
+    const prompt = researchInstruction(
+      { focus: "" },
+      checkInWindow(null, NOW),
+      undefined,
+      "schedule",
+      ["Linear", "Acme CRM"],
+    );
+    expect(prompt).toContain(
+      "Your one question: is there something your person needs to do that they probably don't know about yet? Look for it in what they have connected: Linear, Acme CRM. Raise only that. If there is nothing like that, stay silent.",
+    );
+    // Right after what started it, ahead of the window and everything else.
+    expect(prompt.split("\n")[2]).toStartWith("Your one question:");
+    expect(prompt).toContain(
+      "If something needs doing, raise it as a next step for them instead of doing it.",
+    );
+    for (const mailWording of ["in:inbox", "after:", "mail", "calendar"])
+      expect(prompt).not.toContain(mailWording);
   });
 });
 
@@ -360,36 +393,52 @@ describe("the ping's words", () => {
 });
 
 describe("what a check-in can read", () => {
-  test("only reads of the person's apps count; the person's own memory is not a source", () => {
-    const allowed = new Set([
-      "linear/list_issues",
-      "recall_personal_memory",
-      "memory/recall_personal_memory",
+  const tools = [
+    { ref: "linear/list_issues", name: "mcp__linear__list_issues" },
+    { ref: "linear/create_issue", name: "mcp__linear__create_issue" },
+    { ref: "memory/recall_personal_memory", name: "recall_personal_memory" },
+  ];
+
+  test("only the reads of an app the person connected with their own account; their memory is not a source", async () => {
+    const reads = await scopeOf({ list_issues: true, create_issue: false })(
+      "person",
+      "bot",
+    );
+    expect(appsOf(tools, reads)).toEqual([
+      { title: "Linear", refs: ["linear/list_issues"] },
     ]);
-    expect(
-      appReads(
-        [
-          { ref: "linear/list_issues", name: "mcp__linear__list_issues" },
-          { ref: "linear/create_issue", name: "mcp__linear__create_issue" },
+  });
+
+  test("an app on an admin's credential, or one the person never connected, is not read", async () => {
+    for (const options of [{ ownCredential: false }, { connected: false }])
+      expect(
+        appsOf(
+          tools,
+          await scopeOf({ list_issues: true }, options)("person", "bot"),
+        ),
+      ).toEqual([]);
+  });
+
+  test("a Team Bot's tool that would land in someone else's account, or one not consented to, is not read", async () => {
+    const reads = await createCheckInScope({
+      catalogue: {
+        listServers: async () => [
           {
-            ref: "memory/recall_personal_memory",
-            name: "recall_personal_memory",
+            id: "linear",
+            title: "Linear",
+            ownCredential: true,
+            tools: [
+              { ref: "linear/list_issues", labelledRead: true },
+              { ref: "linear/list_projects", labelledRead: true },
+            ],
           },
         ],
-        allowed,
-      ),
-    ).toEqual(["linear/list_issues"]);
-    expect(
-      appReads(
-        [
-          {
-            ref: "memory/recall_personal_memory",
-            name: "recall_personal_memory",
-          },
-        ],
-        allowed,
-      ),
-    ).toEqual([]);
+      },
+      ownConnections: async () => new Set(["linear"]),
+      unaskedOwnAccount: async () => async (ref) =>
+        ref === "linear/list_projects",
+    })("person", "team-bot");
+    expect([...reads.keys()]).toEqual(["linear/list_projects"]);
   });
 });
 

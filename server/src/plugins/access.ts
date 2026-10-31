@@ -62,6 +62,21 @@ export type ServerAccess = {
    */
   reachedAs: "person" | "deployment";
   /**
+   * Whether the call goes out on the asking person's OWN credential: a grant they gave at the
+   * vendor, or their own account behind a broker. This is what "something this person connected"
+   * means, and a check-in reads nothing else.
+   *
+   * NOT `reachedAs === "person"`, and the one place the two differ is the point. A built-in server
+   * runs against this deployment's own tables as the person whose turn it is, so the trail names
+   * them, but they connected nothing and hold no credential for it. Everything an admin's key
+   * reaches for everybody, a Shared app's team account, an app with no account at all and a public
+   * endpoint are not the person's either.
+   *
+   * Answered here, by every kind of server, so a kind added later cannot be read by a check-in until
+   * it says whose credential it runs on, and the check-in never has to know its name.
+   */
+  ownCredential: boolean;
+  /**
    * Which app at the broker this row is, and null for a row that is not brokered at all.
    *
    * Read from the URL, because the URL is what the transport dials — so the app a person is checked
@@ -110,6 +125,20 @@ const REACHED_AS_BY_AUTH: Record<
   "user-oauth": "person",
   builtin: "person",
 };
+
+/**
+ * Whether each auth kind runs on the asking person's own credential. A third table rather than a
+ * reading of the two above, for their reason: `builtin` is reached as the person and holds no
+ * credential of theirs, and only a table keyed on the auth kind can say both, with the compiler
+ * asking the question again for any kind added later.
+ */
+const OWN_CREDENTIAL_BY_AUTH: Record<CatalogueEntry["auth"]["kind"], boolean> =
+  {
+    none: false,
+    "deployment-bearer": false,
+    "user-oauth": true,
+    builtin: false,
+  };
 
 /**
  * The shelf both refusals below sit on: this deployment cannot say how to reach a row, and will
@@ -371,6 +400,7 @@ export function accessFor(
       transport: entry.transport ?? "mcp",
       credential: CREDENTIAL_BY_AUTH[entry.auth.kind],
       reachedAs: REACHED_AS_BY_AUTH[entry.auth.kind],
+      ownCredential: OWN_CREDENTIAL_BY_AUTH[entry.auth.kind],
       toolkit: null,
     };
   }
@@ -409,13 +439,16 @@ export function accessFor(
      * provider's business, and those are the two fields below.
      */
     const provider = row.provenance;
+    const reachedAs =
+      schemeKind(row.authScheme) === "none" || row.accountMode === "shared"
+        ? "deployment"
+        : "person";
     return {
       transport: provider,
       credential: "brokered",
-      reachedAs:
-        schemeKind(row.authScheme) === "none" || row.accountMode === "shared"
-          ? "deployment"
-          : "person",
+      reachedAs,
+      // The person's own account at the app, and only that: a Shared app's account is the team's.
+      ownCredential: reachedAs === "person",
       toolkit: TOOLKIT_OF[provider](row.url),
     };
   }
@@ -424,6 +457,7 @@ export function accessFor(
     transport: "mcp",
     credential: "deployment-token",
     reachedAs: "deployment",
+    ownCredential: false,
     toolkit: null,
   };
 }

@@ -524,6 +524,66 @@ export function connectionMethods(context: StoreContext) {
     },
 
     /**
+     * Every server this person can reach with an account they connected themselves, by id: a
+     * `user-oauth` grant they have not withdrawn, and their own account at a brokered app.
+     *
+     * The question a check-in asks before it reads anything, so it is one answer across both tables
+     * and a check-in never has to know there are two. An admin's Shared account is not here (it is
+     * the team's, held by the deployment), and neither is anything reached with an admin's key.
+     *
+     * EVERY ROW AT A CONNECTED APP'S URL, not only the one {@link brokeredConnectionsFor} draws on
+     * the settings page. The account belongs to the app, and a Bot granted a tool on a second row
+     * at the same url reaches the same account through it; leaving that row out would make a
+     * check-in skip an app the person did connect.
+     */
+    async ownConnections(userId: string): Promise<Set<string>> {
+      if (!userId) return new Set();
+      const granted = await database
+        .select({ serverId: mcpUserCredentials.serverId })
+        .from(mcpUserCredentials)
+        .innerJoin(
+          credentialRows,
+          eq(credentialRows.id, mcpUserCredentials.credentialId),
+        )
+        .where(
+          and(
+            eq(mcpUserCredentials.userId, userId),
+            isNull(credentialRows.revokedAt),
+          ),
+        );
+      const apps = new Set(
+        (
+          await database
+            .select({ app: brokeredConnections.app })
+            .from(brokeredConnections)
+            .where(
+              and(
+                eq(brokeredConnections.provider, brokerProvider),
+                eq(brokeredConnections.holder, "person"),
+                eq(brokeredConnections.userId, userId),
+              ),
+            )
+        ).map((row) => row.app),
+      );
+      const brokered =
+        apps.size === 0
+          ? []
+          : (
+              await database
+                .select({ id: mcpServers.id, url: mcpServers.url })
+                .from(mcpServers)
+                .where(eq(mcpServers.provenance, brokerProvider))
+            ).filter((row) => {
+              const app = toolkitOfFor(brokerProvider, row.url);
+              return app !== null && apps.has(app);
+            });
+      return new Set([
+        ...granted.map((row) => row.serverId),
+        ...brokered.map((row) => row.id),
+      ]);
+    },
+
+    /**
      * The deployment's one account at a brokered app, as the admin page draws it; null where none
      * is connected, and null for a server that is not brokered at all.
      *

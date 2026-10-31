@@ -193,6 +193,38 @@ export function standingRoleMessage(
   };
 }
 
+/**
+ * The guidance {@link standingRoleMessage} ends with, which every Bot OpenBot runs itself is given
+ * anyway (see {@link builtInAgentConfiguration}): left off a role run here so it is not said twice.
+ */
+const STANDING_GUIDANCE = `\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`;
+
+/**
+ * A Bot as OpenBot's own runner builds it, whatever it runs on elsewhere: what a check-in runs.
+ *
+ * A CHECK-IN NEVER CALLS A BOT'S OWN ENDPOINT. A Bot on another framework (a harness, an agent an
+ * admin registered) holds tools of its own there, and OpenBot cannot see them, so it cannot hold them
+ * to reads; a check-in that called the endpoint could act through them with nobody watching. Run
+ * here instead, as that Bot (its name and role, from the same standing role it is sent), on the
+ * deployment's model, with the person's connected tools through OpenBot's own dispatcher, every tool
+ * a check-in can touch is one OpenBot can refuse. The check-in's job is set by OpenBot's own
+ * instruction, so little of the framework's own logic is lost.
+ *
+ * A built-in Bot, or one OpenBot cannot run at all, is returned as it is.
+ */
+export function onOpenBotRunner(agent: RegisteredAgent): RegisteredAgent {
+  if (agent.type !== "remote_ag_ui" && agent.type !== "remote_mastra")
+    return agent;
+  return {
+    id: agent.id,
+    name: agent.name,
+    type: "built_in",
+    systemPrompt: agent.standingMessage.content.endsWith(STANDING_GUIDANCE)
+      ? agent.standingMessage.content.slice(0, -STANDING_GUIDANCE.length)
+      : agent.standingMessage.content,
+  };
+}
+
 export type RuntimeModel = {
   provider: "openai" | "anthropic";
   defaultModel: string;

@@ -106,23 +106,42 @@ export const CHECK_IN_OPENING: Record<ProactiveRunTrigger, string> = {
 const DO_IT_NOW =
   "Do the check-in now, in this turn. It is not a request to set up, list or change a routine or a schedule, even where their focus below is worded like one.";
 
+/**
+ * What a check-in is for: something needs doing, the person doesn't know about it yet, so the Bot
+ * brings it to their attention. Asked of what the person connected, named when the engine knows it
+ * (the apps `scope.ts` found), and never of any one app: a check-in reads whatever the person
+ * connected, so nothing here is written for mail or a calendar.
+ */
+export function coreQuestion(apps: readonly string[]) {
+  return [
+    "Your one question: is there something your person needs to do that they probably don't know about yet?",
+    apps.length > 0
+      ? `Look for it in what they have connected: ${apps.join(", ")}.`
+      : "Look for it in the apps they have connected.",
+    "Raise only that. If there is nothing like that, stay silent.",
+  ].join(" ");
+}
+
 /** The check-in turn's instruction, the whole of its message. */
 export function researchInstruction(
   setting: Pick<ProactiveSetting, "focus">,
   window: CheckInWindow,
   context: CheckInContext = EMPTY_CONTEXT,
   trigger: ProactiveRunTrigger = "schedule",
+  /** The apps the person connected that this Bot can read, by title (see `scope.ts`). */
+  apps: readonly string[] = [],
 ) {
   const after = Math.floor(window.since.getTime() / 1000);
   return [
     CHECK_IN_OPENING[trigger],
     DO_IT_NOW,
+    coreQuestion(apps),
     `It is ${window.now.toISOString()}. Look only at what is new since ${window.since.toISOString()}, ${window.firstRun ? "the last day, because no earlier check-in finished" : "when you last checked in"}.`,
-    `For mail, put after:${after} in every search, for example "in:inbox after:${after}", so you read only messages newer than that. For the calendar, read today's and tomorrow's events.`,
+    `Where an app lets you ask for what changed after a time, ask it for only what is newer than that (Unix time ${after}).`,
     setting.focus
       ? `They asked you to focus on: ${setting.focus}`
       : "Look for new requests waiting on them, changes to their plans, and anything due today or tomorrow.",
-    "You can only read in this run. You cannot send messages, change anything in an app, hand work to anyone, or use a browser or computer; those tools are refused.",
+    "You can only read in this run. You cannot send messages, change anything in an app, hand work to anyone, or use a browser or computer; those tools are refused. If something needs doing, raise it as a next step for them instead of doing it.",
     "Most check-ins should record nothing. When nothing new needs the person, record nothing: silence is the right outcome, and they hear from you only when you record something.",
     context.open.length > 0
       ? `Still open from your earlier check-ins. Never raise any of these again, however you would word it. If one no longer needs them (it was answered, done or cancelled), clear it with clear_next_step and its id, and say why:\n${context.open.map((item) => `- ${quoted(item.title)} (id: ${item.id})`).join("\n")}`

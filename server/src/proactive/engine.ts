@@ -12,7 +12,8 @@
  * most end with nothing raised: one ledger row, no message, no second turn. Before any of that, the
  * gates that would make it pointless are read without the model: the person turned check-ins off,
  * paused the Bot, an admin turned them off, the Bot used its day's runs, the conversation is gone,
- * or the Bot can read none of the person's apps. Each writes a `skipped` row saying which.
+ * or the Bot can read nothing the person connected with their own account (`scope.ts`). Each writes
+ * a `skipped` row saying which.
  *
  * WHAT IT RAISES IS AN ITEM, NOT A MESSAGE. An item needs a source the check-in actually read, and
  * is refused if it repeats something open, something the person already has a task for, or something
@@ -42,11 +43,11 @@ import type {
   TaskService,
 } from "./contracts";
 import {
-  PROACTIVE_MEMORY_READS,
   proactiveInitiator,
   proactiveRunIdOf,
   refusalsFor,
 } from "./restriction";
+import type { CheckInApp } from "./scope";
 import {
   PROACTIVE_RUN_KIND,
   type PriorItems,
@@ -121,10 +122,11 @@ export type ProactiveEngineDeps = {
   /** Opens a task for an item the person started (`tasks/*`). Without it, Start is refused. */
   tasks?: Pick<TaskService, "startFromItem">;
   /**
-   * The connected-app reads this Bot can make for this person, by ref (see `appReads`). Empty means
-   * a check-in could find nothing, so none is run. Without it, every check-in goes to the model.
+   * The apps this person connected with their own account that this Bot can read, with the reads
+   * in each (see `scope.ts`). Empty means a check-in could find nothing, so none is run; otherwise
+   * the instruction names them. Without it, every check-in goes to the model and names none.
    */
-  readableApps?(ownerUserId: string, agentId: string): Promise<string[]>;
+  readableApps?(ownerUserId: string, agentId: string): Promise<CheckInApp[]>;
   catalogue: {
     listServers(): Promise<
       { id: string; title: string; tools: { ref: string }[] }[]
@@ -135,25 +137,6 @@ export type ProactiveEngineDeps = {
   mintThreadId(): string;
   now?: () => Date;
 };
-
-/**
- * The reads among a Bot's tools that reach the person's apps: the tools a check-in may call
- * (`allowed`, the read classifier's answer) less the person's own memory, which every Bot can recall
- * and which holds nothing new for a check-in to find.
- */
-export function appReads(
-  tools: readonly { ref: string; name: string }[],
-  allowed: ReadonlySet<string>,
-): string[] {
-  return tools
-    .filter(
-      (tool) =>
-        (allowed.has(tool.ref) || allowed.has(tool.name)) &&
-        !PROACTIVE_MEMORY_READS.has(tool.ref) &&
-        !PROACTIVE_MEMORY_READS.has(tool.name),
-    )
-    .map((tool) => tool.ref);
-}
 
 /**
  * Why a new item repeats one the person already has, or null. Compared by normalized title and by
@@ -412,22 +395,23 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
   }
 
   /**
-   * Why a check-in for this setting would find nothing, or null when it may go to the model. The
-   * gates, cheapest first, none of them a model call. Asked by the run itself, and by Run now before
-   * it queues one, so the person hears at once why it can't.
+   * Why a check-in for this setting would find nothing, or the apps it can read when it may go to
+   * the model. The gates, cheapest first, none of them a model call. Asked by the run itself, and by
+   * Run now before it queues one, so the person hears at once why it can't.
    */
   async function gateOf(
     setting: ProactiveSetting,
-  ): Promise<ProactiveSkipReason | null> {
-    if (await deps.store.personOff(setting.ownerUserId)) return "off_person";
+  ): Promise<{ skip: ProactiveSkipReason } | { apps: CheckInApp[] }> {
+    if (await deps.store.personOff(setting.ownerUserId))
+      return { skip: "off_person" };
     if (await deps.store.paused(setting.ownerUserId, setting.agentId))
-      return "paused";
-    if (!(await allowed(setting.ownerUserId))) return "off_admin";
+      return { skip: "paused" };
+    if (!(await allowed(setting.ownerUserId))) return { skip: "off_admin" };
     if (
       (await deps.store.runsToday(setting.id)) >=
       (await dailyRuns(setting.agentId))
     )
-      return "capped";
+      return { skip: "capped" };
     if (
       !(await deps.resolveScope(
         setting.ownerUserId,
@@ -435,14 +419,11 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         setting.agentId,
       ))
     )
-      return "unreachable";
-    if (
-      deps.readableApps &&
-      (await deps.readableApps(setting.ownerUserId, setting.agentId)).length ===
-        0
-    )
-      return "no_sources";
-    return null;
+      return { skip: "unreachable" };
+    if (!deps.readableApps) return { apps: [] };
+    // Nothing the person connected that this Bot can read: there is nothing for a check-in to find.
+    const apps = await deps.readableApps(setting.ownerUserId, setting.agentId);
+    return apps.length === 0 ? { skip: "no_sources" } : { apps };
   }
 
   /** A check-in a gate stopped, in the ledger with its reason, where the Bot's check-ins read it. */
@@ -469,8 +450,8 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
   ) {
     const setting = await deps.store.byId(settingId);
     if (!setting?.enabled) return;
-    const reason = await gateOf(setting);
-    if (reason) return skip(setting, runId, trigger, reason);
+    const gate = await gateOf(setting);
+    if ("skip" in gate) return skip(setting, runId, trigger, gate.skip);
     // Read before this run is in the ledger, so the window opens at the check-in before it.
     const last = await deps.store.lastCheckIn(setting.id);
     const threadId = deps.mintThreadId();
@@ -488,6 +469,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       checkInWindow(last, now()),
       contextOf(prior),
       trigger,
+      gate.apps.map((app) => app.title),
     );
     let failure: string | null = null;
     try {
@@ -680,10 +662,14 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         );
       }
       const runId = crypto.randomUUID();
-      const reason = await gateOf(setting);
-      if (reason) {
-        await skip(setting, runId, "run_now", reason);
-        return { queued: false, skipped: reason, why: SKIPPED_BECAUSE[reason] };
+      const gate = await gateOf(setting);
+      if ("skip" in gate) {
+        await skip(setting, runId, "run_now", gate.skip);
+        return {
+          queued: false,
+          skipped: gate.skip,
+          why: SKIPPED_BECAUSE[gate.skip],
+        };
       }
       const payload = { settingId: setting.id, runId, trigger: "run_now" };
       const offered = await deps.queue.offer({

@@ -14,7 +14,8 @@ import {
   pluginGrants,
   vendorNameOf,
 } from "../../db/schema";
-import { classifyTool, tokenHeaderFor } from "../catalogue";
+import { isProactiveInitiator } from "../../proactive/initiator";
+import { classifyTool, labelledRead, tokenHeaderFor } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
@@ -144,6 +145,7 @@ export function callMethods(context: StoreContext) {
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
+          declaredRead: mcpTools.declaredRead,
           version: mcpTools.version,
         })
         .from(mcpTools)
@@ -152,12 +154,54 @@ export function callMethods(context: StoreContext) {
         )
         .limit(1);
 
-      const effect = classifyTool(
-        entry,
-        toolName,
-        advertised.length > 0,
-        advertised[0]?.effect,
-      );
+      /*
+       * A CHECK-IN ONLY READS, AND THAT IS DECIDED HERE TOO, not only where its tools are loaded.
+       *
+       * A check-in may call a tool only on an account the person connected themselves and only
+       * where the tool says it only reads (see `proactive/scope.ts`). The loader offers nothing else
+       * and checks again before each call; this is the same rule at the one door every call passes,
+       * so a check-in reaching a tool by any other route is refused before the policy, the vault or
+       * the vendor.
+       *
+       * And a call that passes is judged as the read it says it is. Its chat classification can
+       * still be a write (a server's `readOnlyHint` is trusted for a check-in and never for chat),
+       * and judged as one it would open an approval for a person who is not there to answer.
+       */
+      const checkIn = isProactiveInitiator(input.initiator);
+      if (
+        checkIn &&
+        !(
+          access.ownCredential &&
+          advertised[0] &&
+          labelledRead(entry, toolName, advertised[0])
+        )
+      ) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.call_rejected",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          ...(input.initiator ? { initiator: input.initiator } : {}),
+          payload: {
+            actor: auditActor,
+            bot: input.botId,
+            server: serverId,
+            tool: toolName,
+            refusal: "check_in_not_a_read",
+          },
+        });
+        throw new PluginRefusedError(
+          `${input.ref} is not available during a check-in, which can only read what the person connected.`,
+          null,
+        );
+      }
+      const effect = checkIn
+        ? "read"
+        : classifyTool(
+            entry,
+            toolName,
+            advertised.length > 0,
+            advertised[0]?.effect,
+          );
 
       const args = withoutEmptyOptionals(
         input.args,

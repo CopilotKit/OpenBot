@@ -49,6 +49,7 @@ import {
 } from "../src/proactive/engine";
 import { proactiveInitiator } from "../src/proactive/restriction";
 import { createProactiveRoutes } from "../src/proactive/routes";
+import type { CheckInApp } from "../src/proactive/scope";
 import { createProactiveStore } from "../src/proactive/store";
 import {
   ProactiveRefusedError,
@@ -74,6 +75,8 @@ const mail = `check-in-mail-${suite}`;
 const listMessages = `${mail}/list_messages`;
 /** The name a model calls the read by, which the check-in maps back to its ref. */
 const READ_TOOL = `mcp__${mail}__list_messages`;
+/** The one app the inbox Bot can read, as the engine is told it. */
+const mailApp = [{ title: "Mail", refs: [listMessages] }];
 const inboxChannel = `check-in-inbox-channel-${suite}`;
 const calendarChannel = `check-in-calendar-channel-${suite}`;
 const taskChannel = `check-in-task-channel-${suite}`;
@@ -359,7 +362,10 @@ function replica(
     model?: Model;
     admin?: ProactiveAdmin;
     tasks?: Pick<TaskService, "startFromItem">;
-    readableApps?: (ownerUserId: string, agentId: string) => Promise<string[]>;
+    readableApps?: (
+      ownerUserId: string,
+      agentId: string,
+    ) => Promise<CheckInApp[]>;
     denied?: string[];
     reachable?: boolean;
   } = {},
@@ -533,7 +539,7 @@ async function seedRuns(
   );
 }
 const afterOf = (instruction: string | undefined) =>
-  Number(instruction?.match(/after:(\d+)/)?.[1] ?? Number.NaN);
+  Number(instruction?.match(/\(Unix time (\d+)\)/)?.[1] ?? Number.NaN);
 
 /** `/api/proactive` over one replica's engine, signed in as the owner. */
 function routes(engine: ProactiveEngine) {
@@ -813,7 +819,7 @@ describe("the gates, before any model call", () => {
     expect(asked).toEqual([`${owner}:${inboxBot}`]);
     expect(nothing.requests).toEqual([]);
     await due(inbox);
-    const mailOnly = replica({ readableApps: async () => [listMessages] });
+    const mailOnly = replica({ readableApps: async () => mailApp });
     await mailOnly.engine.sweep();
     expect(mailOnly.requests).toHaveLength(1);
   });
@@ -1530,10 +1536,11 @@ describe("Run now", () => {
     };
     return settings.find((setting) => setting.id === inbox.id)?.lastRun;
   };
-  const nothingToRead = "Nothing to check: connect an app this Bot can read.";
+  const nothingToRead =
+    "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.";
 
   test("after a skip it is tried again, saying plainly why it can't, and the Bot's check-ins show the last one and why", async () => {
-    let readable: string[] = [];
+    let readable: CheckInApp[] = [];
     const { engine, requests } = replica({
       readableApps: async () => readable,
     });
@@ -1569,7 +1576,7 @@ describe("Run now", () => {
     expect(requests).toEqual([]);
 
     // Once it can read an app, the next Run now runs.
-    readable = [listMessages];
+    readable = mailApp;
     expect(await (await press(engine)).json()).toEqual({ queued: true });
     await engine.sweep();
     expect(requests).toHaveLength(1);
@@ -1589,7 +1596,7 @@ describe("Run now", () => {
   });
 
   test("a Run now skipped when it came up can be pressed again at once, and runs", async () => {
-    let readable = [listMessages];
+    let readable = mailApp;
     const { engine, requests } = replica({
       readableApps: async () => readable,
     });
@@ -1604,7 +1611,7 @@ describe("Run now", () => {
     });
     expect(requests).toEqual([]);
     // Pressed again within the ten minutes: queued and run, never a silent nothing.
-    readable = [listMessages];
+    readable = mailApp;
     expect(await engine.runNow(owner, inbox.id)).toEqual({ queued: true });
     await engine.sweep();
     expect(requests).toHaveLength(1);
@@ -1642,7 +1649,7 @@ describe("Run now", () => {
 describe("what a check-in costs and how it is asked", () => {
   test("a check-in is put to the model as a check-in, never as a routine firing: on its schedule, or because the person asked", async () => {
     await due(inbox);
-    const scheduled = replica();
+    const scheduled = replica({ readableApps: async () => mailApp });
     await scheduled.engine.sweep();
     const asked = askedOf(scheduled.requests[0]);
     expect(asked).toStartWith(CHECK_IN_OPENING.schedule);
@@ -1650,6 +1657,20 @@ describe("what a check-in costs and how it is asked", () => {
     expect(asked).toContain(
       "It is not a request to set up, list or change a routine or a schedule",
     );
+    /*
+     * What a check-in is for, asked of the apps the person connected and named: something they
+     * need to do and probably don't know about yet, raised only then, otherwise silence. Ahead of
+     * the window, the repeats and the read-only rule, which all still follow.
+     */
+    expect(asked).toContain(
+      "Your one question: is there something your person needs to do that they probably don't know about yet? Look for it in what they have connected: Mail. Raise only that. If there is nothing like that, stay silent.",
+    );
+    expect(asked.indexOf("Your one question:")).toBeLessThan(
+      asked.indexOf("Look only at what is new since"),
+    );
+    expect(asked).toContain("Nothing you raised before is still open.");
+    expect(asked).toContain("You can only read in this run.");
+    expect(asked).toContain("naming the tool you read the evidence with");
 
     await database
       .update(proactiveRuns)

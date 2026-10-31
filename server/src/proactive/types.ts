@@ -97,7 +97,8 @@ export const SKIPPED_BECAUSE: Record<ProactiveSkipReason, string> = {
   paused: "You paused this Bot.",
   capped: "This Bot used all its check-ins for today.",
   unreachable: "This Bot or its conversation is no longer available to you.",
-  no_sources: "Nothing to check: connect an app this Bot can read.",
+  no_sources:
+    "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.",
   busy: "Another check-in was still running.",
 };
 
