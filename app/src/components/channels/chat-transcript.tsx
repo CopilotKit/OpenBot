@@ -5,7 +5,6 @@ import {
   useRenderActivityMessage,
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
-import { useQuery } from "@tanstack/react-query";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -18,6 +17,7 @@ import {
   IconFile,
   IconX,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {
   createContext,
@@ -59,6 +59,7 @@ import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
@@ -71,7 +72,6 @@ import {
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { AppAccessCard } from "./app-access-card";
 import { isBrowserStep } from "./browser-activity";
 import {
@@ -94,6 +94,7 @@ import {
   useDrawnTool,
 } from "./tool-activity";
 import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
+import { ToolLine } from "./tool-line";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import { TranscriptRail } from "./transcript-rail";
 import {
@@ -103,13 +104,17 @@ import {
   type Turn,
   turnsOf,
 } from "./transcript-turns";
-import { ToolLine } from "./tool-line";
 import { VoiceChatCard } from "./voice-chat-card";
 
 type ChatTranscriptProps = {
   busy?: boolean;
   /** Comma-separated `/` command names, used to tell a skill chip from a leading slash. */
   commandNames?: string;
+  /**
+   * Drawn above the first message, as the first thing in the scroll content, so it scrolls away
+   * with the conversation. Only once the earliest page is drawn: see where it is rendered.
+   */
+  intro?: React.ReactNode;
   messages: ReadonlyArray<Readonly<Message>>;
   /**
    * Typed while the Bot had the turn, and waiting for it to finish. Empty on a screen that does not
@@ -1812,6 +1817,7 @@ function TranscriptRenderersWatch({
 export function ChatTranscript({
   busy = false,
   commandNames = "",
+  intro,
   messages,
   onRemoveQueued,
   queued = EMPTY_QUEUE,
@@ -1820,6 +1826,12 @@ export function ChatTranscript({
   working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
+  /*
+   * The transcript's column. OpenBot's own look widens it to a centered 720px in openbot.css,
+   * through `data-transcript-column`, an attribute of its own because the scroller's content keeps
+   * its `data-slot`.
+   */
+  const column = "mx-auto w-full max-w-2xl px-4";
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
    * silently broke the transcript: the agent hands back the SAME array and mutates it, so the
@@ -2100,7 +2112,10 @@ export function ChatTranscript({
   if (restoring) {
     return (
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+        <div
+          className={cn("flex flex-col gap-6 py-6", column)}
+          data-transcript-column=""
+        >
           <RestoringTranscript />
           {/*
            * A message typed while history loads is parked, not lost, and must be seen to be: a
@@ -2204,9 +2219,18 @@ export function ChatTranscript({
             >
               <MessageScrollerContent
                 aria-busy={busy}
-                className="mx-auto w-full max-w-2xl px-4 py-6"
+                className={cn("py-6", column)}
+                data-transcript-column=""
                 spacerClassName="order-2"
               >
+                {/*
+                 * THE INTRO IS THE FIRST CHILD, AND ONLY ONCE THE EARLIEST PAGE IS DRAWN. The scroller
+                 * reads "the first child moved" as rows prepended and holds the reader's place (see the
+                 * block below). Drawn while older pages are still to come, the intro would stay the
+                 * first child and every page drawn under it would be read as appended rows instead.
+                 * Drawn in the same commit as the earliest page, it is the prepend.
+                 */}
+                {pages.from === 0 ? intro : null}
                 {/*
                  * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
                  * at this block, worked the mechanism out from the library's bundle, and reached the

@@ -3,8 +3,12 @@
 @import "shadcn/tailwind.css";
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
+/* Inter is OpenDuet's face; Atkinson Hyperlegible is OpenBot's own (openbot.css). */
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/atkinson-hyperlegible-next";
+@import "@fontsource-variable/atkinson-hyperlegible-mono";
 @import "./theme.css";
+@import "./openbot.css";
 @import "./skins/skins.css";
 
 /*
@@ -151,4 +155,54 @@
   from {
     opacity: 0;
   }
+}
+
+/*
+ * The pattern behind an empty state. One rule, read entirely from the `--empty-pattern*` tokens in
+ * theme.css, so changing the pattern never means changing a component: the tile is a mask over a
+ * flat fill of `--empty-pattern-color`, faded out from the top-right corner by a second mask so it
+ * sits behind the empty state rather than across its text.
+ */
+.empty-pattern {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--empty-pattern-color);
+  opacity: var(--empty-pattern-opacity);
+  mask-image:
+    var(--empty-pattern),
+    radial-gradient(
+      circle at 85% 15%,
+      #000 0,
+      rgb(0 0 0 / 0.4) 30%,
+      transparent 60%
+    );
+  mask-repeat: repeat, no-repeat;
+  mask-size:
+    auto,
+    100% 100%;
+  mask-composite: intersect;
+}
+
+/*
+ * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
+ * so swapping or turning off the empty-state pattern does the same here. It fades out from the
+ * center instead of a corner.
+ */
+.orb-pattern {
+  position: absolute;
+  inset: -40px;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--empty-pattern-color);
+  opacity: var(--empty-pattern-opacity);
+  mask-image:
+    var(--empty-pattern),
+    radial-gradient(circle, #000 30%, rgb(0 0 0 / 0.35) 55%, transparent 72%);
+  mask-repeat: repeat, no-repeat;
+  mask-size:
+    auto,
+    100% 100%;
+  mask-composite: intersect;
 }

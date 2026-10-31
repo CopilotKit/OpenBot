@@ -56,6 +56,15 @@ export const IDENTITY_SUMMARIES = {
   slack: "Lets OpenBot recognise you when you message it from Slack.",
 } as const;
 
+/**
+ * The same, short enough for a Connections tile, where the line is one line wide and the full
+ * sentence was cut off mid-word. The full one stays on each connection's own page.
+ */
+const IDENTITY_TILE_SUMMARIES = {
+  github: "Repository events can start Bots.",
+  slack: "Message OpenBot from Slack.",
+} as const;
+
 const IDENTITY_TITLES = { github: "GitHub", slack: "Slack" } as const;
 
 export function connectionRows(input: {
@@ -80,7 +89,7 @@ export function connectionRows(input: {
           title: IDENTITY_TITLES[provider],
           summary: link?.handle
             ? `@${link.handle}`
-            : IDENTITY_SUMMARIES[provider],
+            : IDENTITY_TILE_SUMMARIES[provider],
           state: !link
             ? "available"
             : link.status === "needs_reconnect"
@@ -112,7 +121,9 @@ export function connectionRows(input: {
         (server): ConnectionRow => ({
           key: server.id,
           title: server.title,
-          summary: server.summary || `Connect your ${server.title} account.`,
+          // No line rather than "Connect your Todoist account.", which only repeated the tile's
+          // Connect button.
+          summary: server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
           mark: { kind: "logo", logo: server.logo },
         }),

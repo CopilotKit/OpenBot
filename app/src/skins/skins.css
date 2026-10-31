@@ -7,3 +7,26 @@
 @import "./openduet/skin.css";
 @import "./opendots/skin.css";
 @import "./openmuse/skin.css";
+
+/*
+ * The empty-state pattern is drawn for OpenBot's own palette, so a skin starts without it. A skin
+ * that wants one sets `--empty-pattern-opacity` (and its colour) in its own skin.css.
+ */
+:root[data-skin] {
+  --empty-pattern-opacity: 0;
+}
+
+/*
+ * Likewise the firmer card edge and lift: a skin keeps the plain hairline it was designed with, with
+ * no edge on rows and cards in dark mode, and its hairline around empty states in both. A skin that
+ * wants OpenBot's set the `--card-*` and `--empty-border` tokens in its skin.css.
+ */
+:root[data-skin] {
+  --card-border: var(--border);
+  --empty-border: var(--border);
+  --card-shadow: 0 0 #0000;
+  --card-shadow-hover: 0 0 #0000;
+}
+:root[data-skin].dark {
+  --card-border: transparent;
+}

@@ -25,6 +25,7 @@ import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
@@ -184,6 +185,18 @@ function renderSidebar() {
     refetchInterval: false,
   });
   queryClient.setQueryData(botLifecycleKeys.attention, []);
+  // The sidebar reads the approval inbox to mark conversations that wait for you; answered here so only channel requests are counted.
+  queryClient.setQueryDefaults(approvalInboxOptions().queryKey, {
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: false,
+  });
+  queryClient.setQueryData(approvalInboxOptions().queryKey, {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
   // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
   queryClient.setQueryData(browserKeys.state, {
     available: false,
@@ -225,7 +238,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
   const view = renderSidebar();
   const agent = await view.findByText("Recent conversation");
   const thread = view.getByText("New conversation");
-  expect(thread.className).toContain("text-[0.9rem]");
+  expect(thread.className).toContain("text-sm");
   act(() =>
     clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
       messageListEmphasis: "agent",
@@ -234,7 +247,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
       skin: "openbot",
     }),
   );
-  await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));
+  await waitFor(() => expect(agent.className).toContain("text-sm"));
   expect(thread.className).toContain("text-muted-foreground");
 });
 

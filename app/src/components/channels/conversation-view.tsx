@@ -19,6 +19,7 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 import { newId } from "../../lib/new-id";
 
 export function ConversationView({
@@ -36,6 +37,7 @@ export function ConversationView({
   stoppable,
   queueWhileBusy = false,
   restoring = false,
+  intro,
   onSubmit,
   onStop,
   voiceCall,
@@ -93,6 +95,11 @@ export function ConversationView({
   queueWhileBusy?: boolean;
   /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
+  /**
+   * The top of the conversation, drawn above the first message and scrolled away with it. Only in
+   * OpenBot's own look; a skin draws the transcript as it was designed.
+   */
+  intro?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
@@ -108,6 +115,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
+  const openbot = useSkinId() === DEFAULT_SKIN;
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 
@@ -428,6 +436,7 @@ export function ConversationView({
           commandNames={(commands ?? [])
             .map((command) => command.name)
             .join(",")}
+          {...(openbot && intro ? { intro } : {})}
           messages={messages}
           onRemoveQueued={(id) => {
             apply({ id, type: "remove" });
@@ -438,6 +447,7 @@ export function ConversationView({
           working={working}
         />
       </div>
+      {/* In OpenBot's own look, openbot.css widens this column to the transcript's centered 720px. */}
       <div
         className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
         data-slot="composer-column"

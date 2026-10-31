@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /**
  * One line for one thing a Bot did.
@@ -40,20 +42,28 @@ export function ToolLine({
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
 }) {
+  const openbot = useSkinId() === DEFAULT_SKIN;
   const tone = refused
     ? "text-destructive"
     : failed
       ? "text-amber-600 dark:text-amber-500"
       : "text-muted-foreground";
+  /*
+   * In OpenBot's own look a line that opens is a card, its label in the text color, so what the Bot
+   * did reads first and what it did it to second. A line that does not open stays a line.
+   */
+  const card = openbot && Boolean(children);
 
   const text = (
     <span
-      className={`inline-flex min-w-0 max-w-full items-baseline gap-1.5 text-sm ${tone} ${
-        running ? "tool-line-running" : ""
-      }`}
+      className={cn(
+        "inline-flex min-w-0 max-w-full items-baseline gap-1.5 text-sm",
+        card && !refused && !failed ? "text-foreground" : tone,
+        running && "tool-line-running",
+      )}
     >
       {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
-      <span className="shrink-0">
+      <span className={cn("shrink-0", card && "font-semibold")}>
         {refused
           ? `Blocked: ${label}`
           : failed
@@ -62,14 +72,29 @@ export function ToolLine({
               ? `${label}, not done yet`
               : label}
       </span>
-      {detail ? <span className="truncate opacity-70">{detail}</span> : null}
+      {detail ? (
+        <span
+          className={cn(
+            "truncate",
+            card ? "font-normal text-muted-foreground" : "opacity-70",
+          )}
+        >
+          {detail}
+        </span>
+      ) : null}
     </span>
   );
 
   if (!children) return <div className="my-1.5">{text}</div>;
 
   return (
-    <details className="tool-line my-1.5 min-w-0">
+    <details
+      className={cn(
+        "tool-line my-1.5 min-w-0",
+        card &&
+          "overflow-hidden rounded-xl border border-border bg-card px-3.5 py-2.5",
+      )}
+    >
       {/*
        * Native <details> owns expansion because SDK tool renderers can be re-invoked independently
        * of this component's React state.

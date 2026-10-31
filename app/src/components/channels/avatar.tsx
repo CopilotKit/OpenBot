@@ -1,6 +1,8 @@
 import Avatar from "boring-avatars";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
+import { BotOrb } from "@/components/agents/bot-orb";
 import { cn } from "@/lib/utils";
+import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
@@ -11,6 +13,10 @@ import { cn } from "@/lib/utils";
  *
  * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
  * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
+ *
+ * OpenBot's own look draws each Bot as its orb, seeded by its id; a skin keeps the faces. The orbs
+ * are hidden from screen readers: the row beside the avatar names the conversation, and an id read
+ * aloud would name nothing.
  */
 export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
@@ -21,11 +27,18 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
+  const orbs = useSkinId() === DEFAULT_SKIN;
+  const face = orbs ? orbFace : boringFace;
   const avatar =
     participantIds.length === 1 ? (
-      <Avatar className="size-full" name={participantIds[0]} size={size} />
+      face(participantIds[0], size)
     ) : (
-      <GroupFaces participantIds={participantIds} size={size} />
+      <GroupFaces
+        face={face}
+        layout={orbs ? ORB_PAIR : participantIds.length === 2 ? 2 : 3}
+        participantIds={participantIds}
+        size={size}
+      />
     );
 
   return (
@@ -55,20 +68,50 @@ const LAYOUTS = {
   },
 } as const;
 
+type Layout = {
+  diameter: number;
+  at: readonly (readonly [number, number])[];
+};
+
+/** The orbs' group: the first two Bots side by side, overlapping by a third of an orb. */
+const ORB_PAIR: Layout = {
+  diameter: 0.6,
+  at: [
+    [0, 0.2],
+    [0.4, 0.2],
+  ],
+};
+
+function boringFace(id: string, size: number) {
+  return <Avatar className="size-full" name={id} size={size} />;
+}
+
+function orbFace(id: string, size: number) {
+  return (
+    <span aria-hidden="true" className="contents">
+      <BotOrb name={id} seed={id} size={size} />
+    </span>
+  );
+}
+
 /**
- * A group's first two or three Bots, overlapping inside the avatar's own square so the row around
- * it keeps its layout. Each face is cut out where a later one covers it, leaving a gap that reads
+ * A group's first Bots, as many as the layout places, overlapping inside the avatar's own square so
+ * the row around it keeps its layout. Each face is cut out where a later one covers it, leaving a gap that reads
  * on any background — selected, hovered, or the conversation's header.
  */
 function GroupFaces({
+  face,
+  layout: chosen,
   participantIds,
   size,
 }: {
+  face: (id: string, size: number) => ReactNode;
+  layout: keyof typeof LAYOUTS | Layout;
   participantIds: string[];
   size: number;
 }) {
-  const shown = participantIds.slice(0, 3);
-  const layout = LAYOUTS[shown.length === 2 ? 2 : 3];
+  const layout: Layout = typeof chosen === "number" ? LAYOUTS[chosen] : chosen;
+  const shown = participantIds.slice(0, layout.at.length);
   const diameter = Math.round(size * layout.diameter);
   const gap = Math.max(1, size * 0.05);
   const at = layout.at.map(([x, y]) => [x * size, y * size]);
@@ -97,7 +140,7 @@ function GroupFaces({
               WebkitMaskComposite: "source-in",
             }}
           >
-            <Avatar className="size-full" name={id} size={diameter} />
+            {face(id, diameter)}
           </div>
         );
       })}

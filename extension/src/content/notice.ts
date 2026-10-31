@@ -10,34 +10,34 @@ export const NOTICE_TAG = "openbot-recorder-notice";
 
 export const NOTICE_TOKENS = {
   light: {
-    "--background": "oklch(0.985 0 0)",
-    "--foreground": "oklch(0.145 0 0)",
-    "--card": "oklch(1 0 0)",
-    "--card-foreground": "oklch(0.145 0 0)",
-    "--border": "oklch(0.922 0 0)",
-    "--primary": "oklch(0.205 0 0)",
-    "--primary-foreground": "oklch(0.985 0 0)",
-    "--secondary": "oklch(0.97 0 0)",
-    "--muted-foreground": "oklch(0.5 0 0)",
-    "--destructive": "oklch(0.577 0.245 27.325)",
-    "--ring": "oklch(0.708 0 0)",
+    "--background": "#f9f9fb",
+    "--foreground": "#010507",
+    "--card": "#ffffff",
+    "--card-foreground": "#010507",
+    "--border": "#dbdbe5",
+    "--primary": "#010507",
+    "--primary-foreground": "#ffffff",
+    "--secondary": "#f0f0f4",
+    "--muted-foreground": "#64646c",
+    "--destructive": "#b42530",
+    "--ring": "#7480f1",
   },
   dark: {
-    "--background": "oklch(0.145 0 0)",
-    "--foreground": "oklch(0.985 0 0)",
-    "--card": "oklch(0.205 0 0)",
-    "--card-foreground": "oklch(0.985 0 0)",
-    "--border": "oklch(1 0 0 / 10%)",
-    "--primary": "oklch(0.922 0 0)",
-    "--primary-foreground": "oklch(0.205 0 0)",
-    "--secondary": "oklch(0.269 0 0)",
-    "--muted-foreground": "oklch(0.708 0 0)",
-    "--destructive": "oklch(0.704 0.191 22.216)",
-    "--ring": "oklch(0.556 0 0)",
+    "--background": "#242032",
+    "--foreground": "#f0f0f4",
+    "--card": "#2b2645",
+    "--card-foreground": "#f0f0f4",
+    "--border": "#3a3452",
+    "--primary": "#f0f0f4",
+    "--primary-foreground": "#010507",
+    "--secondary": "#332e4a",
+    "--muted-foreground": "#9a9aa6",
+    "--destructive": "#ff9aa0",
+    "--ring": "#8d97ff",
   },
 } as const;
 
-export const RADIUS = "0.5rem";
+export const RADIUS = "0.625rem";
 
 type Choice = "stop" | "restart" | "continue";
 

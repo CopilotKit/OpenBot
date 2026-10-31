@@ -119,6 +119,8 @@ const MAX_HEIGHT_PX = 220;
  */
 const COMPACT_MIN_HEIGHT_PX = 19;
 const COMPACT_MAX_HEIGHT_PX = 96;
+/** A raised composer's editor starts three lines tall. */
+const RAISED_MIN_HEIGHT_PX = 72;
 
 export type ComposerProps = {
   className?: string;
@@ -128,6 +130,14 @@ export type ComposerProps = {
    * `text-lg`) goes through here, where tailwind-merge lets it beat the built-in `text-sm`.
    */
   editorClassName?: string;
+  /** What the empty editor says. Home steps it through prompts built from the person's Bots. */
+  placeholder?: string;
+  /**
+   * `raised` lifts the full composer off the page with the card edge and shadow and gives its editor
+   * room for a few lines, for a composer that is the page's one job, like Home's. The compact one
+   * ignores it.
+   */
+  variant?: "default" | "raised";
   compact?: boolean;
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
   /** Agents that `@` can address. Empty means the mention menu reports an empty channel. */
@@ -312,6 +322,8 @@ const UNACCEPTED_DROP_REASON = {
 export function Composer({
   className,
   editorClassName,
+  placeholder = "Ask anything",
+  variant = "default",
   compact = false,
   voiceCall,
   agents = [],
@@ -1561,7 +1573,7 @@ export function Composer({
                   onChange={handleChange}
                   onImagePaste={canAttach ? stagePastedImage : undefined}
                   onSubmit={submitDraft}
-                  placeholder="Ask anything"
+                  placeholder={placeholder}
                   ref={promptAreaRef}
                   triggers={triggers}
                   value={value}
@@ -1591,7 +1603,11 @@ export function Composer({
       {tooManyStagedNotice}
       <form
         aria-busy={isBusy}
-        className="overflow-hidden rounded-2xl border border-border bg-card"
+        className={cn(
+          "overflow-hidden rounded-2xl border border-border bg-card",
+          variant === "raised" &&
+            "border-card-border shadow-card focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+        )}
         data-slot="composer"
         onSubmit={handleFormSubmit}
       >
@@ -1614,14 +1630,18 @@ export function Composer({
                 autoGrow
                 className={cn(
                   "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+                  variant === "raised" && "text-base",
                   editorClassName,
                 )}
                 disabled={disabled}
                 maxHeight={MAX_HEIGHT_PX}
+                minHeight={
+                  variant === "raised" ? RAISED_MIN_HEIGHT_PX : undefined
+                }
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
-                placeholder="Ask anything"
+                placeholder={placeholder}
                 ref={promptAreaRef}
                 triggers={triggers}
                 value={value}

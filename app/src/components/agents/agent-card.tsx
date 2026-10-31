@@ -9,23 +9,23 @@ export function AgentCard({
   appearance = "compact",
 }: {
   agent: AgentProfile;
-  appearance?: "compact" | "tile";
+  appearance?: "compact" | "row";
 }) {
-  if (appearance === "tile") {
+  if (appearance === "row") {
     return (
-      <div className="flex h-[180px] w-[144px] flex-col overflow-hidden rounded-2xl border border-border bg-card p-3 transition-colors hover:border-ring dark:border-transparent">
+      /*
+       * The avatar beside the name rather than above it: a tall card left most of its height empty
+       * between the two, and a row reads the name and what the Bot is for in one glance.
+       */
+      <div className="flex h-16 min-w-0 items-center gap-3 rounded-xl border border-card-border bg-card px-3 shadow-card transition-[border-color,box-shadow] hover:border-ring hover:shadow-card-hover">
         <div aria-hidden="true" className="flex shrink-0">
-          <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={36} />
+          <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={32} />
         </div>
-        {/* Bottom-aligned, where the text sat on the earlier artwork card; the avatar holds the top. */}
-        <div className="mt-auto flex min-w-0 flex-col gap-2">
-          <span
-            className="line-clamp-1 break-words text-sm font-medium leading-5"
-            title={agent.name}
-          >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium" title={agent.name}>
             {agent.name}
           </span>
-          <span className="line-clamp-3 break-words text-xs leading-4 text-muted-foreground">
+          <span className="truncate text-xs text-muted-foreground">
             {agent.roleDescription}
           </span>
         </div>

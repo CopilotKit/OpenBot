@@ -1,0 +1,56 @@
+/*
+ * What the default skin adds beyond theme.css: its typeface, the edge and tone of a Bot's orb, and
+ * the conversation's centered column. Its colors, edges and shadows are theme.css's own tokens. Every rule is scoped to
+ * `:root:not([data-skin])`, so OpenDuet, OpenDots and OpenMuse keep their own face and frame.
+ */
+:root:not([data-skin]) {
+  /* The hairline and drop that lift a Bot's orb off the surface. */
+  --orb-edge: 0 0 0 1px rgb(1 5 7 / 7%), 0 1px 3px -1px rgb(1 5 7 / 20%);
+  --font-sans:
+    "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  /* Only for URLs, times, codes and file names. */
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+}
+:root:not([data-skin]).dark {
+  --orb-edge: 0 0 0 1px rgb(255 255 255 / 8%);
+}
+
+/*
+ * The default skin's face. `body` above names Inter outright, which the skins still inherit, so
+ * OpenBot's own look reads the token instead.
+ */
+:root:not([data-skin]) body {
+  font-family: var(--font-sans);
+}
+
+/*
+ * A Bot's live orb, toned for white surfaces. AgentOrb's own contrast boost and full-strength
+ * halftone wash light colors out to white; these keep each Bot's palette true. Only `BotOrb`
+ * carries `.bot-orb-live`, so the orb anywhere else is unchanged.
+ */
+:root:not([data-skin]) .bot-orb-live .agent-orb::before {
+  filter: blur(var(--blur-amount)) contrast(1.15) saturate(1.3);
+}
+:root:not([data-skin]) .bot-orb-live .agent-orb::after {
+  opacity: 0.25;
+  backdrop-filter: blur(calc(var(--blur-amount) * 1.5)) contrast(1.25);
+}
+:root:not([data-skin]).dark .bot-orb-live .agent-orb::before {
+  filter: blur(var(--blur-amount)) contrast(1) saturate(0.95) brightness(1.18);
+}
+
+/*
+ * The transcript and the composer share one centered 720px column, set by padding so the scrollbar
+ * stays at the pane's edge. A skin keeps the `max-w-2xl` column it was designed with.
+ */
+:root:not([data-skin])
+:is([data-slot="composer-column"], [data-transcript-column]) {
+  max-width: none;
+  padding-inline: 16px;
+}
+@media (min-width: 48rem) {
+  :root:not([data-skin])
+    :is([data-slot="composer-column"], [data-transcript-column]) {
+    padding-inline: max(32px, calc((100% - 720px) / 2));
+  }
+}

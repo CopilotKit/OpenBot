@@ -17,13 +17,14 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { appConfig } from "@/lib/generated/application-config";
 import { NAVIGATION, navigationFor } from "@/lib/navigation";
 import { queryClient } from "@/query-client";
 import { opendots } from "@/skins/opendots";
+import { DEFAULT_SKIN, setSkin } from "@/skins/store";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
 import type { AgentProfile } from "../../server/src/agents/profile-types";
 import { createAgentRoutes } from "../../server/src/agents/routes";
@@ -217,6 +218,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  // The frame is OpenDots, so the avatars inside it wear OpenDots too.
+  act(() => setSkin("opendots"));
   requests.length = 0;
   actor = person;
   agentsFail = false;
@@ -234,6 +237,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  act(() => setSkin(DEFAULT_SKIN));
   // The app's one client, as the mutations invalidate it; each test starts from an empty cache.
   queryClient.clear();
 });

@@ -1,4 +1,5 @@
 import {
+  IconApps,
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconChevronRight,
@@ -19,6 +20,7 @@ import {
   AccessRequestsSection,
   usePendingRequestCounts,
 } from "@/components/plugins/access-requests";
+import { PluginLogo } from "@/components/plugins/plugin-logo";
 import {
   Item,
   ItemActions,
@@ -59,18 +61,28 @@ export const Route = createFileRoute("/_authed/admin/plugins/")({
 });
 
 /**
- * A vendor's own mark where there is one, and a plug where there is not.
- *
- * The fallback covers a server an administrator added by URL, which has no catalogue entry and so no
- * mark of its own — and it would cover a catalogue vendor Tabler ships no brand for. Only Drive is in
- * the catalogue today, and Tabler has it.
+ * A vendor's own mark where Tabler ships one. Everything else draws the server's logo, or its
+ * initial: a server an administrator added by URL has no catalogue entry and so no mark of its own,
+ * and a column of identical plugs would tell one vendor from another no better than no icon at all.
  */
 const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
   "google-drive": IconBrandGoogleDrive,
   notion: IconBrandNotion,
 };
 
-const markFor = (key: string) => MARKS[key] ?? IconPlug;
+function VendorMark({
+  id,
+  logo,
+  name,
+}: {
+  id: string;
+  logo?: string | null;
+  name: string;
+}) {
+  const Brand = MARKS[id];
+  if (Brand) return <Brand className="size-4" />;
+  return <PluginLogo logo={logo} name={name} />;
+}
 
 /**
  * What a connected row says on the right.
@@ -167,7 +179,6 @@ function RouteComponent() {
             ) : (
               <PageRows>
                 {plugins.data?.servers.map((server, index) => {
-                  const Mark = markFor(server.id);
                   return (
                     <React.Fragment key={server.id}>
                       {/*
@@ -186,7 +197,11 @@ function RouteComponent() {
                         size="sm"
                       >
                         <RowMark>
-                          <Mark className="size-4" />
+                          <VendorMark
+                            id={server.id}
+                            logo={server.logo}
+                            name={server.title}
+                          />
                         </RowMark>
                         <ItemContent>
                           <ItemTitle>{server.title}</ItemTitle>
@@ -238,7 +253,6 @@ function RouteComponent() {
             ) : (
               <PageRows>
                 {explore.map((entry: CatalogueItem, index) => {
-                  const Mark = markFor(entry.key);
                   return (
                     <React.Fragment key={entry.key}>
                       <Item
@@ -252,7 +266,7 @@ function RouteComponent() {
                         size="sm"
                       >
                         <RowMark>
-                          <Mark className="size-4" />
+                          <VendorMark id={entry.key} name={entry.title} />
                         </RowMark>
                         <ItemContent>
                           <ItemTitle>{entry.title}</ItemTitle>
@@ -302,7 +316,7 @@ function RouteComponent() {
                   size="sm"
                 >
                   <RowMark>
-                    <IconPlug className="size-4" />
+                    <IconApps className="size-4" />
                   </RowMark>
                   <ItemContent>
                     <ItemTitle>{moreApps.title}</ItemTitle>
@@ -317,7 +331,7 @@ function RouteComponent() {
                    until the key is set. */
                 <Item data-testid="plugin-directory" size="sm">
                   <RowMark>
-                    <IconPlug className="size-4" />
+                    <IconApps className="size-4" />
                   </RowMark>
                   <ItemContent>
                     <ItemTitle>{moreApps.title}</ItemTitle>

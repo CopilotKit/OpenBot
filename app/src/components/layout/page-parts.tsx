@@ -17,7 +17,7 @@ import {
  *
  * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
  * would wrap every row. The page is exactly the window's height and does not scroll: the title sits
- * at the pane's left edge, lined up with the table's first column rather than centred above a table
+ * at the pane's left SURFACE_EDGE, lined up with the table's first column rather than centred above a table
  * that is not, and the children fill what is left, so the table can be the one thing that scrolls.
  * It is not a licence for anything else to be wide. It is no column, so `PageShell` draws it itself.
  */
@@ -40,20 +40,13 @@ export function PageColumn({
   return (
     <>
       {/*
-       * The scroller, and it has to live here rather than in either shell, because the two shells
-       * this frame is used under disagree about who scrolls.
-       *
-       * Under `_authed` — admin, settings — the document scrolls, so a page taller than the window
-       * has always just worked. Under `_authed/_app` it does not: that shell is `h-svh
-       * overflow-hidden` on purpose ("one viewport, never scrolls: panes scroll inside it") and its
-       * `main` is `overflow-hidden` too, so a PageShell taller than the window was silently CLIPPED
-       * — 246px of Skills sat below the fold with no way to reach it, by keyboard or otherwise.
+       * The scroller. Every shell — app, admin, settings — is exactly the window's height and holds
+       * the page in an inset panel that never grows past it, so a page taller than the window
+       * scrolls here, inside the panel, and the panel's rounded corners stay on screen.
        *
        * `min-h-0` is the load-bearing half of `min-h-0 flex-1`: a flex item's default `min-height:
-       * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the pane
-       * and clip exactly as before. Under `_authed` both are inert — the parent is not a flex
-       * container — and `overflow-y-auto` on an auto-height element shows no scrollbar, so those
-       * eighteen screens are unaffected.
+       * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the panel
+       * and the overflow would be clipped instead of scrolled.
        *
        * Separate from the centred column below so the scrollbar rides the pane's edge instead of
        * appearing inside the measure with content either side of it.
@@ -157,6 +150,12 @@ export function PageSection({
  * them. Rendering nothing when there is nothing is deliberate — an empty bordered box reads as a
  * thing that failed to load, where absence reads as nothing to see yet.
  */
+/*
+ * Rows and cards take the firmer edge and soft lift from the `--card-*` tokens in theme.css; a skin
+ * sets them back to its plain hairline in skins.css.
+ */
+const SURFACE_EDGE = "border-card-border shadow-card";
+
 export function PageRows({
   children,
   className,
@@ -176,9 +175,10 @@ export function PageRows({
      */
     <div
       className={cn(
-        "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
+        "mt-4 overflow-hidden rounded-lg border bg-card",
+        SURFACE_EDGE,
         "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
-        // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
+        // Dividers stop 16px short of each SURFACE_EDGE, lined up with the rows' text, as Linear draws them.
         // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
         "[&_[data-slot=separator][data-orientation=horizontal]]:mx-4 [&_[data-slot=separator][data-orientation=horizontal]]:w-auto",
         className,
@@ -208,10 +208,7 @@ export function PageCard({
 }) {
   return (
     <div
-      className={cn(
-        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
-        className,
-      )}
+      className={cn("rounded-lg border bg-card p-4", SURFACE_EDGE, className)}
     >
       {children}
       {footer ? (
@@ -243,7 +240,10 @@ export function PageEmpty({
   title?: string;
 }) {
   return (
-    <Empty className="mt-4 rounded-lg border border-border">
+    // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
+    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-(--empty-border)">
+      {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
+      <div aria-hidden className="empty-pattern" />
       <EmptyHeader>
         {Icon ? (
           <EmptyMedia variant="icon">
