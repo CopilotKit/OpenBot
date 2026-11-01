@@ -11,6 +11,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import {
+  COMPONENT_GUIDANCE,
   type ComputerGuidance,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
@@ -187,6 +188,8 @@ export function standingRoleMessage(
        * "Investigate policies, transaction monitoring, and control evidence."
        */
       PROVENANCE_GUIDANCE,
+      // When to answer with a component, which a remote Bot is offered through the run's tools.
+      COMPONENT_GUIDANCE,
       // And for the same reason, how to read the untrusted-content envelope its tool results carry.
       UNTRUSTED_GUIDANCE,
     ].join("\n\n"),
@@ -486,6 +489,8 @@ export function builtInAgentConfiguration(
        * it says comes from its own knowledge, and saying so is the only honest move available.
        */
       PROVENANCE_GUIDANCE,
+      // When to answer with a component. Also unconditional: the tools it names vary, the rule not.
+      COMPONENT_GUIDANCE,
       // How to read the untrusted-content envelope every outside result arrives in.
       UNTRUSTED_GUIDANCE,
       ...(grantedToolGuidance(tools, connectedVendors)

@@ -6,11 +6,13 @@ import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import {
+  COMPONENT_GUIDANCE,
   computerGuidance,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
-import { EMPTY, lastValueFrom } from "rxjs";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
+import { EMPTY, lastValueFrom, Observable } from "rxjs";
 import { z } from "zod";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
@@ -322,7 +324,7 @@ describe("registered Copilot agents", () => {
       model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere.
-      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       apiKey: "openai-secret",
     });
   });
@@ -648,6 +650,7 @@ describe("standing agent roles", () => {
         // travel in it or the Bot never hears it. Referenced rather than restated, so the assertion
         // stays exact without pinning the wording twice.
         PROVENANCE_GUIDANCE,
+        COMPONENT_GUIDANCE,
         UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
     });
@@ -856,6 +859,7 @@ describe("standing agent roles", () => {
         "Reconcile corporate card statements.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
         PROVENANCE_GUIDANCE,
+        COMPONENT_GUIDANCE,
         UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
     );
@@ -1311,6 +1315,126 @@ describe("where a Bot says its answer came from", () => {
 });
 
 /**
+ * A Bot is told to answer with a component when the answer has structure.
+ *
+ * Every Bot was offered the gallery and none was told when to use it, so structured answers came back
+ * as prose. The rule travels the same three ways the provenance rule does, and each is asserted,
+ * because they are built by different code: the built-in prompt, the standing role that is a remote
+ * Bot's only instruction, and a background turn, which builds its Bot through the resolver rather
+ * than the request path.
+ */
+describe("when a Bot answers with a component", () => {
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  test("a built-in Bot carries it straight after the provenance rule it defers to", () => {
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      model,
+      "openai-secret",
+    );
+    const prompt = "prompt" in configuration ? configuration.prompt : undefined;
+
+    // Its last line points at "the rules above", so the order is part of the rule.
+    expect(prompt).toContain(`${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}`);
+  });
+
+  test("a remote Bot carries it in its standing role", () => {
+    expect(standingRoleMessage(riskRow).content).toContain(COMPONENT_GUIDANCE);
+  });
+
+  test("names kinds of answer, never a tool a turn might not hold", () => {
+    const guidance = COMPONENT_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
+    for (const kind of ["a chart", "a checklist", "a record card", "choose"])
+      expect(guidance).toContain(kind);
+    expect(guidance).toContain("plain text only for a short conversational");
+    // Tool names are camelCase or snake_case; the tools on a turn vary per Bot and grant.
+    expect(COMPONENT_GUIDANCE).not.toMatch(/\b[a-z]+[A-Z]\w*\b|\b\w+_\w+\b/);
+  });
+
+  test("reaches both kinds of Bot on a background turn", async () => {
+    const recorder = new LLMock();
+    await using endpoint = fakeAgUiEndpoint();
+    const originalBase = process.env.OPENAI_BASE_URL;
+    try {
+      process.env.OPENAI_BASE_URL = await recorder.start();
+      recorder.onMessage(/.*/, { content: "Routine done." });
+      // Built from rows the way the server's own loader builds them.
+      const registered = [
+        {
+          ...assistantRow,
+          configuration: { systemPrompt: "Be helpful." },
+        },
+        { ...riskRow, configuration: { endpoint: endpoint.url } },
+      ].map((row) => {
+        const agent = registeredAgentFromRow(row);
+        if (!agent) throw new Error(`Expected ${row.id} to register.`);
+        return agent;
+      });
+      const resolver = createActorAgentResolver({
+        loadAgents: async () => registered,
+        model,
+        resolveModelApiKey: async () => "openai-secret",
+      });
+      const runTurn = createTurnRunner({
+        admission: async () => new AbortController().signal,
+        intelligence: {
+          getOrCreateThread: async () => undefined,
+          getThreadMessages: async () => ({ messages: [] }),
+          ɵacquireThreadLock: async () => undefined,
+          ɵrenewThreadLock: async () => undefined,
+          ɵcleanupThreadLock: async () => undefined,
+        },
+        runner: {
+          run: ({ agent, input }) =>
+            new Observable((subscriber) => {
+              agent
+                .runAgent(input, {
+                  onEvent: ({ event }) => subscriber.next(event),
+                })
+                .then(
+                  () => subscriber.complete(),
+                  (error) => subscriber.error(error),
+                );
+            }),
+          stop: async () => true,
+        },
+        // What the server's `buildAgentFor` calls for a routine, a handoff or a check-in.
+        buildAgentFor: ({ ownerUserId, agentId, initiator }) =>
+          resolver.resolveAgentForActor(
+            { id: ownerUserId, role: "user" },
+            agentId,
+            { initiator },
+          ),
+      });
+
+      for (const agentId of [assistantRow.id, riskRow.id])
+        await runTurn({
+          ownerUserId: "owner",
+          routineId: "routine-weekly",
+          agentId,
+          threadId: `thread-${agentId}`,
+          instruction: "Summarise this week's spend by team.",
+        });
+
+      const quoted = JSON.stringify(COMPONENT_GUIDANCE).slice(1, -1);
+      expect(recorder.getRequests()).toHaveLength(1);
+      expect(JSON.stringify(recorder.getRequests()[0]?.body)).toContain(quoted);
+      expect(endpoint.requests).toHaveLength(1);
+      expect(JSON.stringify(endpoint.requests[0])).toContain(quoted);
+    } finally {
+      if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBase;
+      await recorder.stop();
+    }
+  });
+});
+
+/**
  * The person's own standing instructions, and where they land in a prompt.
  *
  * The third instruction carrier. A role is the coworker's and reads the same to everybody; a skill
@@ -1390,7 +1514,7 @@ describe("a person's standing instructions", () => {
       // Byte for byte what a deployment had before any of this existed, which is what most people
       // on most days get.
       expect(prompt).toBe(
-        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       );
     },
   );
