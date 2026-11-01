@@ -14,7 +14,7 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
-import { markdownComponents } from "@/lib/markdown";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
   connectorName,
   humanise,
@@ -531,7 +531,10 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
           ) : null}
           {step.output ? (
             <div className="max-h-60 overflow-auto border-l pl-3 [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
-              <Streamdown components={markdownComponents}>
+              <Streamdown
+                components={markdownComponents}
+                plugins={markdownPlugins}
+              >
                 {forDisplay(step.output)}
               </Streamdown>
             </div>

@@ -7,3 +7,11 @@
 @import "./openduet/skin.css";
 @import "./opendots/skin.css";
 @import "./openmuse/skin.css";
+
+/*
+ * OpenBot's own look draws a Bot's answers in a column wider than the composer. Every skin keeps the
+ * column it was drawn with, as wide as the composer under it.
+ */
+:root[data-skin] [data-transcript-column] {
+  max-width: var(--container-2xl);
+}
