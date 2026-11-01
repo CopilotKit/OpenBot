@@ -1,3 +1,4 @@
+import { createCodePlugin } from "@streamdown/code";
 import {
   IconFile,
   IconFileText,
@@ -112,4 +113,13 @@ export const markdownComponents = {
       </a>
     );
   },
+};
+
+/**
+ * Syntax highlighting for fenced code, through Streamdown's own code plugin (Shiki), on every surface
+ * that draws a Bot's markdown. The pair is [light, dark]: Streamdown colours each token with both and
+ * OpenBot's `.dark` class picks one, so a code block follows the theme switch without being redrawn.
+ */
+export const markdownPlugins = {
+  code: createCodePlugin({ themes: ["github-light", "github-dark"] }),
 };

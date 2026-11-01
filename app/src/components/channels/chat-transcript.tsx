@@ -59,7 +59,7 @@ import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
-import { markdownComponents } from "@/lib/markdown";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
 import {
@@ -802,7 +802,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closing token arrives, so the answer visibly rewrites itself as it lands. This
                  * closes them for the duration.
                  */
-                <Streamdown components={markdownComponents} mode={mode}>
+                <Streamdown
+                  components={markdownComponents}
+                  mode={mode}
+                  plugins={markdownPlugins}
+                >
                   {revealed}
                 </Streamdown>
               )}
@@ -1602,7 +1606,7 @@ export function ServerToolLine({
       running={running}
     >
       {shown ? (
-        <Streamdown components={markdownComponents}>
+        <Streamdown components={markdownComponents} plugins={markdownPlugins}>
           {forDisplay(shown)}
         </Streamdown>
       ) : null}
@@ -2100,7 +2104,10 @@ export function ChatTranscript({
   if (restoring) {
     return (
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+        <div
+          className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6"
+          data-transcript-column
+        >
           <RestoringTranscript />
           {/*
            * A message typed while history loads is parked, not lost, and must be seen to be: a
@@ -2204,7 +2211,8 @@ export function ChatTranscript({
             >
               <MessageScrollerContent
                 aria-busy={busy}
-                className="mx-auto w-full max-w-2xl px-4 py-6"
+                className="mx-auto w-full max-w-4xl px-4 py-6"
+                data-transcript-column
                 spacerClassName="order-2"
               >
                 {/*
