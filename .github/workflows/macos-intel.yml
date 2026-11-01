@@ -1,0 +1,75 @@
+name: macOS Intel build
+
+# Fork-only workflow. Builds OpenBot Desktop as an x86_64 (Intel) DMG.
+# GitHub's `macos-latest` runner is Apple Silicon, so the Intel binary is cross-compiled with
+# `--target x86_64-apple-darwin`. The app is ad-hoc signed (no Apple Developer certificate), so on
+# first launch macOS needs: right-click > Open, or `xattr -dr com.apple.quarantine OpenBot.app`.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Also publish the DMG as a GitHub pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write # needed only when `publish` is true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop/src-tauri
+          key: macos-intel
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun run typecheck
+        working-directory: desktop
+      - name: Prepare internal build version
+        run: bun scripts/desktop-version.ts internal
+        working-directory: desktop
+      - name: Build Intel DMG
+        run: bun run tauri build --target x86_64-apple-darwin --bundles dmg --config src-tauri/tauri.build-version.conf.json
+        working-directory: desktop
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+      - name: Verify architecture and ad-hoc signature
+        run: |
+          set -euo pipefail
+          dmg=$(ls desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg)
+          mount="$RUNNER_TEMP/openbot-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$dmg"
+          trap 'hdiutil detach "$mount"' EXIT
+          bin=$(ls "$mount"/OpenBot.app/Contents/MacOS/*)
+          for f in $bin; do file "$f"; done
+          lipo -archs "$mount"/OpenBot.app/Contents/MacOS/openbot* | grep -q x86_64
+          codesign --verify --deep --strict --verbose=2 "$mount/OpenBot.app"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: OpenBot-macos-intel-dmg
+          path: desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+      - name: Publish pre-release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="intel-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" --prerelease --title "OpenBot Intel macOS ($tag)" \
+            --notes "Unsigned (ad-hoc) x86_64 build. See docs/macos-intel.md." \
+            desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
