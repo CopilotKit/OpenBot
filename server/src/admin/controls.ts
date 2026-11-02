@@ -233,12 +233,19 @@ export function decideFromSnapshot(
    * decided without DNS: an IP-range rule needs the resolved address, which the computer's filter has
    * and this server does not.
    */
-  if (context.intent === "navigate" && context.page.host) {
+  const destination =
+    context.intent === "navigate" && context.page.host
+      ? destinationOf(context.page.url)
+      : null;
+  if (destination) {
     const policy = effectiveNetworkPolicy(snapshot.network, member, true);
     const hasRanges = policy.rules.some((rule) => rule.type === "cidr");
-    if (!hasRanges || /^[\d.:[\]]+$/.test(context.page.host)) {
-      const port = portOf(context.page.url);
-      const decision = egressDecision(policy, context.page.host, port);
+    if (!hasRanges || /^[\d.:[\]]+$/.test(destination.host)) {
+      const decision = egressDecision(
+        policy,
+        destination.host,
+        destination.port,
+      );
       if (!decision.allowed) {
         return refusal(
           `network:${policy.from}`,
@@ -250,12 +257,25 @@ export function decideFromSnapshot(
   return null;
 }
 
-function portOf(url: string): number {
+/**
+ * The host and port a navigation opens, as the egress matcher wants them: apart.
+ *
+ * Not `page.host`. That is `URL.host`, which carries the port whenever it is not the scheme's
+ * default (`erp.internal:8080`), because a boundary rule written as `page.host == "..."` matches
+ * against it. Handed to the matcher as the host, it was compared with the domain rules as
+ * `erp.internal:8080` and matched none of them, so every allowed destination on a non-default port
+ * was refused here, before the computer's filter, which reads the host and port apart, was asked.
+ */
+function destinationOf(url: string): { host: string; port: number } | null {
   try {
     const parsed = new URL(url);
-    return Number(parsed.port || (parsed.protocol === "http:" ? 80 : 443));
+    if (!parsed.hostname) return null;
+    return {
+      host: parsed.hostname,
+      port: Number(parsed.port || (parsed.protocol === "http:" ? 80 : 443)),
+    };
   } catch {
-    return 443;
+    return null;
   }
 }
 
@@ -716,11 +736,9 @@ export function guardDeliveryStore<T extends DeliveryLike>(
   const bind = store.bind.bind(store);
   const removeBinding = store.removeBinding.bind(store);
   store.bind = (async (input: Parameters<T["bind"]>[0]) => {
+    const chat = input.transport === "slack" || input.transport === "teams";
     const controls = enterpriseControls();
-    if (
-      controls &&
-      (input.transport === "slack" || input.transport === "teams")
-    ) {
+    if (controls && chat) {
       let allowed = false;
       try {
         allowed = await controls.capabilityFor(input.ownerUserId, "slackTeams");
@@ -740,6 +758,20 @@ export function guardDeliveryStore<T extends DeliveryLike>(
         realm: input.realm,
         channelId: input.channelId ?? null,
         agentId: input.agentId ?? null,
+        /*
+         * Which chat account now speaks as the owner, for Slack and Teams only.
+         *
+         * A link code there is redeemed by whoever sends it, and that account then runs the Bot as
+         * its owner and decides approvals as them. The row is filed under the owner, so without
+         * this a binding somebody else redeemed reads as the owner connecting their own account,
+         * and once the binding is removed nothing anywhere says which account it was. Recorded on
+         * the link only: `delivery.unlinked` carries the same `targetId`, so the trail joins them.
+         *
+         * Not for SMS or push. There `identity` is a phone number or a device token, the trail is
+         * readable by every administrator, and the code-in-a-shared-chat risk does not exist —
+         * an SMS code proves possession of the phone it was sent to.
+         */
+        ...(chat ? { identity: input.identity } : {}),
       },
     }).catch(() => undefined);
     return bound;
