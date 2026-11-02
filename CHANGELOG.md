@@ -78,6 +78,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A late conversation title is discarded after deletion
+
+A generated title that arrives after a conversation was deleted is discarded. The naming job is
+settled without changing the deleted row or announcing a new summary, and a missing conversation is
+not reported as successfully named.
+
 ### Concurrent routine edits keep their limit and saved schedule
 
 An update now reads the current routine under the same owner lock used to count and write it. An
