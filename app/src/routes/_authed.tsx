@@ -1,8 +1,11 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { BotLookProvider } from "../components/agents/bot-look";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
 import { SkinAccountSync } from "../skins/account-sync";
+import { useActiveSkin } from "../skins/registry";
 
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async ({ context, location }) => {
@@ -28,7 +31,18 @@ export const Route = createFileRoute("/_authed")({
       <AppHotkeys />
       {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
       <SkinAccountSync />
-      <Outlet />
+      <SkinBotLook>
+        <Outlet />
+      </SkinBotLook>
     </CopilotProvider>
   ),
 });
+
+/** Bots are drawn the way the active skin asks for, on every authed page. */
+function SkinBotLook({ children }: { children: ReactNode }) {
+  return (
+    <BotLookProvider value={useActiveSkin().botLook ?? "face"}>
+      {children}
+    </BotLookProvider>
+  );
+}

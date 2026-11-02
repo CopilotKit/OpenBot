@@ -1,7 +1,7 @@
 import {
+  IconBolt,
   IconListDetails,
   IconPlugOff,
-  IconRobot,
   IconSearch,
   IconTool,
 } from "@tabler/icons-react";
@@ -261,7 +261,7 @@ function RouteComponent() {
         description="There is no Bot with that name."
         title="Not a Bot"
       >
-        <PageEmpty icon={IconRobot} title="Bot not found">
+        <PageEmpty icon={IconBolt} title="Bot not found">
           It may have been deleted after you opened this page.
         </PageEmpty>
       </PageShell>
