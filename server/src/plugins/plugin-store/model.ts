@@ -417,6 +417,14 @@ export type _ProbeOutcomeLeaves = Decides<
   RecordedCheck | "untouched"
 >;
 
+/** A stored-client read failed. Never retains a vault error, parser error, or secret-bearing cause. */
+export class OAuthClientReadError extends Error {
+  constructor() {
+    super("The stored OAuth client could not be read.");
+    this.name = "OAuthClientReadError";
+  }
+}
+
 export class PluginRefusedError extends Error {
   constructor(
     message: string,
@@ -1114,7 +1122,7 @@ export const CLIENT_REREGISTRATION_BACKOFF_MS = 5 * 60_000;
  * `LINEAR_GET_ME` — and an unanchored match would take `SLACK_PROFILE_SET` for an identity read.
  */
 export const IDENTITY_ACTION =
-  /(_GET_ME|_PROFILE|_CURRENT_USER|_USER_INFO|_WHOAMI)$/;
+  /(_GET_ME|_PROFILE|_CURRENT_USER|_USER_INFO|_WHOAMI|_GET_SHOP_DETAILS)$/;
 
 /**
  * Every broker's id namespace, reserved together. See {@link BROKERED_PROFILE} in `./access` for

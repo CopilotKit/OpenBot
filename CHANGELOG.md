@@ -88,6 +88,101 @@ Bot failed with "This deployment will not dial". The deployment's own agent addr
 allowed at exactly those URLs: when a Bot is saved, in Test connection, and on every run. Another
 path on the same host and port, and a redirect onto the agent's own address, are still refused.
 
+### A tool's link and a vendor's refusal are cut between characters
+
+When a tool answers with a link, its title, name and description are each cut to 400 characters
+before the Bot reads them, and the reason a vendor gives for refusing a request is cut to 400 too.
+When the cut landed inside an emoji, the Bot was handed a broken character before the "…". The cut
+now drops the half character instead.
+
+### An approval cuts a long value between characters
+
+An approval shows what a Bot is about to type, write or send, cut to 2,000 characters, and each field
+on the OpenTag card is cut to 300. When the cut landed inside an emoji, the approval showed a "�"
+before the "…". The cut now drops the half character instead.
+
+### A long text message is cut between characters
+
+A message too long for one SMS is cut and ends with "Open OpenBot to read the full message.". When
+the cut landed inside an emoji, the person received a "�" before the "…". The cut now drops the
+half character instead.
+
+### A late conversation title is discarded after deletion
+
+A generated title that arrives after a conversation was deleted is discarded. The naming job is
+settled without changing the deleted row or announcing a new summary, and a missing conversation is
+not reported as successfully named.
+
+### Concurrent routine edits keep their limit and saved schedule
+
+An update now reads the current routine under the same owner lock used to count and write it. An
+enable queued behind a pause and another create cannot take a person past 20 enabled routines.
+Concurrent cron and timezone edits also calculate the next firing from the schedule actually saved.
+
+### A failed shared-app approval can be tried again
+
+Deciding a shared-app request now commits the decision and the access it grants together. If the
+approval or its audience cannot be saved, the request stays pending instead of disappearing as
+approved without granting access. An administrator can retry after the write failure is resolved.
+Concurrent direct approvals and request decisions take the same Bot/app transaction lock before
+writing either row, so they do not deadlock by acquiring those rows in opposite orders. An owner
+grant that races an administrator now leaves the administrator's approval and audience in place.
+
+### A rule on activation also catches Enter or Space pressed with a modifier
+
+A Bot's `computer_key` call names its key the way Playwright reads it, so `Shift+Enter` is Enter with
+Shift held, and the browser submits the form or clicks the focused button for it just as for Enter.
+The gateway only counted the bare `Enter`, `NumpadEnter` and `Space` as `intent == "activate"`, so the
+same key with a modifier was decided as typing and passed a deny rule on activation. It now judges the
+key a press ends on, so `Shift+Enter`, `Control+Enter` and `Shift+Space` are activations too, and so
+are `\n` and `\r`, which Playwright presses as Enter.
+
+The shipped "Never submit a form" rule (the Boundaries preset and the `AGENT_COMPUTER_POLICY` example
+in `.env.example`) now refuses a keypress on `intent == "activate"` instead of `key == "Enter"`, so it
+catches those spellings too, and Space. A deployment running the old rule keeps the old gap until it
+adds the preset again or changes `key == "Enter"` to `intent == "activate"` in its own copy.
+
+### A boundary rule about a host also covers that host written with a root dot
+
+`page.host` kept the root dot a URL can end its host with, so a navigation to
+`https://intranet.example.com./` was decided as `intranet.example.com.` and walked past a rule such
+as `page.host == "intranet.example.com"`, though DNS, the Bot's browser and the computer's own
+network filter all treat the two as one site. `page.host` now drops the root dot (the port stays),
+so the rule refuses either spelling.
+
+### Allowing a Gmail send always no longer allows it to anybody
+
+A Bot sending or replying through Composio's Gmail (`GMAIL_SEND_EMAIL`, `GMAIL_REPLY_TO_THREAD`)
+names the recipient in `recipient_email` and `extra_recipients`, which the private-share check did
+not read. Every email was filed under the app and the action instead of the person it went to, so
+the approval did not say who would receive it, and "Always allow" given for one email let the Bot
+send any later one to any address without asking. Those emails are now addressed to their
+recipients, and an "Always allow" covers only the people it was given for.
+
+### An allowed site on a non-default port opens
+
+With a network allowlist, a Bot opening an allowed site on a port that is not the scheme's default,
+such as `http://erp.internal:8080`, was refused in the conversation with "erp.internal:8080:8080 is
+not on this deployment's network allowlist", whatever the rule said. The server compared the host
+with its port still attached against the allowlist's domains. It now compares the host and the port
+separately, as the computer's own filter already did, so the rule's domain and ports decide.
+
+### The server image starts again
+
+The `server` image left out `agent-computer/src/egress.ts`, which the server imports to check a
+Bot's navigation against the network policy, so a container built from `server/Dockerfile` exited on
+start with a module-not-found error and restarted in a loop. The image now carries that file. The
+all-in-one `openbot` image was not affected.
+
+### An isolated Bot's computer is reachable with a longer namespace
+
+With the supervisor on a shared network (Compose), the server reaches a computer by its container
+name. Docker's network DNS answers only for names of up to 63 characters, and an isolated Bot's,
+`<namespace>-computer-bot-agent_<uuid>`, is exactly 63 with the default `openbot` namespace. Any
+longer `COMPUTER_NAMESPACE` made every isolated Bot's computer start healthy while the server, unable
+to resolve its name, reported it as not running on every action. The supervisor now gives the server the container's short
+id, which Docker also answers for, whenever the name is too long. Names that fit are used as before.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
@@ -102,6 +197,13 @@ The built-in safety rules hand paying, purchasing or moving money to you, but a 
 (such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
 rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
 
+### Empty fields no longer trip the safety rules
+
+The built-in safety rules matched on the names of fields a Bot left empty: writing only a note on a
+Shopify order was handed to you as money-moving because the action has a `billing_address` field the
+Bot never filled in. Field names now only count when the field actually holds something, so that
+note goes straight through.
+
 ### A computer run on a laptop can stay off the local network
 
 A managed computer listens on every network interface, which a container needs. Run straight on a
@@ -109,6 +211,28 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 `COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
+
+### A store connection is checked against the store itself
+
+After connecting a key, OpenBot checks it with one argument-free read, preferring an identity read
+and otherwise taking the first safe read alphabetically. For Shopify that was `SHOPIFY_COUNT_BLOGS`,
+which needs the `read_content` scope a store app with only order and product scopes does not have,
+so a working key was reported as rejected. A store's own details now count as an identity read, so
+the check calls `SHOPIFY_GET_SHOP_DETAILS` instead.
+
+### A message naming different Bots' apps stays on the default when routing is unsure
+
+When the router cannot decide and a message names apps held by different Bots, OpenBot keeps the
+default Bot instead of picking whichever app appears first in the roster. A single Bot uniquely
+holding the named apps still receives the message, and a confident routing decision still wins.
+
+### A client read failure does not replace a working app registration
+
+A server that cannot decrypt an app's stored OAuth client now fails that connection attempt without
+registering a replacement. A server with the correct encryption key can keep using the original
+client. Confirmed missing or revoked credentials and malformed stored clients still use the existing
+registration flow. Connect records a safe read-failure audit row for the person and app and returns
+a retryable error, without exposing the vault failure.
 
 ### The default look: an inset page, OpenBot's palette and Bots as orbs
 
@@ -427,6 +551,15 @@ The download falls from 537 MB to about 423 MB on arm64 and from 520 MB to about
 Unpacked, the image is about 375 MB smaller on arm64 and 296 MB smaller on amd64. The all-in-one `openbot` image installs the same browser the same way and shrinks by about
 as much. The browser and its behaviour are unchanged. On a desktop install the computer is the
 largest image, so a first install and each upgrade download less.
+
+### The audit trail says which Slack or Teams account a link bound
+
+Linking a Bot to Slack or Teams recorded a `delivery.linked` row filed under the Bot's owner, with
+the transport and workspace but not the chat account that sent the code. Whoever sends a link code
+is the account that then speaks as the owner, so a code redeemed by somebody else read on the trail
+as the owner connecting their own account, and once the link was removed nothing said which account
+it had been. The row now names it, for Slack and Teams only: for SMS and push the same field is a
+phone number or a device token, which stays off a trail every administrator can read.
 
 ### A Bot can send, draft and reply in Gmail
 
