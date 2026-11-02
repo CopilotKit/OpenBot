@@ -1297,13 +1297,26 @@ export function createStoreContext(options: PluginStoreOptions) {
     keyId: `oauth-client-${serverId}`,
   });
 
-  /** Classify only client reads, never vendor registration or subsequent vault writes. */
+  /**
+   * Classify only client reads, never vendor registration or subsequent vault writes.
+   *
+   * The fault is logged by its name alone, because a vault or decryption message can quote the stored
+   * value. The error thrown in its place carries nothing of it, so this line is all an operator gets.
+   */
   async function readClient(
+    serverId: string,
     work: () => Promise<OAuthClient | null>,
   ): Promise<OAuthClient | null> {
     try {
       return await work();
-    } catch {
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "mcp-oauth-client-read-failed",
+          server: serverId,
+          error: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
       throw new OAuthClientReadError();
     }
   }
@@ -1363,7 +1376,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     transaction: Transaction,
     serverId: string,
   ): Promise<OAuthClient | null> {
-    return readClient(async () => {
+    return readClient(serverId, async () => {
       const [server] = await transaction
         .select({ credentialId: mcpServers.credentialId })
         .from(mcpServers)
@@ -1506,7 +1519,7 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function storedOAuthClient(
     serverId: string,
   ): Promise<OAuthClient | null> {
-    return readClient(async () => {
+    return readClient(serverId, async () => {
       const [row] = await database
         .select({ credentialId: mcpServers.credentialId })
         .from(mcpServers)

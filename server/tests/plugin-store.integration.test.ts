@@ -2990,12 +2990,32 @@ describe("a dynamic client the vendor has evicted", () => {
         escaped.push(error);
         return new Response("escaped", { status: 500 });
       });
+      const said: string[] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => {
+        said.push(args.map(String).join(" "));
+      };
       try {
         const response = await routes.request(
           `http://openbot.test/servers/${dynamicServerId}/connect`,
           { method: "POST" },
         );
+        console.error = realError;
         const body = await response.text();
+        // The operator's only clue is the fault's name, and never its message, which can quote the
+        // stored client.
+        expect(
+          said
+            .filter((line) => line.includes("mcp-oauth-client-read-failed"))
+            .map((line) => JSON.parse(line)),
+        ).toEqual([
+          {
+            type: "mcp-oauth-client-read-failed",
+            server: dynamicServerId,
+            error: fault === "wrong-key" ? "OperationError" : "Error",
+          },
+        ]);
+        expect(said.join("\n")).not.toContain(sentinel);
         const events = await database
           .select()
           .from(auditEvents)
@@ -3031,6 +3051,7 @@ describe("a dynamic client the vendor has evicted", () => {
           EVICTED,
         );
       } finally {
+        console.error = realError;
         await putClient(EVICTED);
       }
     },

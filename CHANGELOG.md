@@ -99,12 +99,14 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 `COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
+
 ### A client read failure does not replace a working app registration
 
 A server that cannot decrypt an app's stored OAuth client now fails that connection attempt without
 registering a replacement. A server with the correct encryption key can keep using the original
 client. Confirmed missing or revoked credentials and malformed stored clients still use the existing
-registration flow. Connect records a safe read-failure audit row for the person and app and returns a retryable error, without exposing the vault failure.
+registration flow. Connect records a safe read-failure audit row for the person and app and returns
+a retryable error, without exposing the vault failure.
 
 ### The default look: an inset page, OpenBot's palette and Bots as orbs
 
