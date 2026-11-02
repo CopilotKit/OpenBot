@@ -197,7 +197,8 @@ export function OnboardingFrame({
               className={cn(
                 buttonVariants({ size: "lg" }),
                 shape,
-                "motion-reduce:transition-none",
+                // Last on a desktop, so the way forward is the rightmost button; first on a phone.
+                "motion-reduce:transition-none lg:order-last",
                 primary.done &&
                   "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10",
               )}
