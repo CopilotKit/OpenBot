@@ -534,6 +534,7 @@ beforeEach(() => {
   project = arcadeProject();
 });
 
+// Every database this file created is dropped here, and there are a few dozen of them.
 afterAll(async () => {
   useArcadeClient(null);
   engine?.stop(true);
@@ -548,7 +549,7 @@ afterAll(async () => {
   } finally {
     await admin.end({ timeout: 5 });
   }
-});
+}, 60_000);
 
 /* ------------------------------------------------------------------ a deployment, booted */
 

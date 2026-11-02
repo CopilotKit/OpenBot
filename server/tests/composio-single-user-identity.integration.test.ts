@@ -104,6 +104,7 @@ async function close(database: Database) {
   await database.$client.close();
 }
 
+// Every database this file created is dropped here, and there are a few dozen of them.
 afterAll(async () => {
   useComposioClient(null);
   for (const database of opened) await database.$client.close();
@@ -115,7 +116,7 @@ afterAll(async () => {
   } finally {
     await admin.end({ timeout: 5 });
   }
-});
+}, 60_000);
 
 /** The vendor's account statuses, spelled here because the adapter keeps its copy private. */
 type AccountStatus =
