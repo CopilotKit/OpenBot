@@ -78,6 +78,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A Bot made with "Run it here" runs when the deployment's own agent is on a private address
+
+A Bot created in the app with no endpoint is bound to the deployment's own agent,
+`MANAGED_AGENT_AG_UI_URL`. Where that address is private, as on a local deployment that keeps it on
+loopback, the endpoint check refused it like an address a person typed in, and every message to the
+Bot failed with "This deployment will not dial". The deployment's own agent addresses
+(`MANAGED_AGENT_AG_UI_URL`, and `PICKED_HARNESS_URL` when `PICKED_HARNESS_IMAGE` is set) are now
+allowed at exactly those URLs: when a Bot is saved, in Test connection, and on every run. Another
+path on the same host and port, and a redirect onto the agent's own address, are still refused.
+
 ### A tool's link and a vendor's refusal are cut between characters
 
 When a tool answers with a link, its title, name and description are each cut to 400 characters
