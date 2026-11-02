@@ -86,11 +86,13 @@ function Diff({
   kind,
   path,
   changes,
+  replaceAll,
   result,
 }: {
   kind: "edit" | "write";
   path?: string;
   changes: { before: string; after: string }[];
+  replaceAll?: boolean;
   result?: string;
 }) {
   return (
@@ -99,6 +101,7 @@ function Diff({
       kind={kind}
       outcome={useOutcome(result)}
       path={path}
+      replaceAll={replaceAll}
     />
   );
 }
@@ -181,6 +184,7 @@ export function CodingTools() {
         ]}
         kind="edit"
         path={given?.file_path}
+        replaceAll={given?.replace_all === true}
         result={result}
       />
     ),

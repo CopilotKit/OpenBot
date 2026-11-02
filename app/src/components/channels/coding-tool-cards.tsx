@@ -285,12 +285,19 @@ export function DiffCard({
   kind,
   path,
   changes,
+  replaceAll = false,
   outcome,
 }: {
   kind: "edit" | "write";
   path: string | undefined;
   /** Each replacement, in order. A write is one, from nothing. */
   changes: readonly { before: string; after: string }[];
+  /**
+   * The edit replaced every occurrence of its text, not only the first. The diff shows one
+   * replacement either way, because the arguments carry the text and not the file, so the header
+   * says so.
+   */
+  replaceAll?: boolean;
   outcome: CodingOutcome;
 }) {
   const rows: DiffRow[] = [];
@@ -305,6 +312,11 @@ export function DiffCard({
     <CodingFrame
       aside={
         <>
+          {replaceAll ? (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              All occurrences
+            </span>
+          ) : null}
           {added || removed ? (
             <span className="flex shrink-0 gap-1.5 font-mono text-xs">
               {added ? <span className={MARK_TONES.add}>+{added}</span> : null}

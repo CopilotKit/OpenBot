@@ -143,6 +143,17 @@ export const documented = {
     arguments: JSON.stringify({ pattern: "**/*.py" }),
     result: "/workspace/greet.py\n/workspace/tests/test_greet.py",
   },
+  replaceAll: {
+    name: "Edit",
+    arguments: JSON.stringify({
+      file_path: "/workspace/greet.py",
+      old_string: "name",
+      new_string: "person",
+      replace_all: true,
+    }),
+    result:
+      "The file /workspace/greet.py has been updated. All occurrences were successfully replaced.",
+  },
   multiEdit: {
     name: "MultiEdit",
     arguments: JSON.stringify({

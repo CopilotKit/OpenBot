@@ -182,6 +182,21 @@ test("an edit is a diff of what it replaced, in red, and what it put in, in gree
   expect(added?.parentElement?.className).toContain("bg-emerald-500/10");
 });
 
+test("an edit that replaced every occurrence says so", async () => {
+  const view = draw(
+    turn([documented.replaceAll], [documented.replaceAll.result]),
+  );
+  const edit = await card(view, "Edited a file");
+  expect(edit.getByText("All occurrences")).toBeTruthy();
+  cleanup();
+
+  // One that replaced a single occurrence says nothing about it.
+  const single = live(recorded.edit);
+  expect(
+    (await card(single, "Edited a file")).queryByText("All occurrences"),
+  ).toBeNull();
+});
+
 test("an edit Claude Code refused says it didn't work, live and after a reload", async () => {
   for (const draw of [live, reloaded]) {
     const view = draw(recorded.refusedEdit);
