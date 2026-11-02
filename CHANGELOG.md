@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A boundary rule about a host also covers that host written with a root dot
+
+`page.host` kept the root dot a URL can end its host with, so a navigation to
+`https://intranet.example.com./` was decided as `intranet.example.com.` and walked past a rule such
+as `page.host == "intranet.example.com"`, though DNS, the Bot's browser and the computer's own
+network filter all treat the two as one site. `page.host` now drops the root dot (the port stays),
+so the rule refuses either spelling.
+
 ### Allowing a Gmail send always no longer allows it to anybody
 
 A Bot sending or replying through Composio's Gmail (`GMAIL_SEND_EMAIL`, `GMAIL_REPLY_TO_THREAD`)
