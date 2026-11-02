@@ -168,6 +168,11 @@ A coworker is a durable Bot profile:
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
 
+For a message with no named Bot, the intent router chooses from the person's roster. If it cannot
+choose confidently, a unique app holder may receive the message instead of the default Bot. When
+different named apps point to different unique holders, that fallback is ambiguous and the default
+stays selected; roster order does not decide which Bot owns the conversation.
+
 A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (`group_bot_threads`), and what the people in it read is a shared transcript (`group_messages`) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
 
 Who may reach one is decided by membership: every channel route resolves the caller in

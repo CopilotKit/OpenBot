@@ -84,6 +84,12 @@ Approving a Bot for a shared app now succeeds when the same group appears in its
 and its assigned groups. Repeated people or groups are stored once; a person and a group with the
 same name remain separate, and no additional audience is approved.
 
+### Concurrent routine edits keep their limit and saved schedule
+
+An update now reads the current routine under the same owner lock used to count and write it. An
+enable queued behind a pause and another create cannot take a person past 20 enabled routines.
+Concurrent cron and timezone edits also calculate the next firing from the schedule actually saved.
+
 ### A failed shared-app approval can be tried again
 
 Deciding a shared-app request now commits the decision and the access it grants together. If the
@@ -176,6 +182,12 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 `COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
+
+### A message naming different Bots' apps stays on the default when routing is unsure
+
+When the router cannot decide and a message names apps held by different Bots, OpenBot keeps the
+default Bot instead of picking whichever app appears first in the roster. A single Bot uniquely
+holding the named apps still receives the message, and a confident routing decision still wins.
 
 ### A client read failure does not replace a working app registration
 
