@@ -227,6 +227,37 @@ const PROVENANCE_GUIDANCE_LINES = [
 export const PROVENANCE_GUIDANCE = asParagraphs(PROVENANCE_GUIDANCE_LINES);
 
 /**
+ * When to answer with a component rather than prose.
+ *
+ * Every Bot is offered the gallery (charts, tables, record cards, checklists, choices), sandboxed UI
+ * in the browser, and the display half of the gallery on a background turn. Nothing said when to use
+ * any of it, so each tool's own description decided alone: a comparison of figures got a chart, but
+ * a first-week plan came back as headed lists and a landmark's key facts as bullets, from a Bot
+ * holding a checklist and a record card.
+ *
+ * It names kinds of answer and never a tool, because the tools on a turn differ: by Bot, by grant,
+ * and between a person's own turn and a background one, where nothing that waits on a person is
+ * offered. A list of names would promise a component somebody's turn does not hold.
+ *
+ * It goes straight after `PROVENANCE_GUIDANCE` in every prompt, which is what "the rules above" in
+ * its last line points at: a chart drawn because this said to is still a chart whose figures have to
+ * say where they came from.
+ */
+const COMPONENT_GUIDANCE_LINES = [
+  "When an answer has structure, answer with a component from your tools rather than in prose.",
+  "Numbers or a comparison: a chart or headline figures. Steps, a list or a plan: a checklist or a",
+  "table. The details of one thing, such as a person, an order or an account: a record card. A choice",
+  "the person has to make: a card they choose from. Use whichever of the tools you hold on this turn",
+  "fits, and put a sentence or two of text around it saying what it shows or what comes next, without",
+  "repeating what it already shows.",
+  "",
+  "Answer in plain text only for a short conversational reply, or when none of your tools fits the",
+  "answer. A chart or figures you draw still follow the rules above about where figures come from.",
+];
+
+export const COMPONENT_GUIDANCE = asParagraphs(COMPONENT_GUIDANCE_LINES);
+
+/**
  * What a tool call is given when its answer never came.
  *
  * A tool call the surface owns ends the run without a result on purpose: the surface draws it, or
