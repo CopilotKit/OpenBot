@@ -117,10 +117,11 @@ export function OnboardingFrame({
           <StepDashes index={index} total={total} />
         </div>
         <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
-          <p className="type-sub flex items-center gap-2 font-semibold">
+          {/* A div, not a p: the orb draws its layers in divs. */}
+          <div className="type-sub flex items-center gap-2 font-semibold">
             <AgentOrb size="24px" />
             {appConfig.brand.productName}
-          </p>
+          </div>
           <StepMenu
             index={index}
             onPick={onPick}
