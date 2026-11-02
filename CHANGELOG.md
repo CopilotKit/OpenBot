@@ -86,6 +86,13 @@ not on this deployment's network allowlist", whatever the rule said. The server 
 with its port still attached against the allowlist's domains. It now compares the host and the port
 separately, as the computer's own filter already did, so the rule's domain and ports decide.
 
+### The server image starts again
+
+The `server` image left out `agent-computer/src/egress.ts`, which the server imports to check a
+Bot's navigation against the network policy, so a container built from `server/Dockerfile` exited on
+start with a module-not-found error and restarted in a loop. The image now carries that file. The
+all-in-one `openbot` image was not affected.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
@@ -107,6 +114,20 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 `COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
+
+### The default look: an inset page, OpenBot's palette and Bots as orbs
+
+Each page now sits in a panel inset from the window, on a darker frame shared with the sidebar,
+with white cards on a light page; admin and settings scroll inside it like the rest of the app.
+The palette leans towards CopilotKit's lilac, with a plum dark mode, and the type is Atkinson
+Hyperlegible. Each Bot appears as an orb in its own colors. The sidebar says "Waiting for you"
+on a conversation that needs you, and orange means nothing else. Home has a subheader and cycles
+through example jobs from your own Bots; a conversation opens with its Bot's orb, name and role.
+Rows show an app's logo or initial instead of the same plug; Home shows Bots as compact cards;
+Connections tiles no longer cut their text off; and the Composio directory shows its rows loading.
+Colors, card edges and shadows are theme tokens in `theme.css`, and empty states carry a faint dot
+pattern whose file, color and strength are tokens too (`--empty-pattern*`), so a deployment can
+restyle or turn them off. Skins keep their own look.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
