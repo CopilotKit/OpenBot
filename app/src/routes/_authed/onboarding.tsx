@@ -46,7 +46,7 @@ const PRODUCT = appConfig.brand.productName;
  * Every step, by id, with the number the server stores for it.
  *
  * `POST /api/me/onboarding` keeps a step as an integer, so each id has a number of its own. A
- * number per id, never a position in the list: the self-hosting step joins the list only for
+ * number per id, never a position in the list: the Talk to us step joins the list only for
  * somebody trying OpenBot alone, and a position would mean a different step to them than to
  * everybody else. 0 is the server's "not started".
  */
@@ -302,16 +302,20 @@ const approval: OnboardingStep = {
 };
 
 /*
- * THE SELF-HOSTING STEP IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it
- * (see `localEvaluation` in RouteComponent). It answers what that person is deciding: where their
- * data is, whether their own agents fit, and what taking it to their organization involves. None of
- * it is said to an organization's own people, who are past all three.
+ * THE TALK TO US STEP IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it
+ * (see `localEvaluation` in RouteComponent). It comes last, before the name, so it never stands
+ * between them and the rest of the tour. None of it is said to an organization's own people, who
+ * already have OpenBot.
  */
 const selfhost: OnboardingStep = {
   id: "selfhost",
-  title: "It runs on your machine",
+  title: "Talk to us",
   intro: () => (
     <StepIntro>
+      <p>
+        Thinking about OpenBot for your team? Book a call and we'll walk you
+        through running it for your organization.
+      </p>
       {/*
        * Said as it is: files and Bot settings stay here, but every request goes to the model
        * provider this install was set up with, and Intelligence keeps the conversations.
@@ -321,28 +325,16 @@ const selfhost: OnboardingStep = {
         provider, and CopilotKit Intelligence keeps your conversations and
         memory.
       </p>
-      <p>
-        Any AG-UI agent can join as a Bot. For your organization, run one
-        container image or a Helm chart.
-      </p>
-      {/*
-       * A link in the sentence, not a third button beside Back and Continue: it is a way to learn
-       * more, not a way through onboarding. A new tab, so following it doesn't cost the place.
-       */}
-      <p>
-        Taking it to your team?{" "}
-        <a
-          className="rounded-sm font-medium text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring"
-          href={SELF_HOST_URL}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          Talk to an engineer
-        </a>
-      </p>
     </StepIntro>
   ),
   demo: () => <SelfHostDemo />,
+  // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
+  primaryLabel: "Book a call",
+  onPrimary: (next) => {
+    window.open(SELF_HOST_URL, "_blank", "noopener,noreferrer");
+    next();
+  },
+  secondary: { label: "Not now" },
 };
 
 function RouteComponent() {
@@ -398,11 +390,11 @@ function RouteComponent() {
    * the person lands on already names its step. `connected` is dropped the same way, and only it.
    */
   /*
-   * The self-hosting step, after the intro, is for somebody evaluating OpenBot locally, never for
+   * The Talk to us step, before the name, is for somebody evaluating OpenBot locally, never for
    * an organization's people: the server says single-user mode, which an organization's
    * deployment, always behind sign-in, cannot be in. Until the answer arrives it is left out, and
    * the intro's Continue waits for it, so a slow or failed request never shows an organization's
-   * employees a page about deploying OpenBot themselves, and an evaluator never walks past theirs.
+   * employees a page about booking a call, and an evaluator never walks past theirs.
    *
    * NOT GATED ON `selfHostBanner` AS WELL. That flag is off for any deployment with a paid
    * Intelligence entitlement, and the stack `copilotkit local` installs runs on an enterprise
@@ -416,13 +408,13 @@ function RouteComponent() {
     isPending: askingCapabilities,
   } = useQuery(deploymentCapabilitiesQueryOptions());
   /*
-   * A self-hosting step somebody else has no business on, from an address or a saved number, reads
+   * A Talk to us step somebody else has no business on, from an address or a saved number, reads
    * as the step it comes before, once the answer says so: the address is rewritten below and the
    * new place saved, rather than drawing one step while the address and the server hold another.
    */
   const reachable = (step: StepId | null | undefined) =>
     step === "selfhost" && capabilities && !capabilities.localEvaluation
-      ? AFTER_INTRO
+      ? "name"
       : (step ?? undefined);
   const saved = reachable(stepForNumber(me.data?.onboarding?.step));
   const asked = reachable(isStepId(search.step) ? search.step : undefined);
@@ -459,7 +451,7 @@ function RouteComponent() {
   const { mutate: save } = advance;
   React.useEffect(() => {
     if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
-    // The self-hosting step waits for the answer that says whether this person has one.
+    // The Talk to us step waits for the answer that says whether this person has one.
     if (current === "selfhost" && !capabilities) return;
     /*
      * A save that fails is tried again on the next move, since the saved step still differs. It is
@@ -587,13 +579,7 @@ function RouteComponent() {
   /*
    * Skip intro on every intro step but the last, where it would only do what Continue does.
    */
-  const introSteps = [
-    welcome,
-    computer,
-    team,
-    approval,
-    ...(capabilities?.localEvaluation ? [selfhost] : []),
-  ];
+  const introSteps = [welcome, computer, team, approval];
   const intro: OnboardingStep[] = introSteps.map((step, at) => ({
     ...step,
     primaryDisabled: !capabilities,
@@ -659,10 +645,11 @@ function RouteComponent() {
       optional: true,
     },
     notify,
+    ...(capabilities?.localEvaluation ? [selfhost] : []),
     name,
   ];
 
-  // A self-hosting step in the address waits for the answer that puts it in the list, rather
+  // A Talk to us step in the address waits for the answer that puts it in the list, rather
   // than drawing step 1 for a moment and then jumping.
   const waiting = askingCapabilities && current === "selfhost";
 

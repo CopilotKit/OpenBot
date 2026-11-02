@@ -25,6 +25,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
@@ -367,7 +368,7 @@ test("on every step, its name in the list of steps is its heading", async () => 
     if (searchOf(view).step === "name") break;
     const step = searchOf(view).step;
     fireEvent.click(
-      step === "apps" || step === "notify"
+      step === "apps" || step === "notify" || step === "selfhost"
         ? view.getByRole("button", { name: "Not now" })
         : await continueButton(view),
     );
@@ -781,28 +782,43 @@ test("the last intro step has no Skip intro, since Continue goes to the same pla
   );
 });
 
-test("somebody trying OpenBot alone gets the self-hosting step, with Talk to an engineer", async () => {
+test("somebody trying OpenBot alone gets Talk to us before the name, and Book a call opens a new tab", async () => {
   localEvaluation = true;
-  const view = open("/onboarding?step=approval");
-  await heading(view, "You decide what it asks about");
+  const opened: unknown[][] = [];
+  const realOpen = window.open;
+  window.open = ((...args: unknown[]) => {
+    opened.push(args);
+    return null;
+  }) as typeof window.open;
+  try {
+    const view = open("/onboarding?step=notify");
+    await heading(view, "Get notified");
+    fireEvent.click(view.getByRole("button", { name: "Not now" }));
 
-  fireEvent.click(await continueButton(view));
+    expect(await heading(view, "Talk to us")).toBeTruthy();
+    expect(searchOf(view).step).toBe("selfhost");
+    expect(
+      Array.from(view.container.querySelectorAll("footer button")).map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Back", "Book a call", "Not now"]);
 
-  expect(await heading(view, "It runs on your machine")).toBeTruthy();
-  expect(searchOf(view).step).toBe("selfhost");
-  const engineer = view.getByRole("link", { name: "Talk to an engineer" });
-  expect(engineer.getAttribute("target")).toBe("_blank");
-  // Two actions, Back and Continue: no Skip intro, and the engineer is a link in the words.
-  expect(
-    Array.from(view.container.querySelectorAll("footer button")).map(
-      (button) => button.textContent,
-    ),
-  ).toEqual(["Back", "Continue"]);
-  expect(engineer.closest("p")?.textContent).toBe(
-    "Taking it to your team? Talk to an engineer",
-  );
-  fireEvent.click(await continueButton(view));
-  expect(await heading(view, "Check your setup")).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Book a call" }));
+    expect(opened).toEqual([[SELF_HOST_URL, "_blank", "noopener,noreferrer"]]);
+    expect(await heading(view, "What should we call you?")).toBeTruthy();
+  } finally {
+    window.open = realOpen;
+  }
+});
+
+test("Not now on Talk to us moves on without opening anything", async () => {
+  localEvaluation = true;
+  const view = open("/onboarding?step=selfhost");
+  await heading(view, "Talk to us");
+
+  fireEvent.click(view.getByRole("button", { name: "Not now" }));
+
+  expect(await heading(view, "What should we call you?")).toBeTruthy();
 });
 
 test("an organization's people never see the self-hosting step", async () => {
@@ -812,14 +828,14 @@ test("an organization's people never see the self-hosting step", async () => {
   fireEvent.click(await continueButton(view));
 
   expect(await heading(view, "Check your setup")).toBeTruthy();
-  expect(view.queryByText("Running it yourself")).toBeNull();
+  expect(view.queryByRole("heading", { name: "Talk to us" })).toBeNull();
 });
 
 test("the self-hosting step in the address waits for the answer, rather than flashing step 1", async () => {
   localEvaluation = true;
   const view = open("/onboarding?step=selfhost");
 
-  expect(await heading(view, "It runs on your machine")).toBeTruthy();
+  expect(await heading(view, "Talk to us")).toBeTruthy();
   expect(
     view.queryByRole("heading", { name: "Welcome to OpenBot" }),
   ).toBeNull();
@@ -937,14 +953,14 @@ test.each([
   ["in the address", "/onboarding?step=selfhost", 0],
   ["saved", "/onboarding", 5],
 ])(
-  "a self-hosting step %s for an organization's person opens Check your setup, and saves that",
+  "a Talk to us step %s for an organization's person opens the name step, and saves that",
   async (_label, path, stored) => {
     saved = stored;
     const view = open(path);
 
-    expect(await heading(view, "Check your setup")).toBeTruthy();
-    await waitFor(() => expect(searchOf(view).step).toBe("setup"));
-    await waitFor(() => expect(saved).toBe(8));
+    expect(await heading(view, "What should we call you?")).toBeTruthy();
+    await waitFor(() => expect(searchOf(view).step).toBe("name"));
+    await waitFor(() => expect(saved).toBe(9));
     expect(saves).not.toContain(5);
   },
 );
