@@ -233,12 +233,19 @@ export function decideFromSnapshot(
    * decided without DNS: an IP-range rule needs the resolved address, which the computer's filter has
    * and this server does not.
    */
-  if (context.intent === "navigate" && context.page.host) {
+  const destination =
+    context.intent === "navigate" && context.page.host
+      ? destinationOf(context.page.url)
+      : null;
+  if (destination) {
     const policy = effectiveNetworkPolicy(snapshot.network, member, true);
     const hasRanges = policy.rules.some((rule) => rule.type === "cidr");
-    if (!hasRanges || /^[\d.:[\]]+$/.test(context.page.host)) {
-      const port = portOf(context.page.url);
-      const decision = egressDecision(policy, context.page.host, port);
+    if (!hasRanges || /^[\d.:[\]]+$/.test(destination.host)) {
+      const decision = egressDecision(
+        policy,
+        destination.host,
+        destination.port,
+      );
       if (!decision.allowed) {
         return refusal(
           `network:${policy.from}`,
@@ -250,12 +257,25 @@ export function decideFromSnapshot(
   return null;
 }
 
-function portOf(url: string): number {
+/**
+ * The host and port a navigation opens, as the egress matcher wants them: apart.
+ *
+ * Not `page.host`. That is `URL.host`, which carries the port whenever it is not the scheme's
+ * default (`erp.internal:8080`), because a boundary rule written as `page.host == "..."` matches
+ * against it. Handed to the matcher as the host, it was compared with the domain rules as
+ * `erp.internal:8080` and matched none of them, so every allowed destination on a non-default port
+ * was refused here, before the computer's filter, which reads the host and port apart, was asked.
+ */
+function destinationOf(url: string): { host: string; port: number } | null {
   try {
     const parsed = new URL(url);
-    return Number(parsed.port || (parsed.protocol === "http:" ? 80 : 443));
+    if (!parsed.hostname) return null;
+    return {
+      host: parsed.hostname,
+      port: Number(parsed.port || (parsed.protocol === "http:" ? 80 : 443)),
+    };
   } catch {
-    return 443;
+    return null;
   }
 }
 

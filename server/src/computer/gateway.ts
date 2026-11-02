@@ -1720,15 +1720,6 @@ async function write(
 }
 
 /**
- * The host a rule can match on, or empty.
- *
- * Empty means "no page", which is the accurate answer before a Bot has snapshotted anything, and it is
- * the only case that occurs in practice: the URL comes from Playwright's own `page.url()` by way of the
- * snapshot cache. Worth stating explicitly because a `page.host == "..."` deny rule would not match an
- * empty host, so a boundary that must not be evadable should also key on the tool, the element or the
- * file rather than on the host alone.
- */
-/**
  * One row for a handover.
  *
  * Separate from `write` because a handover has no element, no file and no policy decision, forcing it
@@ -1779,9 +1770,25 @@ const SNAPSHOT_FIELDS = ["title", "elements"] as const;
 /** A two-step login can take two page loads and a wait for a code field; this outlasts the computer's own waits. */
 const SIGN_IN_BACKSTOP_MS = 75_000;
 
+/**
+ * The host a rule can match on, or empty.
+ *
+ * Empty means "no page", which is the accurate answer before a Bot has snapshotted anything, and it is
+ * the only case that occurs in practice: the URL comes from Playwright's own `page.url()` by way of the
+ * snapshot cache. Worth stating explicitly because a `page.host == "..."` deny rule would not match an
+ * empty host, so a boundary that must not be evadable should also key on the tool, the element or the
+ * file rather than on the host alone.
+ *
+ * Without the root dot. `intranet.example.com.` is the same name to DNS, to Chromium and to the
+ * computer's own network filter (agent-computer's `normalizeHost`), and `new URL()` keeps the dot, so
+ * a navigation written with one used to slip past `page.host == "intranet.example.com"`. The port
+ * stays, as it always has: a rule may name one.
+ */
 export function hostOf(url: string): string {
   try {
-    return new URL(url).host;
+    const { hostname, port } = new URL(url);
+    const name = hostname.replace(/\.+$/, "");
+    return port ? `${name}:${port}` : name;
   } catch {
     return "";
   }
