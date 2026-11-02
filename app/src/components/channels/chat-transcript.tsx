@@ -58,6 +58,7 @@ import { attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
+import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
@@ -1420,19 +1421,22 @@ const ToolCallBody = memo(function ToolCallBody({
     [toolCallId, name, args],
   );
 
-  const drawn = renderToolCall({
-    toolCall,
-    ...(result === undefined
-      ? {}
-      : {
-          toolMessage: {
-            id: `${toolCallId}-result`,
-            role: "tool",
-            toolCallId,
-            content: result,
-          },
-        }),
-  });
+  // Another harness's tool under one of Claude Code's names is drawn as any other tool is.
+  const drawn = foreignCodingCall(name, args)
+    ? null
+    : renderToolCall({
+        toolCall,
+        ...(result === undefined
+          ? {}
+          : {
+              toolMessage: {
+                id: `${toolCallId}-result`,
+                role: "tool",
+                toolCallId,
+                content: result,
+              },
+            }),
+      });
 
   const place = useMemo(
     () => ({ toolCallId, latest, spokeAfter }),

@@ -22,6 +22,10 @@ import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
  * Claude Code's arguments, and its result is the text Claude Code gave the model. Without these they
  * fold into the generic "Used 6 tools" line, and a Bot that wrote and ran code shows none of it.
  *
+ * REGISTERED BY BARE NAME, FOR EVERY BOT. The browser cannot tell which harness a Bot runs, so a call
+ * is drawn here only when it carries Claude Code's arguments; another harness's `Bash` with other
+ * arguments is drawn as any other tool. See `coding-calls.ts`.
+ *
  * The names are Claude Code's, across its versions. MultiEdit has gone from current ones, Grep and
  * Glob are absent from its native macOS and Linux builds, which search through Bash instead, and its
  * task tools replace TodoWrite unless the harness sets `CLAUDE_CODE_ENABLE_TASKS=0`. Every one of

@@ -96,6 +96,16 @@ async function card(view: ReturnType<typeof draw>, label: string) {
   return within(await view.findByRole("region", { name: label }));
 }
 
+/** The coding cards drawn, by what each says it did. Other regions on the page are left out. */
+function cards(view: ReturnType<typeof draw>): (string | null)[] {
+  return view
+    .queryAllByRole("region")
+    .map((region) => region.getAttribute("aria-label"))
+    .filter((label) =>
+      /^(Ran a command|Edited a file|Wrote a file)$/.test(label ?? ""),
+    );
+}
+
 /** What a reader is told by each element matching `selector`: decoration hidden from a screen reader is left out. */
 function readableLines(root: HTMLElement, selector: string): (string | null)[] {
   return Array.from(root.querySelectorAll(selector), (element) => {
@@ -266,6 +276,20 @@ test("reading and searching are one line each, with what was found", async () =>
     'Found no matches"class "',
     "Found 2 files**/*.py",
   ]);
+});
+
+test("a tool that shares a Claude Code name but not its arguments is drawn as any other tool", async () => {
+  // Another harness's `Bash`, taking `cmd` where Claude Code's takes `command`.
+  const other = { name: "Bash", arguments: JSON.stringify({ cmd: "ls" }) };
+  const view = draw(turn([other], ["greet.py"]));
+  await view.findByText("Bash");
+  expect(view.queryByRole("region", { name: "Ran a command" })).toBeNull();
+  cleanup();
+
+  // And folds with its neighbours, as a tool the app has no component for does.
+  const two = draw(turn([other, other], ["greet.py", "greet.py"]));
+  expect(await two.findByText("Used 2 tools")).toBeTruthy();
+  expect(cards(two)).toEqual([]);
 });
 
 test("a plan is a checklist of done, in progress and not started", async () => {

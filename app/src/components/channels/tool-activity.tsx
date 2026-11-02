@@ -14,6 +14,7 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
   connectorName,
@@ -121,7 +122,13 @@ export function groupToolSteps(
 function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
   if (isBrowserStep(item)) return true;
   const name = item.toolCall.function.name;
-  if (!name.startsWith("mcp__") && isDrawn(name)) return false;
+  // Another harness's tool under one of Claude Code's names is not drawn as Claude Code's.
+  if (
+    !name.startsWith("mcp__") &&
+    isDrawn(name) &&
+    !foreignCodingCall(name, item.toolCall.function.arguments)
+  )
+    return false;
   /*
    * The app-access card is drawn from a server tool's answer, so no renderer registers it and the
    * registry cannot say so. Never folded — not even while its answer is still on the way, or the
