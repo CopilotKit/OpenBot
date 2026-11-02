@@ -10,34 +10,34 @@ export const NOTICE_TAG = "openbot-recorder-notice";
 
 export const NOTICE_TOKENS = {
   light: {
-    "--background": "oklch(0.985 0 0)",
-    "--foreground": "oklch(0.145 0 0)",
+    "--background": "oklch(0.983 0.003 286.4)",
+    "--foreground": "oklch(0.108 0.015 220.9)",
     "--card": "oklch(1 0 0)",
-    "--card-foreground": "oklch(0.145 0 0)",
-    "--border": "oklch(0.922 0 0)",
-    "--primary": "oklch(0.205 0 0)",
-    "--primary-foreground": "oklch(0.985 0 0)",
-    "--secondary": "oklch(0.97 0 0)",
-    "--muted-foreground": "oklch(0.5 0 0)",
-    "--destructive": "oklch(0.577 0.245 27.325)",
-    "--ring": "oklch(0.708 0 0)",
+    "--card-foreground": "oklch(0.108 0.015 220.9)",
+    "--border": "oklch(0.894 0.014 286.1)",
+    "--primary": "oklch(0.108 0.015 220.9)",
+    "--primary-foreground": "oklch(1 0 0)",
+    "--secondary": "oklch(0.956 0.005 286.3)",
+    "--muted-foreground": "oklch(0.506 0.013 285.9)",
+    "--destructive": "oklch(0.504 0.178 22.9)",
+    "--ring": "oklch(0.644 0.167 276.1)",
   },
   dark: {
-    "--background": "oklch(0.145 0 0)",
-    "--foreground": "oklch(0.985 0 0)",
-    "--card": "oklch(0.205 0 0)",
-    "--card-foreground": "oklch(0.985 0 0)",
-    "--border": "oklch(1 0 0 / 10%)",
-    "--primary": "oklch(0.922 0 0)",
-    "--primary-foreground": "oklch(0.205 0 0)",
-    "--secondary": "oklch(0.269 0 0)",
-    "--muted-foreground": "oklch(0.708 0 0)",
-    "--destructive": "oklch(0.704 0.191 22.216)",
-    "--ring": "oklch(0.556 0 0)",
+    "--background": "oklch(0.182 0.023 296.6)",
+    "--foreground": "oklch(0.956 0.005 286.3)",
+    "--card": "oklch(0.212 0.028 297.1)",
+    "--card-foreground": "oklch(0.956 0.005 286.3)",
+    "--border": "oklch(0.28 0.035 298.6)",
+    "--primary": "oklch(0.956 0.005 286.3)",
+    "--primary-foreground": "oklch(0.108 0.015 220.9)",
+    "--secondary": "oklch(0.253 0.032 297.6)",
+    "--muted-foreground": "oklch(0.69 0.017 285.9)",
+    "--destructive": "oklch(0.792 0.121 16.4)",
+    "--ring": "oklch(0.713 0.151 277.7)",
   },
 } as const;
 
-export const RADIUS = "0.5rem";
+export const RADIUS = "0.625rem";
 
 type Choice = "stop" | "restart" | "continue";
 
