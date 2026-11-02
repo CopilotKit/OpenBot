@@ -1,5 +1,5 @@
 {
-  "id": "c646a2ae-bda9-43db-a022-b3631f0fac4b",
+  "id": "c616aff5-16d2-4bce-bb6c-6fa15eb3ff23",
   "prevId": "929a1a96-4562-4336-bad4-90c42993ab9d",
   "version": "7",
   "dialect": "postgresql",
@@ -2855,57 +2855,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.brokered_identities": {
-      "name": "brokered_identities",
-      "schema": "",
-      "columns": {
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "vendor_user_id": {
-          "name": "vendor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "brokered_identities_provider_user_id_pk": {
-          "name": "brokered_identities_provider_user_id_pk",
-          "columns": [
-            "provider",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "brokered_identities_provider_check": {
-          "name": "brokered_identities_provider_check",
-          "value": "\"brokered_identities\".\"provider\" IN ('composio', 'arcade')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.composio_connections": {
       "name": "composio_connections",
       "schema": "",
@@ -3055,6 +3004,12 @@
         },
         "owner_grants": {
           "name": "owner_grants",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entra_scope": {
+          "name": "entra_scope",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -3364,7 +3319,7 @@
           "name": "action",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "holder": {
           "name": "holder",

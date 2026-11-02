@@ -58,9 +58,10 @@ import { attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
+import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { markdownComponents } from "@/lib/markdown";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@openbot/shared/tool-name";
 import {
@@ -807,7 +808,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closing token arrives, so the answer visibly rewrites itself as it lands. This
                  * closes them for the duration.
                  */
-                <Streamdown components={markdownComponents} mode={mode}>
+                <Streamdown
+                  components={markdownComponents}
+                  mode={mode}
+                  plugins={markdownPlugins}
+                >
                   {revealed}
                 </Streamdown>
               )}
@@ -1421,19 +1426,22 @@ const ToolCallBody = memo(function ToolCallBody({
     [toolCallId, name, args],
   );
 
-  const drawn = renderToolCall({
-    toolCall,
-    ...(result === undefined
-      ? {}
-      : {
-          toolMessage: {
-            id: `${toolCallId}-result`,
-            role: "tool",
-            toolCallId,
-            content: result,
-          },
-        }),
-  });
+  // Another harness's tool under one of Claude Code's names is drawn as any other tool is.
+  const drawn = foreignCodingCall(name, args)
+    ? null
+    : renderToolCall({
+        toolCall,
+        ...(result === undefined
+          ? {}
+          : {
+              toolMessage: {
+                id: `${toolCallId}-result`,
+                role: "tool",
+                toolCallId,
+                content: result,
+              },
+            }),
+      });
 
   const place = useMemo(
     () => ({ toolCallId, latest, spokeAfter }),
@@ -1607,7 +1615,7 @@ export function ServerToolLine({
       running={running}
     >
       {shown ? (
-        <Streamdown components={markdownComponents}>
+        <Streamdown components={markdownComponents} plugins={markdownPlugins}>
           {forDisplay(shown)}
         </Streamdown>
       ) : null}
@@ -1826,8 +1834,11 @@ export function ChatTranscript({
   working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
-  /** The transcript's column, shared by the restoring state and the scroller. */
-  const column = "mx-auto w-full max-w-2xl px-4";
+  /**
+   * The transcript's column, shared by the restoring state and the scroller. 768px, wider than the
+   * composer's 672px, which is the reading width ChatGPT and Claude.ai give an answer.
+   */
+  const column = "mx-auto w-full max-w-3xl px-4";
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
    * silently broke the transcript: the agent hands back the SAME array and mutates it, so the
@@ -2108,7 +2119,10 @@ export function ChatTranscript({
   if (restoring) {
     return (
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
-        <div className={cn("flex flex-col gap-6 py-6", column)}>
+        <div
+          className={cn("flex flex-col gap-6 py-6", column)}
+          data-transcript-column
+        >
           <RestoringTranscript />
           {/*
            * A message typed while history loads is parked, not lost, and must be seen to be: a
@@ -2213,6 +2227,7 @@ export function ChatTranscript({
               <MessageScrollerContent
                 aria-busy={busy}
                 className={cn("py-6", column)}
+                data-transcript-column
                 spacerClassName="order-2"
               >
                 {/*

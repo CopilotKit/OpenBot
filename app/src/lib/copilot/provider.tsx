@@ -5,6 +5,7 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { generativeUiProviderOptions } from "./a2ui";
 import { ActiveBotProvider } from "./active-bot";
 import { BotTools } from "./bot-tools";
+import { CodingTools } from "./coding-tools";
 import { ComputerTools } from "./computer-tools";
 import { EscalationTool } from "./escalation-tool";
 import { GalleryTools } from "./gallery-tools";
@@ -66,6 +67,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         */}
         <HandoffTool />
         <EscalationTool />
+        {/* A coding harness Bot's own tools, which it runs itself: commands, diffs and its plan. */}
+        <CodingTools />
         {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}

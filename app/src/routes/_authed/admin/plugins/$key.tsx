@@ -166,14 +166,17 @@ function BotApprovalText({
  * "one credential, used for everybody" to the connector whose whole point is that each person
  * connects their own account, and would have stored a token nothing ever reads.
  *
- * A server an administrator added by URL is still the fallback's case, and still correct there:
- * nothing about it is reached as a person, so it gets the shared-token shape.
+ * A server an administrator added by URL is still the fallback's case, and still correct there,
+ * unless it was marked with an Entra scope. Then each call carries a token Microsoft Entra issues
+ * for the person asking, so it is reached as that person and has no token to paste: the shared-token
+ * shape would say the opposite of what it does.
  */
 export function connectionKindFor(
   server: PluginServer | undefined,
   auth: CatalogueItem["auth"] | undefined,
-): CatalogueItem["auth"] | "brokered" {
+): CatalogueItem["auth"] | "brokered" | "person-entra" {
   if (server && brokeredProvenance(server.provenance)) return "brokered";
+  if (server?.entraScope) return "person-entra";
   return auth ?? "deployment-bearer";
 }
 
@@ -704,7 +707,9 @@ function RouteComponent() {
                 : auth === "brokered"
                   ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
                     brokeredConnectionDescription(provider)
-                  : "What this deployment sends to the vendor. One credential for everybody."
+                  : auth === "person-entra"
+                    ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
+                    : "What this deployment sends to the vendor. One credential for everybody."
           }
           title="Connection"
         >
@@ -769,6 +774,32 @@ function RouteComponent() {
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
                     {brokeredReach(provider).badge}
+                  </span>
+                </ItemActions>
+              </Item>
+            ) : null}
+
+            {auth === "person-entra" ? (
+              /*
+               * Nothing to click. The scope is set when the server is added by URL, and each call
+               * exchanges the asking person's own Microsoft sign-in for a token to it. Shown so an
+               * admin can see the mark at all: without this row the page drew the shared-token
+               * shape over a server that never sends one.
+               */
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>How this is reached</ItemTitle>
+                  <ItemDescription>
+                    As the person asking, through their Microsoft sign-in. There
+                    is no token to paste.
+                  </ItemDescription>
+                  <code className="mt-1 block break-all font-mono text-muted-foreground text-xs">
+                    {server?.entraScope}
+                  </code>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    Microsoft Entra
                   </span>
                 </ItemActions>
               </Item>

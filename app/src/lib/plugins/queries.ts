@@ -97,6 +97,12 @@ export type PluginServer = {
    * Null is not an older brokered row. It is a row that is not brokered at all.
    */
   authScheme: string | null;
+  /**
+   * The Microsoft Entra scope a server added by URL is reached with as the person asking, or null
+   * for one reached on the deployment's own token. Optional because a server replica older than
+   * this field does not send it, mid-rollout.
+   */
+  entraScope?: string | null;
   tools: PluginTool[];
   /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
   withdrawn: WithdrawnGrant[];

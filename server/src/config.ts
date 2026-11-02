@@ -104,6 +104,12 @@ export type AuthProviderId = "google" | "microsoft" | "okta";
 /** An OAuth client, as every provider here needs one. */
 export type OAuthClient = { clientId: string; clientSecret: string };
 
+export type MicrosoftAuthConfig = OAuthClient & {
+  tenantId: string;
+  apiScope: string;
+  allowedClients: string[];
+};
+
 export type GithubAppConfig = {
   clientId: string;
   clientSecret: string;
@@ -126,8 +132,18 @@ export type AuthConfig = {
    * `tenantId` decides who may sign in at all, so it is not a detail. `common` admits any Microsoft
    * account including personal ones, `organizations` any work or school account anywhere, and a GUID
    * admits one directory. A deployment that wants only its own company needs the GUID.
+   *
+   * `apiScope` is OpenBot's own API in Entra, as a scope: what a person's app asks for a token to
+   * OpenBot with, and what OpenBot asks for from a person's stored sign-in before exchanging it on
+   * their behalf (`auth/entra.ts`). `api://<client id>/.default` unless MICROSOFT_OAUTH_API_SCOPE says
+   * otherwise.
+   *
+   * `allowedClients` is which apps may call OpenBot with a person's token, by application (client)
+   * id, lower-cased: a token's `azp` must be one of them. Entra issues a token for OpenBot's API to
+   * any app a person or an admin consents to, so the token alone does not say the app is one this
+   * company meant. Empty, from MICROSOFT_OAUTH_ALLOWED_CLIENTS unset, no app's token is taken.
    */
-  microsoft?: OAuthClient & { tenantId: string };
+  microsoft?: MicrosoftAuthConfig;
   /** Okta is an OIDC provider rather than a named one, so it is identified by its issuer. */
   okta?: OAuthClient & { issuer: string };
 };
@@ -795,7 +811,7 @@ const MULTI_TENANT_AUDIENCES = new Set([
   "consumers",
 ]);
 
-function namesNoDirectory(tenantId: string | undefined): boolean {
+export function namesNoDirectory(tenantId: string | undefined): boolean {
   return (
     tenantId !== undefined &&
     MULTI_TENANT_AUDIENCES.has(tenantId.trim().toLowerCase())
@@ -949,13 +965,41 @@ function authConfig(
  */
 function microsoftAuth(
   environment: Environment,
-): (OAuthClient & { tenantId: string }) | undefined {
+): MicrosoftAuthConfig | undefined {
   const client = oauthClient(environment, "MICROSOFT");
   if (!client) return undefined;
   return {
     ...client,
     tenantId: optional(environment, "MICROSOFT_OAUTH_TENANT_ID") ?? "common",
+    apiScope:
+      optional(environment, "MICROSOFT_OAUTH_API_SCOPE") ??
+      `api://${client.clientId}/.default`,
+    allowedClients: allowedEntraClients(environment),
   };
+}
+
+/** An application (client) id as Entra writes it in a token's `azp`: a GUID. */
+const ENTRA_CLIENT_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The apps whose tokens OpenBot takes, from MICROSOFT_OAUTH_ALLOWED_CLIENTS.
+ *
+ * Refused at start-up when an entry is not a client id, because the likely mistake is pasting the
+ * app's `api://` URI or its name, which no token's `azp` will ever equal: every app would then be
+ * refused at the door with nothing said about why.
+ */
+function allowedEntraClients(environment: Environment): string[] {
+  const named = commaSeparated(environment, "MICROSOFT_OAUTH_ALLOWED_CLIENTS");
+  const wrong = named.find(
+    (client) => !ENTRA_CLIENT_ID.test(client.toLowerCase()),
+  );
+  if (wrong !== undefined) {
+    throw new Error(
+      `MICROSOFT_OAUTH_ALLOWED_CLIENTS names \`${wrong}\`, which is not an application (client) id. Give each app's client id, a GUID from its app registration, separated by commas.`,
+    );
+  }
+  return named.map((client) => client.toLowerCase());
 }
 
 /**

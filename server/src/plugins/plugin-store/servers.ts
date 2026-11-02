@@ -65,6 +65,7 @@ import {
 /** Adding, removing, refreshing and listing MCP servers and brokered apps, and an app's account mode. */
 export function serverMethods(context: StoreContext) {
   const {
+    options,
     database,
     auditStore,
     credentials,
@@ -241,7 +242,19 @@ export function serverMethods(context: StoreContext) {
       title: string;
       url: string;
       credentialId?: string;
+      /**
+       * The Entra scope to reach this server with as the signed-in person, for example
+       * `api://hr-api/.default`. Null puts it back on `credentialId`. Absent keeps whatever the
+       * server already has, as `credentialId` does: re-adding a marked server without naming one
+       * must not quietly move it onto the deployment's credential.
+       */
+      entraScope?: string | null;
       by: string;
+      /**
+       * Who is adding it, by id. A server reached as the signed-in person is asked what it offers
+       * as the admin adding it, since there is no deployment credential to ask with.
+       */
+      actorId?: string;
     }): Promise<ServerRecord> {
       const refusal = customUrlRefusal(input.url);
       if (refusal) throw new CustomServerRefusedError(refusal);
@@ -376,9 +389,46 @@ export function serverMethods(context: StoreContext) {
           provenance: mcpServers.provenance,
           // The third of what `accessFor` resolves a row with. See there.
           authScheme: mcpServers.authScheme,
+          // Kept when the caller names none; see `entraScope` below.
+          entraScope: mcpServers.entraScope,
         })
         .from(mcpServers)
         .where(eq(mcpServers.id, input.id));
+
+      /*
+       * How it is reached once this write lands: the scope the caller named, none when they named
+       * null, and otherwise the one it already has. The last is the case that matters. A caller that
+       * does not know about the field (the app's add-by-URL request does not send it) re-adding a
+       * marked server used to clear the mark, and every call then went out on the deployment's
+       * credential with nothing said.
+       */
+      const namedScope =
+        input.entraScope === undefined
+          ? undefined
+          : input.entraScope?.trim() || null;
+      const entraScope =
+        (namedScope === undefined ? existing?.entraScope : namedScope) ||
+        undefined;
+      if (entraScope) {
+        if (!options.entra) {
+          throw new CustomServerRefusedError(
+            "Microsoft sign-in isn't set up, so a server can't be reached as the signed-in person. Set MICROSOFT_OAUTH_CLIENT_ID and MICROSOFT_OAUTH_CLIENT_SECRET first.",
+          );
+        }
+        // Each call carries the person's own token, so a deployment token here would never be sent.
+        if (input.credentialId?.trim()) {
+          throw new CustomServerRefusedError(
+            namedScope === undefined
+              ? `${input.id} is reached as the signed-in person, so it takes no token. To reach it on a token, send entraScope as null with it.`
+              : "A server reached as the signed-in person uses their Microsoft sign-in, so it takes no token.",
+          );
+        }
+        if (/\s/.test(entraScope) || entraScope.length > 256) {
+          throw new CustomServerRefusedError(
+            "Give one Entra scope, for example api://hr-api/.default.",
+          );
+        }
+      }
 
       /*
        * Before the address rule below, because it is the stronger statement about the same write.
@@ -420,6 +470,7 @@ export function serverMethods(context: StoreContext) {
           url: input.url,
           provenance: "custom",
           credentialId: credentialId ?? null,
+          entraScope: entraScope ?? null,
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -459,6 +510,8 @@ export function serverMethods(context: StoreContext) {
              * this endpoint does, and nothing asks it to.
              */
             ...(credentialId ? { credentialId } : {}),
+            // Kept when the caller names none, for the reason given where `entraScope` is decided.
+            ...(namedScope !== undefined ? { entraScope: namedScope } : {}),
             addedBy: input.by,
             updatedAt: new Date(),
           },
@@ -476,10 +529,14 @@ export function serverMethods(context: StoreContext) {
           // Named in the trail, because "who added a server nobody reviewed" is a question somebody
           // will ask and the answer should not require reading the catalogue of a past build.
           provenance: "custom",
+          ...(entraScope ? { reachedAs: "person", entraScope } : {}),
         },
       });
 
-      await this.refreshTools(input.id);
+      await this.refreshTools(
+        input.id,
+        entraScope ? (input.actorId ?? "") : undefined,
+      );
       const added = (await this.listServers()).find(
         (server) => server.id === input.id,
       );
@@ -2039,6 +2096,7 @@ export function serverMethods(context: StoreContext) {
           accountMode: toolkit
             ? (brokeredApps.get(row.url)?.accountMode ?? null)
             : row.accountMode,
+          entraScope: row.entraScope,
           sharedVendorConnected:
             toolkit !== null &&
             brokeredApps.get(row.url)?.accountMode === "shared" &&
