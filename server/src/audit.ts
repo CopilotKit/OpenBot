@@ -112,6 +112,16 @@ export const auditEventTypes = [
    * endpoint that dies mid-answer from one that never answers at all.
    */
   "agent.stream_stalled",
+  /**
+   * A built-in Bot's run refused before its model call, because it would have offered more tools
+   * than the model provider accepts in one request (OpenAI: 128).
+   *
+   * The person is told in the run; this is for the administrator, who is the one who can fix it and
+   * the one who would otherwise never hear of it. A Bot over the limit is refused on every message,
+   * thread naming included, until its grants are narrowed. Payload: `bot`, `tools` (what the run
+   * would have sent, including the runtime's and the client's own), `limit`, `provider`.
+   */
+  "agent.tool_limit_refused",
   /*
    * Which of a Bot's tools were put in front of the model for one run, and why those.
    *

@@ -44,6 +44,7 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
+import { toolLimitFor, toolLimitRefusal } from "./agents/tool-limit";
 import type { AuditInitiator } from "./audit";
 import {
   attachmentIdsIn,
@@ -590,6 +591,8 @@ export async function buildAgents(
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
   loadPersonalMemory?: LoadPersonalMemory,
+  /** How a run refused for holding too many tools is put on record. Absent writes no row. */
+  recordToolLimitRefusal?: RecordToolLimitRefusal,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -646,6 +649,7 @@ export async function buildAgents(
           loadAttachment,
           markAttachmentsSent,
           acquireLearnedSkills,
+          recordToolLimitRefusal,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -908,6 +912,8 @@ async function buildAgent(
   /** How this run records that those files were sent. See {@link buildAgents}. */
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  /** How a run refused by {@link admitTools} below is put on record. See {@link buildAgents}. */
+  recordToolLimitRefusal?: RecordToolLimitRefusal,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1015,6 +1021,43 @@ async function buildAgent(
   }
 
   /*
+   * Whether a run may be sent to the model with the tools it would offer, decided by count.
+   *
+   * Per run rather than per Bot, because the count is only known then: narrowing may have cut the
+   * grants down, a handoff may have added to them, and the client's own tools arrive with the
+   * request. A plan model is not an OpenAI request, so it is not held to OpenAI's number.
+   *
+   * The refusal is the person's answer; the log line and the audit row are the administrator's,
+   * because a Bot over the limit fails on every message until somebody narrows its grants, and
+   * nobody narrows what they cannot see.
+   */
+  const limit = model.plan ? null : toolLimitFor(model.provider);
+  const admitTools = limit
+    ? (names: readonly string[]) => {
+        if (names.length <= limit.limit) return undefined;
+        const refused = {
+          tools: names.length,
+          limit: limit.limit,
+          provider: limit.provider,
+        };
+        console.error({
+          error: "tool_limit_exceeded",
+          context: { operation: "admitTools", agentId: agent.id, ...refused },
+          timestamp: new Date().toISOString(),
+        });
+        void recordToolLimitRefusal?.(agent.id, refused).catch(() => {
+          // Never log the thrown value: database errors can contain connection details.
+          console.error({
+            error: "tool_limit_record_failed",
+            context: { operation: "recordToolLimitRefusal", agentId: agent.id },
+            timestamp: new Date().toISOString(),
+          });
+        });
+        return toolLimitRefusal(agent.name, names.length, limit);
+      }
+    : undefined;
+
+  /*
    * A built-in Bot takes its tools in its configuration, so narrowing means building it again once
    * the message is known. The guidance it is given is generated from the tools passed here, which is
    * what keeps a narrowed run from being told it holds something it was not offered.
@@ -1047,6 +1090,7 @@ async function buildAgent(
       ),
       {
         observe: observeModelConnection,
+        ...(admitTools ? { admitTools } : {}),
         ...(loadAttachment
           ? {
               inline: (messages: AgentRunInput["messages"], threadId: string) =>
@@ -1652,6 +1696,8 @@ export async function resolveRuntimeAgents(
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
   loadPersonalMemory?: LoadPersonalMemory,
+  /** Appended after `loadPersonalMemory`, for the positional reason `loadInstructions` gives. */
+  recordToolLimitRefusal?: RecordToolLimitRefusal,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1688,11 +1734,22 @@ export async function resolveRuntimeAgents(
     markAttachmentsSent,
     acquireLearnedSkills,
     loadPersonalMemory,
+    recordToolLimitRefusal,
   );
 }
 
 /** What one Bot may call, for the person whose request this is. */
 export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
+
+/**
+ * Writes the row for a run refused before its model call because it would have offered more tools
+ * than the provider accepts. Bound to the person asking, like {@link LoadToolsForBot}. Never
+ * allowed to change the refusal: a failure is logged and the person still gets the sentence.
+ */
+export type RecordToolLimitRefusal = (
+  botId: string,
+  refused: { tools: number; limit: number; provider: string },
+) => Promise<void>;
 
 /**
  * The deployment's signed statement of what a run is, for the agent that will run it.

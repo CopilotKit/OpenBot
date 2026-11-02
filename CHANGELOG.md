@@ -78,6 +78,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A Bot holding more tools than its model accepts says so
+
+OpenAI refuses a request carrying more than 128 tools, and a built-in Bot past that (General
+Assistant reached 279 after one app approval) showed "Thinking" and then nothing on every message,
+with no error anywhere. Such a run is now refused before the model is called: the person sees which
+Bot, how many tools it would have been offered, the limit, and that an administrator can narrow its
+grants on the Bot's page. The server logs `tool_limit_exceeded` and the audit trail records
+`agent.tool_limit_refused`, shown under Blocked. Only OpenAI's documented limit is enforced, and only
+on OpenAI's own hosts: Claude and an `OPENAI_BASE_URL` naming another host are not limited.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
