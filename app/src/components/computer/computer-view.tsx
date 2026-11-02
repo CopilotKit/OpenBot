@@ -1,4 +1,5 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
+import { IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -267,7 +268,7 @@ function WheelColumn({
 }) {
   if (!live) return children;
   return (
-    <div className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:w-96 lg:shrink-0 lg:overflow-y-auto">
+    <div className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:pt-10">
       {children}
     </div>
   );
@@ -849,15 +850,16 @@ export function ComputerView({
               className={`fixed inset-0 z-50 flex flex-col overflow-y-auto ${settled ? "p-4 sm:p-8" : "p-2 sm:p-4"}`}
             >
               {/*
-                Backdrop closes only while read-only; during driving, Escape remains the exit. A
-                turn that is over is always read-only, whoever is holding the live browser.
+                Backdrop closes only while read-only, so a click that misses the page while driving
+                does not throw the person out of it. A turn that is over is always read-only, whoever
+                is holding the live browser. It is a mouse shortcut only: the close button in the
+                card is the way out a person can see and reach from the keyboard, as Escape is.
               */}
               <button
                 type="button"
                 onClick={() => !wheelHere && setExpanded(false)}
-                aria-label="Close the Bot's screen"
-                aria-hidden={wheelHere}
-                tabIndex={wheelHere ? -1 : 0}
+                aria-hidden
+                tabIndex={-1}
                 className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
               />
               {/*
@@ -873,6 +875,27 @@ export function ComputerView({
               <div
                 className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ${settled ? "max-w-[70vw] p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
               >
+                {/*
+                  The way back to the conversation. A live view fills the window, so the backdrop
+                  around it is a thin strip, and it does nothing while the person is driving: without
+                  this, Escape was the only way out and nothing on screen said so. Closing is what
+                  Escape does: it never hands the wheel back. In a wide live view it sits over the
+                  top of the wheel's column, which leaves it the room; otherwise it is a row of its
+                  own above the screen.
+                */}
+                <div
+                  className={`flex justify-end ${settled ? "mb-2" : "lg:absolute lg:top-3 lg:right-3 lg:z-10"}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(false)}
+                    aria-label="Close the Bot's screen"
+                    title="Close (Esc)"
+                    className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <IconX className="size-5" aria-hidden />
+                  </button>
+                </div>
                 <BrowserWindow
                   live={!settled}
                   botId={computerId}

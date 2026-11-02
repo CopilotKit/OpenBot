@@ -116,6 +116,12 @@ on the person: an action that needs approval is handed back, and the Bot asks in
 Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
 OpenBot runs the tool itself, so a remote agent needs no change.
 
+### The Bot's screen, opened full size, has a close button
+
+The full-size view of a Bot's screen now has an X in its corner that closes it and goes back to the
+conversation, including while the person has control. Before, Escape was the only way out of a live
+view. Closing does what Escape does: it leaves the wheel where it is.
+
 ### Bots tell you when something needs you
 
 A Bot a person has talked to now checks what that person connected (any app or server they
