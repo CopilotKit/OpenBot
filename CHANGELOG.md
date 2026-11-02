@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Sixteen things change for an existing deployment:
+**Before upgrading.** Seventeen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -77,6 +77,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+- Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
+  the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
+  the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
+  affected.
+
+### Each Bot keeps a fact it formed, even when another Bot formed it first
+
+A memory a Bot forms from what it read was deduplicated per person, but each Bot recalls only the
+memories it formed itself. So when a second Bot formed a fact the first already held, it was told
+the fact was remembered and could then never recall it. Each Bot now keeps its own copy, and
+resetting one Bot leaves the other's alone. Forgetting stays the person's: a fact forgotten from any
+Bot is not formed again by another.
 
 ### A Bot made with "Run it here" runs when the deployment's own agent is on a private address
 
