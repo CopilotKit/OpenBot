@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Twenty-six things change for an existing deployment:
+**Before upgrading.** Eighteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -77,16 +77,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
-- Migration `0070_single_user_identity` adds one table, `brokered_identities`. A single-user
-  deployment with a Composio or Arcade key and no connections recorded for that broker gets its own
-  user id there at its next start (below), so it stops seeing and using connections another
-  single-user OpenBot made on the same key. One with connections recorded under `dev-local-user`
-  keeps that id until it has none. On Arcade, a single-user deployment whose consents are not
-  recorded approves its apps once more under its new id. Deployments that sign people in are
-  unchanged.
-- On Arcade, a Bot's call now needs the person's connection recorded in OpenBot, as on Composio. A
-  consent finished through OpenBot was always recorded. One that exists only at Arcade is recorded
-  the next time the person opens the app under Connections, or presses Connect.
+- Migration `0070_single_user_identity` adds one table, `brokered_identities`, and lets
+  `pending_authorizations.action` be null (an Arcade Connect asks for the whole app, not one
+  action). Every single-user deployment with a Composio or Arcade key gets its own user id there at
+  its next start (below), so it stops seeing and using connections another single-user OpenBot made
+  on the same key. **A single-user deployment connects each of its apps once more after upgrading.**
+  Its connections recorded under `dev-local-user` are removed from OpenBot at that start, because
+  neither broker can move a connection to another user id. Nothing is ended at Composio or Arcade,
+  since other OpenBots on the same key may be using those accounts. Deployments that sign people in
+  keep their ids.
+- On Arcade, a Bot's call now needs the person's connection recorded in OpenBot, as on Composio, on
+  every deployment including those that sign people in. A consent finished through OpenBot was
+  always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
+  the person opens the app under Connections, or presses Connect where Arcade already holds
+  everything the app asks for.
 
 ### Each single-user OpenBot has its own Composio and Arcade identity
 
@@ -96,9 +100,11 @@ Composio and Arcade filed their connections under. So two single-user OpenBots o
 one ended the account in both, and a call that named no account could run in whichever Gmail was
 connected last. On one `ARCADE_API_KEY` one OpenBot's consent to Google was the grant the other's
 Bots ran on. Each single-user deployment now has its own user id at its broker, `dev-local-user:`
-and a random part, kept in its database so a restart or a second replica uses the same one.
-Threads and memory stay with `dev-local-user`. A deployment that already has connections recorded
-under `dev-local-user` keeps that id, so nobody reconnects. See
+and a random part, given at its first start with that broker and kept in its database, so a
+restart or a second replica uses the same one. Threads and memory stay with `dev-local-user`. A
+deployment that already had connections under `dev-local-user` gets its own id too, and connects
+each app once more: those connections cannot be moved to the new id, and the broker cannot say
+whether one was this deployment's or another's on the same key. See
 [configuration.md](docs/configuration.md#authentication).
 
 ### Arcade apps connect with one press, and their connections are recorded like Composio's

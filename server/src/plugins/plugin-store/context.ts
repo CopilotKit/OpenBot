@@ -695,10 +695,10 @@ export function createStoreContext(options: PluginStoreOptions) {
        *
        * NEITHER BROKER TAKES THIS WAIVER TODAY. Arcade declared `false` and took it until its grants
        * were recorded here as Composio's are: with no row, this deployment could not say whose
-       * grants it had asked Arcade to use, which is what kept every single-user deployment on one
-       * Arcade key sharing `dev-local-user`'s. It now declares `true`, a call needs its row as a
-       * Composio call does, and Arcade still checks the action itself. The branch stays for a
-       * broker that declares otherwise, under the rules above.
+       * grants it had asked Arcade to use. It now declares `true`, a call needs its row as a
+       * Composio call does on every deployment, signed in or not, and Arcade still checks the
+       * action itself. The branch stays for a broker that declares otherwise, under the rules
+       * above.
        *
        * ONLY A PRECONDITION IS REMOVED; THE IDENTITY IS UNCHANGED. The id returned is
        * `resolved.ref.vendorUserId` — the very value the branch below returns out of the row —

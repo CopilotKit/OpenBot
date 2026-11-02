@@ -1714,10 +1714,10 @@ export function createArcadeClient(apiKey: string): {
      * Arcade still checks the action itself on every call.
      *
      * IT USED TO BE `false`, and a call went out with no row behind it. That left this deployment
-     * with no record of whom it had asked Arcade to act for, which is what kept a single-user
-     * deployment's own name (`ensureSingleUserIdentity`) from reaching Arcade: with nothing here to
-     * say whether grants were held under `dev-local-user`, every single-user OpenBot on one key went
-     * on sharing them.
+     * with no record of whom it had asked Arcade to act for, and Arcade's grants behaving unlike
+     * Composio's: a page could not say what was connected, offboarding had nothing to end, and the
+     * card a refused call shows could not tell a lost account from a missing action. Composio is the
+     * reference and Arcade mirrors it, on every deployment, signed in or single-user.
      */
     grantIsLocal: true,
     listApps: () => listApps(client),

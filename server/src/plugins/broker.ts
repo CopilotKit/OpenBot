@@ -499,8 +499,7 @@ export type ConnectedAppBroker = {
    * TRUE for both brokers. Composio's connection rows have always lived in this deployment's own
    * tables. Arcade's did too, once a consent came back through the verifier, but its broker used to
    * declare `false` and its calls went out with no row behind them; it now records and requires the
-   * row exactly as Composio does, so Bot calls, the single-user identity and offboarding all read one
-   * kind of record. A broker that declared `false` would still be gated as the comment at
+   * row exactly as Composio does, so Bot calls, pages and offboarding all read one kind of record. A broker that declared `false` would still be gated as the comment at
    * `connectionTokenFor` sets out.
    */
   grantIsLocal: boolean;

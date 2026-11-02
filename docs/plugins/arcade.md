@@ -154,18 +154,26 @@ worth reading before pressing **Add**.
 **Connect works as it does on Composio.** It asks Arcade for one consent covering every scope the
 app's actions publish (the `auth.authorize` call, with the app's own authorization requirement read
 off its listing), and the consent comes back through the verifier below, which records the
-connection. An app whose actions name more than one authorization requirement cannot be connected
-in one consent, and Connect says so.
+connection and lands the person on the app's page, as Composio's Connect does. Actions name the
+same requirement when they name the same auth provider instance, its `id` (or the same
+`provider_id` where none names an `id`): the live catalogue publishes one instance with and without
+its `provider_id` (`SquareupApi`) and two instances with neither (`XeroApi`). An app whose actions
+name more than one instance cannot be connected in one consent, and Connect says so. Where Arcade
+already holds everything the app asks for, Connect records the connection without a consent
+screen.
 
 **The action list under Connections still approves one action at a time**, for somebody who wants
 to grant less than the whole app. Either way, the connection is recorded in this deployment's
 `brokered_connections`, as Composio's are: a Bot's call needs that row before it reaches Arcade, a
 page that opens the app asks Arcade whether the connection is still there and writes or clears the
-row from the answer, and Disconnect and offboarding end it at Arcade and then here. Arcade still
+row from the answer, and Disconnect and offboarding end it at Arcade and then here. That holds on a
+deployment that signs people in too: a grant Arcade holds with no row here (approved before rows
+were recorded, say) is recorded, with no new consent, when the person opens the app under
+Connections. Arcade still
 checks each action itself on every call. A call it refuses for want of authorization shows the
 person the Reconnect card. The row is cleared only where Arcade then answers that the account holds
-nothing for the app, which is Composio's lost account; where it holds the app's other actions, the
-row stays and those actions go on working. Either way the card's Reconnect goes to the app's page
+nothing for the app, which is Composio's lost account; where it holds the app's other actions, or
+does not answer within ten seconds, the row stays and those actions go on working. Either way the card's Reconnect goes to the app's page
 under Connections, as on Composio, and a connected Arcade app there offers Reconnect beside
 Disconnect: one press asks for the whole app over the connection that stands, with no Disconnect
 first.

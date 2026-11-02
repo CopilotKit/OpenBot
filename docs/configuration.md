@@ -390,20 +390,27 @@ database (the `brokered_identities` table, one row per broker), so it is the sam
 and on every replica. Only the name at the broker changes: threads, memory and everything else stay
 with `dev-local-user`.
 
-Whether a deployment already holds connections under `dev-local-user` is read from its own records
-and never asked of the broker, whose answer would include every other deployment on the key. The
-record is any `brokered_connections` row for the active broker whose `user_id` and `vendor_user_id`
-are both `dev-local-user`. Composio writes that row when an account is connected or confirmed, and
-Arcade when a consent comes back through the verifier or a page confirms a connection Arcade holds.
-A deployment with such a row keeps using `dev-local-user`, so nothing is disconnected and nobody
-reconnects; it gets its own id at the first start after its last such connection is disconnected. A
-deployment with none gets its own id at once. On Arcade that includes one whose consents were given
-at Arcade without coming back through this deployment, which approves its apps once more under the
-new id. A consent begun under `dev-local-user` before that start and finished after it is refused,
-and the person is asked to press Connect again; nothing held under `dev-local-user`, which other
-deployments may share, is confirmed or withdrawn. A deployment that signs people in is unchanged. To see the id in use, run
-`select provider, vendor_user_id from brokered_identities`; no row for the active broker means
-`dev-local-user`. That is also the `--user` to give `bun run composio:smoke`.
+A deployment that already had connections under `dev-local-user` gets its own id too, at the same
+start, and **connects each of its apps once more**. Neither broker can move a connection to another
+user id: Composio's connected-account update takes no user id, and Arcade's user connections can
+only be listed and deleted. Nor can either say which deployment made a connection under the shared
+id, and before this change one deployment opening an app another had connected recorded that
+account as its own. So at that start the deployment removes its own records of connections under
+`dev-local-user` (its `brokered_connections` rows for the active broker whose `user_id` and
+`vendor_user_id` are both `dev-local-user`), logs the apps it removed as
+`single-user-connections-retired`, and asks the broker nothing. Each app then reads as not connected
+and one Connect files it under the new id. The accounts themselves stay at the broker under
+`dev-local-user`, because another OpenBot on the same key may still be using them. If this was the
+only OpenBot on its key, remove them there: they are Composio's connected accounts for user id
+`dev-local-user`, and Arcade's user connections for `user_id=dev-local-user`
+(`GET /v1/admin/user_connections`).
+
+A consent begun under `dev-local-user` before that start and finished after it is refused, and the
+person is asked to press Connect again; nothing held under `dev-local-user` is confirmed or
+withdrawn. A deployment that signs people in keeps filing each person under their own id. To see
+the id in use, run `select provider, vendor_user_id from brokered_identities`; no row for the
+active broker means the person's own id. That is also the `--user` to give
+`bun run composio:smoke`.
 
 **`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an
 administrator once in. Matching is exact with no wildcards, so `example.com` admits neither

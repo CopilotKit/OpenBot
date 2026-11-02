@@ -1122,6 +1122,32 @@ describe("Connect on an app whose actions name their Arcade requirement in diffe
 });
 
 describe("a deployment that signs people in", () => {
+  test("needs a person's Arcade grant recorded before a Bot uses it, as on Composio, and opening the app records it with no new consent", async () => {
+    /*
+     * A grant Arcade holds with nothing recorded here: approved before this deployment recorded
+     * Arcade grants, or a record a confirm cleared. A Bot's call now needs the record, as a
+     * Composio call always has, and the page that opens the app records what Arcade holds, as it
+     * does for Composio.
+     */
+    const bob = `bob-${suite}`;
+    const deployment = await newDeployment(bob);
+    project.grant(bob, SCOPES[READ] ?? [], "bob@example.test");
+
+    await expect(deployment.call(READ)).rejects.toThrow(
+      "You have not connected your Gmail account.",
+    );
+    expect(project.ran).toEqual([]);
+
+    // Bob opens Gmail under Connections. Nothing is asked of him and nothing is minted.
+    expect(await confirm(deployment)).toEqual({ connected: true });
+    expect(project.minted).toEqual([]);
+    expect(await rowsIn(deployment.database)).toEqual([
+      { provider: "arcade", app: TOOLKIT, userId: bob, vendorUserId: bob },
+    ]);
+    expect((await deployment.call(READ)).text).toContain("bob@example.test");
+    expect(project.unexpected).toEqual([]);
+  });
+
   test("files each person under their own id at Arcade, and writes no name for anybody", async () => {
     const alice = `alice-${suite}`;
     const deployment = await newDeployment(alice);
