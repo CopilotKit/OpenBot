@@ -1435,9 +1435,9 @@ export function mountConnectionRoutes({
    * row to correlate it. Both callers therefore build `returnUrl` before calling this.
    *
    * ONE ACTION OR THE WHOLE APP. `action` is the action Authorize was pressed for, and null on
-   * Connect, which asks the broker for everything the app's actions need. The attempt row needs an
-   * action either way, so a whole-app attempt is filed under the app's own name: that is what the
-   * verifier's landing says was just authorized, and what the trail's `action` reads.
+   * Connect, which asks the broker for everything the app's actions need. The attempt row carries
+   * that null as it is, so the verifier lands a Connect on the app's page as Composio's does and
+   * the trail's `action` says no single action was asked for.
    *
    * THE URL IS A BEARER CAPABILITY — answered to this browser and to nothing else. It is never
    * logged, audited or put in an error body. No `next_uri` is sent: the vendor refuses every value,
@@ -1463,19 +1463,20 @@ export function mountConnectionRoutes({
       held?: () => Promise<Response>;
     },
   ): Promise<Response> => {
-    const attemptAction = action ?? toolkit;
     const claim = await store.claimAuthorizationAttempt({
       actorId: context.var.actor.id,
       serverId,
-      action: attemptAction,
+      action,
       account,
     });
     if (!claim.claimed) {
       return context.json(
         {
-          error: claim.live
-            ? `An authorization for ${claim.live.action} is already in progress. Finish it, or wait for it to expire, before starting another.`
-            : "An authorization is already in progress. Finish it, or wait for it to expire, before starting another.",
+          error: !claim.live
+            ? "An authorization is already in progress. Finish it, or wait for it to expire, before starting another."
+            : claim.live.action === null
+              ? "You're already connecting an app. Finish it, or wait for it to expire, before starting another."
+              : `An authorization for ${claim.live.action} is already in progress. Finish it, or wait for it to expire, before starting another.`,
         },
         409,
       );
@@ -1576,7 +1577,7 @@ export function mountConnectionRoutes({
             JSON.stringify({
               type: "arcade-refused-attempt-not-cleared",
               server: serverId,
-              action: attemptAction,
+              action,
               note: "A mint was refused and its attempt could not be deleted. The person was told why the vendor refused, and the row holds them until it expires.",
               error: reasonWithoutStatement(cleanup),
             }),
@@ -1639,7 +1640,7 @@ export function mountConnectionRoutes({
         JSON.stringify({
           type: "arcade-mint-outcome-unknown",
           server: serverId,
-          action: attemptAction,
+          action,
           attemptStartedAt: claim.attempt.createdAt,
           note: "The vendor did not answer an authorization clearly, so whether it started a flow is unknown. The attempt was left standing with no authorization id: it cannot complete, it holds this person until it is fifteen minutes old, and nobody was sent to a consent screen. If the vendor shows a pending authorization for this action begun at attemptStartedAt, nobody here can finish it; end it there if it must not linger.",
           error: reasonWithoutStatement(error),
@@ -1728,7 +1729,7 @@ export function mountConnectionRoutes({
         JSON.stringify({
           type: "arcade-mint-not-recorded",
           server: serverId,
-          action: attemptAction,
+          action,
           authorizationId: minted.authorizationId,
           attemptCleared: freed,
           note: "An authorization was minted at the vendor and could not be written to its attempt. The person was told, was not sent to the consent screen, and the flow named here is live at the vendor with nothing here recording it.",
@@ -2623,13 +2624,21 @@ export function mountConnectionRoutes({
        * `connectedAccountsUrlFor` with `{ serverId }` answers a query-less path, so appending
        * `?action=` here cannot produce a second `?`.
        *
+       * A WHOLE-APP CONNECT NAMES NO ACTION AND LANDS AS COMPOSIO'S CONNECT DOES: on the app's page
+       * with no query, where the app reading Connected is the news. Filed under the app's own name
+       * it landed on "You just authorized Gmail." with no grant row to mark.
+       *
        * BUILT BEFORE THE WRITE RATHER THAN AFTER IT, so that the only thing standing between a
        * committed grant and the person's browser is the redirect itself. Both reads are off the
        * attempt row and neither calls anybody.
        */
       const landing = `${connectedAccountsUrlFor(connect?.appUrl, {
         serverId: attempt.serverId,
-      })}?action=${encodeURIComponent(attempt.action)}`;
+      })}${
+        attempt.action === null
+          ? ""
+          : `?action=${encodeURIComponent(attempt.action)}`
+      }`;
 
       /*
        * THE COMPLETION HAS ITS OWN `catch`, AND IT IS THE ONLY PLACE ON THIS LEG THAT MAY ANSWER

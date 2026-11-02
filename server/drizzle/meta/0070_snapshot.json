@@ -1,5 +1,5 @@
 {
-  "id": "cd0a11ba-f9e9-48f5-883f-a41b7a6812e8",
+  "id": "c1e45aba-3420-4d31-98ba-6c5e56f0bd02",
   "prevId": "ab8a3370-f719-40eb-9066-b19d682c8e6a",
   "version": "7",
   "dialect": "postgresql",
@@ -3357,7 +3357,7 @@
           "name": "action",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "holder": {
           "name": "holder",

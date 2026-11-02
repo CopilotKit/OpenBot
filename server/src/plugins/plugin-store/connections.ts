@@ -1070,7 +1070,8 @@ export function connectionMethods(context: StoreContext) {
     async claimAuthorizationAttempt(input: {
       actorId: string;
       serverId: string;
-      action: string;
+      /** The action Authorize was pressed for, or `null` for a whole-app Connect. */
+      action: string | null;
       account: AccountRef;
     }): Promise<
       | { claimed: true; attempt: PendingAuthorization }
@@ -1272,7 +1273,8 @@ export function connectionMethods(context: StoreContext) {
       authId: string;
       toolkit: string;
       account: AccountRef;
-      action: string;
+      /** The attempt's own: an action, or `null` where Connect asked for the whole app. */
+      action: string | null;
       scopes: string[];
       authProvider: string;
     }): Promise<{ claimed: boolean }> {
@@ -1403,6 +1405,7 @@ export function connectionMethods(context: StoreContext) {
                */
               scope: input.scopes.join(" "),
               // The action the attempt was for: what this grant was obtained in order to call.
+              // `null` for a whole-app Connect, which asked for every action at once.
               action: input.action,
               authProvider: input.authProvider,
               reconnected: Boolean(existing),

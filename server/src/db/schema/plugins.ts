@@ -608,7 +608,13 @@ export const pendingAuthorizations = pgTable(
     serverId: text("server_id")
       .notNull()
       .references(() => mcpServers.id, { onDelete: "cascade" }),
-    action: text("action").notNull(),
+    /**
+     * The one action Authorize was pressed for, or `null` for Connect, which asks the broker for
+     * everything the app's actions need. Null rather than the app's own name, because the verifier
+     * lands the person on `?action=` and the trail files it as `action`, and an app's name there
+     * read as an action that was just authorized.
+     */
+    action: text("action"),
     /**
      * Whose account this attempt is for, with the same meaning and the same two values as
      * {@link brokeredConnections.holder} — and held by the same CHECK, because `$type<>` is erased

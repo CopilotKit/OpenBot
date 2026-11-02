@@ -739,8 +739,9 @@ async function connectGmail(deployment: Deployment, mailbox: string) {
       user_id: deployment.identity,
     },
   });
+  // The app's page, with no action named: Connect asked for the whole app, as Composio's does.
   expect(await returnFrom(deployment, authorizationUrl, mailbox)).toBe(
-    `${APP_URL}/connections/${ROW}?action=${TOOLKIT}`,
+    `${APP_URL}/connections/${ROW}`,
   );
   expect(await rowsIn(deployment.database)).toEqual([
     {
@@ -1006,6 +1007,52 @@ describe("Connect on an app Arcade already holds for this deployment's name", ()
     expect(
       await deployment.database.select().from(pendingAuthorizations),
     ).toEqual([]);
+    expect((await deployment.call(SEND)).text).toContain("me@example.test");
+    expect(project.unexpected).toEqual([]);
+  });
+});
+
+describe("Connect on an Arcade app", () => {
+  test("lands on the app's page and files the connection with no action, as Composio's Connect does", async () => {
+    const deployment = await newDeployment();
+    // One action's Authorize lands on that action, and the trail files it.
+    await authorizeAction(deployment, READ, "me@example.test");
+
+    const pressed = await deployment.app.request(
+      `/api/plugins/servers/${ROW}/connect`,
+      { method: "POST" },
+    );
+    expect(pressed.status).toBe(200);
+    const { authorizationUrl } = (await pressed.json()) as {
+      authorizationUrl: string;
+    };
+    // The attempt in flight names no action: it is for the whole app.
+    expect(
+      await deployment.database
+        .select({ action: pendingAuthorizations.action })
+        .from(pendingAuthorizations),
+    ).toEqual([{ action: null }]);
+
+    // Back from Google: the app's page, with no "You just authorized" about an action nobody chose.
+    expect(
+      await returnFrom(deployment, authorizationUrl, "me@example.test"),
+    ).toBe(`${APP_URL}/connections/${ROW}`);
+    const filed = await deployment.database
+      .select({ payload: auditEvents.payload })
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "mcp.account_connected"))
+      .orderBy(auditEvents.createdAt);
+    expect(filed).toMatchObject([
+      { payload: { server: TOOLKIT, action: READ, holder: "person" } },
+      {
+        payload: {
+          server: TOOLKIT,
+          action: null,
+          holder: "person",
+          reconnected: true,
+        },
+      },
+    ]);
     expect((await deployment.call(SEND)).text).toContain("me@example.test");
     expect(project.unexpected).toEqual([]);
   });
