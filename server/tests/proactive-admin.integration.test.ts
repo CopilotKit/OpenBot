@@ -40,6 +40,7 @@ import {
   capabilitySettings,
   enterpriseSettings,
   modelUsage,
+  proactivePeople,
   proactivePings,
   proactiveRuns,
   proactiveSettings,
@@ -459,6 +460,75 @@ describe("the Check-ins switch", () => {
     await setSwitch("role", "user", null);
     await setSwitch("group", `sales-${suite}`, false);
     expect(await checkIn(settingOf(seller, inboxBot))).toEqual([seller.id]);
+  });
+});
+
+describe("the ping pass", () => {
+  test("skips past the people an admin turned check-ins off for, so nobody behind them waits for ever", async () => {
+    // More people with older waiting items than one pass looks at, every one of them refused.
+    await setSwitch("role", "user", false);
+    const refused = Array.from({ length: 21 }, (_, index) => ({
+      id: `ci-refused-${index}-${suite}`,
+      email: `ci-refused-${index}-${suite}@acme.test`,
+      name: `Refused ${index}`,
+    }));
+    await database.insert(users).values(refused);
+    const everyone = [...refused.map((person) => person.id), admin.id];
+    await database
+      .delete(proactivePeople)
+      .where(inArray(proactivePeople.ownerUserId, everyone));
+    const theirSettings: string[] = [];
+    try {
+      const hourAgo = Date.now() - 60 * 60_000;
+      for (const [index, person] of refused.entries()) {
+        const setting = await store.create(
+          person.id,
+          { agentId: inboxBot, channelId: `ci-channel-${person.id}` },
+          `ci-thread-${randomUUID()}`,
+        );
+        theirSettings.push(setting.id);
+        await database.insert(proactiveSuggestions).values({
+          id: randomUUID(),
+          ownerUserId: person.id,
+          agentId: inboxBot,
+          settingId: setting.id,
+          runId: `ci-run-${randomUUID()}`,
+          title: `Waiting since before the switch ${index}`,
+          detail: "Raised before check-ins were turned off.",
+          createdAt: new Date(hourAgo - (index + 1) * 60_000),
+        });
+      }
+      // The admin is still allowed, and their item is the newest of all.
+      await database.insert(proactiveSuggestions).values({
+        id: randomUUID(),
+        ownerUserId: admin.id,
+        agentId: inboxBot,
+        settingId: settingOf(admin, inboxBot).id,
+        runId: `ci-run-${randomUUID()}`,
+        title: "Reply to Sam",
+        detail: "Sam asked for the spec by Friday.",
+        createdAt: new Date(hourAgo),
+      });
+
+      const { engine } = replica();
+      await engine.sweep();
+
+      const pinged = await database
+        .select({ ownerUserId: proactivePings.ownerUserId })
+        .from(proactivePings)
+        .where(inArray(proactivePings.ownerUserId, everyone));
+      expect(pinged).toEqual([{ ownerUserId: admin.id }]);
+    } finally {
+      await database
+        .delete(proactiveSettings)
+        .where(inArray(proactiveSettings.id, theirSettings));
+      await database.delete(users).where(
+        inArray(
+          users.id,
+          refused.map((person) => person.id),
+        ),
+      );
+    }
   });
 });
 

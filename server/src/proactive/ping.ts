@@ -25,6 +25,7 @@ import {
   inArray,
   isNull,
   lte,
+  notInArray,
   or,
   sql,
   TransactionRollbackError,
@@ -218,9 +219,10 @@ export function createPingStore(database: Database) {
 
     /**
      * People with something waiting and a free slot: who the ping pass tries. Oldest wait first, so
-     * a backlog drains in the order it built up.
+     * a backlog drains in the order it built up. `skip` is everyone the pass already tried, so it
+     * can page past people it may not ping (`pingPass` in engine.ts).
      */
-    async waiting(limit = 20): Promise<string[]> {
+    async waiting(limit = 20, skip: readonly string[] = []): Promise<string[]> {
       const rows = await database
         .select({ ownerUserId: proactiveSuggestions.ownerUserId })
         .from(proactiveSuggestions)
@@ -228,7 +230,15 @@ export function createPingStore(database: Database) {
           proactivePeople,
           eq(proactivePeople.ownerUserId, proactiveSuggestions.ownerUserId),
         )
-        .where(and(pingableItem, slotFree))
+        .where(
+          and(
+            pingableItem,
+            slotFree,
+            skip.length > 0
+              ? notInArray(proactiveSuggestions.ownerUserId, [...skip])
+              : undefined,
+          ),
+        )
         .groupBy(proactiveSuggestions.ownerUserId)
         .orderBy(sql`min(${proactiveSuggestions.createdAt})`)
         .limit(limit);

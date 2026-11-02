@@ -86,6 +86,8 @@ const RUN_NOW_GAP_MS = 10 * 60_000;
  * that the replica which wrote it is plainly not about to.
  */
 const UNOFFERED_AFTER_MS = 60_000;
+/** How many people one ping pass pings at most, so a backlog drains over a few sweeps. */
+const PINGS_PER_PASS = 20;
 /** How many of its own open items, tasks and hidden items a check-in is told of, newest first. */
 const OWN_LISTED = 50;
 /** Check-ins one Bot may run for one person in a day, until an admin says otherwise: hourly. */
@@ -413,27 +415,52 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     await deps.store.pings.markOffered(ping.pingId);
   }
 
+  /** Ping this person if their hour allows and something waits. */
+  async function ping(ownerUserId: string) {
+    const written = await deps.store.pings.take(ownerUserId);
+    if (written) await offer(written);
+    return written;
+  }
   /**
-   * Ping this person if their hour allows and something waits. An admin who turned check-ins off
-   * for them stops the pings too, not only the runs.
+   * The same, unless an admin turned check-ins off for them: that stops the pings too, not only the
+   * runs.
    */
   async function tryPing(ownerUserId: string) {
     if (!(await allowed(ownerUserId))) return null;
-    const ping = await deps.store.pings.take(ownerUserId);
-    if (ping) await offer(ping);
-    return ping;
+    return ping(ownerUserId);
   }
 
   /**
    * The ping pass, every sweep: offer pings a stopped replica wrote but never offered, then ping
-   * each person whose items waited for their hour to pass. One person's failure is logged and the
-   * rest still go.
+   * each person whose items waited for their hour to pass, up to {@link PINGS_PER_PASS} of them.
+   * One person's failure is logged and the rest still go.
+   *
+   * IT PAGES PAST WHOEVER IT MAY NOT PING. A person an admin turned check-ins off for keeps the
+   * items raised before the switch, oldest first in the queue, and is refused every pass. Taking
+   * one page and stopping meant a page of them was all any pass ever saw, and nobody behind them was
+   * pinged again. The admin's switch is resolved from roles and groups in code, so it is asked per
+   * person here rather than written into the query; each person is asked once a pass.
    */
   async function pingPass() {
     for (const ping of await deps.store.pings.unoffered(UNOFFERED_AFTER_MS))
       await offer(ping).catch(logged("proactive-ping-error"));
-    for (const ownerUserId of await deps.store.pings.waiting())
-      await tryPing(ownerUserId).catch(logged("proactive-ping-error"));
+    const tried: string[] = [];
+    let pinged = 0;
+    while (pinged < PINGS_PER_PASS) {
+      const people = await deps.store.pings.waiting(PINGS_PER_PASS, tried);
+      if (people.length === 0) return;
+      for (const ownerUserId of people) {
+        tried.push(ownerUserId);
+        const may = await allowed(ownerUserId).catch((error: unknown) => {
+          logged("proactive-ping-error")(error);
+          return false;
+        });
+        if (!may) continue;
+        pinged += 1;
+        await ping(ownerUserId).catch(logged("proactive-ping-error"));
+        if (pinged >= PINGS_PER_PASS) return;
+      }
+    }
   }
 
   /**
