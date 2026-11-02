@@ -143,26 +143,6 @@ export const documented = {
     arguments: JSON.stringify({ pattern: "**/*.py" }),
     result: "/workspace/greet.py\n/workspace/tests/test_greet.py",
   },
-  apiError: {
-    name: "Bash",
-    arguments: JSON.stringify({
-      command: "curl -s https://api.example.com/v1/orders",
-      description: "Fetch the orders",
-    }),
-    // What the harness sends for that output: it parses JSON text and sends it re-serialised.
-    result: '{"error": true, "message": "rate limited"}',
-  },
-  replaceAll: {
-    name: "Edit",
-    arguments: JSON.stringify({
-      file_path: "/workspace/greet.py",
-      old_string: "name",
-      new_string: "person",
-      replace_all: true,
-    }),
-    result:
-      "The file /workspace/greet.py has been updated. All occurrences were successfully replaced.",
-  },
   multiEdit: {
     name: "MultiEdit",
     arguments: JSON.stringify({
@@ -179,5 +159,35 @@ export const documented = {
       ],
     }),
     result: "Applied 2 edits to /workspace/greet.py",
+  },
+};
+
+/**
+ * Calls the recorded run did not make, built from the harness's own code and the Agent SDK's types:
+ * an edit with `replace_all` (`FileEditInput.replace_all`), and a command whose output is a JSON
+ * object with an `error` field, as `ag-ui-claude-sdk` 0.1.5's `_normalize_text` passes it on.
+ */
+export const constructed = {
+  apiError: {
+    name: "Bash",
+    arguments: JSON.stringify({
+      command: "curl -s https://api.example.com/v1/orders",
+      description: "Fetch the orders",
+    }),
+    // What the harness sends when a command prints that: it parses JSON text and sends it on
+    // re-serialised with Python's `json.dumps`.
+    result: '{"error": true, "message": "rate limited"}',
+  },
+  replaceAll: {
+    name: "Edit",
+    arguments: JSON.stringify({
+      file_path: "/workspace/greet.py",
+      old_string: "name",
+      new_string: "person",
+      replace_all: true,
+    }),
+    // The card does not read the answer to an edit, only whether it failed.
+    result:
+      "The file /workspace/greet.py has been updated successfully. (file state is current in your context — no need to Read it back)",
   },
 };

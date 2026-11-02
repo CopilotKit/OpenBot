@@ -8,6 +8,7 @@ import { ChatTranscript } from "@/components/channels/chat-transcript";
 import { CodingTools } from "@/lib/copilot/coding-tools";
 import { queryClient } from "@/query-client";
 import {
+  constructed,
   documented,
   type RecordedCall,
   recorded,
@@ -177,7 +178,9 @@ test("a failed command shows its exit code, live and after a reload", async () =
 });
 
 test("a command that printed JSON with an error field still worked", async () => {
-  const view = draw(turn([documented.apiError], [documented.apiError.result]));
+  const view = draw(
+    turn([constructed.apiError], [constructed.apiError.result]),
+  );
   const command = await card(view, "Ran a command");
   expect(command.queryByText("Didn't work")).toBeNull();
   expect(command.queryByText(/Exit code/)).toBeNull();
@@ -204,7 +207,7 @@ test("an edit is a diff of what it replaced, in red, and what it put in, in gree
 
 test("an edit that replaced every occurrence says so", async () => {
   const view = draw(
-    turn([documented.replaceAll], [documented.replaceAll.result]),
+    turn([constructed.replaceAll], [constructed.replaceAll.result]),
   );
   const edit = await card(view, "Edited a file");
   expect(edit.getByText("All occurrences")).toBeTruthy();
