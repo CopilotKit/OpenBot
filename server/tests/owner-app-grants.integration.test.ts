@@ -41,6 +41,10 @@ import {
 } from "../src/plugins/shared-use-store";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import {
+  GRANTED_TOOL_BUDGET,
+  toolBudgetRefusal,
+} from "../src/plugins/tool-budget";
+import {
   createTeamBots,
   TEAM_BOT_CONSENT_MARKER,
 } from "../src/team-bots/team-bots";
@@ -298,6 +302,41 @@ describe("an owner giving their own app to their own Bot", () => {
     expect(
       events.find((event) => event.eventType === "app_access.owner_granted"),
     ).toMatchObject({ actorUserId: owner, payload: { bot, app: GMAIL } });
+  });
+
+  test("a give that would take the Bot past the tools a model accepts is refused with the numbers, and gives nothing", async () => {
+    const bot = await botOf(owner);
+    await connect(owner);
+    // FETCH and these: one more read than a Bot can be granted.
+    await database.insert(mcpTools).values(
+      Array.from({ length: GRANTED_TOOL_BUDGET }, (_, index) => ({
+        serverId: GMAIL,
+        name: `FETCH_${index}`,
+        description: "Read",
+        inputSchema: {},
+        effect: "read",
+      })),
+    );
+    const given = await appAs(owner).request(
+      `/api/plugins/for/${bot}/apps/${GMAIL}/give`,
+      send("POST"),
+    );
+    expect(given.status).toBe(409);
+    expect((await given.json()).error).toBe(
+      `${toolBudgetRefusal({ app: "Gmail", adding: GRANTED_TOOL_BUDGET + 1, holding: 0 })} Ask an admin to choose which of Gmail's actions this Bot needs.`,
+    );
+    expect(await grantsOn(bot)).toEqual([]);
+    expect(
+      events.find((event) => event.eventType === "app_access.refused"),
+    ).toMatchObject({
+      actorUserId: owner,
+      payload: {
+        app: GMAIL,
+        bot,
+        reason: "over_tool_limit",
+        tools: { adding: GRANTED_TOOL_BUDGET + 1, holding: 0 },
+      },
+    });
   });
 
   test("somebody else's Bot, an app kept for admins, and an app nobody turned on are refused", async () => {

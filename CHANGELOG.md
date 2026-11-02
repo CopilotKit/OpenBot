@@ -78,6 +78,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Approving app access can no longer give a Bot more tools than a model accepts
+
+Approving a Bot's access to an app gave it every read-only action the app has, and for a large
+Composio app that is hundreds (239 for Shopify). Every granted tool goes to the model on every call,
+OpenAI accepts at most 128 in one request, and a Bot past that stopped answering. An approval, or a
+Bot owner giving their own app, that would take a Bot past 88 granted tools is now refused, with a
+sentence naming the app, how many tools it would add, the Bot's resulting total and the limit, and
+an `app_access.refused` row in the trail (`reason: over_tool_limit`). The request stays pending;
+choose fewer of the app's actions on its page under Plugins and approve again. Grants made before
+the upgrade are unchanged.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.

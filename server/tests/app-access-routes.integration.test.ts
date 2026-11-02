@@ -41,6 +41,10 @@ import {
   type PluginStore,
   type ServerRecord,
 } from "../src/plugins/store";
+import {
+  GRANTED_TOOL_BUDGET,
+  toolBudgetRefusal,
+} from "../src/plugins/tool-budget";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { stubBroker } from "./support/stub-broker";
 
@@ -1351,6 +1355,47 @@ describe("what approving grants, and when it can be answered", () => {
     const chosen = await appAs(admin, "admin").request(
       `/api/plugins/access-requests/${request.id}/approve`,
       post({ refs: [`${GMAIL}/SEND_MAIL`] }),
+    );
+    expect(chosen.status).toBe(200);
+  });
+
+  test("an approval that would take the Bot past the tools a model accepts is refused with the numbers, and stays pending", async () => {
+    const reads = Array.from(
+      { length: GRANTED_TOOL_BUDGET + 1 },
+      (_, index) => `READ_${String(index).padStart(3, "0")}`,
+    );
+    await seedApp({
+      key: GMAIL,
+      title: "Gmail",
+      tools: reads,
+      effects: Object.fromEntries(reads.map((name) => [name, "read"])),
+      grant: false,
+    });
+    const request = await file("Gmail");
+    const response = await appAs(admin, "admin").request(
+      `/api/plugins/access-requests/${request.id}/approve`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(409);
+    expect((await json<{ error: string }>(response)).error).toBe(
+      `${toolBudgetRefusal({ app: "Gmail", adding: reads.length, holding: 0 })} Choose fewer of Gmail's actions on its page under Plugins, then approve this request again.`,
+    );
+    expect(await statusOf(request.id)).toBe("pending");
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.agentId, bot)),
+    ).toEqual([]);
+    expect(eventsOf("app_access.refused").at(-1)?.payload).toMatchObject({
+      app: GMAIL,
+      reason: "over_tool_limit",
+      tools: { adding: reads.length, holding: 0 },
+    });
+    // Fewer, named, fit.
+    const chosen = await appAs(admin, "admin").request(
+      `/api/plugins/access-requests/${request.id}/approve`,
+      post({ refs: reads.slice(0, 3).map((name) => `${GMAIL}/${name}`) }),
     );
     expect(chosen.status).toBe(200);
   });

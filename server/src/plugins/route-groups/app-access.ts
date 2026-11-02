@@ -24,6 +24,7 @@ import {
   deploymentFaultSentence,
   isDeploymentFault,
 } from "../store";
+import { toolBudgetRefusal } from "../tool-budget";
 import { enableComposioApp } from "./composio-apps";
 import type { PluginRouteContext } from "./context";
 import { sharedGrantApproval } from "./grants";
@@ -147,6 +148,7 @@ export function mountAppAccessRoutes({
       request?: string;
       bot?: string | null;
       kind?: string;
+      tools?: { adding: number; holding: number };
     },
   ) => {
     await store.recordAppAccessEvent({
@@ -159,9 +161,24 @@ export function mountAppAccessRoutes({
         ...(input.request ? { request: input.request } : {}),
         ...(input.bot !== undefined ? { bot: input.bot } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.tools ? { tools: input.tools } : {}),
       },
     });
     return context.json({ error: input.error }, input.status);
+  };
+
+  /**
+   * How many tools a Bot is granted now, and how many of `refs` would be new to it: what
+   * {@link toolBudgetRefusal} weighs before anything is granted.
+   */
+  const toolTally = async (agentId: string, refs: string[]) => {
+    const held = new Set(
+      (await store.listForAgent(agentId)).tools.map((tool) => tool.ref),
+    );
+    return {
+      adding: refs.filter((ref) => !held.has(ref)).length,
+      holding: held.size,
+    };
   };
 
   /**
@@ -185,6 +202,7 @@ export function mountAppAccessRoutes({
       reason: string,
       error: string,
       status: 400 | 404 | 409 | 502 | 503,
+      tools?: { adding: number; holding: number },
     ) =>
       refused(context, {
         app: request.appKey,
@@ -194,6 +212,7 @@ export function mountAppAccessRoutes({
         reason,
         error,
         status,
+        ...(tools ? { tools } : {}),
       });
 
     const inspect = () =>
@@ -322,6 +341,15 @@ export function mountAppAccessRoutes({
           "no_read_only_tools",
           `None of ${name}'s actions are marked read-only, so approving here gives this Bot nothing. Choose its actions on ${name}'s page under Plugins, then ${again}.`,
           409,
+        );
+      const tally = await toolTally(agentId, refs);
+      const tooMany = toolBudgetRefusal({ app: name, ...tally });
+      if (tooMany)
+        return deny(
+          "over_tool_limit",
+          `${tooMany} Choose fewer of ${name}'s actions on its page under Plugins, then ${again}.`,
+          409,
+          tally,
         );
       for (const ref of refs) {
         await store.grant("mcp", ref, agentId, actorEmail(context));
@@ -671,19 +699,26 @@ export function mountAppAccessRoutes({
    *
    * Every grant is `granted_as = owner`, which keeps each call on the asking person's own account
    * (`credentialActorFor`). A Bot that already holds any of the app is answered with nothing given.
+   * One that would take the Bot past the tools a model accepts is refused, as an approval is.
    */
   routes.post("/for/:agentId/apps/:app/give", requireUser, async (context) => {
     const found = await ownersApp(context);
     if (found instanceof Response) return found;
     const { agentId, inspected } = found;
     const { access } = inspected;
-    const deny = (reason: string, error: string, status: 403 | 409) =>
+    const deny = (
+      reason: string,
+      error: string,
+      status: 403 | 409,
+      tools?: { adding: number; holding: number },
+    ) =>
       refused(context, {
         app: access.key,
         bot: agentId,
         reason,
         error,
         status,
+        ...(tools ? { tools } : {}),
       });
     const refusal = await ownerGrantRefusal(
       store,
@@ -727,6 +762,15 @@ export function mountAppAccessRoutes({
         "no_read_only_tools",
         `${access.displayName} has nothing a Bot can only read with. Ask an admin to choose what this Bot can do with it.`,
         409,
+      );
+    const tally = await toolTally(agentId, refs);
+    const tooMany = toolBudgetRefusal({ app: access.displayName, ...tally });
+    if (tooMany)
+      return deny(
+        "over_tool_limit",
+        `${tooMany} Ask an admin to choose which of ${access.displayName}'s actions this Bot needs.`,
+        409,
+        tally,
       );
     for (const ref of refs)
       await store.grant("mcp", ref, agentId, actorEmail(context), "owner");
@@ -930,7 +974,8 @@ export function mountAppAccessRoutes({
    * offers, and nothing that sends, writes or deletes. Anything more is chosen action by action, on
    * the Bot's page for the app or by naming them here. An app with no read-only action is refused
    * with that sentence rather than granted everything. A ref outside the app is refused rather than
-   * dropped.
+   * dropped. So is an approval that would take the Bot past the tools a model accepts in one request
+   * (`toolBudgetRefusal`), with the numbers, and the request waits for fewer to be chosen.
    */
   routes.post("/access-requests/:id/approve", requireUser, async (context) => {
     const forbidden = requireAdmin(context);
