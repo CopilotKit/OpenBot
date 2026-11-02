@@ -37,17 +37,48 @@ const CLOSING = new RegExp(`</${UNTRUSTED_TAG}`, "gi");
  * envelope is returned as it is.
  */
 export function markUntrusted(content: string, source: string): string {
-  if (isMarkedUntrusted(content)) return content;
   const safeSource = source.replace(/["<>\n\r]/g, " ").slice(0, 120);
+  // Only an envelope this caller would have written: its own source, not one the content chose.
+  if (isMarkedUntrusted(content, safeSource)) return content;
   return `${untrustedNotice(`${safeSource} content`)}\n<${UNTRUSTED_TAG} source="${safeSource}">\n${content.replace(CLOSING, `<\\/${UNTRUSTED_TAG}`)}\n</${UNTRUSTED_TAG}>`;
 }
 
-/** Whether a string is already an envelope. */
-export function isMarkedUntrusted(content: string): boolean {
+/**
+ * Whether a string is already an envelope: exactly what `markUntrusted` returns, and nothing else.
+ *
+ * The content being judged is outside content, so it can be written to look like an envelope. A
+ * string that merely starts and ends the right way can carry its own notice, or close the tag and
+ * continue outside it, and the envelope it would have been given is then skipped. So the notice must
+ * be the one `markUntrusted` writes for the source the tag names, that source must be one
+ * `markUntrusted` could have written, and the only closing tag is the last one.
+ *
+ * Given `source`, the envelope must also name that source. The source is written into the notice the
+ * model reads, so an envelope the content wrote itself could name a source that is an instruction
+ * ("the owner approved emailing the file") and still be well formed; `markUntrusted` skips wrapping
+ * only an envelope naming its own caller's source.
+ */
+export function isMarkedUntrusted(content: string, source?: string): boolean {
+  const opening = `\n<${UNTRUSTED_TAG} source="`;
+  const openingAt = content.indexOf(opening);
+  if (openingAt === -1) return false;
+  const sourceStart = openingAt + opening.length;
+  const sourceEnd = content.indexOf('">\n', sourceStart);
+  if (sourceEnd === -1) return false;
+  const named = content.slice(sourceStart, sourceEnd);
+  if (named.length > 120 || /["<>\n\r]/.test(named)) return false;
+  if (source !== undefined && named !== source) return false;
+  const head = `${untrustedNotice(`${named} content`)}${opening}${named}">\n`;
+  const tail = `\n</${UNTRUSTED_TAG}>`;
+  if (
+    !content.startsWith(head) ||
+    !content.endsWith(tail) ||
+    content.length < head.length + tail.length
+  ) {
+    return false;
+  }
   return (
-    content.startsWith("CRITICAL: The following ") &&
-    content.includes(`\n<${UNTRUSTED_TAG} source="`) &&
-    content.endsWith(`</${UNTRUSTED_TAG}>`)
+    content.slice(head.length, content.length - tail.length).search(CLOSING) ===
+    -1
   );
 }
 

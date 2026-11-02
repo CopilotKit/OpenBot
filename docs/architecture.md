@@ -154,7 +154,7 @@ Secret entry is separate from chat content. The audit trail records that a secre
 
 ## Watching a Bot work
 
-Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity tab is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
+Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity list under it is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
 
 Activity is held in the browser for the open conversation and is gone on reload. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
 
@@ -375,7 +375,7 @@ Required package files:
 Optional: `skills.yaml`, `theme.css`, and an `agents/` directory holding a coworker per file, read
 alongside `agents.yaml`. See [configuration.md](configuration.md#agents).
 
-The server validates the package at startup. Channel agent IDs must match declared agents. Knowledge sources currently support Google Drive and Microsoft OneDrive declarations.
+The server validates the package at startup. Channel agent IDs must match declared agents. `knowledge.yaml` accepts Google Drive and Microsoft OneDrive declarations and is validated, but nothing reads it yet; see [configuration.md](configuration.md#knowledgeyaml).
 
 Connector credentials are stored through the credential vault and referenced by id, not stored inline in YAML.
 
