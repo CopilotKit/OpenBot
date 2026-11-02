@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import {
@@ -1163,6 +1164,25 @@ describe("the computer gateway", () => {
       }
     });
 
+    test("a newline or a carriage return is Enter, alone or with a modifier", async () => {
+      // `key` is free text, and Playwright's keyboard layout names `\n` and `\r` as aliases of
+      // Enter, so either one submits the form. Read as typing, they walked past a rule on activation.
+      for (const key of ["\n", "\r", "Shift+\n", "Control+\r"]) {
+        const { gateway, calls } = await gatewayWith({
+          ...PERMISSIVE,
+          deny: ['intent == "activate"'],
+        });
+        await expect(
+          gateway.key(botSeat("bot-1"), ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key,
+          }),
+        ).rejects.toThrow(ActionRefusedError);
+        expect(calls).toEqual([]);
+      }
+    });
+
     /*
      * The rule the product ships, run against every door it claims to close.
      *
@@ -1172,7 +1192,30 @@ describe("the computer gateway", () => {
      * either copy that reopens a door fails here.
      */
     const SHIPPED_NEVER_SUBMIT =
-      '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")';
+      '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && intent == "activate")';
+
+    test("both shipped copies are the rule pinned here", () => {
+      // Pinned as written, so a copy that drifts back to `key == "Enter"` fails here rather than
+      // quietly letting Shift+Enter submit the form on a deployment that followed the advice.
+      const example = readFileSync(
+        new URL("../../.env.example", import.meta.url),
+        "utf8",
+      );
+      const line = example
+        .split("\n")
+        .find((one) => one.startsWith("# AGENT_COMPUTER_POLICY="));
+      expect(line).toBeDefined();
+      const policy = JSON.parse(
+        (line ?? "").slice("# AGENT_COMPUTER_POLICY=".length),
+      ) as { deny: string[] };
+      expect(policy.deny).toEqual([SHIPPED_NEVER_SUBMIT]);
+
+      const presets = readFileSync(
+        new URL("../../app/src/lib/boundaries/rules.ts", import.meta.url),
+        "utf8",
+      );
+      expect(presets).toContain(`rule: '${SHIPPED_NEVER_SUBMIT}',`);
+    });
 
     test("the shipped preset closes the button, the keypress and the submit flag", async () => {
       const shipped = { ...PERMISSIVE, deny: [SHIPPED_NEVER_SUBMIT] };
@@ -1195,6 +1238,19 @@ describe("the computer gateway", () => {
         }),
       ).rejects.toThrow();
       expect(enter.calls).toEqual([]);
+
+      // Enter spelled any other way the computer presses as Enter, and Space on a focused button.
+      for (const key of ["Shift+Enter", "Control+Enter", "\n", "Space"]) {
+        const pressed = await gatewayWith(shipped);
+        await expect(
+          pressed.gateway.key(botSeat("bot-1"), ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key,
+          }),
+        ).rejects.toThrow(ActionRefusedError);
+        expect(pressed.calls).toEqual([]);
+      }
 
       const submit = await gatewayWith(shipped);
       await expect(

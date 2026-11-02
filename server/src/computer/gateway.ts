@@ -1540,8 +1540,18 @@ export function describeFile(path: string): {
  *
  * Enter and Space are activations. They press whatever has focus, so a rule about activation must
  * cover keypresses as well as clicks.
+ *
+ * `\n` and `\r` are Enter too. `key` is free text, and Playwright's keyboard layout names both as
+ * aliases of Enter, so a press of either submits the form exactly as Enter does.
  */
-const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
+const ACTIVATING_KEYS = new Set([
+  "Enter",
+  "NumpadEnter",
+  "\n",
+  "\r",
+  "Space",
+  " ",
+]);
 
 /**
  * The key a press ends on, without the modifiers held for it.
