@@ -3,8 +3,7 @@ import { readFileSync } from "node:fs";
 
 /*
  * The default look is theme.css's own shadcn tokens, so a customer changes it in one place. Light
- * is `:root` and dark is `.dark`. openbot.css adds only what the default skin needs beyond colors:
- * its typeface and the orb's edge, scoped to `:root:not([data-skin])`.
+ * is `:root` and dark is `.dark`. Nothing else declares a token for the default look.
  */
 
 const read = (path: string) =>
@@ -26,18 +25,16 @@ function declared(css: string, selector: string) {
   return tokens;
 }
 
-/** Relative luminance of a `#rrggbb` color, as WCAG computes it. */
-function luminance(hex: string | undefined) {
-  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex))
-    throw new Error(`not a hex color: ${hex}`);
-  const [r, g, b] = [1, 3, 5].map((at) => {
-    const channel = Number.parseInt(hex.slice(at, at + 2), 16) / 255;
-    return channel <= 0.04045
-      ? channel / 12.92
-      : ((channel + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+/** The perceived lightness of an `oklch(...)` color, its first channel. */
+function lightness(color: string | undefined) {
+  const match = color?.match(/^oklch\(([\d.]+)\s/);
+  if (!match) throw new Error(`not an oklch color: ${color}`);
+  return Number(match[1]);
 }
+
+/** shadcn's theme tokens: the color pairs, the chart and sidebar sets, and the radius. */
+const SHADCN_TOKEN =
+  /^--((background|foreground|border|input|ring|radius)|(card|popover|primary|secondary|muted|accent|destructive)(-foreground)?|chart-[1-5]|sidebar(-(foreground|primary|primary-foreground|accent|accent-foreground|border|ring))?)$/;
 
 const theme = read("../src/theme.css");
 const THEMES = [
@@ -59,9 +56,9 @@ describe("default look tokens", () => {
   test.each(THEMES)(
     "%s: the frame is darker than the panel, the panel darker than cards",
     (_, tokens) => {
-      const frame = luminance(tokens.get("--sidebar"));
-      const panel = luminance(tokens.get("--background"));
-      const card = luminance(tokens.get("--card"));
+      const frame = lightness(tokens.get("--sidebar"));
+      const panel = lightness(tokens.get("--background"));
+      const card = lightness(tokens.get("--card"));
       expect(frame).toBeLessThan(panel);
       expect(panel).toBeLessThan(card);
     },
@@ -82,39 +79,24 @@ describe("default look tokens", () => {
     },
   );
 
-  test.each(THEMES)(
-    "%s: the card edge, shadow and warning colors are tokens",
-    (_, tokens) => {
-      for (const token of [
-        "--card-border",
-        "--card-shadow",
-        "--card-shadow-hover",
-        "--empty-border",
-        "--warning",
-        "--warning-foreground",
-      ]) {
-        expect(tokens.has(token)).toBe(true);
-      }
-    },
-  );
+  // A stock shadcn theme drops in: no token beyond shadcn's own, the success color and the
+  // empty-state pattern's.
+  test.each(THEMES)("%s: declares only shadcn's tokens", (_, tokens) => {
+    const extra = [...tokens.keys()].filter(
+      (token) =>
+        !SHADCN_TOKEN.test(token) &&
+        token !== "--success" &&
+        !token.startsWith("--empty-pattern"),
+    );
+    expect(extra).toEqual([]);
+  });
 
   // A button or badge on a card is lighter than the card, never a hole through to the frame.
   test("dark: secondary and muted fills are lighter than cards", () => {
     const [, dark] = THEMES[1];
-    const card = luminance(dark.get("--card"));
-    expect(luminance(dark.get("--secondary"))).toBeGreaterThan(card);
-    expect(luminance(dark.get("--muted"))).toBeGreaterThan(card);
-  });
-
-  test("skins keep their plain card edge and no lift", () => {
-    const skins = read("../src/skins/skins.css");
-    const light = declared(skins, ":root[data-skin]");
-    expect(light.get("--card-border")).toBe("var(--border)");
-    expect(light.get("--card-shadow")).toBe("0 0 #0000");
-    expect(light.get("--empty-border")).toBe("var(--border)");
-    expect(declared(skins, ":root[data-skin].dark").get("--card-border")).toBe(
-      "transparent",
-    );
+    const card = lightness(dark.get("--card"));
+    expect(lightness(dark.get("--secondary"))).toBeGreaterThan(card);
+    expect(lightness(dark.get("--muted"))).toBeGreaterThan(card);
   });
 
   test("skins start with the empty-state pattern off", () => {
@@ -126,41 +108,8 @@ describe("default look tokens", () => {
   });
 });
 
-describe("default skin extras", () => {
-  const extras = read("../src/openbot.css");
-  const light = declared(extras, ":root:not([data-skin])");
-  const dark = declared(extras, ":root:not([data-skin]).dark");
-
-  test("the type is Atkinson Hyperlegible", () => {
-    expect(light.get("--font-sans")).toContain("Atkinson Hyperlegible Next");
-    expect(light.get("--font-mono")).toContain("Atkinson Hyperlegible Mono");
-  });
-
-  test("the orb's edge is set for light and dark", () => {
-    expect(light.has("--orb-edge")).toBe(true);
-    expect(dark.has("--orb-edge")).toBe(true);
-  });
-
-  test("it sets no colors of its own", () => {
-    // Its typeface overrides theme.css's on purpose; anything else theme.css sets is a color.
-    const colors = [...light.keys(), ...dark.keys()].filter(
-      (token) => theme.includes(`${token}:`) && !token.startsWith("--font-"),
-    );
-    expect(colors).toEqual([]);
-  });
-});
-
 describe("fonts", () => {
   const styles = read("../src/styles.css");
-
-  test("both Atkinson faces load", () => {
-    expect(styles).toContain(
-      '@import "@fontsource-variable/atkinson-hyperlegible-next"',
-    );
-    expect(styles).toContain(
-      '@import "@fontsource-variable/atkinson-hyperlegible-mono"',
-    );
-  });
 
   // OpenDuet is set in Inter.
   test("Inter still loads", () => {
@@ -171,9 +120,5 @@ describe("fonts", () => {
 describe("the extension", () => {
   test("theme.css, which the extension's pages import, has no default-skin blocks", () => {
     expect(theme).not.toContain(":root:not([data-skin])");
-  });
-
-  test("only the app's own stylesheet brings in the default skin's extras", () => {
-    expect(read("../src/styles.css")).toContain('@import "./openbot.css";');
   });
 });

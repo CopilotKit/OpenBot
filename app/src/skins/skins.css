@@ -15,18 +15,3 @@
 :root[data-skin] {
   --empty-pattern-opacity: 0;
 }
-
-/*
- * Likewise the firmer card edge and lift: a skin keeps the plain hairline it was designed with, with
- * no edge on rows and cards in dark mode, and its hairline around empty states in both. A skin that
- * wants OpenBot's set the `--card-*` and `--empty-border` tokens in its skin.css.
- */
-:root[data-skin] {
-  --card-border: var(--border);
-  --empty-border: var(--border);
-  --card-shadow: 0 0 #0000;
-  --card-shadow-hover: 0 0 #0000;
-}
-:root[data-skin].dark {
-  --card-border: transparent;
-}

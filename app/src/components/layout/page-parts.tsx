@@ -17,7 +17,7 @@ import {
  *
  * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
  * would wrap every row. The page is exactly the window's height and does not scroll: the title sits
- * at the pane's left SURFACE_EDGE, lined up with the table's first column rather than centred above a table
+ * at the pane's left edge, lined up with the table's first column rather than centred above a table
  * that is not, and the children fill what is left, so the table can be the one thing that scrolls.
  * It is not a licence for anything else to be wide. It is no column, so `PageShell` draws it itself.
  */
@@ -91,7 +91,10 @@ export function PageHeader({
   return (
     <header className="flex flex-col gap-2" data-slot="page-header">
       <div className="flex flex-row items-center justify-between gap-4">
-        <h1 className="font-bold text-2xl" data-slot="page-title">
+        <h1
+          className="font-semibold text-2xl tracking-tight"
+          data-slot="page-title"
+        >
           {title}
         </h1>
         {action}
@@ -129,7 +132,11 @@ export function PageSection({
     <section className={cn("mt-12", className)}>
       {title ? (
         <div className="flex min-h-8 flex-row items-center justify-between gap-4">
-          <h2 className="font-bold text-lg">{title}</h2>
+          {/*
+           * Close to body size and lighter than the page title, so the sections read as parts of
+           * the page rather than as a second row of titles competing with it.
+           */}
+          <h2 className="font-semibold text-base">{title}</h2>
           {action}
         </div>
       ) : null}
@@ -150,12 +157,6 @@ export function PageSection({
  * them. Rendering nothing when there is nothing is deliberate — an empty bordered box reads as a
  * thing that failed to load, where absence reads as nothing to see yet.
  */
-/*
- * Rows and cards take the firmer edge and soft lift from the `--card-*` tokens in theme.css; a skin
- * sets them back to its plain hairline in skins.css.
- */
-const SURFACE_EDGE = "border-card-border shadow-card";
-
 export function PageRows({
   children,
   className,
@@ -175,10 +176,9 @@ export function PageRows({
      */
     <div
       className={cn(
-        "mt-4 overflow-hidden rounded-lg border bg-card",
-        SURFACE_EDGE,
+        "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
         "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
-        // Dividers stop 16px short of each SURFACE_EDGE, lined up with the rows' text, as Linear draws them.
+        // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
         // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
         "[&_[data-slot=separator][data-orientation=horizontal]]:mx-4 [&_[data-slot=separator][data-orientation=horizontal]]:w-auto",
         className,
@@ -208,7 +208,10 @@ export function PageCard({
 }) {
   return (
     <div
-      className={cn("rounded-lg border bg-card p-4", SURFACE_EDGE, className)}
+      className={cn(
+        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
+        className,
+      )}
     >
       {children}
       {footer ? (
@@ -241,7 +244,7 @@ export function PageEmpty({
 }) {
   return (
     // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
-    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-(--empty-border)">
+    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-border">
       {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
       <div aria-hidden className="empty-pattern" />
       <EmptyHeader>
