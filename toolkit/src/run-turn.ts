@@ -293,6 +293,10 @@ export function turnMessages(input: {
   continuation?: Parameters<TurnRunner>[0]["continuation"];
 }): { messages: Message[]; persistedInputMessages: Message[] } {
   const { seeded, historicIds, turn, continuation } = input;
+  /*
+   * A turn whose message the thread already holds is a retry of it, which a failed run that got as
+   * far as persisting its input leaves behind: the message is there once, never sent twice.
+   */
   const messages: Message[] = continuation
     ? sanitizeSeededHistory([
         ...continuation.snapshot.messages,
@@ -303,7 +307,9 @@ export function turnMessages(input: {
           ...continuation.result,
         },
       ])
-    : [...seeded, turn];
+    : seeded.some((message) => message.id === turn.id)
+      ? seeded
+      : [...seeded, turn];
   return {
     messages,
     persistedInputMessages: messages.filter(

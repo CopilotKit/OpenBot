@@ -16,6 +16,12 @@ export type TaskScope = {
 /** One run of a task's turn. `final` is its last: if it fails, the task has failed. */
 export type TaskTurnInput = {
   runId: string;
+  /**
+   * The id the ask is drawn under: its message in the conversation, and its line. The same for a
+   * retry of the turn as for its first run, so a retry carries on the ask already there instead of
+   * putting it in the conversation, and in front of the model, a second time.
+   */
+  askId: string;
   /** The person's ask, as their message in the conversation. */
   text: string;
   signal: AbortSignal;
@@ -68,14 +74,14 @@ export function createTaskTurn(deps: {
         { text, agentId, at: new Date() },
         { id },
       );
-    await record(input.text, null, `${input.runId}${ASK_LINE}`);
+    await record(input.text, null, `${input.askId}${ASK_LINE}`);
     await deps.channels.signalBusy(scope.threadId, true).catch(() => {});
     try {
       const result = await deps.runTurn({
         ...scope,
         routineId: input.runId,
         instruction: input.text,
-        userMessage: { id: input.runId, role: "user", content: input.text },
+        userMessage: { id: input.askId, role: "user", content: input.text },
         initiator: PERSON_INITIATOR,
         signal: input.signal,
       });

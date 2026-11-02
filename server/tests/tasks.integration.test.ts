@@ -150,9 +150,21 @@ const asked: RunAgentInput[] = [];
 const persisted: Message[][] = [];
 const initiators: unknown[] = [];
 
+/**
+ * What the platform keeps of a conversation, for the tests that read a thread back: each run's
+ * persisted input, as Intelligence stores it. Off unless a test turns it on.
+ */
+const threads = new Map<string, Message[]>();
+let keepThreads = false;
+
 const runner: RunnerLike = {
   run: ({ agent, input, persistedInputMessages }) => {
     persisted.push(persistedInputMessages ?? []);
+    if (keepThreads)
+      threads.set(input.threadId, [
+        ...(threads.get(input.threadId) ?? []),
+        ...(persistedInputMessages ?? []),
+      ]);
     return new Observable((subscriber) => {
       agent
         .runAgent(input, { onEvent: ({ event }) => subscriber.next(event) })
@@ -211,7 +223,9 @@ const runTurn = createTurnRunner({
   admission: serverTurnAdmission,
   intelligence: {
     getOrCreateThread: async () => undefined,
-    getThreadMessages: async () => ({ messages: [] }),
+    getThreadMessages: async ({ threadId }) => ({
+      messages: (threads.get(threadId) ?? []) as never[],
+    }),
     ɵacquireThreadLock: async () => undefined,
     ɵrenewThreadLock: async () => undefined,
     ɵcleanupThreadLock: async () => undefined,
@@ -782,6 +796,35 @@ describe("where a task stands", () => {
     // Somebody else asking about this person's task learns nothing about it.
     const stranger = await person();
     expect(await asksEveryStep(stranger.id, threadId)).toBe(false);
+  });
+
+  test("a turn retried after a failure asks once: its conversation holds the ask once, and the model is sent it once", async () => {
+    const { owner, item } = await seed();
+    keepThreads = true;
+    try {
+      let down = 1;
+      script = (input) =>
+        down-- > 0
+          ? providerDown(input)
+          : reply(input, "The reply is drafted.");
+      const from = asked.length;
+
+      const task = await start(owner, item.id);
+      await tasks.idle();
+
+      // Run once, then once more after the provider failed, and that one finished.
+      expect(asked.length - from).toBe(2);
+      expect(await taskStore.get(owner.id, task.id)).toMatchObject({
+        status: "ready_for_review",
+      });
+      const { threadId } = await taskStore.get(owner.id, task.id);
+      const asks = (messages: Message[]) =>
+        messages.filter((message) => message.role === "user");
+      expect(asks(threads.get(threadId ?? "") ?? [])).toHaveLength(1);
+      expect(asks(asked.at(-1)?.messages ?? [])).toHaveLength(1);
+    } finally {
+      keepThreads = false;
+    }
   });
 
   test("a turn that fails twice reads failed, says so in its conversation, and Try again runs once however often it is pressed", async () => {

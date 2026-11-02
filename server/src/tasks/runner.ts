@@ -39,9 +39,10 @@ const TASK_RETRY_MS = 10_000;
 export type StartedItem = Parameters<TaskService["startFromItem"]>[0]["item"];
 
 /**
- * The run id one execution of a task's turn goes by: the id its ask is drawn under in the
- * conversation, and the one its lines are recorded with. A rerun, whether the retry or Try again, is
- * a new run with its own id, so it never collides with what the one before left there.
+ * The run id one execution of a task's turn goes by: the one its lines are recorded with. A rerun,
+ * whether the retry or Try again, is a new run with its own id, so it never collides with what the
+ * one before left there. The ask is drawn under the id of the turn's first run (attempt 1): the
+ * retry carries on that same ask, and Try again, a turn of its own, asks under its own.
  */
 export function taskExecutionId(input: {
   taskId: string;
@@ -246,6 +247,13 @@ export function createTaskRunner(deps: {
         taskId: task.id,
         workKey,
         attempt,
+        again: work.again,
+      }),
+      // The turn's first run's id: a retry carries on the same ask rather than asking again.
+      askId: taskExecutionId({
+        taskId: task.id,
+        workKey,
+        attempt: 1,
         again: work.again,
       }),
       text:
