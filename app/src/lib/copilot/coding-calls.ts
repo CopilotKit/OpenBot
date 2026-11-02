@@ -1,3 +1,4 @@
+import { parse } from "shell-quote";
 import { z } from "zod";
 
 /**
@@ -62,4 +63,131 @@ export function foreignCodingCall(name: string, args: string): boolean {
   const given = settled(args);
   if (given === undefined) return false;
   return !CLAUDE_CODE_ARGUMENTS[name].safeParse(given).success;
+}
+
+/**
+ * What a call that only looked at something did, in the words Claude Code counts them in: it read
+ * files, searched for patterns, or listed directories.
+ */
+export type Look = "file" | "pattern" | "directory";
+
+/**
+ * The look a call is, or null when it changed something, ran something, or is not Claude Code's.
+ *
+ * Claude Code folds a run of these into one line ("Read 3 files, searched for 2 patterns"), and the
+ * transcript does the same. Read, Grep and Glob are looks by name, so they fold while their
+ * arguments arrive. A Bash command is a look only once the command can be read, and only when it is
+ * one of the plain read, search and list commands Claude Code counts in that line.
+ */
+export function codingLook(name: string, args: string): Look | null {
+  if (!isCodingTool(name)) return null;
+  const given = settled(args);
+  if (
+    given !== undefined &&
+    !CLAUDE_CODE_ARGUMENTS[name].safeParse(given).success
+  )
+    return null;
+  if (name === "Read") return "file";
+  if (name === "Grep" || name === "Glob") return "pattern";
+  if (name !== "Bash" || given === undefined) return null;
+  return commandLook((given as { command: string }).command);
+}
+
+const LOOK_PROGRAMS: Record<string, Look> = {
+  cat: "file",
+  head: "file",
+  tail: "file",
+  grep: "pattern",
+  egrep: "pattern",
+  fgrep: "pattern",
+  rg: "pattern",
+  find: "pattern",
+  ls: "directory",
+  tree: "directory",
+  du: "directory",
+};
+
+/** What a later stage of a pipeline may be: filters that only shorten or count what they are given. */
+const FILTERS = new Set([
+  "head",
+  "tail",
+  "wc",
+  "grep",
+  "egrep",
+  "fgrep",
+  "sort",
+]);
+
+/** Arguments that make an otherwise read-only program run, delete or write something. */
+const ACTS: Record<string, (argument: string) => boolean> = {
+  find: (argument) =>
+    /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(
+      argument,
+    ),
+  rg: (argument) => argument === "--pre" || argument.startsWith("--pre="),
+  // `-o` names a file to write the result to, alone or in a cluster of short options.
+  sort: (argument) =>
+    /^-[a-zA-Z]*o/.test(argument) || argument.startsWith("--output"),
+  tree: (argument) => /^-[a-zA-Z]*o/.test(argument),
+};
+
+type Token = ReturnType<typeof parse>[number];
+
+/** Whether a token is a plain word or a glob pattern, which a read-only command may take. */
+function word(token: Token): string | undefined {
+  if (typeof token === "string") return token;
+  if ("op" in token && token.op === "glob") return token.pattern;
+  return undefined;
+}
+
+/**
+ * The look a shell command is, read conservatively. One pipeline of words, the first a program from
+ * `LOOK_PROGRAMS` and the rest filters, with errors sent to /dev/null at most. Anything else, a `;`,
+ * an `&&`, a redirect into a file, a substitution, a second line or a variable set in front, is a
+ * command that may do more than look, and keeps its own card.
+ */
+export function commandLook(command: string): Look | null {
+  if (/[\n\r`]|\$\(/.test(command)) return null;
+  let tokens: Token[];
+  try {
+    tokens = parse(command);
+  } catch {
+    return null;
+  }
+  const stages: string[][] = [[]];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] as Token;
+    // `2>/dev/null` and `2>&1`, which only quiet or merge what it prints.
+    if (token === "2") {
+      const [op, target] = [tokens[index + 1], tokens[index + 2]];
+      if (
+        op &&
+        typeof op === "object" &&
+        "op" in op &&
+        ((op.op === ">" && target === "/dev/null") ||
+          (op.op === ">&" && target === "1"))
+      ) {
+        index += 2;
+        continue;
+      }
+    }
+    if (typeof token === "object" && "op" in token && token.op === "|") {
+      stages.push([]);
+      continue;
+    }
+    if (typeof token === "object" && "comment" in token) continue;
+    const value = word(token);
+    if (value === undefined) return null;
+    stages.at(-1)?.push(value);
+  }
+  const [first, ...rest] = stages;
+  const program = first?.[0];
+  if (!program || !Object.hasOwn(LOOK_PROGRAMS, program)) return null;
+  for (const [name, ...args] of stages) {
+    if (name === undefined) return null;
+    const acts = ACTS[name];
+    if (acts && args.some(acts)) return null;
+  }
+  if (rest.some((stage) => !FILTERS.has(stage[0] as string))) return null;
+  return LOOK_PROGRAMS[program] ?? null;
 }

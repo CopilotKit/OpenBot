@@ -14,6 +14,7 @@ import { type ReactNode, useState } from "react";
 import { byPosition } from "@/components/gallery/positions";
 import { Badge, GalleryFrame } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
+import type { Look } from "@/lib/copilot/coding-calls";
 import { asText } from "@/lib/plugins/tool-result";
 import { cn } from "@/lib/utils";
 import { ToolLine } from "./tool-line";
@@ -517,23 +518,19 @@ function numberedLines(text: string): number {
   return text.split("\n").filter((line) => /^\s*\d+(\t|→)/.test(line)).length;
 }
 
-export function ReadLine({
-  path,
-  outcome,
-}: {
-  path: string | undefined;
-  outcome: CodingOutcome;
-}) {
+/** What a look says: its words when it has finished and while it has not, and what it was done to. */
+type LookWords = { did: string; doing: string; detail: string | undefined };
+
+function readWords(
+  path: string | undefined,
+  outcome: CodingOutcome,
+): LookWords {
   const count = outcome.state === "done" ? numberedLines(outcome.text) : 0;
-  return (
-    <LookLine
-      detail={fileName(path)}
-      did={count ? `Read ${plural(count, "line", "lines")}` : "Read"}
-      doing="Reading"
-      icon={IconFileText}
-      outcome={outcome}
-    />
-  );
+  return {
+    did: count ? `Read ${plural(count, "line", "lines")}` : "Read",
+    doing: "Reading",
+    detail: fileName(path),
+  };
 }
 
 type GrepMode = "content" | "files_with_matches" | "count";
@@ -570,6 +567,101 @@ function grepFound(text: string, mode: GrepMode): string {
   return `Found ${plural(count, "match", "matches")}`;
 }
 
+function grepWords(
+  pattern: string | undefined,
+  path: string | undefined,
+  mode: GrepMode | undefined,
+  outcome: CodingOutcome,
+): LookWords {
+  const where = fileName(path);
+  return {
+    did:
+      outcome.state === "done"
+        ? grepFound(outcome.text, mode ?? "files_with_matches")
+        : "Searched",
+    doing: "Searching",
+    detail:
+      pattern === undefined
+        ? undefined
+        : `"${pattern}"${where ? ` in ${where}` : ""}`,
+  };
+}
+
+function globWords(
+  pattern: string | undefined,
+  outcome: CodingOutcome,
+): LookWords {
+  const files =
+    outcome.state === "done" && !/^No files found/.test(outcome.text.trim())
+      ? linesOf(outcome.text).filter((line) => !line.startsWith("(")).length
+      : 0;
+  return {
+    did:
+      outcome.state === "done"
+        ? files
+          ? `Found ${plural(files, "file", "files")}`
+          : "Found no files"
+        : "Looked for files",
+    doing: "Looking for files",
+    detail: pattern,
+  };
+}
+
+/** A shell command that only looked, named for what it did; the command is what it was done to. */
+const COMMAND_WORDS: Record<Look, { did: string; doing: string }> = {
+  file: { did: "Read", doing: "Reading" },
+  pattern: { did: "Searched", doing: "Searching" },
+  directory: { did: "Listed", doing: "Listing" },
+};
+
+/**
+ * One read or search of a run Claude Code folds into a single line, as a step of that line: what it
+ * did, what to, and what came back. The same words its own line uses when it stands alone.
+ */
+export function lookStep(
+  name: string,
+  given: Record<string, unknown>,
+  look: Look,
+  outcome: CodingOutcome,
+): { label: string; detail: string | undefined } {
+  const string = (key: string) =>
+    typeof given[key] === "string" ? (given[key] as string) : undefined;
+  const words =
+    name === "Read"
+      ? readWords(string("file_path"), outcome)
+      : name === "Grep"
+        ? grepWords(
+            string("pattern"),
+            string("path"),
+            string("output_mode") as GrepMode | undefined,
+            outcome,
+          )
+        : name === "Glob"
+          ? globWords(string("pattern"), outcome)
+          : { ...COMMAND_WORDS[look], detail: string("command") };
+  const settled = outcome.state === "done" || outcome.state === "failed";
+  return {
+    label: settled ? words.did : words.doing,
+    detail: words.detail || undefined,
+  };
+}
+
+export function ReadLine({
+  path,
+  outcome,
+}: {
+  path: string | undefined;
+  outcome: CodingOutcome;
+}) {
+  return (
+    <LookLine
+      {...readWords(path, outcome)}
+      icon={IconFileText}
+      outcome={outcome}
+    />
+  );
+}
+
 export function GrepLine({
   pattern,
   path,
@@ -581,20 +673,9 @@ export function GrepLine({
   mode: GrepMode | undefined;
   outcome: CodingOutcome;
 }) {
-  const where = fileName(path);
   return (
     <LookLine
-      detail={
-        pattern === undefined
-          ? undefined
-          : `"${pattern}"${where ? ` in ${where}` : ""}`
-      }
-      did={
-        outcome.state === "done"
-          ? grepFound(outcome.text, mode ?? "files_with_matches")
-          : "Searched"
-      }
-      doing="Searching"
+      {...grepWords(pattern, path, mode, outcome)}
       icon={IconSearch}
       outcome={outcome}
     />
@@ -608,21 +689,9 @@ export function GlobLine({
   pattern: string | undefined;
   outcome: CodingOutcome;
 }) {
-  const files =
-    outcome.state === "done" && !/^No files found/.test(outcome.text.trim())
-      ? linesOf(outcome.text).filter((line) => !line.startsWith("(")).length
-      : 0;
   return (
     <LookLine
-      detail={pattern}
-      did={
-        outcome.state === "done"
-          ? files
-            ? `Found ${plural(files, "file", "files")}`
-            : "Found no files"
-          : "Looked for files"
-      }
-      doing="Looking for files"
+      {...globWords(pattern, outcome)}
       icon={IconFolderSearch}
       outcome={outcome}
     />

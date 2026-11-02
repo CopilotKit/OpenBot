@@ -248,7 +248,7 @@ test("several edits to one file are one diff, counted together", async () => {
   expect(edit.getAllByText("Removed:")).toHaveLength(2);
 });
 
-test("reading and searching are one line each, with what was found", async () => {
+test("a run of reads and searches is one line, as Claude Code folds it, that opens to each", async () => {
   const view = draw(
     turn(
       [
@@ -267,15 +267,50 @@ test("reading and searching are one line each, with what was found", async () =>
       ],
     ),
   );
-  await view.findByText("Read 39 lines");
-  // Read numbers the empty line after the final newline too.
-  expect(readableLines(view.container, "details.tool-line > summary")).toEqual([
+  const line = await view.findByText("Read 1 file and searched for 4 patterns");
+  // One row for the run, not five.
+  expect(cards(view)).toEqual([]);
+  (line.closest("details") as HTMLDetailsElement).open = true;
+  // Each step says what it found, as it would standing alone. Read numbers the empty line after the
+  // final newline too.
+  expect(readableLines(view.container, "ol > li details > summary")).toEqual([
     "Read 39 linesgreet.py",
     'Found 2 files"def " in workspace',
     'Found 2 matches"def " in greet.py',
     'Found no matches"class "',
     "Found 2 files**/*.py",
   ]);
+});
+
+test("a coding turn folds only its reads and searches, and keeps every change and command in view", async () => {
+  // A recorded turn: plan, write, read it back, edit, list a folder that is not there, list another,
+  // run it. Claude Code shows the plan, the write, the edit and the run on their own, and folds the
+  // read and the two listings.
+  const calls = [
+    recorded.todoPlan,
+    recorded.write,
+    recorded.read,
+    recorded.edit,
+    recorded.failedCommand,
+    recorded.failedCommand,
+    recorded.run,
+  ];
+  const view = draw(
+    turn(
+      calls,
+      calls.map((call) => call.history),
+    ),
+  );
+  await view.findByText("To-dos");
+  expect(cards(view)).toEqual([
+    "Wrote a file",
+    "Edited a file",
+    "Ran a command",
+  ]);
+  // A lone read keeps its own line; the two listings fold into one, which says both didn't work.
+  expect(view.getByText("Read 39 lines")).toBeTruthy();
+  expect(view.getByText("Listed 2 directories")).toBeTruthy();
+  expect(view.getByText("2 issues")).toBeTruthy();
 });
 
 test("a tool that shares a Claude Code name but not its arguments is drawn as any other tool", async () => {

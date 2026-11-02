@@ -21,6 +21,8 @@ import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
  * a model. `ag-ui-claude-sdk` streams each call under Claude Code's own name (`Bash`, `Edit`), with
  * Claude Code's arguments, and its result is the text Claude Code gave the model. Without these they
  * fold into the generic "Used 6 tools" line, and a Bot that wrote and ran code shows none of it.
+ * Reads and searches still fold, into Claude Code's own "Read 3 files and searched for 2 patterns"
+ * line; see `groupToolSteps`.
  *
  * REGISTERED BY BARE NAME, FOR EVERY BOT. The browser cannot tell which harness a Bot runs, so a call
  * is drawn here only when it carries Claude Code's arguments; another harness's `Bash` with other
