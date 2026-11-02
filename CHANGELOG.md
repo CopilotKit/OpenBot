@@ -78,6 +78,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A rule on activation also catches Enter or Space pressed with a modifier
+
+A Bot's `computer_key` call names its key the way Playwright reads it, so `Shift+Enter` is Enter with
+Shift held, and the browser submits the form or clicks the focused button for it just as for Enter.
+The gateway only counted the bare `Enter`, `NumpadEnter` and `Space` as `intent == "activate"`, so the
+same key with a modifier was decided as typing and passed a deny rule on activation. It now judges the
+key a press ends on, so `Shift+Enter`, `Control+Enter` and `Shift+Space` are activations too.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.

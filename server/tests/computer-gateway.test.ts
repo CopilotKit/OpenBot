@@ -1123,6 +1123,46 @@ describe("the computer gateway", () => {
       expect(calls).toEqual([]);
     });
 
+    test("a key held with a modifier is still an activation", async () => {
+      // Playwright presses `Shift+Enter` as Enter with Shift held, and Chromium submits the form and
+      // clicks the focused button for it just as for Enter. Spelled with a modifier, it must not
+      // read as typing and walk past a rule on activation.
+      for (const key of [
+        "Shift+Enter",
+        "Control+Enter",
+        "Shift+NumpadEnter",
+        "Shift+Space",
+        "Shift+ ",
+      ]) {
+        const { gateway, calls } = await gatewayWith({
+          ...PERMISSIVE,
+          deny: ['intent == "activate"'],
+        });
+        await expect(
+          gateway.key(botSeat("bot-1"), ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key,
+          }),
+        ).rejects.toThrow(ActionRefusedError);
+        expect(calls).toEqual([]);
+      }
+
+      // A modifier on a key that presses nothing is still typing.
+      for (const key of ["Shift+Tab", "Control+a", "Shift++"]) {
+        const { gateway, calls } = await gatewayWith({
+          ...PERMISSIVE,
+          deny: ['intent == "activate"'],
+        });
+        await gateway.key(botSeat("bot-1"), ACTOR, {
+          ref: "e1",
+          snapshotId: 7,
+          key,
+        });
+        expect(calls).toEqual(["key"]);
+      }
+    });
+
     /*
      * The rule the product ships, run against every door it claims to close.
      *

@@ -1544,6 +1544,28 @@ export function describeFile(path: string): {
 const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
 
 /**
+ * The key a press ends on, without the modifiers held for it.
+ *
+ * The computer hands the key straight to Playwright's `press`, which reads `Shift+Enter` as Enter with
+ * Shift held, and Chromium submits a form and clicks a focused button on Shift+Enter, Shift+NumpadEnter
+ * and Shift+Space exactly as it does on the bare key, and Control+Enter is how most web apps send a
+ * message. Matched as written, all of them were `type`, and a rule on `intent == "activate"` let them
+ * through. Split the way Playwright splits it: on `+`, except that a `+` with nothing before it is the
+ * plus key itself (`Shift++`).
+ */
+function mainKey(key: string): string {
+  let building = "";
+  let last = "";
+  for (const char of key) {
+    if (char === "+" && building) {
+      last = building;
+      building = "";
+    } else building += char;
+  }
+  return building || last;
+}
+
+/**
  * What a person's mouse and keyboard produce, and the whole of what `/human/<kind>` may name.
  *
  * A set rather than the union type alone, because the type is erased before the value gets here: the
@@ -1563,7 +1585,7 @@ export function intentOf(
     // A type carrying `submit` ends in Enter, and the same reasoning applies to it: what the
     // keypress does is press whatever the form activates, whichever tool asked for it.
     case "computer_type":
-      return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
+      return key && ACTIVATING_KEYS.has(mainKey(key)) ? "activate" : "type";
     case "computer_navigate":
       return "navigate";
     case "computer_read":
