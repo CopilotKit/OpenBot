@@ -256,3 +256,7 @@ describe("every curated entry is asked which credential it takes", () => {
     }
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

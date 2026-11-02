@@ -1,5 +1,5 @@
 {
-  "id": "c1e45aba-3420-4d31-98ba-6c5e56f0bd02",
+  "id": "1efe7e4b-13fe-4bcf-be24-06a90698fbfc",
   "prevId": "ab8a3370-f719-40eb-9066-b19d682c8e6a",
   "version": "7",
   "dialect": "postgresql",
@@ -2855,57 +2855,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.brokered_identities": {
-      "name": "brokered_identities",
-      "schema": "",
-      "columns": {
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "vendor_user_id": {
-          "name": "vendor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "brokered_identities_provider_user_id_pk": {
-          "name": "brokered_identities_provider_user_id_pk",
-          "columns": [
-            "provider",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "brokered_identities_provider_check": {
-          "name": "brokered_identities_provider_check",
-          "value": "\"brokered_identities\".\"provider\" IN ('composio', 'arcade')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.composio_connections": {
       "name": "composio_connections",
       "schema": "",
@@ -3357,7 +3306,7 @@
           "name": "action",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "holder": {
           "name": "holder",
@@ -5961,11 +5910,17 @@
           "method": "btree",
           "with": {}
         },
-        "personal_memories_formed_digest_idx": {
-          "name": "personal_memories_formed_digest_idx",
+        "personal_memories_formed_digest_per_bot_idx": {
+          "name": "personal_memories_formed_digest_per_bot_idx",
           "columns": [
             {
               "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "formed_by_agent_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

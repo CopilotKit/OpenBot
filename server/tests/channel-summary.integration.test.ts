@@ -1,7 +1,12 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { FIRING_FRAME, frameFiring } from "@openbot/shared/routine-firing";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import postgres from "postgres";
+import {
+  CHANNEL_ACTIVITY_TOPIC,
+  type ChannelActivityEvent,
+} from "../src/channels/events";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
@@ -360,11 +365,12 @@ describe("naming a claimed conversation", () => {
     // Offered before it was named, which is exactly the race two replicas produce.
     await queue.offer({ kind: CHANNEL_SUMMARY_KIND, key: channel.id });
 
-    await summariseClaimedChannels(
+    const report = await summariseClaimedChannels(
       options({ title: titler("A second opinion") }),
     );
 
     expect((await summaryOf(channel.id))?.summary).toBe("Named already");
+    expect(report.written).toContain(channel.id);
   });
 
   test("leaves the conversation unnamed when the model has no answer", async () => {
@@ -431,6 +437,70 @@ describe("naming a claimed conversation", () => {
     expect(item?.finishedAt).not.toBeNull();
     expect(item?.attempts).toBe(1);
   });
+
+  test.each(["soft", "hard"] as const)(
+    "a %s delete while the model is naming a conversation is final",
+    async (kind) => {
+      const owner = await createUser();
+      const channel = await createUsedChannel(owner);
+      await offer(channel.id);
+      const started = Promise.withResolvers<void>();
+      const resume = Promise.withResolvers<void>();
+      const work = summariseClaimedChannels(
+        options({
+          title: async () => {
+            started.resolve();
+            await resume.promise;
+            return "A title that arrived after deletion";
+          },
+        }),
+      );
+      void work.catch(started.reject);
+      const notifications = postgres(databaseUrl, { max: 1 });
+      const barrier = `summary-barrier-${randomUUID()}`;
+      const observed = Promise.withResolvers<void>();
+      const summaries: string[] = [];
+      try {
+        await notifications.listen(CHANNEL_ACTIVITY_TOPIC, (payload) => {
+          if (payload === barrier) {
+            observed.resolve();
+            return;
+          }
+          const event = JSON.parse(payload) as ChannelActivityEvent;
+          if (event.channelId === channel.id && event.summary !== undefined)
+            summaries.push(event.summary);
+        });
+        await started.promise;
+        if (kind === "soft")
+          expect(await store.softDelete(owner, channel.id)).toBe(true);
+        else await database.delete(channels).where(eq(channels.id, channel.id));
+        resume.resolve();
+        const report = await work;
+        // NOTIFY is commit-ordered. This marker follows the completed worker transaction, so
+        // observing it also observes any summary announcement that worker could have committed.
+        await database.execute(
+          sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${barrier})`,
+        );
+        await observed.promise;
+        expect(summaries).toEqual([]);
+        const row = await summaryOf(channel.id);
+        if (kind === "soft") {
+          expect(row?.summary).toBeNull();
+          expect(row?.summaryAt).toBeNull();
+        } else expect(row).toBeUndefined();
+        expect(report.written).not.toContain(channel.id);
+        const [item] = await database
+          .select({ finishedAt: workItems.finishedAt })
+          .from(workItems)
+          .where(eq(workItems.key, channel.id));
+        expect(item?.finishedAt).not.toBeNull();
+      } finally {
+        resume.resolve();
+        await Promise.allSettled([work]);
+        await notifications.end({ timeout: 1 });
+      }
+    },
+  );
 
   test("a soft-deleted conversation is dropped the same way", async () => {
     const owner = await createUser();
