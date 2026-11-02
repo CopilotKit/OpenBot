@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { AbstractAgent, BaseEvent, RunAgentInput } from "@ag-ui/client";
+import {
+  type AbstractAgent,
+  type BaseEvent,
+  EventType,
+  type RunAgentInput,
+} from "@ag-ui/client";
 import {
   RUNTIME_STATE_TOOLS,
   TOOL_LIMIT_EXCEEDED,
@@ -201,8 +206,8 @@ describe("a built-in Bot over its provider's tool limit", () => {
         await assistant(grants(279), openai, { recorded }),
       );
       expect(seen.map((event) => event.type)).toEqual([
-        "RUN_STARTED",
-        "RUN_ERROR",
+        EventType.RUN_STARTED,
+        EventType.RUN_ERROR,
       ]);
       const error = seen[1] as BaseEvent & { message: string; code: string };
       expect(error.code).toBe(TOOL_LIMIT_EXCEEDED);
