@@ -15,3 +15,11 @@
 :root[data-skin] [data-transcript-column] {
   max-width: var(--container-2xl);
 }
+
+/*
+ * The empty-state pattern is drawn for OpenBot's own palette, so a skin starts without it. A skin
+ * that wants one sets `--empty-pattern-opacity` (and its colour) in its own skin.css.
+ */
+:root[data-skin] {
+  --empty-pattern-opacity: 0;
+}
