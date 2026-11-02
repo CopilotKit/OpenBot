@@ -1540,8 +1540,40 @@ export function describeFile(path: string): {
  *
  * Enter and Space are activations. They press whatever has focus, so a rule about activation must
  * cover keypresses as well as clicks.
+ *
+ * `\n` and `\r` are Enter too. `key` is free text, and Playwright's keyboard layout names both as
+ * aliases of Enter, so a press of either submits the form exactly as Enter does.
  */
-const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
+const ACTIVATING_KEYS = new Set([
+  "Enter",
+  "NumpadEnter",
+  "\n",
+  "\r",
+  "Space",
+  " ",
+]);
+
+/**
+ * The key a press ends on, without the modifiers held for it.
+ *
+ * The computer hands the key straight to Playwright's `press`, which reads `Shift+Enter` as Enter with
+ * Shift held, and Chromium submits a form and clicks a focused button on Shift+Enter, Shift+NumpadEnter
+ * and Shift+Space exactly as it does on the bare key, and Control+Enter is how most web apps send a
+ * message. Matched as written, all of them were `type`, and a rule on `intent == "activate"` let them
+ * through. Split the way Playwright splits it: on `+`, except that a `+` with nothing before it is the
+ * plus key itself (`Shift++`).
+ */
+function mainKey(key: string): string {
+  let building = "";
+  let last = "";
+  for (const char of key) {
+    if (char === "+" && building) {
+      last = building;
+      building = "";
+    } else building += char;
+  }
+  return building || last;
+}
 
 /**
  * What a person's mouse and keyboard produce, and the whole of what `/human/<kind>` may name.
@@ -1563,7 +1595,7 @@ export function intentOf(
     // A type carrying `submit` ends in Enter, and the same reasoning applies to it: what the
     // keypress does is press whatever the form activates, whichever tool asked for it.
     case "computer_type":
-      return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
+      return key && ACTIVATING_KEYS.has(mainKey(key)) ? "activate" : "type";
     case "computer_navigate":
       return "navigate";
     case "computer_read":
@@ -1688,15 +1720,6 @@ async function write(
 }
 
 /**
- * The host a rule can match on, or empty.
- *
- * Empty means "no page", which is the accurate answer before a Bot has snapshotted anything, and it is
- * the only case that occurs in practice: the URL comes from Playwright's own `page.url()` by way of the
- * snapshot cache. Worth stating explicitly because a `page.host == "..."` deny rule would not match an
- * empty host, so a boundary that must not be evadable should also key on the tool, the element or the
- * file rather than on the host alone.
- */
-/**
  * One row for a handover.
  *
  * Separate from `write` because a handover has no element, no file and no policy decision, forcing it
@@ -1747,9 +1770,25 @@ const SNAPSHOT_FIELDS = ["title", "elements"] as const;
 /** A two-step login can take two page loads and a wait for a code field; this outlasts the computer's own waits. */
 const SIGN_IN_BACKSTOP_MS = 75_000;
 
+/**
+ * The host a rule can match on, or empty.
+ *
+ * Empty means "no page", which is the accurate answer before a Bot has snapshotted anything, and it is
+ * the only case that occurs in practice: the URL comes from Playwright's own `page.url()` by way of the
+ * snapshot cache. Worth stating explicitly because a `page.host == "..."` deny rule would not match an
+ * empty host, so a boundary that must not be evadable should also key on the tool, the element or the
+ * file rather than on the host alone.
+ *
+ * Without the root dot. `intranet.example.com.` is the same name to DNS, to Chromium and to the
+ * computer's own network filter (agent-computer's `normalizeHost`), and `new URL()` keeps the dot, so
+ * a navigation written with one used to slip past `page.host == "intranet.example.com"`. The port
+ * stays, as it always has: a rule may name one.
+ */
 export function hostOf(url: string): string {
   try {
-    return new URL(url).host;
+    const { hostname, port } = new URL(url);
+    const name = hostname.replace(/\.+$/, "");
+    return port ? `${name}:${port}` : name;
   } catch {
     return "";
   }
