@@ -83,10 +83,10 @@ export function PageShell({
   if (width === "full") {
     return (
       /*
-       * One viewport, never scrolls. `min-w-0` lets a table wider than the pane scroll inside its own
-       * container instead of pushing the page sideways.
+       * Exactly the panel's height, never scrolls. `min-w-0` lets a table wider than the pane scroll
+       * inside its own container instead of pushing the page sideways.
        */
-      <div className="flex h-dvh min-w-0 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {barRow}
         <div className={cn("shrink-0 px-4", bar ? "pt-8" : "pt-12")}>
           {header}
