@@ -24,6 +24,11 @@ export type Skin = {
    */
   Frame?: ComponentType<{ children: ReactNode }>;
   /**
+   * How this skin draws a Bot: as its orb, with the orb, name and role at the top of a conversation,
+   * or as the generated face. Absent, a face.
+   */
+  botLook?: "orb" | "face";
+  /**
    * Screens only this skin has, served at `/s/<key>`. They draw OpenBot's existing data; a skin
    * adds no endpoint. A key the active skin does not have goes home.
    */
