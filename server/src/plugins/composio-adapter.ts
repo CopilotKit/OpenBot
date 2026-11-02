@@ -109,7 +109,7 @@ export function buildComposioClient(
 
   const broker: ComposioBroker = {
     ...directoryMethods(context),
-    ...consentMethods(context),
+    ...consentMethods(context, actions),
     ...fieldMethods(context),
     ...accountMethods(context),
   };
@@ -202,12 +202,13 @@ export function createComposioClient(apiKey: string): {
      * have to re-derive it.
      *
      * `dangerouslyAllowAutoUploadDownloadFiles` defaults OFF (`ConfigDefaults.node.ts:4`) and is
-     * the premise `./composio`'s file filter is written on; that filter drops every action whose
-     * schema stages a file under EITHER setting, so the premise is defended by a tested guard
-     * rather than by this literal, and turning the flag on here would be a change to make against
-     * that filter. `sensitiveFileUploadProtection`, `fileUploadPathDenySegments`, `fileUploadDirs`
-     * and `fileDownloadDir` only bear on uploads and downloads that the same filter means never
-     * happen. `provider` defaults to the SDK's `OpenAIProvider`, which this adapter never asks to
+     * the premise `./composio`'s file filter is written on; under EITHER setting that filter drops
+     * every action that needs a file and offers one that only accepts a file without that
+     * parameter, and the execute path refuses a call that carries it anyway. So the premise is
+     * defended by tested guards rather than by this literal, and turning the flag on here would be
+     * a change to make against that filter. `sensitiveFileUploadProtection`,
+     * `fileUploadPathDenySegments`, `fileUploadDirs` and `fileDownloadDir` only bear on uploads
+     * and downloads that the same filter means never happen. `provider` defaults to the SDK's `OpenAIProvider`, which this adapter never asks to
      * format anything — every read here goes through the raw client or the SDK's own models.
      * `host` and `defaultHeaders` are telemetry and header cosmetics, and telemetry is off above.
      * `toolkitVersions` defaults to "latest", which is the literal every listing in this file

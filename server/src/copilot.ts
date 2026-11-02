@@ -1,13 +1,23 @@
 import type { Message, RunAgentInput } from "@ag-ui/client";
 import { type AbstractAgent, HttpAgent } from "@ag-ui/client";
-import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
+import type {
+  BuiltInAgentConfiguration,
+  CopilotRuntimeHooks,
+  GetTrajectoryLearningContainerIds,
+} from "@copilotkit/runtime/v2";
 import {
   type CopilotKitIntelligence,
   CopilotRuntime,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
-import { defaultModelFor } from "@openbot/shared/model-providers";
+import {
+  type ComputerGuidance,
+  PROVENANCE_GUIDANCE,
+} from "@openbot/shared/bot-prompt";
+import {
+  defaultModelFor,
+  requiresResponsesApi,
+} from "@openbot/shared/model-providers";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
@@ -53,6 +63,7 @@ import {
   LEARNED_SKILL_TOOL_NAMES,
   type LearnedSkillInvocation,
   type LearningRuntime,
+  type PersonalSkillSources,
 } from "./learning/runtime";
 import type { LearningSettingsStore } from "./learning/settings";
 import {
@@ -65,7 +76,7 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import { grantedToolGuidance } from "./plugins/tools";
+import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -250,6 +261,38 @@ export function runtimeModelForEnvironment(
   };
 }
 
+/**
+ * The OpenAI API the built-in Bots' model is called on, where `OPENAI_BASE_URL` points somewhere: `responses` when
+ * that model takes tools only there, and nothing otherwise. Returns what it set.
+ *
+ * The CopilotKit runtime decides by host since 1.79: OpenAI and Azure get the Responses API, and any other host gets
+ * Chat Completions, because most OpenAI-compatible servers serve only `/chat/completions`. A gateway or a proxy in
+ * front of OpenAI (LiteLLM, Portkey, a company's own proxy) is any other host, and on Chat Completions
+ * `gpt-5.6-terra`, the model the built-in Bots run on by default, refuses every function tool: every turn of every
+ * built-in Bot failed with "Function tools with reasoning_effort are not supported". The host cannot say which API a
+ * model takes, so the model decides where it has to (`requiresResponsesApi`), and every other model keeps the
+ * runtime's rule, so a server that serves only Chat Completions, or serves it better (Groq's `/responses` refuses
+ * tool calls), is asked as it always was.
+ *
+ * Set on the environment because `COPILOTKIT_OPENAI_API` is the runtime's own switch, read whenever a Bot's model is
+ * resolved, and a deployment runs its built-in Bots on one model, decided once at boot. An operator who set the
+ * switch has decided, and that stands, `chat` included.
+ */
+export function chooseOpenAIApi(
+  model: RuntimeModel,
+  environment: Record<string, string | undefined> = process.env,
+): "responses" | undefined {
+  if (
+    model.provider !== "openai" ||
+    environment.COPILOTKIT_OPENAI_API?.trim() ||
+    !environment.OPENAI_BASE_URL?.trim() ||
+    !requiresResponsesApi(model.defaultModel)
+  )
+    return undefined;
+  environment.COPILOTKIT_OPENAI_API = "responses";
+  return "responses";
+}
+
 type RuntimeAgentRow = {
   id: string;
   name: string;
@@ -375,8 +418,11 @@ export function builtInAgentConfiguration(
    * what its hands are. Absent leaves the role alone, which is right for a deployment with no
    * computer configured, where the browser routes are not mounted and a Bot promised a browser would
    * be promising something that does not exist.
+   *
+   * Worded for the tools passed here, which are what this run is offered: whether one of them finds
+   * sources decides whether the browser is told to leave searching to it or never to search at all.
    */
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   /**
    * Vendors this deployment connects to, whether or not this Bot holds any of their tools.
    *
@@ -445,7 +491,9 @@ export function builtInAgentConfiguration(
       ...(grantedToolGuidance(tools, connectedVendors)
         ? [grantedToolGuidance(tools, connectedVendors)]
         : []),
-      ...(computerGuidance ? [computerGuidance] : []),
+      ...(computerGuidance
+        ? [computerGuidance({ search: holdsWebSearch(tools) })]
+        : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
@@ -501,7 +549,7 @@ export async function buildAgents(
   loadTools: LoadToolsForBot = async () => [],
   signRun?: SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   /**
    * Which vendors this deployment connects to. Asked once per build rather than per Bot, because it
    * is a fact about the deployment; what differs per Bot is which of them it holds.
@@ -847,7 +895,7 @@ async function buildAgent(
   stallGuard: StallGuard | undefined,
   loadTools: LoadToolsForBot,
   signRun?: SignRun,
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   connectedVendors: readonly string[] = [],
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
@@ -1285,7 +1333,7 @@ function remoteAgentWithStandingRole(
    * the same reason the tools are, so switching a connector on reaches the next run.
    *
    * The remote path needs this more than the built-in one, not less. A framework Bot is handed the
-   * tools as an offer and decides for itself what to call, with `COMPUTER_GUIDANCE` as its whole
+   * tools as an offer and decides for itself what to call, with `computerGuidance` as its whole
    * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
    * to drive.google.com holding four Drive tools.
    *
@@ -1566,7 +1614,7 @@ export async function resolveRuntimeAgents(
   stallGuard?: StallGuard,
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
-  computerGuidance?: string,
+  computerGuidance?: ComputerGuidance,
   loadVendors?: () => Promise<readonly string[]>,
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
@@ -1686,6 +1734,21 @@ export function createRequestAgents(
 }
 
 /**
+ * The runtime half of a Bot drawing an A2UI 1.0 interface (`render_ui`).
+ *
+ * Both settings are explicit, because left out each is decided by the browser. `generativeUI`
+ * omitted applies to any run whose request carries a catalog, so `false` is what keeps a stale or
+ * hand-built client from switching a deployment's opt-out back on. `true` is safe on a run without
+ * one: the middleware passes it through untouched.
+ *
+ * The older A2UI middleware stays off either way: it streams A2UI 0.9 surfaces, and the browser no
+ * longer registers the catalog that drew them.
+ */
+export function generativeUiMiddlewares(enabled: boolean) {
+  return { generativeUI: enabled, a2ui: { enabled: false } } as const;
+}
+
+/**
  * Mount the CopilotKit endpoint onto the host Hono app.
  *
  * `agents` is a factory rather than a fixed map so a Bot registered while the server is running is
@@ -1701,10 +1764,31 @@ export function mountCopilotRuntime(
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
+    /**
+     * Each person's own Learning space and everyone's opened Skills, which join the Bot's own in every run
+     * (learning/runtime.ts). Absent, a run gets only the Bot's own learned Skills.
+     */
+    personalSkills?: PersonalSkillSources;
+    /**
+     * The Recorder's capture pass (`trajectory/connect`): the gate that lets only a connected browser through, and
+     * the selector that assigns the trajectory to its person's own Learning space (`recorder/wiring.ts`). Absent, the
+     * route is the runtime's own: any person identifyUser resolves gets a pass that joins no Learning space.
+     * `index.ts` always passes it.
+     */
+    trajectoryCapture?: {
+      gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
+      selectLearningContainers: GetTrajectoryLearningContainerIds;
+    };
   } = {},
 ) {
   const { intelligence } = config.runtime;
-  const { basePath = "/api/copilotkit", onRunBusy, learningSettings } = options;
+  const {
+    basePath = "/api/copilotkit",
+    onRunBusy,
+    learningSettings,
+    personalSkills,
+    trajectoryCapture,
+  } = options;
 
   /**
    * The same Bot a person's run would get, built without a request.
@@ -1748,6 +1832,7 @@ export function mountCopilotRuntime(
       new IntelligenceKnowingANewThread({
         apiUrl: intelligence.apiUrl,
         wsUrl: intelligence.gatewayWsUrl,
+        browserWsUrl: intelligence.browserGatewayWsUrl,
         apiKey: intelligence.apiKey,
         getLearningContainerId: async ({
           agentId,
@@ -1764,6 +1849,12 @@ export function mountCopilotRuntime(
             userId: user.id,
           });
         },
+        ...(trajectoryCapture
+          ? {
+              getTrajectoryLearningContainerIds:
+                trajectoryCapture.selectLearningContainers,
+            }
+          : {}),
       }),
     );
 
@@ -1771,6 +1862,7 @@ export function mountCopilotRuntime(
     ? createLearningRuntime({
         store: learningSettings,
         client: intelligenceClient,
+        ...(personalSkills ? { people: personalSkills } : {}),
       })
     : undefined;
 
@@ -1808,16 +1900,20 @@ export function mountCopilotRuntime(
      * has; see DeploymentConfig.generativeUi.
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
-    // A browser catalog enables the public A2UI middleware/tool. Explicitly disable it on the
-    // server too, so stale clients cannot reactivate a deployment's generative UI opt-out.
-    a2ui: { enabled: config.generativeUi },
+    ...generativeUiMiddlewares(config.generativeUi),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,
   });
 
   return {
-    handler: createCopilotHonoHandler({ runtime, basePath }),
+    handler: createCopilotHonoHandler({
+      runtime,
+      basePath,
+      ...(trajectoryCapture
+        ? { hooks: { onBeforeHandler: trajectoryCapture.gate } }
+        : {}),
+    }),
     learning,
     /**
      * How to reach the platform's runner, exactly as the runtime reaches it.

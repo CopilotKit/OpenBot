@@ -47,6 +47,8 @@ describe("runtime capabilities", () => {
       generativeUi: true,
       // Default-on: a fresh clone is somebody evaluating the template.
       selfHostBanner: true,
+      // Off: this deployment has an identity provider, so it is not somebody's local trial.
+      localEvaluation: false,
       transcription: false,
       voice: false,
       // Names only. The sign-in screen reads this to know which buttons to draw.
@@ -73,6 +75,7 @@ describe("runtime capabilities", () => {
       "durableHistory",
       "generativeUi",
       "selfHostBanner",
+      "localEvaluation",
       "transcription",
       "voice",
       "authProviders",

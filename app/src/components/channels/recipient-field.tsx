@@ -61,9 +61,9 @@ export function RecipientField({
         {isFull ? null : (
           <InputGroup className="h-8 w-56 border-none bg-transparent">
             <InputGroupInput
-              aria-label="Choose a coworker"
+              aria-label="Choose a Bot"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Choose a coworker…"
+              placeholder="Choose a Bot…"
               value={search}
             />
             <InputGroupAddon />
@@ -96,7 +96,7 @@ export function RecipientField({
           ))}
           {matches.length === 0 ? (
             <li className="px-2 py-1.5 text-sm text-muted-foreground">
-              No coworker by that name.
+              No Bot by that name.
             </li>
           ) : null}
         </ul>

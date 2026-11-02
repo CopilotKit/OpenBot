@@ -95,8 +95,15 @@ export function createHandoffDesk(options: {
   actorFor: (userId: string) => Promise<AgentActor | null>;
   auditStore: AuditStore;
   caps: HandoffCaps;
+  /**
+   * A hop was queued from this thread. Lets the conversation that asked say what it is waiting on
+   * before the hop is picked up, which on a busy replica can be minutes. Not awaited: the Bot that
+   * asked is mid-turn, and a conversation told late is worth less than a tool call kept waiting.
+   */
+  onOffered?: (threadId: string) => Promise<void>;
 }): HandoffDesk {
-  const { queue, profiles, mayAddress, actorFor, auditStore, caps } = options;
+  const { queue, profiles, mayAddress, actorFor, auditStore, caps, onOffered } =
+    options;
 
   /** Said once, so the trail carries the same words the Bot was given. */
   async function refuse(
@@ -416,6 +423,12 @@ export function createHandoffDesk(options: {
           task: task.slice(0, 500),
         },
       });
+
+      try {
+        void onOffered?.(from.threadId).catch(() => {});
+      } catch {
+        // Told on the next event instead. The hop is queued either way.
+      }
 
       return { ok: true, to: found.id, toName: found.name };
     },

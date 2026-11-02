@@ -95,7 +95,7 @@ test("upstream errors do not leak provider response bodies", async () => {
       new File(["audio"], "audio.webm"),
       new AbortController().signal,
     ),
-  ).rejects.toThrow("Retry or contact your administrator");
+  ).rejects.toThrow("Try again, or ask an admin if it keeps happening.");
 });
 
 test("malformed success is a visible failure", async () => {

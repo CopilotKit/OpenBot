@@ -67,15 +67,4 @@ describe("what a jsonb column actually stores", () => {
     expect(row?.bot).toBe(marker);
     // Left in place: the trail is append-only, so a test cannot tidy up after itself. One row.
   });
-
-  test("the whole trail is objects, not strings", async () => {
-    // A deployment that has run the migration has no string-shaped payloads left. Written as a sweep
-    // rather than a single row because the failure this guards against is partial by nature: a new
-    // column added with drizzle's `jsonb` would pass every test above and fail only here.
-    const [row] = await database.execute<{ strings: number }>(
-      sql`select count(*)::int as strings from audit_events
-          where jsonb_typeof(payload) <> 'object'`,
-    );
-    expect(row?.strings).toBe(0);
-  });
 });

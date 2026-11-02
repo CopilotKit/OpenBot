@@ -7,7 +7,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { computerGuidance } from "../../shared/bot-prompt";
 import { NO_ANSWER_CAME, toLangChainMessages } from "../src/history";
 
 /**
@@ -25,6 +25,27 @@ import { NO_ANSWER_CAME, toLangChainMessages } from "../src/history";
  */
 const input = (messages: unknown[]): RunAgentInput =>
   ({ messages }) as unknown as RunAgentInput;
+
+describe("the computer guidance this Bot is given", () => {
+  // Decided by the tool names the run offers, the only view this Bot has of its grants.
+  const offered = (...names: string[]) =>
+    ({
+      messages: [{ id: "u1", role: "user", content: "Search for X." }],
+      tools: names.map((name) => ({ name, description: "", parameters: {} })),
+    }) as unknown as RunAgentInput;
+
+  test("leaves searching to a search tool the run offers", () => {
+    const [system] = toLangChainMessages(
+      offered("show_app_access", "mcp__parallel__web_search"),
+    );
+    expect(String(system?.content)).toBe(computerGuidance({ search: true }));
+  });
+
+  test("never searches in the browser when no search tool is offered", () => {
+    const [system] = toLangChainMessages(offered("show_app_access"));
+    expect(String(system?.content)).toBe(computerGuidance({ search: false }));
+  });
+});
 
 const assistantAsking = {
   role: "assistant",
@@ -273,7 +294,7 @@ describe("a provider that takes one system prompt", () => {
       expect(system).toHaveLength(1);
       expect(messages[0]).toBe(system[0] as SystemMessage);
       const prompt = String(system[0]?.content);
-      expect(prompt.startsWith(COMPUTER_GUIDANCE)).toBe(true);
+      expect(prompt.startsWith(computerGuidance({ search: false }))).toBe(true);
       const at = instructions.map((text) => prompt.indexOf(text));
       expect(at.every((index) => index > 0)).toBe(true);
       expect(at).toEqual([...at].sort((a, b) => a - b));

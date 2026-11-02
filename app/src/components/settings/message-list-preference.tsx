@@ -37,7 +37,7 @@ export function MessageListPreference() {
         <ItemContent>
           <ItemTitle>Message list emphasis</ItemTitle>
           <ItemDescription>
-            Choose which name appears larger in the sidebar.
+            Choose which line stands out in the sidebar.
           </ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -54,14 +54,14 @@ export function MessageListPreference() {
               <SelectValue>
                 {emphasis
                   ? emphasis === "agent"
-                    ? "Agent name"
-                    : "Thread title"
+                    ? "Bot name"
+                    : "Conversation title"
                   : "Loading…"}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="thread">Thread title</SelectItem>
-              <SelectItem value="agent">Agent name</SelectItem>
+              <SelectItem value="thread">Conversation title</SelectItem>
+              <SelectItem value="agent">Bot name</SelectItem>
             </SelectContent>
           </Select>
         </ItemActions>
@@ -76,7 +76,7 @@ export function MessageListPreference() {
             size="sm"
             onClick={() => void preferences.refetch()}
           >
-            Retry
+            Try again
           </Button>
         </div>
       ) : null}

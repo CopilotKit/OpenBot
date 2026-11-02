@@ -1,0 +1,2 @@
+ALTER TABLE "proactive_suggestions" DROP CONSTRAINT "proactive_suggestions_status_check";--> statement-breakpoint
+ALTER TABLE "proactive_suggestions" ADD CONSTRAINT "proactive_suggestions_status_check" CHECK ("proactive_suggestions"."status" IN ('open', 'dismissed', 'started', 'superseded'));

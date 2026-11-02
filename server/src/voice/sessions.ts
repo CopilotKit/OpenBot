@@ -1,10 +1,10 @@
-import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
 import type {
   SaveVoiceSessionInput,
   VoiceSessionPage,
   VoiceSessionRecord,
   VoiceTranscriptEntry,
 } from "@openbot/shared/voice-session";
+import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
@@ -172,7 +172,7 @@ export function createVoiceSessionStore(
       )
       .for("share");
     if (rows.length === 0)
-      throw new VoiceSessionError("Channel not found.", 404);
+      throw new VoiceSessionError("Couldn't find that conversation.", 404);
     if (rows.some((row) => row.deletedAt !== null))
       throw new VoiceSessionError("This channel is no longer active.", 409);
   }
@@ -182,7 +182,8 @@ export function createVoiceSessionStore(
     write = false,
   ) {
     const channel = await channelStore.get(actor, channelId);
-    if (!channel) throw new VoiceSessionError("Channel not found.", 404);
+    if (!channel)
+      throw new VoiceSessionError("Couldn't find that conversation.", 404);
     if (write && !channel.active)
       throw new VoiceSessionError("This channel is no longer active.", 409);
   }

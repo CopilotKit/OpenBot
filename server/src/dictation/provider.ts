@@ -37,7 +37,7 @@ export function createTranscriptionProvider(
             throw new TranscriptionError(
               response.status === 429
                 ? "The transcription service is busy. Please retry shortly."
-                : "The transcription service could not process this recording. Retry or contact your administrator.",
+                : "Couldn't process this recording. Try again, or ask an admin if it keeps happening.",
             );
           }
           const result: unknown = await response.json().catch(() => null);

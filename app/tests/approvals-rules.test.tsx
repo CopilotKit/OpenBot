@@ -14,7 +14,6 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 import {
   cleanup,
   fireEvent,
@@ -23,13 +22,14 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ApprovalSettings } from "@/components/approvals/settings";
+import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { ApprovalSettings } from "@/components/approvals/settings";
+import { toVisibleChatItems } from "@/components/channels/chat-messages";
 import {
   groupToolSteps,
   ToolActivity,
 } from "@/components/channels/tool-activity";
-import { toVisibleChatItems } from "@/components/channels/chat-messages";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -164,9 +164,9 @@ test("team rules are locked for members, enforced auto-review is shown as requir
   expect(view.getByText("Locked")).toBeTruthy();
   const review = view.getByRole("switch", { name: "Auto-review" });
   expect(review.getAttribute("aria-checked")).toBe("true");
-  expect(view.getByText(/Required by your team/)).toBeTruthy();
+  expect(view.getByText(/An admin requires this/)).toBeTruthy();
   expect(
-    view.getByText(/Your team limits this to "Ask every time"/),
+    view.getByText(/An admin limits this to "Ask every time"/),
   ).toBeTruthy();
   expect(view.queryByText("Team settings")).toBeNull();
 });
@@ -289,7 +289,11 @@ test("with personal rules switched off by the team, they are shown as not applyi
     team: { ...inbox.team, customRulesEnabled: false },
   };
   const view = draw(<ApprovalSettings />);
-  expect(await view.findByText(/kept but do not apply/)).toBeTruthy();
+  expect(
+    await view.findByText(
+      /An admin has turned off personal rules\. Yours are kept but don't apply\./,
+    ),
+  ).toBeTruthy();
   expect(view.queryByText("Add a rule")).toBeNull();
 });
 
@@ -415,6 +419,8 @@ test("in the real transcript shape a waiting click is folded into browser activi
         content: '{"ok":true,"url":"https://httpbin.org/forms/post"}',
       },
     ] as never),
+    // Browser steps fold whatever the app draws, so nothing else needs naming here.
+    () => false,
   );
   const group = items.find((item) => item.kind === "tools");
   if (group?.kind !== "tools") throw new Error("no tool group");

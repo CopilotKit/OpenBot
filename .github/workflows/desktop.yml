@@ -3,12 +3,16 @@ name: Desktop
 # The shell is the one thing here that cannot be proved by running it on Linux: it is a macOS app, a
 # Windows app and a Linux app built from one tree, and the ways they differ are exactly the ways
 # this fails. So it tests and builds on all three, on every change to it.
+# `shared/harnesses.json` and `shared/marks/**` are watched here even though they are not under
+# desktop/: the catalogue the setup window draws moved there so the web app could read one copy, and
+# these jobs are the only ones that prove it still deserializes into `Harness` — `catalogue()` parses
+# it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml"]
   push:
     branches: [main]
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml"]
   workflow_call:
     secrets:
       OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
@@ -31,11 +35,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: desktop/src-tauri
       # Linux is the only target needing system libraries, and it needs them even to check.
@@ -71,10 +75,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: desktop/src-tauri
           key: ${{ matrix.platform.name }}
@@ -138,6 +142,18 @@ jobs:
       # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
+        working-directory: desktop/src-tauri
+      # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
+      # the install that writes its manifests. The host name and extension id come from
+      # shared/recorder-extension.json, which the Rust reads at compile time.
+      - name: Recorder native host tests
+        run: cargo test --locked --test recorder_host
+        working-directory: desktop/src-tauri
+      # Only a release build is a GUI-subsystem executable on Windows, and only a release build proves
+      # the debug-only test seam is absent.
+      - name: Recorder native host tests (release)
+        if: matrix.platform.name == 'windows'
+        run: cargo test --locked --release --test recorder_host
         working-directory: desktop/src-tauri
       # Hosted Windows runners are administrators. Exercise setup again with an actual Users-only
       # account: DISM's feature reads worked as CI's administrator but refused ordinary app users.

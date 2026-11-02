@@ -41,6 +41,8 @@ function app(store: {
 }) {
   const routes = createPluginRoutes(
     {
+      // The provider these rows belong to, which the routes read rather than guess.
+      brokerProvider: "composio" as const,
       /*
        * The read that decides whether this is a brokered row, which the handler makes before
        * anything about the consent flow. None of these vendors is one: a brokered app is reached
@@ -118,7 +120,7 @@ describe("connecting a dynamically registered vendor", () => {
     expect(ensureCalls.length).toBe(1);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBe(
-      "Notion would not register this deployment, or could not be reached. Try again, and check the vendor's status if it persists.",
+      "Couldn't set up Notion. Try again, or check Notion's status if it keeps happening.",
     );
   });
 });
@@ -142,7 +144,9 @@ describe("connecting a manually registered vendor (regression pin)", () => {
     expect(response.status).toBe(409);
     expect(ensureCalls).toEqual([]);
     const body = (await response.json()) as { error: string };
-    expect(body.error).toContain("no OAuth client registered");
+    expect(body.error).toContain(
+      "isn't set up yet. Ask an admin to finish setting it up.",
+    );
   });
 });
 
@@ -172,7 +176,7 @@ describe("connecting a vendor this deployment has not added", () => {
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBe(
-      "Notion has not been added to this deployment yet. An administrator has to add it first.",
+      "Notion hasn't been added yet. Ask an admin to add it.",
     );
   });
 });

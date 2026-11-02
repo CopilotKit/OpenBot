@@ -50,6 +50,21 @@ export type AgentProfile = {
    * a roster on `canManage` and an administrator's "mine" fills up with other people's work.
    */
   mine: boolean;
+  /**
+   * Whether its owner gave it a computer of its own, rather than letting it share theirs.
+   *
+   * What was asked for. Whether it is happening is `isolationActive`: an administrator can withdraw
+   * "Isolated Bots" from the owner, and the Bot then runs on a shared computer with this still true,
+   * so that giving the switch back restores it.
+   */
+  isolated: boolean;
+  /** Whether its next run gets that computer of its own. Decided by the server from the owner's switch. */
+  isolationActive: boolean;
+  /**
+   * Why an isolated Bot is running on a shared computer instead, or null. `admin`: the owner no
+   * longer holds "Isolated Bots". `deployment`: this OpenBot cannot make a second computer.
+   */
+  isolationOffReason: "admin" | "deployment" | null;
 };
 
 /**
@@ -76,6 +91,14 @@ export const agentKeys = {
 export type AgentCapabilities = {
   /** Whether a coworker can run on the deployment's own Bot, with no endpoint of its own. */
   builtInAvailable: boolean;
+  /**
+   * Whether this deployment can give a Bot a computer of its own at all.
+   *
+   * Only where its computers are made one at a time (the supervisor, or a cluster's sandboxes).
+   * Whether the signed-in person may is a different question, answered by the "Isolated Bots"
+   * switch in `myCapabilitiesQueryOptions`.
+   */
+  isolationAvailable: boolean;
 };
 
 export function agentCapabilitiesQueryOptions() {
@@ -118,7 +141,7 @@ export function agentListQueryOptions(hidden = false) {
     queryKey: agentKeys.list(hidden),
     queryFn: (): Promise<AgentProfile[]> =>
       client(`/api/agents${hidden ? "?hidden=true" : ""}`, "agents", {
-        fallback: "Could not load coworkers",
+        fallback: "Couldn't load your Bots.",
       }),
   });
 }
@@ -133,7 +156,7 @@ export function agentQueryOptions(agentId: string) {
     queryKey: agentKeys.detail(agentId),
     queryFn: (): Promise<AgentProfile> =>
       client(agentApiPath(agentId), "agent", {
-        fallback: "Could not load this coworker",
+        fallback: "Couldn't load this Bot.",
       }),
   });
 }

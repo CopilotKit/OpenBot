@@ -11,13 +11,13 @@ export function linkedNotice(value: string | undefined): LinkedNotice | null {
   if (value === "failed") {
     return {
       tone: "error",
-      text: "Your GitHub account could not be linked. Try again.",
+      text: "Couldn't link your GitHub account. Try again.",
     };
   }
   if (value === "github-taken") {
     return {
       tone: "error",
-      text: "That GitHub account is already linked to another OpenBot user. Sign in to GitHub as a different account and connect again, or ask your OpenBot administrator for help.",
+      text: "That GitHub account is linked to someone else in OpenBot. Sign in to GitHub with another account and try again, or ask an admin.",
     };
   }
   return null;

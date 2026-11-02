@@ -33,6 +33,9 @@ test("a command exported to the collector is scrubbed of the secrets in it", asy
         action: "computer_run_command",
         command: `curl -H "Authorization: Bearer ${secret}" https://api.example.test`,
         nested: { command: `export API_TOKEN=${secret}` },
+        // A credential written positionally is the shape that used to survive: it is not a `NAME=value`
+        // and not a named flag, so nothing matched it before it reached the wire.
+        positional: { command: `redis-cli -a ${secret} SET k v` },
       },
     });
     await exporter?.shutdown();

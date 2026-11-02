@@ -12,6 +12,7 @@ import { type AppVariables, requireAdmin } from "../auth/guards";
 import { scimStatus } from "../auth/scim";
 import {
   hasIdentityProvider,
+  peopleWithoutSso,
   revokeSessionsWithoutSso,
 } from "../auth/sso-required";
 import {
@@ -96,6 +97,7 @@ const settingInputs: {
     enabled: z.boolean(),
     servers: z.array(SERVER).max(500),
   }),
+  skillSharing: z.boolean(),
 };
 
 export function createEnterpriseAdminRoutes(
@@ -272,6 +274,33 @@ export function createEnterpriseAdminRoutes(
     // sessions made before it, or everyone already signed in another way stays in. Every time it is
     // saved on, not only on the change: a failed attempt is then put right by saving again.
     if (key === "ssoRequired" && parsed.data === true) {
+      /*
+       * Their browsers' Recorders end with their sessions, and first: a Recorder outlives any session it was made from
+       * while it is used, so one left standing would go on recording as somebody who can no longer sign in. Asked of
+       * everybody holding one, not of the sessions, so saving again finishes a save that failed here after the
+       * sessions had gone. When one cannot be ended, the save says so and no session has ended yet.
+       */
+      const recorders = controls.deps.recorders;
+      if (recorders) {
+        const signingOut = await peopleWithoutSso(
+          controls.deps.database,
+          controls.deps.initialAdminEmails ?? [],
+          await recorders.holders(),
+          context.var.actor.id,
+        );
+        try {
+          for (const userId of signingOut)
+            await recorders.signOut(userId, "sso_required");
+        } catch {
+          return context.json(
+            {
+              error:
+                "SSO is now required, but not everybody could be signed out yet. Save it again to finish.",
+            },
+            503,
+          );
+        }
+      }
       const ended = await revokeSessionsWithoutSso(
         controls.deps.database,
         controls.deps.initialAdminEmails ?? [],

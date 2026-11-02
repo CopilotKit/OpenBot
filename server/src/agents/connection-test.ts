@@ -46,6 +46,20 @@ async function readOpening(body: ReadableStream<Uint8Array>): Promise<string> {
       if (done) break;
       bytes += value.byteLength;
       text += decoder.decode(value, { stream: true });
+      /*
+       * ONE RECOGNISED EVENT IS THE WHOLE QUESTION, so stop on it.
+       *
+       * The cap and the end of the stream were the only two ways out, and an agentic harness
+       * supplies neither: it opens with `RUN_STARTED` — ninety bytes, nowhere near the cap — and
+       * then goes away to call a model and run tools, holding the stream open for as long as that
+       * takes. The read therefore waited out the whole run and was cut off by the request timeout,
+       * which surfaced as "The agent started answering and the connection broke" about an agent
+       * that had answered correctly in its first event. Measured against `agent-antigravity`.
+       *
+       * Events rather than bytes, because bytes prove nothing: a stream of SSE comments or
+       * heartbeats would satisfy a "something arrived" test while being no evidence of an agent.
+       */
+      if (eventTypesFrom(text).length > 0) break;
     }
   } finally {
     // The agent is very likely still writing. Nothing is going to read the rest, and leaving it open

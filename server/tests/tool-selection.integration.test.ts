@@ -13,6 +13,7 @@ import { buildAGUITextResponse, LLMock } from "@copilotkit/aimock";
 import { AGUIMock } from "@copilotkit/aimock/agui";
 import { CopilotRuntime } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import {
   buildAgents,
@@ -20,7 +21,6 @@ import {
   type RuntimeModel,
 } from "../src/copilot";
 import type { Selection } from "../src/plugins/selection";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { createModelCompleter } from "../src/routing/model";
 
 declare global {
@@ -500,7 +500,10 @@ describe("a built-in Bot", () => {
         }
       )?.messages ?? []
     )
-      .filter((message) => message.role === "system")
+      // Chat Completions carries a gpt-5 model's instructions as a developer message, not system.
+      .filter(
+        (message) => message.role === "system" || message.role === "developer",
+      )
       .map((message) => String(message.content))
       .join("\n");
     /*
@@ -511,6 +514,37 @@ describe("a built-in Bot", () => {
      */
     expect(system).toContain("drive");
     expect(system).not.toContain("slack: tool_0");
+  });
+
+  test("behind OPENAI_BASE_URL, the run goes to the gateway's Chat Completions endpoint", async () => {
+    /*
+     * Since runtime 1.78 an `openai/...` model whose OPENAI_BASE_URL is not an OpenAI or Azure host
+     * is sent to `/chat/completions`, not `/responses`. That is the only route Desktop's own model
+     * proxy serves (`mountProviderOAuthProxy`), the one routing and tool selection already call
+     * (`chatCompletionsUrl`), and what most OpenAI-compatible servers implement, so a runtime that
+     * went back to `/responses` would break built-in Bots behind any of them.
+     */
+    answerWith(["drive-audit"]);
+    const agents = await buildAgents(
+      [builtIn],
+      model,
+      "test-key",
+      undefined,
+      async () => granted,
+      undefined,
+      undefined,
+      undefined,
+      selection(),
+    );
+    await ask(agents.analyst as never, "read the Drive doc");
+
+    const runs = llm
+      .getRequests()
+      .filter((entry) =>
+        Array.isArray((entry.body as { tools?: unknown })?.tools),
+      );
+    expect(runs.length).toBeGreaterThan(0);
+    for (const run of runs) expect(run.path).toBe("/chat/completions");
   });
 });
 

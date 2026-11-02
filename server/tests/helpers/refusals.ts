@@ -127,15 +127,21 @@ const TABLE = {
   /** `connectionFields`: a box whose answer could not be sent back, because it has no name. */
   fieldNameMissing: () =>
     /under the name nothing, which cannot be filled in here/,
-  /** Personal-mode guard: the person asking has not connected their own account for this app. */
+  /**
+   * Personal-mode guard: the person asking has not connected their own account for this app.
+   *
+   * No longer "in Settings": this refusal carries a connect prompt (see
+   * `@openbot/shared/connect-prompt`), so the transcript draws the button rather than naming a
+   * screen somewhere else. The sentence is still the whole of what the model is told.
+   */
   personalNotConnected: (app: string = "[^.]+") =>
     new RegExp(
-      `You have not connected your ${app} account\\. Connect it in Settings and ask again\\.`,
+      `You have not connected your ${app} account\\. Connect it and ask again\\.`,
     ),
   /** Shared-mode guard: this deployment's shared account for the app has not been connected yet. */
   sharedNotConnected: (app: string = "[^.]+") =>
     new RegExp(
-      `${app} is shared across this deployment and no account is connected to it yet\\. Ask an administrator to connect it\\.`,
+      `${app} uses a shared account, and nobody has connected it yet\\. Ask an admin to connect it\\.`,
     ),
   /** Shared-mode guard: the run does not say what started it, or what did cannot steer a shared account. */
   sharedSteering: (app: string = "[^.]+") =>
@@ -143,7 +149,7 @@ const TABLE = {
   /** Shared-mode guard: this Bot's audience reaches further than an administrator approved for the shared account. */
   sharedAudience: (app: string = "[^.]+") =>
     new RegExp(
-      `This Bot is reachable by more people than an administrator approved for the shared ${app} account\\. An administrator has been asked to approve it\\.`,
+      `This Bot reaches more people than an admin approved for the shared ${app} account\\. An admin has been asked to approve it\\.`,
     ),
 };
 

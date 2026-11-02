@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
 import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import {
   agents,
@@ -13,7 +14,6 @@ import {
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
-import type { ActionPolicy } from "../src/policy/engine";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -41,6 +41,7 @@ const ref = `${serverId}/${toolName}`;
 let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: { readSecret: async () => null },
@@ -93,6 +94,7 @@ beforeAll(async () => {
     .values({
       serverId,
       name: toolName,
+      vendorName: toolName,
       description: "Search the notes.",
       inputSchema: {
         type: "object",

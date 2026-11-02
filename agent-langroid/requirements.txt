@@ -3,3 +3,10 @@ langroid[litellm]
 fastapi
 python-multipart
 uvicorn[standard]
+# litellm 1.106.0 fails every model call in this harness: it reaches for `mcp` and reports
+# whatever it finds as an OpenAIException, so the error arrives as a connection fault rather
+# than the missing import it is. Seen two ways — `cannot import name 'CacheableResult' from
+# 'mcp.types'` where an older mcp is pinned by another dependency, and `No module named 'mcp'`
+# where there is none at all. 1.105.1 does not reach for it. Lift this when litellm stops
+# requiring mcp, or declares it.
+litellm<1.106.0

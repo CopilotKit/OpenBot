@@ -1,0 +1,1321 @@
+{
+  "note": "Captured from Composio's live tool listing (GET /api/v3/tools, toolkit_versions=latest, limit=1000) on 2026-10-22, read-only: the rows client.tools.list answers with, which is what the listing reads. Rows are verbatim except output_parameters, which nothing in this deployment reads and which is left out for size. Regenerate rather than hand-edit.",
+  "gmail": [
+    {
+      "slug": "GMAIL_SEND_EMAIL",
+      "name": "Send Email",
+      "description": "Sends an email via Gmail API using the authenticated user's Google profile display name. Sends immediately and is irreversible — confirm recipients, subject, body, and attachments before calling. At least one of 'to' (or 'recipient_email'), 'cc', or 'bcc' must be provided. At least one of subject or body must be provided. Requires `is_html=True` if the body contains HTML. All common file types including PNG, JPG, PDF, MP4, etc. are supported as attachments. Gmail API limits total message size to ~25 MB after base64 encoding. To reply in an existing thread, use GMAIL_REPLY_TO_THREAD instead. No scheduled send support; enforce timing externally.",
+      "available_versions": ["20261018_00"],
+      "version": "20261018_00",
+      "toolkit": {
+        "slug": "gmail",
+        "name": "gmail",
+        "logo": "https://logos.composio.dev/api/gmail"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "SendEmailRequest",
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Cc",
+            "default": [],
+            "examples": [["manager@example.com", "teamlead@example.com"]],
+            "description": "Carbon Copy (CC) recipients' email addresses. At least one of 'to'/'recipient_email', 'cc', or 'bcc' must be provided.",
+            "human_parameter_name": "CC recipients' email addresses",
+            "human_parameter_description": "Provide email addresses of people you want to inform about the email without them being the main recipient."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Bcc",
+            "default": [],
+            "examples": [["auditor@example.com"]],
+            "description": "Blind Carbon Copy (BCC) recipients' email addresses. At least one of 'to'/'recipient_email', 'cc', or 'bcc' must be provided.",
+            "human_parameter_name": "BCC recipients' email addresses",
+            "human_parameter_description": "Enter email addresses of people you want to receive the email without the main recipients knowing."
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "examples": [
+              "Hello team, let's discuss the project updates tomorrow.",
+              "<h1>Welcome!</h1><p>Thank you for signing up.</p>",
+              ""
+            ],
+            "description": "Email content (plain text or HTML). Either subject or body must be provided for the email to be sent. If HTML, `is_html` must be `True`.",
+            "human_parameter_name": "Email content",
+            "human_parameter_description": "Write the main message of your email here. It can be plain text or formatted HTML."
+          },
+          "is_html": {
+            "type": "boolean",
+            "title": "Is Html",
+            "default": false,
+            "description": "Set to `True` if the email body contains HTML tags.",
+            "human_parameter_name": "Does the email body contain HTML?",
+            "human_parameter_description": "Indicate whether the content of your email is formatted with HTML."
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "examples": ["Project Update Meeting", "Your Weekly Newsletter"],
+            "description": "Subject line of the email. Either subject or body must be provided for the email to be sent.",
+            "human_parameter_name": "Email subject line",
+            "human_parameter_description": "This is the title of your email that summarizes its content."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "me",
+            "examples": ["user@example.com", "me"],
+            "description": "User's email address; the literal 'me' refers to the authenticated user.",
+            "human_parameter_name": "User ID",
+            "human_parameter_description": "This is the email address of the user whose mailbox you want to access. You can use 'me' to refer to your own mailbox."
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "object",
+                "title": "FileUploadable",
+                "required": ["name", "mimetype", "s3key"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "title": "Name",
+                    "examples": ["document.pdf", "image.jpg", "report.docx"],
+                    "description": "The filename that will be used when uploading the file to the destination service"
+                  },
+                  "s3key": {
+                    "type": "string",
+                    "title": "S3Key",
+                    "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                    "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                  },
+                  "mimetype": {
+                    "type": "string",
+                    "title": "Mimetype",
+                    "examples": [
+                      "application/pdf",
+                      "image/jpeg",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                    "description": "The MIME type of the file"
+                  }
+                },
+                "file_uploadable": true
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "FileUploadable",
+                  "required": ["name", "mimetype", "s3key"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name",
+                      "examples": ["document.pdf", "image.jpg", "report.docx"],
+                      "description": "The filename that will be used when uploading the file to the destination service"
+                    },
+                    "s3key": {
+                      "type": "string",
+                      "title": "S3Key",
+                      "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                      "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                    },
+                    "mimetype": {
+                      "type": "string",
+                      "title": "Mimetype",
+                      "examples": [
+                        "application/pdf",
+                        "image/jpeg",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      ],
+                      "description": "The MIME type of the file"
+                    }
+                  },
+                  "file_uploadable": true
+                }
+              }
+            ],
+            "title": "Attachment",
+            "description": "File(s) to attach. Accepts a single file or a list of files. IMPORTANT: mimetype MUST contain a '/' separator - single words like 'pdf' or 'new' are invalid. Gmail API limits: total message size must not exceed ~25 MB after base64 encoding. Omit or set to null for no attachment. Empty attachment objects (with all fields empty/whitespace) are treated as no attachment.",
+            "human_parameter_name": "File(s) to attach",
+            "human_parameter_description": "If you want to send file(s) with your email, provide them here. Can be a single file or a list of files. The mimetype must be in 'type/subtype' format (e.g., 'application/pdf' for PDFs, 'image/png' for PNG files). Total size of all attachments should be under 20 MB before encoding."
+          },
+          "from_email": {
+            "type": "string",
+            "title": "From Email",
+            "examples": ["alias@example.com", "marketing@company.com"],
+            "description": "Sender email address for the 'From' header. Provide the connected account's primary email address or a verified alias configured in Gmail's 'Send mail as' settings. When omitted, the action attempts to resolve the primary email address from the authenticated Gmail profile.",
+            "human_parameter_name": "Sender email address (alias)",
+            "human_parameter_description": "Specify the sender's primary email address or a verified 'Send mail as' alias. Provide this explicitly when the sender cannot be resolved from the connected Gmail account."
+          },
+          "recipient_email": {
+            "type": "string",
+            "title": "Recipient Email",
+            "examples": ["john@doe.com", "me"],
+            "description": "Primary recipient's email address. You can also use 'to' as an alias for this parameter. At least one of 'to'/'recipient_email', 'cc', or 'bcc' must be provided. Use extra_recipients if you want to send to multiple recipients. Use the special value 'me' to send to your own authenticated email address. Must be a full user@domain address; 'me' is not valid here and will fail.",
+            "human_parameter_name": "Primary recipient's email address",
+            "human_parameter_description": "Enter the main email address of the person you want to send the email to. Use 'me' to send to yourself."
+          },
+          "extra_recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Recipients",
+            "default": [],
+            "examples": [["jane.doe@example.com", "support@example.com"]],
+            "description": "Additional 'To' recipients' email addresses (not Cc or Bcc). Should only be used if recipient_email is also provided.",
+            "human_parameter_name": "Additional 'To' recipients' email addresses",
+            "human_parameter_description": "List extra email addresses for other recipients you want to send the email to."
+          },
+          "include_signature": {
+            "type": "boolean",
+            "title": "Include Signature",
+            "default": true,
+            "description": "Append the sender's Gmail signature (the 'Send mail as' signature configured in Gmail settings) to the message body, ahead of any quoted or forwarded content. Skipped when the body already ends with that signature, when no signature is configured, or when the connection lacks permission to read Gmail settings. Set to false to send the body exactly as provided.",
+            "human_parameter_name": "Include Gmail signature?",
+            "human_parameter_description": "Append the sender's configured Gmail signature to the message."
+          }
+        }
+      },
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.send"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.compose",
+              "https://www.googleapis.com/auth/gmail.send"
+            ]
+          }
+        ]
+      },
+      "tags": ["important", "openWorldHint", "createHint"],
+      "no_auth": false,
+      "human_description": "This action sends an email using the Gmail API from the authenticated user's email account. It requires at least one recipient and either a subject or body for the email to be sent.",
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Send Email",
+        "version": "20261018_00",
+        "available_versions": ["20261018_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/gmail"
+        }
+      }
+    },
+    {
+      "slug": "GMAIL_CREATE_EMAIL_DRAFT",
+      "name": "Create email draft",
+      "description": "Creates a Gmail email draft. While all fields are optional per the Gmail API, practical validation requires at least one of recipient_email, cc, or bcc and at least one of subject or body. Supports To/Cc/Bcc recipients, subject, plain/HTML body (ensure `is_html=True` for HTML), attachments, and threading. Returns a draft_id that must be used as-is with GMAIL_SEND_DRAFT — synthetic or stale IDs will fail. When creating a draft reply to an existing thread (thread_id provided), leave subject empty to stay in the same thread; setting a subject will create a NEW thread instead. HTTP 429 may occur on rapid creation/send sequences; apply exponential backoff.",
+      "available_versions": ["20261018_00"],
+      "version": "20261018_00",
+      "toolkit": {
+        "slug": "gmail",
+        "name": "gmail",
+        "logo": "https://logos.composio.dev/api/gmail"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "CreateEmailDraftRequest",
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Cc",
+            "default": [],
+            "examples": [
+              [
+                "cc.recipient1@example.com",
+                "CC User <cc.recipient2@example.com>"
+              ]
+            ],
+            "description": "Carbon Copy (CC) recipients' email addresses. Each must be a valid email address (e.g., 'user@example.com') or display name format (e.g., 'John Doe <user@example.com>'). Plain names without email addresses are NOT valid. Optional for drafts (recipients can be added later before sending)."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Bcc",
+            "default": [],
+            "examples": [
+              ["bcc.recipient@example.com", "BCC User <bcc.user@example.com>"]
+            ],
+            "description": "Blind Carbon Copy (BCC) recipients' email addresses. Each must be a valid email address (e.g., 'user@example.com') or display name format (e.g., 'Bob Jones <user@example.com>'). Plain names without email addresses are NOT valid. Optional for drafts (recipients can be added later before sending)."
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "examples": [
+              "Hello Team,\n\nPlease find the attached report for your review.\n\nBest regards,\nYour Name",
+              "<h1>Meeting Confirmation</h1><p>This email confirms our meeting scheduled for next Tuesday.</p>"
+            ],
+            "description": "Email body content (plain text or HTML); `is_html` must be True if HTML. Optional - drafts can be created without a body and edited later before sending. Can also be provided as 'message_body'.",
+            "human_parameter_name": "Email Body",
+            "human_parameter_description": "Write the main content of your email here. This can be plain text or HTML, depending on your preference."
+          },
+          "is_html": {
+            "type": "boolean",
+            "title": "Is Html",
+            "default": false,
+            "examples": [true, false],
+            "description": "Set to True if `body` is already formatted HTML. When False, plain text newlines are auto-converted to <br/> tags. Both modes result in HTML email; this flag controls whether the body content is treated as raw HTML or plain text that gets HTML formatting applied.",
+            "human_parameter_name": "Is HTML?",
+            "human_parameter_description": "Set to True if your email body is already HTML. When False, plain text formatting (newlines, tabs) will be automatically converted to HTML for proper display."
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "examples": ["Project Update Q3", "Meeting Reminder"],
+            "description": "Email subject line. Optional - drafts can be created without a subject and edited later before sending. When creating a draft reply to an existing thread (thread_id provided), leave this empty to stay in the same thread. Setting a subject will create a NEW thread instead.",
+            "human_parameter_name": "Subject",
+            "human_parameter_description": "Enter the subject of your email. This helps the recipient understand what the email is about."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "me",
+            "examples": ["me", "user@example.com"],
+            "description": "User's email address or 'me' for the authenticated user.",
+            "human_parameter_name": "User ID",
+            "human_parameter_description": "Provide the user ID or the email address of the user. Use 'me' to refer to the currently authenticated user."
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id",
+            "examples": ["17f45ec49a9c3f1b"],
+            "description": "ID of an existing Gmail thread to reply to; omit for new thread. If the thread ID is invalid or inaccessible, the draft will be created as a new thread instead of failing.",
+            "human_parameter_name": "Thread ID",
+            "human_parameter_description": "If you want to reply to an ongoing conversation, provide the thread ID here. Leave it blank for a new message."
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "object",
+                "title": "FileUploadable",
+                "required": ["name", "mimetype", "s3key"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "title": "Name",
+                    "examples": ["document.pdf", "image.jpg", "report.docx"],
+                    "description": "The filename that will be used when uploading the file to the destination service"
+                  },
+                  "s3key": {
+                    "type": "string",
+                    "title": "S3Key",
+                    "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                    "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                  },
+                  "mimetype": {
+                    "type": "string",
+                    "title": "Mimetype",
+                    "examples": [
+                      "application/pdf",
+                      "image/jpeg",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                    "description": "The MIME type of the file"
+                  }
+                },
+                "file_uploadable": true
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "FileUploadable",
+                  "required": ["name", "mimetype", "s3key"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name",
+                      "examples": ["document.pdf", "image.jpg", "report.docx"],
+                      "description": "The filename that will be used when uploading the file to the destination service"
+                    },
+                    "s3key": {
+                      "type": "string",
+                      "title": "S3Key",
+                      "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                      "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                    },
+                    "mimetype": {
+                      "type": "string",
+                      "title": "Mimetype",
+                      "examples": [
+                        "application/pdf",
+                        "image/jpeg",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      ],
+                      "description": "The MIME type of the file"
+                    }
+                  },
+                  "file_uploadable": true
+                }
+              }
+            ],
+            "title": "Attachment",
+            "description": "File(s) to attach to the email. Accepts a single file or a list of files. Total message size including base64-encoded attachments must be under 25 MB; use shareable links (e.g., Google Drive) for larger files.",
+            "human_parameter_name": "Attachment(s)",
+            "human_parameter_description": "Upload file(s) you want to include with the email. Can be a single file or multiple files."
+          },
+          "recipient_email": {
+            "type": "string",
+            "title": "Recipient Email",
+            "examples": [
+              "john.doe@example.com",
+              "John Doe <john.doe@example.com>"
+            ],
+            "description": "Primary recipient's email address. Must be a valid email address (e.g., 'user@example.com') or display name format (e.g., 'John Doe <user@example.com>'). A plain name without an email address (e.g., 'John Doe') is NOT valid - the '@' symbol and domain are required. Optional for drafts (recipients can be added later before sending). Use extra_recipients if you want to send to multiple recipients."
+          },
+          "extra_recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Recipients",
+            "default": [],
+            "examples": [
+              ["jane.doe@example.com", "Jane Doe <jane.doe@example.com>"]
+            ],
+            "description": "Additional 'To' recipients' email addresses (not Cc or Bcc). Each must be a valid email address (e.g., 'user@example.com'), display name format (e.g., 'Jane Doe <user@example.com>'), or 'me' for the authenticated user. Plain names without email addresses are NOT valid. Should only be used if recipient_email is also provided."
+          },
+          "include_signature": {
+            "type": "boolean",
+            "title": "Include Signature",
+            "default": true,
+            "description": "Append the sender's Gmail signature (the 'Send mail as' signature configured in Gmail settings) to the message body, ahead of any quoted or forwarded content. Skipped when the body already ends with that signature, when no signature is configured, or when the connection lacks permission to read Gmail settings. Set to false to send the body exactly as provided.",
+            "human_parameter_name": "Include Gmail signature?",
+            "human_parameter_description": "Append the sender's configured Gmail signature to the message."
+          }
+        }
+      },
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/contacts",
+        "https://www.googleapis.com/auth/contacts.readonly"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.compose",
+              "https://www.googleapis.com/auth/gmail.modify"
+            ]
+          },
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.compose",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.readonly"
+            ]
+          },
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.readonly"
+            ]
+          },
+          {
+            "any_of": [
+              "https://www.googleapis.com/auth/contacts",
+              "https://www.googleapis.com/auth/contacts.readonly"
+            ]
+          }
+        ]
+      },
+      "tags": ["important", "openWorldHint", "createHint"],
+      "no_auth": false,
+      "human_description": "This action creates a draft email in Gmail. It allows specifying recipients, subject, body content, and attachments, enabling users to prepare emails for sending at a later time.",
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Create email draft",
+        "version": "20261018_00",
+        "available_versions": ["20261018_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/gmail"
+        }
+      }
+    },
+    {
+      "slug": "GMAIL_REPLY_TO_THREAD",
+      "name": "Reply to email thread",
+      "description": "Sends a reply within a specific Gmail thread using the original thread's subject; do not provide a custom subject as it will start a new conversation instead of replying in-thread. Requires a valid `thread_id` and at least one of `recipient_email`, `cc`, or `bcc`. Supports optional file attachments.",
+      "available_versions": ["20261018_00"],
+      "version": "20261018_00",
+      "toolkit": {
+        "slug": "gmail",
+        "name": "gmail",
+        "logo": "https://logos.composio.dev/api/gmail"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "ReplyToThreadRequest",
+        "required": ["thread_id"],
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Cc",
+            "default": [],
+            "examples": [
+              ["cc.recipient1@example.com", "cc.recipient2@example.com"]
+            ],
+            "description": "Carbon Copy (CC) recipients' email addresses in format 'user@domain.com'. Each address must include both username and domain separated by '@'. At least one of cc, bcc, or recipient_email must be provided.",
+            "human_parameter_name": "CC Recipients",
+            "human_parameter_description": "Email addresses for people you want to keep in the loop but not address directly. At least one recipient is necessary."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Bcc",
+            "default": [],
+            "examples": [["bcc.recipient@example.com"]],
+            "description": "Blind Carbon Copy (BCC) recipients' email addresses in format 'user@domain.com'. Each address must include both username and domain separated by '@'. At least one of cc, bcc, or recipient_email must be provided.",
+            "human_parameter_name": "BCC Recipients",
+            "human_parameter_description": "Recipients who will receive your reply without others knowing their email addresses. At least one recipient is necessary."
+          },
+          "is_html": {
+            "type": "boolean",
+            "title": "Is Html",
+            "default": false,
+            "examples": [true, false],
+            "description": "Indicates if `message_body` is HTML; if True, body must be valid HTML, if False, body should not contain HTML tags. Mismatch causes recipients to see raw HTML tags as plain text.",
+            "human_parameter_name": "Is HTML?",
+            "human_parameter_description": "Specify whether your message body is in HTML format. Set to true if it contains HTML tags."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "me",
+            "examples": ["me", "user@example.com"],
+            "description": "Identifier for the user sending the reply; 'me' refers to the authenticated user.",
+            "human_parameter_name": "User ID",
+            "human_parameter_description": "The identifier for the user sending the reply. Use 'me' for your own account or provide your email address."
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id",
+            "examples": ["169eefc8138e68ca", "msg-f:169eefc8138e68ca"],
+            "description": "Identifier of the Gmail thread for the reply. Must be a valid hexadecimal string, typically 15-16 characters long (e.g., '169eefc8138e68ca'). Prefixes like 'msg-f:' or 'thread-f:' are automatically stripped. Note: Format validation only checks the ID structure; the thread must also exist and be accessible in your Gmail account. Use GMAIL_LIST_THREADS or GMAIL_FETCH_EMAILS to retrieve valid thread IDs. Must be a threadId, not a messageId; passing a messageId can cause the reply to fail or start an unintended new thread."
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "object",
+                "title": "FileUploadable",
+                "required": ["name", "mimetype", "s3key"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "title": "Name",
+                    "examples": ["document.pdf", "image.jpg", "report.docx"],
+                    "description": "The filename that will be used when uploading the file to the destination service"
+                  },
+                  "s3key": {
+                    "type": "string",
+                    "title": "S3Key",
+                    "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                    "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                  },
+                  "mimetype": {
+                    "type": "string",
+                    "title": "Mimetype",
+                    "examples": [
+                      "application/pdf",
+                      "image/jpeg",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                    "description": "The MIME type of the file"
+                  }
+                },
+                "file_uploadable": true
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "FileUploadable",
+                  "required": ["name", "mimetype", "s3key"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name",
+                      "examples": ["document.pdf", "image.jpg", "report.docx"],
+                      "description": "The filename that will be used when uploading the file to the destination service"
+                    },
+                    "s3key": {
+                      "type": "string",
+                      "title": "S3Key",
+                      "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                      "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                    },
+                    "mimetype": {
+                      "type": "string",
+                      "title": "Mimetype",
+                      "examples": [
+                        "application/pdf",
+                        "image/jpeg",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      ],
+                      "description": "The MIME type of the file"
+                    }
+                  },
+                  "file_uploadable": true
+                }
+              }
+            ],
+            "title": "Attachment",
+            "description": "File(s) to attach to the reply. Accepts a single file or a list of files. Total message size including attachments must stay under 25 MB (400 badRequest if exceeded); use Drive links for large files.",
+            "human_parameter_name": "Attachment(s)",
+            "human_parameter_description": "File(s) you want to attach to your reply. Can be a single file or multiple files."
+          },
+          "message_body": {
+            "type": "string",
+            "title": "Message Body",
+            "default": "",
+            "examples": [
+              "Dear Sir, Nice talking to you. Yours respectfully, John"
+            ],
+            "description": "Content of the reply message, either plain text or HTML.",
+            "human_parameter_name": "Message Body",
+            "human_parameter_description": "The actual message you want to send as a reply. It can be plain text or formatted in HTML."
+          },
+          "recipient_email": {
+            "type": "string",
+            "title": "Recipient Email",
+            "examples": ["john@doe.com"],
+            "description": "Primary recipient's email address in format 'user@domain.com'. Must include both username and domain separated by '@'. Required if cc and bcc is not provided, else can be optional. Use extra_recipients if you want to send to multiple recipients.",
+            "human_parameter_name": "Recipient Email",
+            "human_parameter_description": "The email address of the main recipient for your reply. This is required unless you're using cc or bcc."
+          },
+          "extra_recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Recipients",
+            "default": [],
+            "examples": [
+              ["jane.doe@example.com", "another.person@example.com"]
+            ],
+            "description": "Additional 'To' recipients' email addresses in format 'user@domain.com' (not Cc or Bcc). Each address must include both username and domain separated by '@'. Should only be used if recipient_email is also provided.",
+            "human_parameter_name": "Additional Recipients",
+            "human_parameter_description": "Any additional email addresses you want to include in the 'To' field for this reply."
+          },
+          "include_signature": {
+            "type": "boolean",
+            "title": "Include Signature",
+            "default": true,
+            "description": "Append the sender's Gmail signature (the 'Send mail as' signature configured in Gmail settings) to the message body, ahead of any quoted or forwarded content. Skipped when the body already ends with that signature, when no signature is configured, or when the connection lacks permission to read Gmail settings. Set to false to send the body exactly as provided.",
+            "human_parameter_name": "Include Gmail signature?",
+            "human_parameter_description": "Append the sender's configured Gmail signature to the message."
+          }
+        }
+      },
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/contacts",
+        "https://www.googleapis.com/auth/contacts.other.readonly",
+        "https://www.googleapis.com/auth/contacts.readonly"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.compose",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.send"
+            ]
+          },
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.compose",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.readonly"
+            ]
+          },
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.readonly"
+            ]
+          },
+          {
+            "any_of": [
+              "https://www.googleapis.com/auth/contacts",
+              "https://www.googleapis.com/auth/contacts.other.readonly",
+              "https://www.googleapis.com/auth/contacts.readonly"
+            ]
+          }
+        ]
+      },
+      "tags": ["important", "openWorldHint", "createHint"],
+      "no_auth": false,
+      "human_description": "This action allows users to reply to an existing email thread in Gmail. Users must provide the thread ID and at least one recipient's email address to successfully send their reply.",
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Reply to email thread",
+        "version": "20261018_00",
+        "available_versions": ["20261018_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/gmail"
+        }
+      }
+    },
+    {
+      "slug": "GMAIL_UPDATE_DRAFT",
+      "name": "Update draft",
+      "description": "Updates (replaces) an existing Gmail draft's content in-place by draft ID. This action replaces the entire draft content with the new message - it does not patch individual fields. All fields are optional; if not provided, you should provide complete draft content to avoid data loss.",
+      "available_versions": ["20261018_00"],
+      "version": "20261018_00",
+      "toolkit": {
+        "slug": "gmail",
+        "name": "gmail",
+        "logo": "https://logos.composio.dev/api/gmail"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "UpdateDraftRequest",
+        "required": ["draft_id"],
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Cc",
+            "default": [],
+            "examples": [
+              [
+                "cc.recipient1@example.com",
+                "CC User <cc.recipient2@example.com>"
+              ]
+            ],
+            "description": "Carbon Copy (CC) recipients' email addresses. Each must be a valid email address or display name format."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Bcc",
+            "default": [],
+            "examples": [
+              ["bcc.recipient@example.com", "BCC User <bcc.user@example.com>"]
+            ],
+            "description": "Blind Carbon Copy (BCC) recipients' email addresses. Each must be a valid email address or display name format."
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "examples": [
+              "Hello Team,\n\nPlease find the attached report.\n\nBest regards",
+              "<h1>Meeting Confirmation</h1><p>This confirms our meeting.</p>"
+            ],
+            "description": "Email body content (plain text or HTML); is_html must be True if HTML. If not provided, previous body is preserved. Can also be provided as 'message_body'."
+          },
+          "is_html": {
+            "type": "boolean",
+            "title": "Is Html",
+            "default": false,
+            "examples": [true, false],
+            "description": "Set to True if body is already formatted HTML. When False, plain text newlines are auto-converted to <br/> tags."
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "examples": ["Project Update Q3", "Meeting Reminder"],
+            "description": "Email subject line. If not provided, previous subject is preserved."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "me",
+            "examples": ["me", "user@example.com"],
+            "description": "User's email address or 'me' for the authenticated user."
+          },
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id",
+            "examples": ["r-8388446164079304564", "r1234567890123456789"],
+            "description": "The ID of the draft to update. Must be a valid draft ID from GMAIL_LIST_DRAFTS or GMAIL_CREATE_EMAIL_DRAFT."
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id",
+            "examples": ["17f45ec49a9c3f1b"],
+            "description": "ID of an existing Gmail thread. If provided, the draft will be part of this thread."
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "object",
+                "title": "FileUploadable",
+                "required": ["name", "mimetype", "s3key"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "title": "Name",
+                    "examples": ["document.pdf", "image.jpg", "report.docx"],
+                    "description": "The filename that will be used when uploading the file to the destination service"
+                  },
+                  "s3key": {
+                    "type": "string",
+                    "title": "S3Key",
+                    "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                    "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                  },
+                  "mimetype": {
+                    "type": "string",
+                    "title": "Mimetype",
+                    "examples": [
+                      "application/pdf",
+                      "image/jpeg",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                    "description": "The MIME type of the file"
+                  }
+                },
+                "file_uploadable": true
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "FileUploadable",
+                  "required": ["name", "mimetype", "s3key"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name",
+                      "examples": ["document.pdf", "image.jpg", "report.docx"],
+                      "description": "The filename that will be used when uploading the file to the destination service"
+                    },
+                    "s3key": {
+                      "type": "string",
+                      "title": "S3Key",
+                      "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                      "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                    },
+                    "mimetype": {
+                      "type": "string",
+                      "title": "Mimetype",
+                      "examples": [
+                        "application/pdf",
+                        "image/jpeg",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      ],
+                      "description": "The MIME type of the file"
+                    }
+                  },
+                  "file_uploadable": true
+                }
+              }
+            ],
+            "title": "Attachment",
+            "description": "File(s) to attach to the draft. Accepts a single file or a list of files. Replaces any existing attachments."
+          },
+          "recipient_email": {
+            "type": "string",
+            "title": "Recipient Email",
+            "examples": [
+              "john.doe@example.com",
+              "John Doe <john.doe@example.com>"
+            ],
+            "description": "Primary recipient's email address. Must be a valid email address (e.g., 'user@example.com') or display name format (e.g., 'John Doe <user@example.com>'). Optional - if not provided, previous recipients are preserved."
+          },
+          "extra_recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra Recipients",
+            "default": [],
+            "examples": [
+              ["jane.doe@example.com", "Jane Doe <jane.doe@example.com>"]
+            ],
+            "description": "Additional 'To' recipients' email addresses. Each must be a valid email address or display name format. Should only be used if recipient_email is also provided."
+          },
+          "include_signature": {
+            "type": "boolean",
+            "title": "Include Signature",
+            "default": true,
+            "description": "Append the sender's Gmail signature (the 'Send mail as' signature configured in Gmail settings) to the message body, ahead of any quoted or forwarded content. Skipped when the body already ends with that signature, when no signature is configured, or when the connection lacks permission to read Gmail settings. Set to false to send the body exactly as provided.",
+            "human_parameter_name": "Include Gmail signature?",
+            "human_parameter_description": "Append the sender's configured Gmail signature to the message."
+          }
+        }
+      },
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.compose"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.compose"
+            ]
+          }
+        ]
+      },
+      "tags": ["important", "openWorldHint", "updateHint", "messages"],
+      "no_auth": false,
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Update draft",
+        "version": "20261018_00",
+        "available_versions": ["20261018_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/gmail"
+        }
+      }
+    },
+    {
+      "slug": "GMAIL_FETCH_EMAILS",
+      "name": "Fetch emails",
+      "description": "Fetches a list of email messages from a Gmail account, supporting filtering, pagination, and optional full content retrieval. Results are NOT sorted by recency; sort by internalDate client-side. The messages field may be absent or empty (valid no-results state); always null-check before accessing messageId or threadId. Null-check subject and header fields before string operations. For large result sets, prefer ids_only=true or metadata-only listing, then hydrate via GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID.",
+      "available_versions": ["20261018_00"],
+      "version": "20261018_00",
+      "toolkit": {
+        "slug": "gmail",
+        "name": "gmail",
+        "logo": "https://logos.composio.dev/api/gmail"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "FetchEmailsRequest",
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "examples": [
+              "from:john@example.com is:unread",
+              "subject:meeting has:attachment",
+              "after:2024/01/01 before:2024/02/01",
+              "is:snoozed",
+              "is:important OR is:starred",
+              "label:work -label:spam"
+            ],
+            "description": "Gmail advanced search query (e.g., 'from:user subject:meeting'). Supported operators: 'from:', 'to:', 'subject:', 'label:', 'has:', 'is:', 'in:', 'category:', 'after:YYYY/MM/DD', 'before:YYYY/MM/DD', AND/OR/NOT. IMPORTANT - 'is:' vs 'label:' usage: Use 'is:' for special mail states: is:snoozed, is:unread, is:read, is:starred, is:important. Use 'label:' ONLY for user-created labels (e.g., 'label:work', 'label:projects'). Note: 'muted' may work with both 'is:muted' and 'label:muted' based on community reports. Common mistake: 'label:snoozed' is WRONG - use 'is:snoozed' instead. Use quotes for exact phrases. Omit for no query filter. after:/before: evaluate whole calendar days in UTC; before: is exclusive — adjust for local timezone to avoid off-by-one-day gaps.",
+            "human_parameter_name": "Search query",
+            "human_parameter_description": "Input a search term to filter your emails. Use 'is:' for special states (is:snoozed, is:unread, is:read, is:starred, is:important). Use 'label:' only for user-created labels (exception: 'muted' may work with both)."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "me",
+            "examples": ["me", "user@example.com"],
+            "description": "User's email address or 'me' for the authenticated user. Non-'me' addresses require domain-level delegation; without it, authentication or not-found errors result.",
+            "human_parameter_name": "User ID",
+            "human_parameter_description": "Provide the email address of the user whose mailbox you want to access. You can use 'me' to refer to your own mailbox."
+          },
+          "verbose": {
+            "type": "boolean",
+            "title": "Verbose",
+            "default": true,
+            "examples": [true, false],
+            "description": "If false, uses optimized concurrent metadata fetching for faster performance (~75% improvement). If true, uses standard detailed message fetching. When false, only essential fields (subject, sender, recipient, time, labels) are guaranteed. Body content and attachment details require verbose=true even when include_payload=true.",
+            "human_parameter_name": "Verbose mode?",
+            "human_parameter_description": "Select this to get detailed information for each email or to speed up the process and get just the basics."
+          },
+          "ids_only": {
+            "type": "boolean",
+            "title": "Ids Only",
+            "default": false,
+            "examples": [true, false],
+            "description": "If true, only returns message IDs from the list API without fetching individual message details. Fastest option for getting just message IDs and thread IDs.",
+            "human_parameter_name": "IDs only?",
+            "human_parameter_description": "Use this option if you just want the IDs of emails without loading their full details, making the request quicker."
+          },
+          "label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Label Ids",
+            "examples": ["INBOX", "UNREAD", "Label_123456"],
+            "description": "Filter by label IDs; only messages with all specified labels are returned (AND logic). Optional - omit or use empty list to fetch all messages without label filtering. System label IDs: 'INBOX', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'CATEGORY_PRIMARY' (alias 'CATEGORY_PERSONAL'), 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'. For custom/user-created labels, you MUST use the label ID (e.g., 'Label_123456'), NOT the display name. Use the 'listLabels' action to find label IDs for custom labels. Combining label_ids with label: in query applies AND logic across both, which can silently over-restrict results; use one strategy consistently.",
+            "human_parameter_name": "Label IDs",
+            "human_parameter_description": "List the label IDs to filter which messages to fetch. System labels (INBOX, SPAM, etc.) can be used directly by name. For custom labels, you must use the listLabels action first to get the label ID - do not use the label name you see in Gmail."
+          },
+          "page_token": {
+            "type": "string",
+            "title": "Page Token",
+            "description": "Token for retrieving a specific page, obtained from a previous response's `nextPageToken`. Must be a valid opaque token string from a previous API response. Do not pass arbitrary values. Omit for the first page. Loop calls using nextPageToken until it is absent to avoid silently missing messages. resultSizeEstimate is approximate — do not use as a stopping condition.",
+            "human_parameter_name": "Page token",
+            "human_parameter_description": "If you've paginated results, use this token to get the next set of messages. Leave blank for the first page."
+          },
+          "max_results": {
+            "type": "integer",
+            "title": "Max Results",
+            "default": 1,
+            "maximum": 500,
+            "minimum": 1,
+            "examples": ["10", "100", "500"],
+            "description": "Maximum number of messages to retrieve per page. Default of 1 retrieves only a single message; set higher for practical use. Hard cap is 500 per page.",
+            "human_parameter_name": "Maximum results",
+            "human_parameter_description": "Specify how many email messages you want to retrieve in one request, from 1 to 500."
+          },
+          "include_payload": {
+            "type": "boolean",
+            "title": "Include Payload",
+            "default": true,
+            "examples": [true, false],
+            "description": "Set to true to include full message payload (headers, body, attachments); false for metadata only. payload may still be null even when true; use GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID for guaranteed complete content. When payload is present, bodies are base64url-encoded in payload.parts; replace '-'→'+' and '_'→'/' and fix padding before decoding, and check both text/plain and text/html parts.",
+            "human_parameter_name": "Include full payload?",
+            "human_parameter_description": "Choose whether to get the full content of each email, including attachments and body, or just the essential metadata."
+          },
+          "include_spam_trash": {
+            "type": "boolean",
+            "title": "Include Spam Trash",
+            "default": false,
+            "examples": [true, false],
+            "description": "Set to true to include messages from 'SPAM' and 'TRASH'.",
+            "human_parameter_name": "Include spam and trash?",
+            "human_parameter_description": "Decide if you want to see emails that are normally filtered into your SPAM or TRASH folders."
+          }
+        }
+      },
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.readonly"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://mail.google.com/",
+              "https://www.googleapis.com/auth/gmail.modify",
+              "https://www.googleapis.com/auth/gmail.readonly"
+            ]
+          }
+        ]
+      },
+      "tags": ["important", "openWorldHint", "readOnlyHint"],
+      "no_auth": false,
+      "human_description": "This action retrieves a list of email messages from a specified Gmail account. It allows for filtering the messages based on various parameters such as label IDs and search queries, as well as controlling the level of detail returned for each message.",
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Fetch emails",
+        "version": "20261018_00",
+        "available_versions": ["20261018_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/gmail"
+        }
+      }
+    }
+  ],
+  "googledrive": [
+    {
+      "slug": "GOOGLEDRIVE_UPLOAD_FILE",
+      "name": "Upload File",
+      "description": "Uploads a file (max 5MB) to Google Drive, placing it in the specified folder or root if no valid folder ID is provided. Always creates a new file (never updates existing); use GOOGLEDRIVE_EDIT_FILE to update with a stable file_id. Uploaded files are private by default; configure sharing via GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE.",
+      "available_versions": ["20261022_00"],
+      "version": "20261022_00",
+      "toolkit": {
+        "slug": "googledrive",
+        "name": "googledrive",
+        "logo": "https://logos.composio.dev/api/googledrive"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "UploadFileRequest",
+        "required": ["file_to_upload"],
+        "properties": {
+          "file_to_upload": {
+            "type": "object",
+            "title": "FileUploadable",
+            "required": ["name", "mimetype", "s3key"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name",
+                "examples": ["document.pdf", "image.jpg", "report.docx"],
+                "description": "The filename that will be used when uploading the file to the destination service"
+              },
+              "s3key": {
+                "type": "string",
+                "title": "S3Key",
+                "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+              },
+              "mimetype": {
+                "type": "string",
+                "title": "Mimetype",
+                "examples": [
+                  "application/pdf",
+                  "image/jpeg",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ],
+                "description": "The MIME type of the file"
+              }
+            },
+            "description": "File to upload to Google Drive (max 5MB). Use a clear filename and accurate MIME type, for example `application/pdf`; incorrect values can cause Drive to convert or misrender the file.",
+            "file_uploadable": true,
+            "additionalProperties": false,
+            "human_parameter_name": "File to upload",
+            "human_parameter_description": "The file to upload to Google Drive."
+          },
+          "folder_to_upload_to": {
+            "type": "string",
+            "title": "Folder To Upload To",
+            "examples": ["1duXYCvYC5tIp5B_B1HWLq8LyDYXfMhPU"],
+            "description": "Optional ID of the target Google Drive folder; can be obtained using 'Find Folder' or similar actions. Invalid or missing IDs silently fall back to Drive root with no error — resolve the correct folder ID first using GOOGLEDRIVE_FIND_FILE.",
+            "human_parameter_name": "Target folder ID",
+            "human_parameter_description": "If you want the file placed in a specific Drive folder, paste that folder's ID here. Leave it blank to upload to your My Drive (root) instead."
+          }
+        }
+      },
+      "scopes": [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.appdata",
+        "https://www.googleapis.com/auth/drive.file"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://www.googleapis.com/auth/drive",
+              "https://www.googleapis.com/auth/drive.appdata",
+              "https://www.googleapis.com/auth/drive.file"
+            ]
+          }
+        ]
+      },
+      "tags": ["important", "openWorldHint", "createHint"],
+      "no_auth": false,
+      "human_description": "This action uploads a specified file to Google Drive, with an option to place it in a specific folder if an ID is provided. If no folder ID is given, the file will be uploaded to the root directory of the Drive.",
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Upload File",
+        "version": "20261022_00",
+        "available_versions": ["20261022_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/googledrive"
+        }
+      }
+    },
+    {
+      "slug": "GOOGLEDRIVE_CREATE_FILE",
+      "name": "Create File or Folder",
+      "description": "Creates a new file or folder in Google Drive. Supports both metadata-only creation (for folders and empty documents) and file upload with content. When file_to_upload is provided, uploads the actual file bytes; otherwise creates an empty file. Native Google file types (Docs, Sheets, Forms, etc.) and folders are created as empty shells when no content is provided; content must be added manually afterward. Newly created files are private by default — set sharing permissions afterward for collaboration. For shared-drive folders, use this tool with the target folder ID in `parents` rather than GOOGLEDRIVE_CREATE_FOLDER.",
+      "available_versions": ["20261022_00"],
+      "version": "20261022_00",
+      "toolkit": {
+        "slug": "googledrive",
+        "name": "googledrive",
+        "logo": "https://logos.composio.dev/api/googledrive"
+      },
+      "input_parameters": {
+        "type": "object",
+        "title": "CreateFileRequest",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The name of the file. While optional, providing a meaningful name is strongly recommended. If not specified, Google Drive will create the file with name 'Untitled'.",
+            "human_parameter_name": "File name",
+            "human_parameter_description": "The title you want to give the new file or folder. Choose something meaningful so you can find it later. If omitted, the file will be named 'Untitled'."
+          },
+          "fields": {
+            "type": "string",
+            "title": "Fields",
+            "description": "A comma-separated list of fields to include in the response.",
+            "human_parameter_name": "Response fields",
+            "human_parameter_description": "Which details you want back after creation. Leave empty for the defaults, or list specific fields if you only need a few."
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Parents",
+            "description": "Google Drive folder ID (not folder name) where the file will be created. Must be a list with exactly one folder ID (e.g., ['1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs07X8ygaR']). Folder IDs are long alphanumeric strings, not human-readable names. Use GOOGLEDRIVE_FIND_FOLDER or GOOGLEDRIVE_LIST_FILES to look up folder IDs by name. If omitted, the file is created in My Drive root.",
+            "human_parameter_name": "Parent folder ID",
+            "human_parameter_description": "The Google Drive folder ID (NOT the folder name) where you want to create the file. Must be a long alphanumeric string like '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs07X8ygaR', provided as a list with exactly one ID (e.g., ['1BxiMVs0X...']). To find the folder ID, use GOOGLEDRIVE_FIND_FOLDER or GOOGLEDRIVE_LIST_FILES actions. If omitted, the file is created in My Drive root."
+          },
+          "starred": {
+            "type": "boolean",
+            "title": "Starred",
+            "description": "Whether the user has starred the file.",
+            "human_parameter_name": "Star the file?",
+            "human_parameter_description": "Choose whether to mark this file as a favorite so it's easier to find later."
+          },
+          "mimeType": {
+            "enum": [
+              "application/vnd.google-apps.folder",
+              "application/vnd.google-apps.document",
+              "application/vnd.google-apps.spreadsheet",
+              "application/vnd.google-apps.presentation",
+              "application/vnd.google-apps.drawing",
+              "application/vnd.google-apps.form",
+              "application/vnd.google-apps.script",
+              "application/vnd.google-apps.shortcut",
+              "application/vnd.google-apps.site",
+              "application/vnd.google-apps.map",
+              "application/vnd.google-apps.jam",
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "application/vnd.oasis.opendocument.text",
+              "application/rtf",
+              "text/plain",
+              "text/html",
+              "text/markdown",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "application/vnd.oasis.opendocument.spreadsheet",
+              "text/csv",
+              "text/tab-separated-values",
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              "application/vnd.oasis.opendocument.presentation",
+              "image/jpeg",
+              "image/png",
+              "image/gif",
+              "image/bmp",
+              "image/webp",
+              "image/svg+xml",
+              "image/tiff",
+              "video/mp4",
+              "video/x-msvideo",
+              "video/quicktime",
+              "video/x-ms-wmv",
+              "video/webm",
+              "audio/mpeg",
+              "audio/wav",
+              "audio/ogg",
+              "application/zip",
+              "application/vnd.rar",
+              "application/x-tar",
+              "application/gzip",
+              "application/x-7z-compressed",
+              "application/json",
+              "application/xml",
+              "application/x-yaml",
+              "application/epub+zip",
+              "application/octet-stream"
+            ],
+            "type": "string",
+            "title": "MimeType",
+            "description": "Common MIME types for Google Drive file creation.",
+            "human_parameter_name": "MIME type",
+            "human_parameter_description": "Specify the type of item you're creating. Common values: GOOGLE_FOLDER for folders, GOOGLE_DOCUMENT for Google Docs, PDF, DOCX, TXT for documents, JPEG/PNG for images. Leave blank to let Google Drive infer from the filename."
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "A short description of the file.",
+            "human_parameter_name": "File description",
+            "human_parameter_description": "A short note about the file to help you and others understand what it is or how it should be used."
+          },
+          "file_to_upload": {
+            "type": "object",
+            "title": "FileUploadable",
+            "required": ["name", "mimetype", "s3key"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name",
+                "examples": ["document.pdf", "image.jpg", "report.docx"],
+                "description": "The filename that will be used when uploading the file to the destination service"
+              },
+              "s3key": {
+                "type": "string",
+                "title": "S3Key",
+                "examples": ["47563/gmail/GET_ATTACHMENT/response/12345"],
+                "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+              },
+              "mimetype": {
+                "type": "string",
+                "title": "Mimetype",
+                "examples": [
+                  "application/pdf",
+                  "image/jpeg",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ],
+                "description": "The MIME type of the file"
+              }
+            },
+            "description": "Optional file content to upload. If provided, the file will be created with the actual content from this upload. If omitted, creates an empty file (for folders) or empty Google Workspace document. Use this when you need to upload actual file bytes (images, PDFs, documents, etc.).",
+            "file_uploadable": true,
+            "additionalProperties": false,
+            "human_parameter_name": "File content to upload",
+            "human_parameter_description": "Optional. The actual file content to upload. If provided, creates a file with this content. If omitted, creates an empty file or folder."
+          }
+        }
+      },
+      "scopes": [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/drive.appdata"
+      ],
+      "scope_requirements": {
+        "all_of": [
+          {
+            "any_of": [
+              "https://www.googleapis.com/auth/drive",
+              "https://www.googleapis.com/auth/drive.file",
+              "https://www.googleapis.com/auth/drive.appdata"
+            ]
+          }
+        ]
+      },
+      "tags": ["openWorldHint", "important", "file management", "createHint"],
+      "no_auth": false,
+      "human_description": "This action allows the user to create a new file or folder in a specified location. Users can provide metadata such as the name, MIME type, and parent folder IDs to specify the properties of the file being created.",
+      "is_deprecated": false,
+      "deprecated": {
+        "displayName": "Create File or Folder",
+        "version": "20261022_00",
+        "available_versions": ["20261022_00"],
+        "is_deprecated": false,
+        "toolkit": {
+          "logo": "https://logos.composio.dev/api/googledrive"
+        }
+      }
+    }
+  ]
+}

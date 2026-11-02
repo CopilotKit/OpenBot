@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { eq, inArray, like } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
@@ -25,9 +27,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 

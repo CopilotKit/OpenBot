@@ -162,7 +162,7 @@ test("closing the dialog keeps the link code, so reopening the row shows it agai
   await user.keyboard("{Escape}");
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
   // The row says a code is waiting, and opening it shows that code without asking for another.
-  expect(view.getByText(/A link code is waiting/)).toBeTruthy();
+  expect(view.getByText(/Your link code is ready to send/)).toBeTruthy();
   await user.click(view.getByRole("button", { name: /^Link Slack/ }));
   expect(await view.findByText("link abc")).toBeTruthy();
   // With the conversation it links, so "this conversation" still names one.
@@ -198,7 +198,11 @@ test("a transport the deployment cannot reach says why instead of opening", asyn
   expect(
     view.queryByRole("button", { name: /^Link Microsoft Teams/ }),
   ).toBeNull();
-  expect(view.getByText(/needs to pair OpenBot with OpenTag/)).toBeTruthy();
+  expect(
+    view.getByText(
+      "Not set up yet. An admin has to turn on Slack and Teams first.",
+    ),
+  ).toBeTruthy();
 });
 
 test("a phone is verified for the chosen conversation, then asks for its code", async () => {

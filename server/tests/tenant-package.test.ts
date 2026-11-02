@@ -1,5 +1,8 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
@@ -253,6 +256,20 @@ describe("a seeded Mastra Bot", () => {
 });
 
 describe("tenant YAML validation", () => {
+  test("accepts explicit blank agent titles and preserves trimmed text", () => {
+    for (const title of ["", "   ", " Existing title "]) {
+      const parsed = validateTenantPackage({
+        brand: "tenant: { id: fintech, product_name: Ledgerline }",
+        agents: `agents: [{ id: knowledge, name: Knowledge, title: ${JSON.stringify(title)}, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
+        channels: "channels: []",
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []",
+        themeCss: "",
+      });
+      expect(parsed.agents[0]?.title).toBe(title.trim());
+    }
+  });
   test("rejects an agent without a title", () => {
     expect(() =>
       validateTenantPackage({
@@ -265,7 +282,7 @@ describe("tenant YAML validation", () => {
         knowledge: "sources: []",
         themeCss: "",
       }),
-    ).toThrow("agent.title must be a non-empty string");
+    ).toThrow("agent.title must be text of 120 characters or fewer");
   });
 
   test("rejects an agent without a role description", () => {
@@ -371,6 +388,27 @@ describe("tenant YAML validation", () => {
         themeCss: "",
       }),
     ).toThrow("agent.avatar_seed must be a non-empty string");
+  });
+
+  // A person's own OpenBot browser is a computer named `person-` and 32 hex digits, reached the way a Bot's is: a Bot
+  // with that id would share its computer with the person whose browser it is.
+  test("rejects an agent whose id is the shape of a person's OpenBot browser, and keeps one that is not", () => {
+    const withAgent = (id: string) =>
+      validateTenantPackage({
+        brand: "tenant: { id: fintech, product_name: Ledgerline }",
+        agents: `agents: [{ id: ${id}, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
+        channels: "channels: []",
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []",
+        themeCss: "",
+      });
+    expect(() => withAgent(`person-${"0a".repeat(16)}`)).toThrow(
+      /person's OpenBot browser/,
+    );
+    expect(withAgent("person-helper").agents.map((agent) => agent.id)).toEqual([
+      "person-helper",
+    ]);
   });
 
   test("creates a browser-safe application configuration", () => {
@@ -1086,6 +1124,42 @@ describe("expanding a package file against the environment", () => {
  * cases below are the ones that decide whether that is safe to seed.
  */
 describe("skills a package ships", () => {
+  test("editing only skills.yaml changes the loaded package checksum", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openbot-skills-checksum-"));
+    try {
+      await cp(
+        fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
+        directory,
+        { recursive: true },
+      );
+      const skillsPath = join(directory, "skills.yaml");
+      const original = await readFile(skillsPath, "utf8");
+      const before = await loadTenantPackage(directory);
+      expect((await loadTenantPackage(directory)).checksum).toBe(
+        before.checksum,
+      );
+
+      await writeFile(
+        skillsPath,
+        `${original}\n  - slug: checksum-fixture\n    title: Checksum fixture\n    summary: Added instruction.\n    instructions: Read the revised policy.\n`,
+        "utf8",
+      );
+      const after = await loadTenantPackage(directory);
+      expect(after.skills).toHaveLength(before.skills.length + 1);
+      expect(after.skills.at(-1)?.instructions).toBe(
+        "Read the revised policy.",
+      );
+      expect(after.checksum).not.toBe(before.checksum);
+
+      await writeFile(skillsPath, original, "utf8");
+      expect((await loadTenantPackage(directory)).checksum).toBe(
+        before.checksum,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   const base = {
     brand: "tenant: { id: fintech, product_name: Ledgerline }",
     agents:
@@ -1208,21 +1282,6 @@ describe("skills a package ships", () => {
     summary: Triage.`,
       }),
     ).toThrow("skill.instructions must be a non-empty string");
-  });
-
-  test("editing the skills file changes the package checksum", () => {
-    // Otherwise a deployment reports itself unchanged after its skills were rewritten, and never
-    // reseeds them.
-    const one = validateTenantPackage({ ...base, skills: "skills: []" });
-    const two = validateTenantPackage({
-      ...base,
-      skills: `skills:
-  - slug: triage
-    title: Triage
-    summary: Triage.
-    instructions: Triage.`,
-    });
-    expect(one.skills).not.toEqual(two.skills);
   });
 });
 

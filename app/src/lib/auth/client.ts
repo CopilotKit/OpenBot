@@ -36,11 +36,12 @@ export async function signInWith(
     callbackURL: string;
   }) => Promise<SocialResult> = (input) =>
     authClient.signIn.social(input as never) as Promise<SocialResult>,
+  // Where the browser returns to. Defaults to the origin, which is what every caller without
+  // somewhere particular to resume has always got. Same origin as the app, so Better Auth's
+  // trusted-origin check treats it as it treated the bare origin.
+  callbackURL: string = window.location.origin,
 ) {
-  const result = await start({
-    provider,
-    callbackURL: window.location.origin,
-  });
+  const result = await start({ provider, callbackURL });
 
   if (result.error) {
     // Naming the provider matters more with three buttons than it did with one: "Could not start
@@ -72,8 +73,9 @@ export async function signInWithEmailDomain(
         signIn: { sso: (i: unknown) => Promise<SocialResult> };
       }
     ).signIn.sso(input),
+  callbackURL: string = window.location.origin,
 ) {
-  const result = await start({ email, callbackURL: window.location.origin });
+  const result = await start({ email, callbackURL });
 
   if (result.error) {
     throw new Error(

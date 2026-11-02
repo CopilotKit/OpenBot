@@ -42,7 +42,7 @@ export function SharedApprovalFields({
   return (
     <fieldset className="space-y-2 text-sm">
       <legend className="font-medium">
-        Who may use the shared account through this Bot
+        Who can use the shared account through this Bot
       </legend>
       {options.map((option) => (
         <label className="flex items-center gap-2" key={option.audience}>
@@ -69,7 +69,7 @@ export function SharedApprovalFields({
           }
           type="checkbox"
         />
-        Outside input (email, Slack, webhooks) may use it
+        Messages from outside (email, Slack, webhooks) can use it
       </label>
     </fieldset>
   );

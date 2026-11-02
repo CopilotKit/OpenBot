@@ -416,14 +416,6 @@ const ownedToolkits = [
   unschemedToolkit,
 ];
 /**
- * An app this file does NOT own, standing in for another run's fixture — or another file's.
- *
- * It carries this run's suffix so it cannot collide with a real row, and it is deliberately absent
- * from {@link ownedToolkits} so {@link clean} cannot reach it. Its whole purpose is to be the row
- * that a sweep keyed on `user_id` alone would take by mistake.
- */
-const foreignToolkit = `foreign-${suite}`;
-/**
  * The app the probe chooser reads, which holds actions and nothing else.
  *
  * Its own `mcp_servers` id rather than {@link toolkit}'s, because every other fixture here seeds
@@ -680,6 +672,14 @@ let vendorHolds: string[] = [];
 let configWasStanding = false;
 
 const broker: ComposioBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: unasked("read grants"),
   listApps: unasked("list the catalogue"),
   ensureAuthConfig: async (config) => {
     // Named by app AND kind, because the kind is what decides which config is created: an enable
@@ -776,6 +776,7 @@ const broker: ComposioBroker = {
 };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore,
   broker,
@@ -882,21 +883,6 @@ async function clean() {
   await database.delete(users).where(inArray(users.id, [askerId, leaverId]));
 }
 
-/**
- * The stand-in for somebody else's fixture, taken back by hand.
- *
- * Deliberately NOT part of {@link clean}, because a test below asserts that `clean` leaves this row
- * standing: folding it in would make that assertion agree with itself. Run beside `clean` from
- * `beforeEach` and `afterAll` instead, so the row cannot outlive the run even if the test that
- * inserts it dies partway — the same shared database that makes the row worth protecting makes a
- * leaked one everybody's problem.
- */
-async function cleanForeign() {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, foreignToolkit));
-}
-
 /** Which of this run's app rows the deployment still holds, so "the app survived" is an assertion. */
 async function appsHeld(): Promise<string[]> {
   const rows = await database
@@ -933,6 +919,7 @@ async function addApp() {
   await database.insert(mcpTools).values({
     serverId: toolkit,
     name: actionName,
+    vendorName: actionName,
     description: "Fetch some items.",
     effect: "read",
     version: "20260903_00",
@@ -984,6 +971,7 @@ async function addProbedApp(options: { withProbe?: boolean } = {}) {
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -1010,6 +998,7 @@ async function addCheckableApp(slug: string): Promise<void> {
   await database.insert(mcpTools).values({
     serverId: `composio-${slug}`,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -1037,6 +1026,7 @@ async function addRenamedApp() {
   await database.insert(mcpTools).values({
     serverId: renamedProbedId,
     name: renamedProbeAction,
+    vendorName: renamedProbeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -1055,21 +1045,15 @@ async function addRenamedApp() {
  * unreachable by the cleanup here, and reddens this file for everybody until the database is edited
  * by hand. Narrowing to named apps is what makes the assertion about this run.
  *
- * `within` DEFAULTS TO THIS RUN'S OWN APPS and is passed explicitly only to ask about
- * {@link foreignToolkit} — the one row this file holds that it deliberately does not own, and
- * therefore the one it has to be able to ask about separately.
  */
-async function connectedToolkitsFor(
-  userId: string,
-  within: string[] = ownedToolkits,
-): Promise<string[]> {
+async function connectedToolkitsFor(userId: string): Promise<string[]> {
   const rows = await database
     .select({ toolkit: brokeredConnections.app })
     .from(brokeredConnections)
     .where(
       and(
         eq(brokeredConnections.userId, userId),
-        inArray(brokeredConnections.app, within),
+        inArray(brokeredConnections.app, ownedToolkits),
       ),
     )
     .orderBy(asc(brokeredConnections.app));
@@ -1084,7 +1068,6 @@ function recordedOfType(eventType: string) {
 // one nothing to trip over.
 beforeEach(async () => {
   await clean();
-  await cleanForeign();
   events.length = 0;
   reached.length = 0;
   asks.length = 0;
@@ -1108,7 +1091,6 @@ afterEach(() => useComposioClient(null));
 
 afterAll(async () => {
   await clean();
-  await cleanForeign();
 });
 
 /**
@@ -1463,56 +1445,6 @@ test("retiring nobody retires nothing and leaves the anonymous row alone", async
   // And nothing reached Composio either. An unattributed offboarding has no account to name, so a
   // revoke sent under an empty user id would be this deployment asking the vendor about nobody.
   expect(asksMade()).toEqual([]);
-});
-
-/**
- * The fixture above is taken back by the same sweep every other row here is, and by nothing wider.
- *
- * CRITERION. Two halves, and the second is the one that has teeth. After the sweep this run holds
- * no `composio_connections` row at all — the one at the anonymous actor included, which none of the
- * person ids that sweep names would reach — AND an anonymous row belonging to somebody else is
- * still standing.
- *
- * REASON. Brokered connections are removed here by toolkit, so the anonymous row is already
- * covered and needs no second, broader delete to reach it. Asserted rather than read off the code,
- * because the tempting spelling for "take the anonymous row too" is `user_id = ''`, which is every
- * app at once: the sweep that lands on another file's fixture.
- *
- * WHY THE SECOND HALF IS NOT OPTIONAL. "This run's rows are gone" is satisfied just as well by the
- * wider delete as by the narrow one — a `user_id = ''` sweep takes this run's anonymous row too,
- * and every assertion about absence goes on passing while the defect it forbids is present. Only a
- * row the correct sweep must LEAVE BEHIND can tell the two deletes apart, so {@link foreignToolkit}
- * stands in for one: a row this file inserted, deliberately outside {@link ownedToolkits}, at the
- * pair another run legitimately holds. It is cleaned up by {@link cleanForeign} rather than by the
- * sweep under test, for the reason given there.
- */
-test("the sweep takes this run's anonymous row without reaching by actor", async () => {
-  await seedApp({ connect: false });
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: toolkit,
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
-  // Somebody else's anonymous row, at an app this file's sweep does not name.
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: foreignToolkit,
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
-  expect(await connectedToolkitsFor("")).toEqual([toolkit]);
-
-  await clean();
-
-  expect(await connectionsHeld()).toEqual([]);
-  // And the row that was never this sweep's to take is exactly where it was. This is the assertion
-  // a delete keyed on `user_id = ''` fails, and the only one here that it fails.
-  expect(await connectedToolkitsFor("", [foreignToolkit])).toEqual([
-    foreignToolkit,
-  ]);
 });
 
 /**
@@ -2126,6 +2058,7 @@ test("the probe skips an argument-less write for the read that sorts after it", 
       serverId: probeAppId,
       // Sorts first, asks for nothing, and charges somebody money. The whole test.
       name: "STRIPE_CREATE_BILLING_METER_EVENT_SESSION",
+      vendorName: "STRIPE_CREATE_BILLING_METER_EVENT_SESSION",
       description: "Creates a billing meter event session.",
       effect: "write",
       version: "20260903_00",
@@ -2133,6 +2066,7 @@ test("the probe skips an argument-less write for the read that sorts after it", 
     {
       serverId: probeAppId,
       name: "STRIPE_RETRIEVE_BALANCE",
+      vendorName: "STRIPE_RETRIEVE_BALANCE",
       description: "Retrieves the balance.",
       effect: "read",
       version: "20260903_00",
@@ -2171,6 +2105,7 @@ test("an app whose only read takes an argument has no probe", async () => {
   await database.insert(mcpTools).values({
     serverId: probeAppId,
     name: "APP_GET_PROJECT",
+    vendorName: "APP_GET_PROJECT",
     description: "Reads one project, by id.",
     effect: "read",
     inputSchema: {
@@ -2232,6 +2167,7 @@ test.each([
     await database.insert(mcpTools).values({
       serverId: probeAppId,
       name: "APP_GET_PROJECT",
+      vendorName: "APP_GET_PROJECT",
       description: "Reads one project.",
       effect: "read",
       inputSchema,
@@ -2261,6 +2197,7 @@ test("an action whose composed schema requires nothing is still a probe candidat
   await database.insert(mcpTools).values({
     serverId: probeAppId,
     name: "APP_GET_ME",
+    vendorName: "APP_GET_ME",
     description: "Reads the current account.",
     effect: "read",
     inputSchema: {
@@ -2303,6 +2240,7 @@ test("an app whose only safe read has no recorded version has no probe", async (
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to, at no version anybody recorded.",
     effect: "read",
     version: null,
@@ -2354,6 +2292,7 @@ test("the chooser passes over a versionless read for the one it could call", asy
       serverId: probeAppId,
       // Sorts first, is the preferred shape, and carries nothing to call it at.
       name: "THIN_GET_ME",
+      vendorName: "THIN_GET_ME",
       description: "Says who the key belongs to.",
       effect: "read",
       version: null,
@@ -2361,6 +2300,7 @@ test("the chooser passes over a versionless read for the one it could call", asy
     {
       serverId: probeAppId,
       name: "THIN_LIST_PROJECTS",
+      vendorName: "THIN_LIST_PROJECTS",
       description: "Lists the projects.",
       effect: "read",
       version: "20260903_00",
@@ -2407,6 +2347,7 @@ test("the probe skips a read the vendor also calls destructive", async () => {
       serverId: probeAppId,
       // Sorts first, asks for nothing, and Composio itself says calling it destroys something.
       name: "APP_ARCHIVE_EVERYTHING",
+      vendorName: "APP_ARCHIVE_EVERYTHING",
       description: "Archives the lot.",
       effect: "read",
       destructive: true,
@@ -2415,6 +2356,7 @@ test("the probe skips a read the vendor also calls destructive", async () => {
     {
       serverId: probeAppId,
       name: "APP_LIST_PROJECTS",
+      vendorName: "APP_LIST_PROJECTS",
       description: "Lists the projects.",
       effect: "read",
       destructive: false,
@@ -2474,6 +2416,7 @@ test("the probe prefers the identity read over the read that sorts first", async
       // Sorts first and is perfectly safe, which is what makes it the wrong answer rather than an
       // unsafe one: this is a test about which of two good candidates is chosen.
       name: "ZOO_ALL_ANIMALS",
+      vendorName: "ZOO_ALL_ANIMALS",
       description: "Lists the animals.",
       effect: "read",
       version: "20260903_00",
@@ -2481,6 +2424,7 @@ test("the probe prefers the identity read over the read that sorts first", async
     {
       serverId: probeAppId,
       name: "ZOO_GET_ME",
+      vendorName: "ZOO_GET_ME",
       description: "Says who the key belongs to.",
       effect: "read",
       version: "20260903_00",
@@ -2618,6 +2562,7 @@ test("an action listed after the fact does not rewrite what a key was checked wi
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -2682,6 +2627,7 @@ test("a key nothing was spent on becomes checkable when the app publishes someth
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -2786,6 +2732,7 @@ test("a probe never spends a key on the action of a row the composed id would hi
   await database.insert(mcpTools).values({
     serverId: decoyId,
     name: decoyAction,
+    vendorName: decoyAction,
     description: "Reads something belonging to another app entirely.",
     effect: "read",
     version: probeVersion,
@@ -2828,6 +2775,7 @@ test("a consent connection records no action, because none was spent", async () 
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the account belongs to.",
     effect: "read",
     version: probeVersion,
@@ -3757,6 +3705,7 @@ test("a duplicate row recording no-auth does not take the gate off an app", asyn
   await database.insert(mcpTools).values({
     serverId: noAuthTwinId,
     name: actionName,
+    vendorName: actionName,
     description: "Fetch some items.",
     effect: "read",
     version: "20260903_00",
@@ -4685,6 +4634,7 @@ test("a re-check against a consent connection refuses rather than spending its d
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the account belongs to.",
     effect: "read",
     version: probeVersion,

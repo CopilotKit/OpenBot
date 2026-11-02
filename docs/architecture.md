@@ -78,7 +78,7 @@ startup.
 
 Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a shell reaches whatever its container reaches, so the database is on a `data` network carrying only itself and `migrate`, and everything else is on `default`. A deployment that runs the API server inside Compose rather than on the host joins it to both, which is the one place the two meet.
 
-With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
+With `COMPUTER_SUPERVISOR_URL`, each person gets a computer container of their own, and every Bot they use has its own folder and browser profile in it; a Bot marked Isolated gets a container of its own instead. Without it, all Bots share `AGENT_COMPUTER_URL`, still with a profile and folder for each person and Bot.
 
 Each computer also filters its own outbound connections. The browser and shell commands go through a filter proxy that applies the Bot's network policy (`allow_all`, `defaults_plus_allowlist`, `allowlist_only` or `deny_all`, which is what a Bot gets when its owner's Cloud network access is switched off). The server pushes the policy before the computer acts and whenever it wakes, and until one arrives nothing may leave. `EGRESS_POLICY_REQUIRED=0` is for a computer run with no API server. Cloud metadata addresses are refused in every mode. A process that ignores the proxy variables and opens a raw socket is not stopped by this; that is a Kubernetes NetworkPolicy's job.
 
@@ -154,7 +154,7 @@ Secret entry is separate from chat content. The audit trail records that a secre
 
 ## Watching a Bot work
 
-Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity tab is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
+Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity list under it is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
 
 Activity is held in the browser for the open conversation and is gone on reload. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
 
@@ -313,9 +313,11 @@ A catalogue entry says whose credential a Bot reaches it with, which is a differ
 
 Every MCP call checks the grant first, then evaluates the same action policy engine with MCP context, then audits the result.
 
+Whether a person can use an app through a Bot is answered once, on the server, from those same facts — the app's row, the Bot's grants, the person's own connection, a Shared app's team account — as one of six states: `ready`, `not_connected`, `reconnect`, `shared_not_connected`, `disabled` or `not_granted` (`server/src/plugins/app-access.ts`). The last three are an administrator's to fix, so a person can file a request (`app_access_requests`) for exactly what the state is missing, and approving one performs it — switching the app on, granting it to the Bot — through the same code paths the admin screens use. See [Composio](plugins/composio.md#what-an-app-is-for-one-person-on-one-bot).
+
 ### Writing a skill in a conversation
 
-A skill can be written from the composer as well as from `/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
+A skill can be written from the composer as well as from `/capabilities/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
 
 The grant is the gate. Those four tools are offered only while the Bot holds `skill-creator`, because four extra tools on every run costs the narrowing above what it exists to buy, and a Bot for looking up transactions has no business drafting skills.
 
@@ -373,7 +375,7 @@ Required package files:
 Optional: `skills.yaml`, `theme.css`, and an `agents/` directory holding a coworker per file, read
 alongside `agents.yaml`. See [configuration.md](configuration.md#agents).
 
-The server validates the package at startup. Channel agent IDs must match declared agents. Knowledge sources currently support Google Drive and Microsoft OneDrive declarations.
+The server validates the package at startup. Channel agent IDs must match declared agents. `knowledge.yaml` accepts Google Drive and Microsoft OneDrive declarations and is validated, but nothing reads it yet; see [configuration.md](configuration.md#knowledgeyaml).
 
 Connector credentials are stored through the credential vault and referenced by id, not stored inline in YAML.
 

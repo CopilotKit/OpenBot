@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
+import { eq, inArray } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
@@ -89,10 +89,10 @@ test("sessions persist as JSON, are immutable/idempotent, and are shared only wi
   expect(await store.save(owner, request)).toEqual(saved);
   expect((await store.list(member, channelId)).sessions).toContainEqual(saved);
   await expect(store.list(outsider, channelId)).rejects.toThrow(
-    "Channel not found",
+    "Couldn't find that conversation.",
   );
   await expect(store.save(outsider, input())).rejects.toThrow(
-    "Channel not found",
+    "Couldn't find that conversation.",
   );
   await expect(store.save(member, request)).rejects.toThrow("already in use");
   await expect(

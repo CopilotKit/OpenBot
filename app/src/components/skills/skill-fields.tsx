@@ -91,7 +91,7 @@ export function SkillFields({
                 ) : (
                   <p className="text-muted-foreground text-xs">
                     {slugLocked ? (
-                      "A command cannot be changed. To rename a skill, write a new one and delete this."
+                      "You can't change a command. To rename this skill, write a new one and delete this one."
                     ) : (
                       <>
                         What you type after a slash.{" "}
@@ -174,15 +174,15 @@ export function SkillFields({
                   name={field.name}
                   onBlur={field.handleBlur}
                   onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="Summarise what I did yesterday from the channel, then list what is left."
+                  placeholder="Summarise what I did yesterday in this conversation, then list what is left."
                   value={field.state.value}
                 />
                 {isInvalid ? (
                   <FieldError errors={field.state.meta.errors} />
                 ) : (
                   <p className="text-muted-foreground text-xs">
-                    Added to the run when the command is used. Write it as
-                    instructions to the Bot, not as a description of them.
+                    What the Bot is told when you use the command. Write it as
+                    instructions to the Bot.
                   </p>
                 )}
               </Field>

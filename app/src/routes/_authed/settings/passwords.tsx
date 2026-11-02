@@ -1,4 +1,4 @@
-import { IconKey, IconTrash } from "@tabler/icons-react";
+import { IconKey, IconLockOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -37,22 +37,20 @@ function PasswordsPage() {
   return (
     <PageShell
       title="Passwords"
-      description="Logins you saved when signing a Bot in to a website. A Bot never sees them, and each use needs your confirmation."
+      description="Manage saved website logins. Bots cannot see your passwords, and you approve each use."
     >
       <PageSection title="Saved logins">
         {logins.isPending ? null : logins.error ? (
           <p className="text-destructive text-sm" role="alert">
-            Could not load your passwords.
+            Couldn't load your passwords. Reload the page.
           </p>
         ) : !logins.data.passwordManager ? (
-          <PageEmpty>
-            Saved passwords are turned off for this workspace. Existing logins
-            are kept but not offered.
+          <PageEmpty icon={IconLockOff} title="Saved passwords are off">
+            An admin turned them off. Your logins are kept but won't be offered.
           </PageEmpty>
         ) : logins.data.logins.length === 0 ? (
-          <PageEmpty>
-            No saved logins. Choose Save to Passwords when you sign a Bot in to
-            a website.
+          <PageEmpty icon={IconKey} title="No saved logins yet">
+            Choose Save to Passwords when you sign a Bot in to a website.
           </PageEmpty>
         ) : (
           <PageRows>
@@ -74,7 +72,7 @@ function PasswordsPage() {
                   </ItemContent>
                   <ItemActions>
                     <Button
-                      aria-label={`Delete the login for ${login.origin}`}
+                      aria-label={`Delete login for ${login.origin}`}
                       size="sm"
                       variant="ghost"
                       disabled={remove.isPending}

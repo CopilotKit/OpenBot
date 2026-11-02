@@ -32,10 +32,17 @@ const rules: {
 }[] = [];
 
 const broker = {
+  // This stub stands in for Composio, whose grant is held locally and which runs no
+  // correlated authorization flow; see `ConnectedAppBroker.grantIsLocal` and `.authorizations`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => [],
   ensureAuthConfig: async () => "standing",
   deleteAuthConfig: async () => {},
-  authorize: async () => ({ redirectUrl: "x" }),
+  authorize: async () => ({ redirectUrl: "x", authorizationId: null }),
   isConnected: async () => true,
   revoke: async ({ account }) => {
     if (account.vendorUserId === failRevokeFor)
@@ -50,6 +57,7 @@ const broker = {
 } satisfies ConnectedAppBroker;
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: {} as never,
@@ -59,7 +67,7 @@ const store = createPluginStore({
   deploymentId: "acme",
   sharedUse: async () => ({ allowed: true }),
 });
-const sharedUse = createSharedUseStore(database);
+const sharedUse = createSharedUseStore(database, "composio");
 const modes = createAccountModeSwitch({
   store,
   sharedUse,

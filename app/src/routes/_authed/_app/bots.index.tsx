@@ -1,10 +1,13 @@
 import { IconPlus } from "@tabler/icons-react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
-import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
+import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+
+/** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
+const SHEET_CLOSE_MS = 240;
 
 /** Creating a Bot is a search-parameter state, so the roster stays mounted and Back closes it. */
 export const Route = createFileRoute("/_authed/_app/bots/")({
@@ -22,25 +25,36 @@ function BotsPage() {
           render={(props) => (
             <Link {...props} search={{ new: true }} to="/bots" />
           )}
-          size="lg"
+          size="sm"
+          variant="ghost"
         >
           <IconPlus />
           New Bot
         </Button>
       }
-      description="Every Bot you can reach: what each is doing, what it needs from you, and whether it is paused."
+      description="Manage your Bots and access those shared with you."
       title="Bots"
     >
       <BotRoster />
-      <CreateAgentDialog
+      <NewBotSheet
         onClose={() => void navigate({ search: {} })}
-        onCreated={(agentId) =>
-          void navigate({
-            params: { agentId },
-            search: {},
-            to: "/bots/$agentId",
-          })
-        }
+        onCreated={(agentId) => {
+          /*
+           * Close first, then go. Navigating straight to the Bot unmounted this page with the sheet
+           * still on it, so it vanished instead of sliding away. Replacing the `?new` entry means Back
+           * from the new Bot lands on the roster, not on an empty sheet.
+           */
+          void navigate({ replace: true, search: {} });
+          window.setTimeout(
+            () =>
+              void navigate({
+                params: { agentId },
+                search: {},
+                to: "/bots/$agentId",
+              }),
+            SHEET_CLOSE_MS,
+          );
+        }}
         open={creating === true}
       />
     </PageShell>

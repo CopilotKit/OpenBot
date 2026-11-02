@@ -12,14 +12,14 @@ describe("linkedNotice", () => {
   test("reports a failed link", () => {
     expect(linkedNotice("failed")).toEqual({
       tone: "error",
-      text: "Your GitHub account could not be linked. Try again.",
+      text: "Couldn't link your GitHub account. Try again.",
     });
   });
 
   test("tells the person the GitHub account belongs to another user, as an alert", () => {
     expect(linkedNotice("github-taken")).toEqual({
       tone: "error",
-      text: "That GitHub account is already linked to another OpenBot user. Sign in to GitHub as a different account and connect again, or ask your OpenBot administrator for help.",
+      text: "That GitHub account is linked to someone else in OpenBot. Sign in to GitHub with another account and try again, or ask an admin.",
     });
   });
 

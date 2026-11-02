@@ -16,10 +16,15 @@ export type AgentInput = {
   endpoint?: string;
   /** Write-only auth value; omitted when the user leaves the key field empty. */
   auth?: { header: string; value: string };
+  /**
+   * A computer of its own. Omitted leaves it as it is, so an edit to anything else never moves a
+   * Bot between computers; only the Isolated control sends it.
+   */
+  isolated?: boolean;
 };
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
-const FALLBACK = "Coworker operation failed";
+const FALLBACK = "Couldn't save that change to the Bot.";
 
 /** Server-derived fields are invalidated instead of patched by hand. */
 function invalidateAgents(queryClient: QueryClient) {

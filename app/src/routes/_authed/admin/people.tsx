@@ -1,4 +1,10 @@
-import { IconLock, IconShieldCheck, IconUser } from "@tabler/icons-react";
+import {
+  IconLock,
+  IconSearch,
+  IconShieldCheck,
+  IconUser,
+  IconUsers,
+} from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -58,7 +64,7 @@ function describe(person: Person): string {
   if (person.revoked)
     return `Access removed · ${providers || "no provider"} · ${when}`;
   if (person.configuredAdmin) {
-    return `Administrator by configuration · ${when}`;
+    return `Admin by configuration · ${when}`;
   }
   return `${providers || "no provider"} · ${when}`;
 }
@@ -89,11 +95,11 @@ function PeoplePage() {
 
   return (
     <PageShell
-      description="Everybody who has signed in. Administrators reach these screens; everybody else talks to Bots."
+      description="Manage access for people who have signed in. Only admins can access the Admin pages."
       title="People"
     >
       <PageSection
-        description="An address named in INITIAL_ADMIN_EMAILS is an administrator whatever this screen says, so it cannot be changed here."
+        description="Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
         title="Who is here"
       >
         {failure ? (
@@ -106,7 +112,7 @@ function PeoplePage() {
             Stopped {terminate.data.stopped.length}{" "}
             {terminate.data.stopped.length === 1 ? "computer" : "computers"}
             {terminate.data.failed.length > 0
-              ? `; ${terminate.data.failed.length} could not be stopped`
+              ? `. ${terminate.data.failed.length} couldn't be stopped`
               : ""}
             . Their disks are kept.
           </p>
@@ -125,13 +131,16 @@ function PeoplePage() {
 
         {people.isPending ? null : people.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Could not load people.
+            Couldn't load people. Reload the page.
           </p>
         ) : rows.length === 0 ? (
-          <PageEmpty>
+          <PageEmpty
+            icon={query ? IconSearch : IconUsers}
+            title={query ? "No matches" : "Nobody has signed in yet"}
+          >
             {query
-              ? `Nobody here matches "${query}".`
-              : "Nobody has signed in yet. People appear here once they do."}
+              ? `Nobody matches "${query}".`
+              : "People show here once they do."}
           </PageEmpty>
         ) : (
           <PageRows>
@@ -186,7 +195,7 @@ function PeoplePage() {
                         {person.revoked ? "Restore" : "Remove"}
                       </Button>
                       <Switch
-                        aria-label={`Administrator: ${person.email}`}
+                        aria-label={`Admin: ${person.email}`}
                         checked={person.role === "admin"}
                         disabled={busy || person.configuredAdmin || isSelf}
                         onCheckedChange={(checked) =>

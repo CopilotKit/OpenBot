@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import type { BotAccessCheck } from "../src/agents/profile-policy";
 import type { AppVariables } from "../src/auth/guards";
-import type { BotAccessCheck } from "../src/plugins/routes";
-import { createPluginRoutes } from "../src/plugins/routes";
-import type { PluginStore } from "../src/plugins/store";
 import { createComponentRoutes } from "../src/components/routes";
 import { ComponentNotFoundError } from "../src/components/store";
+import { createPluginRoutes } from "../src/plugins/routes";
+import type { PluginStore } from "../src/plugins/store";
 
 const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
   context,
@@ -23,6 +23,7 @@ const canUseBot: BotAccessCheck = async () => true;
 
 function pluginAppWith(calls: { skills: unknown[] }) {
   const store = {
+    brokerProvider: "composio" as const,
     installSkill: async (input: unknown) => {
       calls.skills.push(input);
       return { ok: true };

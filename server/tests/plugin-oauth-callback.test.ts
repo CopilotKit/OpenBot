@@ -26,8 +26,7 @@ const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 const CALLBACK = "http://t/api/plugins/oauth/callback";
 
-const FAILED =
-  "https://app.example/settings/connected-accounts?connected=failed";
+const FAILED = "https://app.example/connections?connected=failed";
 
 function signedIn(): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (context, next) => {
@@ -63,6 +62,7 @@ function app(input: {
   oauthClientFor?: () => Promise<{ clientId: string; clientSecret: string }>;
 }) {
   const store = {
+    brokerProvider: "composio" as const,
     // The brokered read the connect handler makes before anything about the consent flow. This
     // deployment has no brokered rows, so it answers nothing and the flow below is untouched.
     serverAddress: async () => undefined,
@@ -132,7 +132,7 @@ describe("a consent that came back the way it left", () => {
     const asked = await withWillingVendor(async (asked) => {
       const response = await hono.request(callbackUrl(state));
       expect(response.headers.get("location")).toBe(
-        "https://app.example/settings/connected-accounts/notion",
+        "https://app.example/connections/notion",
       );
       return asked;
     });

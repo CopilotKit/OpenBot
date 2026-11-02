@@ -104,7 +104,7 @@ test("a proposal still streaming shows nothing to press", async () => {
 
   // Awaited rather than read synchronously: the router mounts its route on a later tick, so nothing
   // at all is in the document on the first one.
-  expect(await view.findByText("Writing the coworker…")).toBeTruthy();
+  expect(await view.findByText("Writing the Bot…")).toBeTruthy();
   expect(view.queryByRole("button")).toBeNull();
 });
 

@@ -16,6 +16,7 @@ export type AuthenticatedUser = {
   id: string;
   email: string;
   name?: string | null;
+  needsName?: boolean;
   image?: string | null;
   role: "admin" | "user";
   /** Null means this deployment does not track onboarding, which reads as nothing to finish. */

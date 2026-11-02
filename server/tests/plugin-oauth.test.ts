@@ -221,14 +221,13 @@ describe("PKCE", () => {
     expect(createVerifier()).not.toBe(createVerifier());
   });
 
-  test("a challenge is the S256 of the verifier, not the verifier", () => {
-    // `plain` would make the challenge worthless: anybody who intercepted the authorization request
-    // would hold the value needed to redeem the code.
-    const verifier = "a".repeat(43);
-    const challenge = challengeFor(verifier);
-    expect(challenge).not.toBe(verifier);
-    expect(challenge).toMatch(/^[A-Za-z0-9\-_]+$/);
+  test("derives the S256 challenge from the verifier", () => {
+    // RFC 7636 Appendix B: https://www.rfc-editor.org/rfc/rfc7636#appendix-B
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     expect(challengeFor(verifier)).toBe(challenge);
+    // Also reject an implementation that always returns the published example.
+    expect(challengeFor("a".repeat(43))).not.toBe(challenge);
   });
 });
 
@@ -382,7 +381,7 @@ describe("where the callback sends somebody afterwards", () => {
       connectedAccountsUrlFor("http://localhost:3010", {
         serverId: "google-drive",
       }),
-    ).toBe("http://localhost:3010/settings/connected-accounts/google-drive");
+    ).toBe("http://localhost:3010/connections/google-drive");
   });
 
   test("success carries no outcome, because the account already says it", () => {
@@ -399,7 +398,7 @@ describe("where the callback sends somebody afterwards", () => {
       connectedAccountsUrlFor("http://localhost:3010", {
         serverId: "../../admin",
       }),
-    ).toBe("http://localhost:3010/settings/connected-accounts/..%2F..%2Fadmin");
+    ).toBe("http://localhost:3010/connections/..%2F..%2Fadmin");
   });
 
   test("failure goes to the list, which is the screen that says so", () => {
@@ -411,9 +410,7 @@ describe("where the callback sends somebody afterwards", () => {
      */
     expect(
       connectedAccountsUrlFor("http://localhost:3010", { failed: true }),
-    ).toBe(
-      "http://localhost:3010/settings/connected-accounts?connected=failed",
-    );
+    ).toBe("http://localhost:3010/connections?connected=failed");
   });
 
   test("still points somewhere when no app URL is configured", () => {
@@ -421,7 +418,7 @@ describe("where the callback sends somebody afterwards", () => {
     // only case where `appUrl` can be absent and the deployment still works.
     expect(
       connectedAccountsUrlFor(undefined, { serverId: "google-drive" }),
-    ).toBe("/settings/connected-accounts/google-drive");
+    ).toBe("/connections/google-drive");
   });
 
   test("a connect started on the admin page returns to the admin page", () => {
@@ -448,9 +445,7 @@ describe("where the callback sends somebody afterwards", () => {
         { failed: true },
         "admin",
       ),
-    ).toBe(
-      "http://localhost:3010/settings/connected-accounts?connected=failed",
-    );
+    ).toBe("http://localhost:3010/connections?connected=failed");
   });
 });
 

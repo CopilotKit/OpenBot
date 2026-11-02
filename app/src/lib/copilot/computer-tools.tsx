@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
+import { HelpRequestCard } from "@/components/computer/help-request-card";
 import { tryClient } from "@/lib/client";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
@@ -13,7 +14,10 @@ import {
 } from "@/lib/computers/handoff";
 import { useActiveBotHolder } from "./active-bot";
 import { useFrontendTool } from "./approval-tools";
-import { useComputerAvailable } from "./computer-available";
+import {
+  useComputerAvailable,
+  useComputerToolsOffered,
+} from "./computer-available";
 
 /**
  * Frontend registrations for computer tools, including inline rendering and policy-refusal display.
@@ -58,6 +62,8 @@ type ComputerOutcome = {
   refused?: boolean;
   reason?: string;
   staleRefs?: boolean;
+  /** The computer was still starting and the call was not performed. */
+  starting?: boolean;
   elements?: unknown[];
   element?: { role?: string; name?: string };
   /** What a shell call reports back, so the line can show the output rather than only the command. */
@@ -157,6 +163,7 @@ function ActionLine({
   running,
   refused,
   failed,
+  notYet,
 }: {
   label: string;
   detail?: string;
@@ -165,35 +172,62 @@ function ActionLine({
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /** The computer was still starting, so nothing was done yet. See `stillStarting`. */
+  notYet?: boolean;
 }) {
   return (
     <ToolLine
-      detail={detail}
+      detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
       label={label}
+      notYet={notYet}
       refused={refused}
       running={running}
     />
   );
 }
 
+/** What a line says about a call that waited on a computer still starting. */
+const STILL_STARTING_DETAIL = "The computer is still starting.";
+
 /** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
 function didNotWork(outcome: ComputerOutcome): boolean {
-  return outcome.ok === false && outcome.refused !== true;
+  return (
+    outcome.ok === false &&
+    outcome.refused !== true &&
+    outcome.starting !== true
+  );
+}
+
+/**
+ * Whether a call came back because the computer was still starting, and so did nothing.
+ *
+ * Not a failure, and not drawn as one. A cold start can outlast the server's wait, and when it does
+ * the call is turned away before anything reaches the computer. Drawn as "didn't work" in amber, it
+ * read as a broken computer during the one minute every first start takes.
+ */
+function stillStarting(outcome: ComputerOutcome): boolean {
+  return outcome.ok === false && outcome.starting === true;
 }
 
 export function ComputerTools() {
   const bot = useActiveBotHolder();
-  // Not offered to a Team Bot's teammates; see useComputerAvailable.
+  /*
+   * Not offered to a Team Bot's teammates, and not offered where this deployment's capability
+   * switches would refuse them; see computerToolsOffered.
+   */
+  const offered = useComputerToolsOffered();
+  // Audit bookkeeping rather than a computer action, so it answers only the first question.
   const available = useComputerAvailable();
 
   useFrontendTool({
-    available,
+    available: offered.navigate,
     name: "computer_navigate",
     description:
-      "Open a web page on your own computer so the person can watch. Use this when asked to look " +
-      "at, visit, open or check a website. Returns the page title and its readable text, so answer " +
-      "from what comes back rather than telling the person to go and look.",
+      "Open a web page on your own computer so the person can watch. Use this when asked to open, " +
+      "visit or read a particular website. It is not a web search: never open a search engine with " +
+      "it to look something up. Returns the page title and its readable text, so answer from what " +
+      "comes back rather than telling the person to go and look.",
     parameters: z.object({
       url: z.string().describe("Full web address to open, including https://"),
     }),
@@ -257,7 +291,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_read",
     description:
       "Read the page currently open on your computer, without opening anything. Use this after you " +
@@ -274,7 +308,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_snapshot",
     description:
       "List the things on the current page you can act on: fields, buttons, links and checkboxes, " +
@@ -308,7 +342,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_type",
     description:
       "Enter text into a field on the page. Give the ref of the field from your most recent " +
@@ -354,12 +388,13 @@ export function ComputerTools() {
         }
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
       />
     ),
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_click",
     description:
       "Click something on the page: a button, a link, a checkbox or a radio option. Give the ref " +
@@ -400,13 +435,14 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_key",
     description:
       "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
@@ -443,12 +479,13 @@ export function ComputerTools() {
         detail={typeof args?.key === "string" ? args.key : undefined}
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
       />
     ),
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_request_secret",
     description:
       "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
@@ -546,7 +583,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_request_help",
     description:
       "Ask the person to take control of your computer and do something you cannot: sign in, enter a " +
@@ -570,12 +607,19 @@ export function ComputerTools() {
         toolCall,
       }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
     ) => runHelpRequest(bot.current, input.reason, toolCall?.id, signal),
-    // Rendered by ComputerView as the take-the-wheel prompt.
-    render: () => null,
+    // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
+    render: ({ args, result, toolCallId }) => (
+      <HelpRequestCard
+        botId={bot.current}
+        reason={typeof args?.reason === "string" ? args.reason : undefined}
+        result={result}
+        toolCallId={toolCallId}
+      />
+    ),
   });
 
   useFrontendTool({
-    available,
+    available: offered.computer,
     name: "computer_list_files",
     description:
       "List what is in your workspace: every file and folder you have saved, with sizes. Call this " +
@@ -617,13 +661,14 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
   });
 
   useFrontendTool({
-    available,
+    available: offered.computer,
     name: "computer_read_file",
     description:
       "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, " +
@@ -663,13 +708,14 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
   });
 
   useFrontendTool({
-    available,
+    available: offered.computer,
     name: "computer_run_command",
     description:
       "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
@@ -740,6 +786,7 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome) || exit !== 0}
+          notYet={stillStarting(outcome)}
         >
           {status === "complete" ? (
             <CommandOutput
@@ -755,7 +802,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available,
+    available: offered.computer,
     name: "computer_write_file",
     description:
       "Save a file in your own workspace so you still have it later. Paths are relative to your " +
@@ -817,13 +864,14 @@ export function ComputerTools() {
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
         />
       );
     },
   });
 
   useFrontendTool({
-    available,
+    available: offered.browser,
     name: "computer_scroll",
     description:
       "Scroll the page down, or up with a negative amount, to bring more of a long page into view.",
@@ -852,6 +900,7 @@ export function ComputerTools() {
         label="Scrolled"
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
       />
     ),
   });

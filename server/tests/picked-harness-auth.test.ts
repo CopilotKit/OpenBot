@@ -219,7 +219,10 @@ async function runPicked(options: {
     );
     expect(capabilities.status).toBe(200);
     expect(await capabilities.json()).toEqual({
-      capabilities: { builtInAvailable: options.bundled },
+      capabilities: {
+        builtInAvailable: options.bundled,
+        isolationAvailable: false,
+      },
     });
     const vault = options.customerAuth
       ? {

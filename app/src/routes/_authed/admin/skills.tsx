@@ -94,7 +94,7 @@ function RouteComponent() {
           Write a skill
         </Button>
       }
-      description="Named instructions anybody here can invoke with a slash. A skill adds no capability: it can only ask a Bot to use what that Bot already holds, and every one of those calls is still decided and recorded."
+      description="Create reusable instructions people can run with /. Skills use a Bot’s existing permissions and do not grant additional access."
       title="Skills"
     >
       {error ? (
@@ -104,16 +104,30 @@ function RouteComponent() {
       ) : null}
 
       <PageSection
-        description="Written for the whole deployment. People write their own on their Skills page."
+        description="Manage skills shared across this deployment. People can create personal skills on their Skills page."
         title="Installed"
       >
         {/* A read that failed says so; `isPending` goes false on it too, and it is not "none". */}
         {plugins.isPending ? null : !plugins.data ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Skills could not be loaded.
+            Couldn't load skills. Reload the page.
           </p>
         ) : skills.length === 0 ? (
-          <PageEmpty>No skills yet.</PageEmpty>
+          <PageEmpty
+            action={
+              <Button
+                onClick={() => setWriting(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <IconPlus />
+                Write a skill
+              </Button>
+            }
+            icon={IconFileText}
+            title="No skills yet"
+          />
         ) : (
           <PageRows>
             {skills.map((skill, index) => (
@@ -178,11 +192,11 @@ function RouteComponent() {
       <Dialog onOpenChange={setWriting} open={writing}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Write a skill for the deployment</DialogTitle>
+            <DialogTitle>Write a skill for everybody</DialogTitle>
             <DialogDescription>
-              The slug is what a person types after a slash, and the
-              instructions are added to the run when they do. Everybody here can
-              use it, and you decide which Bots have it.
+              People type the slug after /. The Bot then follows the
+              instructions. Everybody can use it, and you choose which Bots have
+              it.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">

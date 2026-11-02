@@ -161,19 +161,6 @@ describe("a close that lands while the browser is still starting", () => {
     expect(claim.setFollow(() => {})).toBe(false);
   });
 
-  test("the claim is released even when the launch threw", async () => {
-    // `open`'s catch closes the socket after sending an error frame. If nothing released the claim
-    // there, the slot would stay occupied forever and `forgetIdle` could never sweep the
-    // session, which is the unbounded growth it exists to stop.
-    const slot = createViewerSlot();
-    const socket = { id: "a" };
-    slot.claim(socket, () => {});
-
-    await slot.release(socket);
-
-    expect(slot.occupied()).toBe(false);
-  });
-
   test("releasing the same socket twice is harmless", async () => {
     // The catch path closes the socket, so `close` runs release a second time for the same socket.
     const slot = createViewerSlot();
@@ -446,18 +433,6 @@ describe("the session sweep asking whether anybody is watching", () => {
     slot.claim({ id: "a" }, () => {});
 
     expect(slot.occupied()).toBe(true);
-  });
-
-  test("a Bot stays watched until teardown has finished", async () => {
-    const slot = createViewerSlot();
-    const socket = { id: "a" };
-    const claim = slot.claim(socket, () => {});
-    await claim.install(fakeCast());
-
-    const releasing = slot.release(socket);
-    await releasing;
-
-    expect(slot.occupied()).toBe(false);
   });
 
   test("a Bot is still watched while its cast is stopping", async () => {

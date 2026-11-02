@@ -83,7 +83,7 @@ describe("SharedAppNotice", () => {
     });
     expect(
       view.getByText(
-        /Team GitHub calls from this Bot are refused until an administrator approves/,
+        /can't use the shared Team GitHub account until an admin approves/,
       ),
     ).toBeTruthy();
     await userEvent.click(ask);
@@ -98,19 +98,21 @@ describe("SharedAppNotice", () => {
     pending = [{ serverId: "gh", id: "r0" }];
     const view = draw();
     expect(
-      await view.findByText("Waiting for an administrator: shared Team GitHub"),
+      await view.findByText(
+        "Waiting for an admin to approve the shared Team GitHub account.",
+      ),
     ).toBeTruthy();
     expect(view.queryByRole("button")).toBeNull();
   });
 
-  test("an administrator is told saving approves it", async () => {
+  test("an admin is told saving approves it", async () => {
     role = "admin";
     apps = [gh(true)];
     pending = [];
     const view = draw();
     expect(
       await view.findByText(
-        /Saving also approves the shared Team GitHub account for whoever can reach this Bot/,
+        /Saving also lets everyone who can use this Bot use the shared Team GitHub account/,
       ),
     ).toBeTruthy();
   });

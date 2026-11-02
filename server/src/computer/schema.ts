@@ -133,6 +133,8 @@ export type SnapshotElement = {
   type?: string;
   disabled?: boolean;
   checked?: boolean;
+  /** A native dropdown's choices, by label. A Bot chooses one by typing it into the dropdown. */
+  options?: string[];
 };
 
 export type SnapshotResult = {

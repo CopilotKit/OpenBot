@@ -54,9 +54,9 @@ function appFor(baseUrl: string) {
   const rows: AuditEventInput[] = [];
   const provider: ComputerProvider = {
     name: "test",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => baseUrl,
-    status: async (botId) => ({ botId, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
     list: async () => [],
