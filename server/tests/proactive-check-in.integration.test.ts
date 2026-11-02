@@ -418,6 +418,8 @@ function replica(
     reachable?: boolean;
     /** Its own connection pool, as another replica has. */
     store?: ProactiveStore;
+    /** The catalogue it names apps from; the deployment's own unless a test watches it. */
+    catalogue?: Pick<typeof plugins, "listServers">;
   } = {},
 ) {
   const requests: RunAgentInput[] = [];
@@ -476,7 +478,7 @@ function replica(
     ...(options.admin ? { admin: options.admin } : {}),
     ...(options.tasks ? { tasks: options.tasks } : {}),
     ...(options.readableApps ? { readableApps: options.readableApps } : {}),
-    catalogue: plugins,
+    catalogue: options.catalogue ?? plugins,
     deniedToolNames: async () => options.denied ?? [],
     mintThreadId: () => `check-in-thread-${randomUUID()}`,
   });
@@ -1195,6 +1197,45 @@ describe("how a check-in ends", () => {
     const next = replica();
     await next.engine.sweep();
     expect(afterOf(next.turns[0]?.instruction)).toBe(reachedStarted);
+  });
+});
+
+describe("what a check-in costs the catalogue", () => {
+  test("one check-in lists the apps once, however many it names: what it raised, a memory, and every app it couldn't reach", async () => {
+    await due(inbox);
+    let listed = 0;
+    const counted = {
+      listServers: () => {
+        listed += 1;
+        return plugins.listServers();
+      },
+    };
+    const raising = calling([
+      raise("Send the venue deposit", "The hold ends Friday."),
+      raise("Confirm the review time", "Dana asked about Friday."),
+      raise("Sign off the audit letter", "The auditors need it by noon."),
+      {
+        name: "form_memory",
+        args: { content: `Runs the offsite ${suite}`, sourceTool: READ_TOOL },
+      },
+    ]);
+    const { engine } = replica({
+      catalogue: counted,
+      model: async (input, afterTools) => {
+        if (!afterTools) {
+          await failRead(input.runId, listEvents);
+          await failRead(input.runId, `${diary}/get_event`);
+        }
+        return raising(input, afterTools);
+      },
+    });
+    await engine.sweep();
+
+    expect((await runsOf(inbox))[0]).toMatchObject({
+      outcome: "raised",
+      itemsRaised: 3,
+    });
+    expect(listed).toBe(1);
   });
 });
 

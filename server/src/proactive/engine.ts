@@ -253,25 +253,46 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
    */
   const running = new Map<
     string,
-    { setting: ProactiveSetting; reached: boolean }
+    { setting: ProactiveSetting; reached: boolean; catalogue: Catalogue }
   >();
 
-  async function serverFor(ref: string) {
-    const servers = await deps.catalogue.listServers();
-    return servers.find((server) =>
+  /**
+   * The deployment's apps, listed once for one check-in however many it names: each item raised,
+   * each memory and each app it couldn't reach. A listing that failed is not kept, so the next name
+   * asks again.
+   */
+  type Catalogue = () => ReturnType<
+    ProactiveEngineDeps["catalogue"]["listServers"]
+  >;
+  function catalogueOnce(): Catalogue {
+    let listed: ReturnType<Catalogue> | undefined;
+    return () => {
+      listed ??= deps.catalogue.listServers().catch((error: unknown) => {
+        listed = undefined;
+        throw error;
+      });
+      return listed;
+    };
+  }
+  async function serverFor(catalogue: Catalogue, ref: string) {
+    return (await catalogue()).find((server) =>
       server.tools.some((tool) => tool.ref === ref),
     );
   }
   /** The app a tool belongs to, by the name the person knows it by. */
-  async function appOf(ref: string) {
-    return (await serverFor(ref))?.title ?? ref.split("/")[0] ?? ref;
+  async function appOf(catalogue: Catalogue, ref: string) {
+    return (await serverFor(catalogue, ref))?.title ?? ref.split("/")[0] ?? ref;
   }
   /**
    * The apps this run tried to read and could not: every call to them failed, and none answered.
    * One that answered once was reached, so a lookup that came back "not found" after a listing, or
    * a call that worked when the model tried it again, is not an app that was down.
    */
-  async function unreached(reads: ProactiveRead[], runId: string) {
+  async function unreached(
+    reads: ProactiveRead[],
+    runId: string,
+    catalogue: Catalogue,
+  ) {
     const serverOf = (ref: string) => ref.split("/")[0] ?? ref;
     const answered = new Set(reads.map((read) => serverOf(read.ref)));
     const failed = new Map<string, string>();
@@ -279,7 +300,11 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       if (!answered.has(serverOf(ref)) && !failed.has(serverOf(ref)))
         failed.set(serverOf(ref), ref);
     return [
-      ...new Set(await Promise.all([...failed.values()].map(appOf))),
+      ...new Set(
+        await Promise.all(
+          [...failed.values()].map((ref) => appOf(catalogue, ref)),
+        ),
+      ),
     ].sort();
   }
   /** A read this run actually made, matched by ref or by the model-facing tool name. */
@@ -293,6 +318,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
   function toolsForRun(
     setting: ProactiveSetting,
     runId: string,
+    catalogue: Catalogue,
   ): HeadlessTool[] {
     const tool = <T>(
       name: string,
@@ -343,7 +369,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
             throw new ProactiveRefusedError(
               "Name a tool you successfully read with in this check-in as sourceTool. A next step needs a source.",
             );
-          const sourceApp = await appOf(read.ref);
+          const sourceApp = await appOf(catalogue, read.ref);
           // Refused if any of the person's Bots already has it, checked and written under one lock.
           const row = await deps.store.raise(
             {
@@ -395,7 +421,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
             throw new ProactiveRefusedError(
               "A memory needs a source: name a tool you successfully read with in this run.",
             );
-          const server = await serverFor(read.ref);
+          const server = await serverFor(catalogue, read.ref);
           memories += 1;
           return deps.memory.formMemory(setting.ownerUserId, {
             agentId: setting.agentId,
@@ -544,7 +570,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         setting.ownerUserId,
         setting.agentId,
       );
-      const turn = { setting, reached: false };
+      const turn = { setting, reached: false, catalogue: catalogueOnce() };
       running.set(runId, turn);
       const instruction = researchInstruction(
         setting,
@@ -597,7 +623,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         thrown,
         raised,
         reads: reads.length,
-        unreached: await unreached(reads, runId),
+        unreached: await unreached(reads, runId, turn.catalogue),
       });
       await deps.store.finishRun(runId, {
         outcome,
@@ -714,7 +740,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         return [];
       // The runner asks for a turn's tools once it admitted the turn, just before the model.
       turn.reached = true;
-      const own = toolsForRun(setting, runId);
+      const own = toolsForRun(setting, runId, turn.catalogue);
       const ownNames = new Set(own.map((tool) => tool.definition.name));
       const denied = (
         (await deps.deniedToolNames?.(input.ownerUserId, input.agentId)) ?? []
