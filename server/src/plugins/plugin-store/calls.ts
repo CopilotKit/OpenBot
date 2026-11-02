@@ -15,7 +15,12 @@ import {
   vendorNameOf,
 } from "../../db/schema";
 import { isProactiveInitiator } from "../../proactive/initiator";
-import { classifyTool, labelledRead, tokenHeaderFor } from "../catalogue";
+import {
+  classifyTool,
+  labelledRead,
+  reviewedRead,
+  tokenHeaderFor,
+} from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
@@ -499,13 +504,14 @@ export function callMethods(context: StoreContext) {
         target: { serverId, toolName, url: row.url, effect },
         continuation: currentApprovalContext(),
         /*
-         * Whether this is a read with the trust a check-in gives it: an app the person connected with
-         * their own account, and a tool whose server says it only reads. Chat judges the call by
-         * `effect` alone, as before; a task's conversation lets this, and only this, run unasked.
+         * Whether this is a reviewed read of the person's own app: an app they connected with their
+         * own account, and a tool a reviewed read list names (`reviewedRead`). A label is not enough
+         * here, though a check-in trusts one: a task's conversation lets this, and only this, run
+         * unasked. Chat judges the call by `effect` alone, as before.
          */
         ...(access.ownCredential &&
         advertised[0] &&
-        labelledRead(entry, toolName, advertised[0])
+        reviewedRead(entry, toolName, advertised[0])
           ? { ownConnectionRead: true as const }
           : {}),
       });

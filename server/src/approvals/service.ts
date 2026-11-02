@@ -281,10 +281,10 @@ export function createApprovalService(
        * A TASK STARTED FROM A CHECK-IN ASKS BEFORE EVERYTHING BUT A TRUSTED READ, whatever the
        * person's own switch or rules would allow: the work came from something a Bot noticed, not
        * something the person wrote out, so they see each step before it happens. The one thing it
-       * does unasked is what a check-in may do in the background: read an app the person connected
-       * with their own account, with a tool its server says only reads (`ownConnectionRead`). A read
-       * chat would run freely (a page, a search on the deployment's key) asks here too, and a
-       * stricter answer (a hand-off, a refusal) still stands.
+       * does unasked is read an app the person connected with their own account, with a tool a
+       * reviewed read list names (`ownConnectionRead`). A tool only labelled a read, by its server or
+       * a broker, asks; so does a read chat would run freely (a page, a search on the deployment's
+       * key). A stricter answer (a hand-off, a refusal) still stands.
        */
       const inTask =
         continuation?.threadId !== undefined &&

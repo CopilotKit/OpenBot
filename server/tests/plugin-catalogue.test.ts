@@ -8,6 +8,7 @@ import {
   hostAdmissible,
   labelledRead,
   resolveServerUrl,
+  reviewedRead,
   serverCredentialKind,
 } from "../src/plugins/catalogue";
 
@@ -333,6 +334,56 @@ describe("what a check-in may call: the tool's own read-only label", () => {
     expect(classifyTool(notion, "notion-a-new-reader", true, null)).toBe(
       "write",
     );
+  });
+});
+
+describe("what a task runs without asking: a read a reviewed list names", () => {
+  const notion = catalogueEntry("notion");
+  const drive = catalogueEntry("google-drive");
+  const nothing = { destructive: false };
+
+  test("a name on a reviewed read list is one", () => {
+    expect(reviewedRead(notion, "notion-fetch", nothing)).toBe(true);
+    expect(reviewedRead(notion, "notion-search", nothing)).toBe(true);
+    // Drive's adapter advertises exactly these, and the entry now names them.
+    for (const name of [
+      "search_files",
+      "list_recent_files",
+      "get_file_metadata",
+      "read_file_content",
+    ])
+      expect(reviewedRead(drive, name, nothing)).toBe(true);
+  });
+
+  test("a label is not a review: the server's readOnlyHint, a broker's tag and a missing write are all asked about", () => {
+    // A tool Notion added later, which its own server says only reads. The hint is a hint.
+    expect(reviewedRead(notion, "notion-get-request", nothing)).toBe(false);
+    // A broker's read tag, which Composio assigns best-effort from the description.
+    expect(reviewedRead(null, "GMAIL_FETCH_EMAILS", nothing)).toBe(false);
+    // An entry that names no reads: being off its write list says nothing.
+    const parallel = catalogueEntry("parallel");
+    expect(parallel?.readTools).toBeUndefined();
+    expect(reviewedRead(parallel, "web_search_preview", nothing)).toBe(false);
+  });
+
+  test("a reviewed write or a destructive label always wins", () => {
+    expect(reviewedRead(notion, "notion-update-page", nothing)).toBe(false);
+    expect(reviewedRead(drive, "create_file", nothing)).toBe(false);
+    expect(reviewedRead(notion, "notion-fetch", { destructive: true })).toBe(
+      false,
+    );
+  });
+
+  test("Drive's chat answer is unchanged by naming its reads", () => {
+    expect(drive?.readTools).toEqual([
+      "search_files",
+      "list_recent_files",
+      "get_file_metadata",
+      "read_file_content",
+    ]);
+    expect(
+      drive?.readTools?.filter((name) => drive.writeTools.includes(name)),
+    ).toEqual([]);
   });
 });
 

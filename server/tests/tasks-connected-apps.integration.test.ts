@@ -85,6 +85,8 @@ const NOTION = "notion";
 const EXA = "exa";
 /** A request the person was sent, behind a tool Notion has not had reviewed: its server says it reads. */
 const GET_REQUEST = "notion-get-request";
+/** A page, behind a tool on Notion's reviewed read list. */
+const FETCH = "notion-fetch";
 /** A reviewed Notion write, and a send to other people. */
 const COMMENT = "notion-create-comment";
 /** Web search on the deployment's own access: a read in chat, and nobody's own account. */
@@ -137,6 +139,29 @@ function notionServer() {
             text: JSON.stringify({
               id,
               from: "Sam",
+              text: "Can you send the spec by Friday?",
+            }),
+          },
+        ],
+      };
+    },
+  );
+  mcp.registerTool(
+    FETCH,
+    {
+      description: "Read one page, by its id.",
+      inputSchema: { id: z.string() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ id }) => {
+      vendorCalls.push({ tool: FETCH, args: { id } });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              id,
+              title: "Request from Sam",
               text: "Can you send the spec by Friday?",
             }),
           },
@@ -368,6 +393,7 @@ const fixtures = (() => {
         .where(eq(mcpServers.id, NOTION));
       // As a refresh records them from the server's own labels.
       await tool({ serverId: NOTION, name: GET_REQUEST, declaredRead: true });
+      await tool({ serverId: NOTION, name: FETCH, declaredRead: true });
       await tool({
         serverId: NOTION,
         name: COMMENT,
@@ -394,13 +420,16 @@ const fixtures = (() => {
         scope: "",
       });
       await database.insert(pluginGrants).values(
-        [ref(NOTION, GET_REQUEST), ref(NOTION, COMMENT), ref(EXA, SEARCH)].map(
-          (granted) => ({
-            kind: "mcp" as const,
-            ref: granted,
-            agentId: botId,
-          }),
-        ),
+        [
+          ref(NOTION, GET_REQUEST),
+          ref(NOTION, FETCH),
+          ref(NOTION, COMMENT),
+          ref(EXA, SEARCH),
+        ].map((granted) => ({
+          kind: "mcp" as const,
+          ref: granted,
+          agentId: botId,
+        })),
       );
     },
     async remove() {
@@ -711,7 +740,7 @@ describe("a task works with the apps the person connected", () => {
         return {
           toolCalls: [
             {
-              name: modelName(NOTION, GET_REQUEST),
+              name: modelName(NOTION, FETCH),
               arguments: JSON.stringify({ id: "r-1" }),
             },
           ],
@@ -733,10 +762,8 @@ describe("a task works with the apps the person connected", () => {
 
     const task = await start(owner, item.id);
 
-    // The person's own app, read with a tool its server says only reads: no question asked.
-    expect(callsOf(GET_REQUEST)).toEqual([
-      { tool: GET_REQUEST, args: { id: "r-1" } },
-    ]);
+    // The person's own app, read with a tool its reviewed read list names: no question asked.
+    expect(callsOf(FETCH)).toEqual([{ tool: FETCH, args: { id: "r-1" } }]);
     // The send did not go, and waits on one card: Allow once or Deny, with what it would send.
     expect(callsOf(COMMENT)).toEqual([]);
     const waiting = await pendingFor(owner.id);
@@ -789,6 +816,33 @@ describe("a task works with the apps the person connected", () => {
         request.action.policy?.source,
       ]),
     ).toEqual([[ref(NOTION, COMMENT), "task"]]);
+  });
+
+  test("it asks before a tool of their own app that no reviewed list names, though the app's own server says it only reads", async () => {
+    const { owner, item } = await seed();
+    script = (request) =>
+      answeredSinceAsk(request) === 0
+        ? {
+            toolCalls: [
+              {
+                name: modelName(NOTION, GET_REQUEST),
+                arguments: JSON.stringify({ id: "r-1" }),
+              },
+            ],
+          }
+        : { content: "Sam asked for the spec by Friday." };
+
+    const task = await start(owner, item.id);
+
+    // `readOnlyHint` is the server describing itself: in a task it is asked about like any change.
+    expect(callsOf(GET_REQUEST)).toEqual([]);
+    expect(
+      (await pendingFor(owner.id)).map((request) => [
+        request.action.toolRef,
+        request.action.policy?.source,
+      ]),
+    ).toEqual([[ref(NOTION, GET_REQUEST), "task"]]);
+    expect((await taskStore.get(owner.id, task.id)).status).toBe("needs_input");
   });
 
   test("it asks before a read that is not of the person's own app, which the person's own conversation still runs as chat always has", async () => {

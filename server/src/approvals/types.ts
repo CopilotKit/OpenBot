@@ -72,10 +72,10 @@ export type ApprovalCandidate = {
   target?: unknown;
   continuation?: ApprovalContinuation;
   /**
-   * A read with the trust a check-in gives it: a tool on an app the person connected with their own
-   * account, whose server says it only reads (`labelledRead` in plugins/catalogue.ts). Chat goes on
-   * judging a call by `effect`; in a task's conversation this is the one kind of call that runs
-   * without asking. Not part of what the person approves, so not in the action's digest.
+   * A reviewed read of the person's own app: a tool on an app they connected with their own account,
+   * named on a reviewed read list (`reviewedRead` in plugins/catalogue.ts). Chat goes on judging a
+   * call by `effect`; in a task's conversation this is the one kind of call that runs without asking.
+   * Not part of what the person approves, so not in the action's digest.
    */
   ownConnectionRead?: true;
 };

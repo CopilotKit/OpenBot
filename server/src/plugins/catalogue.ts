@@ -350,6 +350,18 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
      * into something the policy engine has never heard of.
      */
     writeTools: Object.freeze(["create_file", "copy_file"]),
+    /*
+     * Every tool the REST adapter offers (`TOOLS` in google-drive-rest.ts), each of which only reads.
+     * Named so a read is a reviewed one, which is what a task started from a check-in runs without
+     * asking (`reviewedRead`), and so a tool added to the adapter later is a write until it is
+     * listed here. Chat's answer for these four is the read it already was.
+     */
+    readTools: Object.freeze([
+      "search_files",
+      "list_recent_files",
+      "get_file_metadata",
+      "read_file_content",
+    ]),
     docsUrl:
       "https://developers.google.com/workspace/guides/configure-mcp-servers",
   },
@@ -669,6 +681,31 @@ export function labelledRead(
   if (entry?.writeTools.includes(toolName)) return false;
   if (classifyTool(entry, toolName, true, tool.effect) === "read") return true;
   return tool.declaredRead;
+}
+
+/**
+ * Whether a person reviewed this tool as a read: the one kind of call a task started from a
+ * check-in makes without asking.
+ *
+ * A TASK ASKS BEFORE EVERY CHANGE, so what it runs unasked has to be a read by construction, not by
+ * anybody's description of it. That leaves only the reviewed `readTools` list. Every other source
+ * {@link labelledRead} accepts is a label: a server's `readOnlyHint` is the server describing itself,
+ * and the MCP specification says a client must treat annotations as untrusted unless the server is
+ * trusted; a broker's read tag is assigned best-effort from the action's description (Composio's
+ * tool-tags page says so); and a name missing from a write list is an omission, which is how a tool
+ * a vendor adds later would pass. Each of those is still a read for a check-in, which only reads.
+ * In a task they ask, like any change.
+ *
+ * A destructive label or a reviewed write still wins over the read list.
+ */
+export function reviewedRead(
+  entry: CatalogueEntry | null,
+  toolName: string,
+  tool: { destructive: boolean },
+): boolean {
+  if (tool.destructive || !entry?.readTools) return false;
+  if (entry.writeTools.includes(toolName)) return false;
+  return entry.readTools.includes(toolName);
 }
 
 /**
