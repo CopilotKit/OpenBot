@@ -125,6 +125,12 @@ A generated title that arrives after a conversation was deleted is discarded. Th
 settled without changing the deleted row or announcing a new summary, and a missing conversation is
 not reported as successfully named.
 
+### A group reached in two ways can be approved for a shared app
+
+Approving a Bot for a shared app now succeeds when the same group appears in its published audience
+and its assigned groups. Repeated people or groups are stored once; a person and a group with the
+same name remain separate, and no additional audience is approved.
+
 ### Concurrent routine edits keep their limit and saved schedule
 
 An update now reads the current routine under the same owner lock used to count and write it. An
