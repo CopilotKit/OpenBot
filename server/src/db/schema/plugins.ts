@@ -525,10 +525,11 @@ export const brokeredConnections = pgTable(
  * one. The local id is unchanged, so threads, memory and everything else stay attached to
  * `dev-local-user`.
  *
- * NO ROW MEANS THE PERSON'S OWN ID, which is every signed-in person and also a single-user
- * deployment that already held grants under `dev-local-user` at that broker when its name was first
- * asked for: nothing is written for it, so those grants keep working and nobody reconnects. See
- * `ensureSingleUserIdentity` in `plugins/single-user-identity.ts`, the only writer.
+ * NO ROW MEANS THE PERSON'S OWN ID, which is every signed-in person. Every single-user deployment
+ * with a broker has one, written at its first start with that broker and never replaced; the
+ * connections it had recorded under `dev-local-user` are retired then, here and not at the broker,
+ * and connected again under the new name. See `ensureSingleUserIdentity` in
+ * `plugins/single-user-identity.ts`, the only writer.
  *
  * NO KEY TO `users`, for the reason `brokered_connections.user_id` has none: the name has to
  * outlive the person for as long as accounts filed under it might need ending.

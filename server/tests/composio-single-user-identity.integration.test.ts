@@ -45,8 +45,9 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * WHAT IS ASSERTED. Two single-user deployments, each with its own database, on one Composio key:
  * each has its own name at Composio, a Gmail connected in one is not listed, adoptable or callable
  * in the other, and a disconnect in one leaves the other's account alone. A deployment that already
- * holds accounts under `dev-local-user` keeps that name, and the name is the same after a restart
- * and on every replica.
+ * holds accounts under `dev-local-user` gets its own name too, with its records under the shared
+ * name retired here and nothing at Composio touched, and the name is the same after a restart and
+ * on every replica.
  *
  * REAL DATABASES, REAL ROUTES, THE REAL SINGLE-USER GUARD, THE REAL STORE AND THE REAL COMPOSIO
  * ADAPTER. Each deployment is a database created here and migrated with this repository's own
@@ -305,23 +306,24 @@ function composioProject() {
 
 type Project = ReturnType<typeof composioProject>;
 
-/** Composio as `index.ts` hands it over: the provider, and what its adapter declares. */
-const composioWired = (project: Project) => ({
-  provider: "composio" as const,
-  grantIsLocal: project.client.broker.grantIsLocal,
-});
-
 /**
  * A single-user deployment starting: its one person written, its Composio name settled, and its
  * store and routes built over its own database, behind the real single-user guard.
  */
-async function boot(url: string, project: Project) {
+async function boot(
+  url: string,
+  project: Project,
+  /** False for a deployment as it ran before it could be given a name of its own. */
+  { named = true }: { named?: boolean } = {},
+) {
   const database = open(url);
   await initializeDevActorUser(database, true);
-  const identity = await ensureSingleUserIdentity(database, {
-    singleUser: true,
-    broker: composioWired(project),
-  });
+  const identity = named
+    ? await ensureSingleUserIdentity(database, {
+        singleUser: true,
+        provider: "composio",
+      })
+    : DEV_ACTOR.id;
   if (identity === null) {
     throw new Error("A single-user deployment on Composio was given no name.");
   }
@@ -545,49 +547,88 @@ describe("a single-user deployment that already holds Composio accounts under de
     return url;
   }
 
-  test("keeps that name, so its Gmail stays connected and nobody reconnects", async () => {
-    const project = composioProject();
-    useComposioClient(project.client.actions);
-    const deployment = await boot(
-      await connectedBeforeTheUpgrade(project),
-      project,
-    );
-    await enableGmail(deployment);
-
-    expect(deployment.identity).toBe(DEV_ACTOR.id);
-    expect(await deployment.database.select().from(brokeredIdentities)).toEqual(
-      [],
-    );
-    expect(await listed(deployment)).toContain("gmail");
-    expect(await confirm(deployment)).toEqual({ connected: true });
-    expect((await deployment.readMail()).text).toContain("me@example.test");
-    expect(project.ran).toEqual([
-      { userId: DEV_ACTOR.id, mailbox: "me@example.test" },
-    ]);
-  });
-
-  test("gets its own name at the first start after its last such account is disconnected", async () => {
+  test("gets its own name at once, stops using the shared account without ending it, and one Connect puts Gmail back", async () => {
     const project = composioProject();
     useComposioClient(project.client.actions);
     const url = await connectedBeforeTheUpgrade(project);
-    const before = await boot(url, project);
-    await enableGmail(before);
-    expect(before.identity).toBe(DEV_ACTOR.id);
+    const shared = structuredClone(project.accounts);
+    const deployment = await boot(url, project);
+    await enableGmail(deployment);
 
-    const ended = await before.app.request(
+    // Its own name, written down, at the first start.
+    expect(deployment.identity).toStartWith(`${DEV_ACTOR.id}:`);
+    expect(
+      await deployment.database
+        .select({ vendorUserId: brokeredIdentities.vendorUserId })
+        .from(brokeredIdentities),
+    ).toEqual([{ vendorUserId: deployment.identity }]);
+
+    // The record under the shared name is retired here: Gmail reads as not connected, a Bot is told
+    // to connect it, and nothing runs at Composio as `dev-local-user`.
+    expect(await rowsIn(deployment.database)).toEqual([]);
+    expect(await listed(deployment)).not.toContain("gmail");
+    await expect(deployment.readMail()).rejects.toThrow(
+      "You have not connected your Gmail account.",
+    );
+    expect(await confirm(deployment)).toEqual({ connected: false });
+    expect(project.ran).toEqual([]);
+    // And the account Composio holds under the shared name is left exactly as it was.
+    expect(project.accounts).toEqual(shared);
+
+    // One Connect files Gmail under the deployment's own name.
+    await connectGmail(deployment, project, "me@example.test");
+    expect(await rowsIn(deployment.database)).toEqual([
+      { userId: DEV_ACTOR.id, vendorUserId: deployment.identity },
+    ]);
+    expect((await deployment.readMail()).text).toContain("me@example.test");
+    expect(project.ran).toEqual([
+      { userId: deployment.identity, mailbox: "me@example.test" },
+    ]);
+  });
+
+  test("whose record was another deployment's account can no longer use, list or end it", async () => {
+    /*
+     * BEFORE THE UPGRADE, A AND B ON ONE KEY WERE ONE COMPOSIO USER. A connected Gmail; B opened
+     * the app's page, and the confirm there found A's account under `dev-local-user` and recorded
+     * it as B's own. That record is the one an earlier revision of this change read as "B already
+     * holds accounts", and kept B on the shared name with A's mailbox for good.
+     */
+    const project = composioProject();
+    useComposioClient(project.client.actions);
+    const a = await boot(await freshDatabase(), project, { named: false });
+    await enableGmail(a);
+    await connectGmail(a, project, "a@example.test");
+    const urlB = await freshDatabase();
+    const b = await boot(urlB, project, { named: false });
+    await enableGmail(b);
+    expect(await confirm(b)).toEqual({ connected: true });
+    expect((await b.readMail()).text).toContain("a@example.test");
+    const aAccount = structuredClone(project.accounts);
+    project.ran.splice(0);
+    await close(b.database);
+
+    // B upgrades. A has not, and still uses `dev-local-user`.
+    const upgraded = await boot(urlB, project);
+    expect(upgraded.identity).toStartWith(`${DEV_ACTOR.id}:`);
+
+    // B no longer lists, confirms or calls A's Gmail.
+    expect(await listed(upgraded)).not.toContain("gmail");
+    expect(await confirm(upgraded)).toEqual({ connected: false });
+    await expect(upgraded.readMail()).rejects.toThrow(
+      "You have not connected your Gmail account.",
+    );
+    expect(project.ran).toEqual([]);
+
+    // B's Disconnect asks about B's own name only, so A's account stands.
+    const ended = await upgraded.app.request(
       "/api/plugins/servers/gmail/connection",
       { method: "DELETE" },
     );
     expect(ended.status).toBe(200);
-    expect(project.accounts).toEqual([]);
-    await close(before.database);
+    expect(project.accounts).toEqual(aAccount);
 
-    const after = await boot(url, project);
-    expect(after.identity).toStartWith(`${DEV_ACTOR.id}:`);
-    await connectGmail(after, project, "me@example.test");
-    expect(await rowsIn(after.database)).toEqual([
-      { userId: DEV_ACTOR.id, vendorUserId: after.identity },
-    ]);
+    // And A, still on the shared name, still reads its own mail.
+    expect((await a.readMail()).text).toContain("a@example.test");
   });
 });
 
@@ -613,10 +654,18 @@ describe("a single-user deployment's Composio name", () => {
   test("is one name when two replicas start together", async () => {
     const url = await freshDatabase();
     const [one, two] = [open(url), open(url)];
-    const broker = composioWired(composioProject());
+    const provider = "composio" as const;
     const settled = await Promise.all([
-      ensureSingleUserIdentity(one, { singleUser: true, broker }, () => "one"),
-      ensureSingleUserIdentity(two, { singleUser: true, broker }, () => "two"),
+      ensureSingleUserIdentity(
+        one,
+        { singleUser: true, provider },
+        () => "one",
+      ),
+      ensureSingleUserIdentity(
+        two,
+        { singleUser: true, provider },
+        () => "two",
+      ),
     ]);
     expect(settled[0]).toBe(settled[1] as string);
     expect([`${DEV_ACTOR.id}:one`, `${DEV_ACTOR.id}:two`]).toContain(
@@ -630,13 +679,13 @@ describe("a single-user deployment's Composio name", () => {
     expect(
       await ensureSingleUserIdentity(database, {
         singleUser: false,
-        broker: composioWired(composioProject()),
+        provider: "composio",
       }),
     ).toBeNull();
     expect(
       await ensureSingleUserIdentity(database, {
         singleUser: true,
-        broker: null,
+        provider: null,
       }),
     ).toBeNull();
     expect(await database.select().from(brokeredIdentities)).toEqual([]);

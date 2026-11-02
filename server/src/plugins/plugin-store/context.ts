@@ -1,6 +1,7 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
+import { DEV_ACTOR } from "../../auth/dev-actor";
 import type { Database } from "../../db/client";
 import {
   type CredentialExecutor,
@@ -11,7 +12,6 @@ import {
 } from "../../credentials";
 import {
   brokeredConnections,
-  brokeredIdentities,
   credentials as credentialRows,
   mcpServers,
   mcpTools,
@@ -37,6 +37,7 @@ import {
   accountFor,
   personAccount,
 } from "../shared-accounts";
+import { filedUnder } from "../single-user-identity";
 import {
   type BrokeredDisconnectReason,
   CatalogueEntryUnknownError,
@@ -243,22 +244,20 @@ export function createStoreContext(options: PluginStoreOptions) {
    * A person's own account at this deployment's broker: filed under their own id, or under the name
    * `brokered_identities` holds for them, which only a single-user deployment's one person has.
    *
-   * READ HERE, ON EVERY RESOLUTION, RATHER THAN HANDED TO THE STORE AT STARTUP, so that every
-   * replica answers from the one row the database holds and none can keep a name another has
-   * replaced. One primary-key read, beside the vendor round trip it decides the identity of.
+   * ASKED OF THE TABLE ONLY FOR THAT PERSON. `ensureSingleUserIdentity` is the table's one writer
+   * and writes `dev-local-user` and nobody else, so for anyone signed in the read could only ever
+   * answer nothing, and it is not made: every brokered call, confirm and connect on a deployment
+   * that signs people in resolves with no query here. For the single-user person it is one
+   * primary-key read through {@link filedUnder}, the same read startup settled the name with, so
+   * the two cannot disagree about it, and every replica answers from the one row the database holds.
    */
   async function personAccountOf(userId: string): Promise<AccountRef> {
-    const [filed] = await database
-      .select({ vendorUserId: brokeredIdentities.vendorUserId })
-      .from(brokeredIdentities)
-      .where(
-        and(
-          eq(brokeredIdentities.provider, brokerProvider),
-          eq(brokeredIdentities.userId, userId),
-        ),
-      )
-      .limit(1);
-    return personAccount(userId, filed?.vendorUserId ?? null);
+    return personAccount(
+      userId,
+      userId === DEV_ACTOR.id
+        ? await filedUnder(database, brokerProvider, userId)
+        : null,
+    );
   }
 
   /**

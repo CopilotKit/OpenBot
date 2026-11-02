@@ -57,8 +57,9 @@ import { seedPeople } from "./support/people";
  * other, a Bot call needs this deployment's own row, and a disconnect in one leaves the other's
  * grant alone. Connect asks Arcade for the whole app, as Composio's Connect does, and comes back
  * through the verifier, which writes the row. A deployment that already holds Arcade grants under
- * `dev-local-user` keeps that name, the name survives a restart, and a deployment that signs people
- * in files them under their own ids as before.
+ * `dev-local-user` gets its own name too: its records under the shared name are retired here and
+ * nothing at Arcade is touched. The name survives a restart, and a deployment that signs people in
+ * files them under their own ids as before.
  *
  * AND THE TWO EDGES OF RECORDING GRANTS HERE. A Bot's call that Arcade does not allow is answered
  * with the card a lost Composio account shows, and the row goes. A consent begun under the shared
@@ -511,12 +512,6 @@ afterAll(async () => {
 
 /* ------------------------------------------------------------------ a deployment, booted */
 
-/** Arcade as `index.ts` hands it over: the provider, and what its adapter declares. */
-const arcadeWired = () => ({
-  provider: "arcade" as const,
-  grantIsLocal: client.broker.grantIsLocal,
-});
-
 /** A guard that signs one named person in, as a deployment that signs people in does. */
 const signedInAs =
   (id: string): MiddlewareHandler<{ Variables: AppVariables }> =>
@@ -545,7 +540,7 @@ async function boot(
   const settled = named
     ? await ensureSingleUserIdentity(database, {
         singleUser: signedIn === undefined,
-        broker: arcadeWired(),
+        provider: "arcade",
       })
     : null;
   const identity = settled ?? actor;
@@ -831,44 +826,101 @@ describe("a single-user deployment that already holds Arcade grants under dev-lo
     return url;
   }
 
-  test("keeps that name, so its Gmail stays connected and nothing is approved again", async () => {
-    const deployment = await boot(await approvedBeforeTheUpgrade());
+  test("gets its own name at once, stops using the shared grant without ending it, and one Connect puts Gmail back", async () => {
+    const url = await approvedBeforeTheUpgrade();
+    const shared = structuredClone(project.connections);
+    const deployment = await boot(url);
     await enableGmail(deployment);
 
-    expect(deployment.settled).toBe(DEV_ACTOR.id);
-    expect(await deployment.database.select().from(brokeredIdentities)).toEqual(
-      [],
+    // Its own name, written down, at the first start.
+    expect(deployment.settled).toStartWith(`${DEV_ACTOR.id}:`);
+    expect(
+      await deployment.database
+        .select({ vendorUserId: brokeredIdentities.vendorUserId })
+        .from(brokeredIdentities),
+    ).toEqual([{ vendorUserId: deployment.identity }]);
+
+    // The record under the shared name is retired here, so Gmail reads as not connected and a Bot
+    // is told to connect it. Nothing runs at Arcade as `dev-local-user`.
+    expect(await rowsIn(deployment.database)).toEqual([]);
+    expect(await listed(deployment)).not.toContain(ROW);
+    await expect(deployment.call(READ)).rejects.toThrow(
+      "You have not connected your Gmail account.",
     );
-    expect(await listed(deployment)).toContain(ROW);
-    expect(await confirm(deployment)).toEqual({ connected: true });
+    expect(await confirm(deployment)).toEqual({ connected: false });
+    expect(project.ran).toEqual([]);
+
+    // And nothing held at Arcade under the shared name was confirmed, extended or withdrawn.
+    expect(project.connections).toEqual(shared);
+    expect(project.confirmed).toEqual([]);
+    expect(project.deleted).toEqual([]);
+
+    // One Connect files Gmail under the deployment's own name, and the Bot reads as that name.
+    await connectGmail(deployment, "me@example.test");
     expect((await deployment.call(READ)).text).toContain("me@example.test");
     expect(project.ran).toEqual([
-      { userId: DEV_ACTOR.id, tool: READ, mailbox: "me@example.test" },
+      { userId: deployment.identity, tool: READ, mailbox: "me@example.test" },
     ]);
-    expect(project.minted).toEqual([]);
+
+    // The next start keeps the same name and the connection made under it.
+    await close(deployment.database);
+    const restarted = await boot(url);
+    expect(restarted.settled).toBe(deployment.settled);
+    expect(await rowsIn(restarted.database)).toEqual([
+      {
+        provider: "arcade",
+        app: TOOLKIT,
+        userId: DEV_ACTOR.id,
+        vendorUserId: deployment.identity,
+      },
+    ]);
+    expect(project.unexpected).toEqual([]);
   });
 
-  test("gets its own name at the first start after its last such grant is disconnected", async () => {
-    const url = await approvedBeforeTheUpgrade();
-    const before = await boot(url);
-    await enableGmail(before);
-    expect(before.settled).toBe(DEV_ACTOR.id);
+  test("whose record was another deployment's grant can no longer use, list or end it", async () => {
+    /*
+     * BEFORE THE UPGRADE, A AND B ON ONE KEY WERE ONE ARCADE USER. A connected Gmail; B opened the
+     * app's page, and the confirm there found A's grant under `dev-local-user` and recorded it as
+     * B's own. That record is the one an earlier revision of this change read as "B already holds
+     * grants", and kept B on the shared name with A's mailbox for good.
+     */
+    const urlA = await freshDatabase();
+    const urlB = await freshDatabase();
+    const a = await boot(urlA, undefined, { named: false });
+    await enableGmail(a);
+    await connectGmail(a, "a@example.test");
+    const b = await boot(urlB, undefined, { named: false });
+    await enableGmail(b);
+    expect(await confirm(b)).toEqual({ connected: true });
+    expect((await b.call(READ)).text).toContain("a@example.test");
+    const aGrant = structuredClone(project.connections);
+    project.ran.splice(0);
+    await close(b.database);
 
-    const ended = await before.app.request(
+    // B upgrades. A has not, and still uses `dev-local-user`.
+    const upgraded = await boot(urlB);
+    expect(upgraded.settled).toStartWith(`${DEV_ACTOR.id}:`);
+
+    // B no longer lists, confirms or calls A's Gmail.
+    expect(await listed(upgraded)).not.toContain(ROW);
+    expect(await confirm(upgraded)).toEqual({ connected: false });
+    await expect(upgraded.call(READ)).rejects.toThrow(
+      "You have not connected your Gmail account.",
+    );
+    expect(project.ran).toEqual([]);
+
+    // B's Disconnect asks about B's own name only, so A's grant stands.
+    const ended = await upgraded.app.request(
       `/api/plugins/servers/${ROW}/connection`,
       { method: "DELETE" },
     );
     expect(ended.status).toBe(200);
-    expect(project.connections).toEqual([]);
-    await close(before.database);
+    expect(project.deleted).toEqual([]);
+    expect(project.connections).toEqual(aGrant);
 
-    const after = await boot(url);
-    expect(after.settled).toStartWith(`${DEV_ACTOR.id}:`);
-    await connectGmail(after, "me@example.test");
-    expect((await after.call(READ)).text).toContain("me@example.test");
-    expect(project.ran).toEqual([
-      { userId: after.identity, tool: READ, mailbox: "me@example.test" },
-    ]);
+    // And A, still on the shared name, still reads its own mail.
+    expect((await a.call(READ)).text).toContain("a@example.test");
+    expect(project.unexpected).toEqual([]);
   });
 });
 
