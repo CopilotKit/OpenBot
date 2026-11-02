@@ -10,6 +10,7 @@ import {
   legacyNamesFor,
   NAMESPACE,
   NAMESPACE_LABEL,
+  networkHostFor,
   OWNER_LABEL,
   PERSON_LABEL,
 } from "./names";
@@ -269,6 +270,7 @@ async function inspectOwned(names: ComputerNames): Promise<{
   image?: string;
   startedAt?: string;
   token?: string;
+  shortId?: string;
 } | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
@@ -285,6 +287,8 @@ async function inspectOwned(names: ComputerNames): Promise<{
       // The token this container was born holding, which is the one it will check callers against
       // for the rest of its life. See `holdsCurrentToken`.
       token: tokenIn(info.Config?.Env),
+      // A second name for it on a shared network, for when its own is too long. See `networkHostFor`.
+      ...(info.Id ? { shortId: info.Id.slice(0, 12) } : {}),
       /*
        * When this run of the container began, which is what tells two runs apart.
        *
@@ -656,7 +660,9 @@ export async function ensure(
       // How to reach it. A name on a shared network, a host port otherwise, the caller does not have
       // to know which arrangement it is in.
       ...(options.network
-        ? { url: `http://${names.container}:4100` }
+        ? {
+            url: `http://${networkHostFor(names.container, settled?.shortId)}:4100`,
+          }
         : settled?.port
           ? { url: `http://127.0.0.1:${settled.port}` }
           : {}),

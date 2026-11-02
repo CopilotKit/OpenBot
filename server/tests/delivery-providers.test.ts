@@ -182,6 +182,27 @@ describe("real HTTP provider adapters", () => {
       new URLSearchParams(String(wire.requests[2]?.init?.body)).get("To"),
     ).toBe("+15551234567");
   });
+  test("Twilio cuts a long SMS between characters, not inside an emoji", async () => {
+    const wire = http([{ sid: "SM1", status: "queued" }]);
+    const twilio = createTwilioTransport({
+      accountSid: "AC1",
+      authToken: "secret",
+      verifyServiceSid: "VA1",
+      from: "+15550000000",
+      webhookUrl: "https://o.test/sms",
+      fetch: wire.fetch,
+    });
+    // 1,399 letters and then an emoji: the 1,400-unit cut lands between its two halves.
+    const text = `${"a".repeat(1399)}😀${"b".repeat(200)}`;
+    await twilio.send({ address: "+15551234567", text, id: "out1" });
+    const body =
+      new URLSearchParams(String(wire.requests[0]?.init?.body)).get("Body") ??
+      "";
+    expect(body).not.toContain("\uFFFD");
+    expect(body).toBe(
+      `${"a".repeat(1399)}…\nOpen OpenBot to read the full message.`,
+    );
+  });
   test("Expo sends canonical deep links and reads receipts including invalid devices", async () => {
     const wire = http([
       { data: { status: "ok", id: "ticket1" } },
