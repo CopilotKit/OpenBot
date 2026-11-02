@@ -77,7 +77,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
-- Migration `0057_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
+- Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
   the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
   the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
   affected.
