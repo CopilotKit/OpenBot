@@ -18,7 +18,7 @@ export type ClientOptions = {
   /** Serialised as JSON, which is also what sets the content type. */
   body?: unknown;
   /**
-   * What a person reads when the server sent no message of its own.
+   * What a person reads when the server sent no message of its own, or never answered at all.
    *
    * Name the entity in it — "Couldn't load your Bots." rather than "Request failed" — because this
    * is the sentence that reaches the screen when the server is the one that broke.
@@ -82,7 +82,19 @@ export async function client<T>(
   const options =
     (typeof keyOrOptions === "string" ? maybeOptions : keyOrOptions) ?? {};
 
-  const response = await send(path, options);
+  let response: Response;
+  try {
+    response = await send(path, options);
+  } catch (error) {
+    /*
+     * No answer at all: offline, or the server out of reach. Each browser words that its own way,
+     * "Failed to fetch", "Load failed" or "NetworkError when attempting to fetch resource.", and
+     * none says anything a person can act on, so the fallback is said instead. A request its caller
+     * abandoned keeps its AbortError, for that caller to recognise.
+     */
+    if (options.fallback === undefined || options.signal?.aborted) throw error;
+    throw new Error(options.fallback, { cause: error });
+  }
 
   if (!response.ok) {
     /*

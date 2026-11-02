@@ -19,6 +19,10 @@ export type TaskInput = {
 /** The sentence for every write here, since they all fail the same way to a reader. */
 const FALLBACK = "Couldn't save that change to the task. Try again.";
 
+/** A Start that failed: there is no task yet to have saved a change to. */
+const START_FALLBACK =
+  "Couldn't start this task. Check your connection and try again.";
+
 const taskPath = (id: string, action: string) =>
   `/api/tasks/${encodeURIComponent(id)}/${action}`;
 
@@ -40,7 +44,7 @@ export function startTaskMutationOptions(queryClient: QueryClient) {
       client("/api/tasks", "task", {
         method: "POST",
         body: input,
-        fallback: FALLBACK,
+        fallback: START_FALLBACK,
       }),
     onSuccess: () => invalidateTasks(queryClient),
   });

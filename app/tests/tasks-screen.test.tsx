@@ -690,6 +690,28 @@ test("a task the server refuses keeps the dialog open with the server's words", 
   );
 });
 
+test("a Start that never reaches the server says so in a plain sentence, not the browser's", async () => {
+  serve();
+  const served = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    // What a browser does when the request reaches nothing: a rejection, worded its own way.
+    if (init?.method === "POST") throw new TypeError("Load failed");
+    return served(input, init);
+  }) as unknown as typeof fetch;
+  const { view, user } = draw();
+  await view.findByText("No tasks yet");
+  await user.click(view.getByRole("button", { name: "New task" }));
+  const dialog = await view.findByRole("dialog", { name: "New task" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "What should it do?" }),
+    "Do it",
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Start task" }));
+  expect((await within(dialog).findByRole("alert")).textContent).toBe(
+    "Couldn't start this task. Check your connection and try again.",
+  );
+});
+
 test("the sidebar has Tasks above Bots with how many need you, and keeps tasks' conversations out of its list", async () => {
   serve({
     tasks: [

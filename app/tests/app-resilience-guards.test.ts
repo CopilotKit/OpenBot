@@ -76,6 +76,43 @@ describe("control/screen/client guards", () => {
     ).rejects.toThrow("Nope.");
   });
 
+  test("client says the fallback when the server never answers, in any browser's words", async () => {
+    const { client } = await import("../src/lib/client");
+    for (const words of [
+      "Failed to fetch",
+      "Load failed",
+      "NetworkError when attempting to fetch resource.",
+    ]) {
+      globalThis.fetch = (async () => {
+        throw new TypeError(words);
+      }) as unknown as typeof fetch;
+      await expect(
+        client("http://x.test/thing", "thing", { fallback: "Nope." }),
+      ).rejects.toThrow("Nope.");
+    }
+  });
+
+  test("client keeps an abandoned request's AbortError, and a raw error with no fallback", async () => {
+    const { client } = await import("../src/lib/client");
+    const ended = new AbortController();
+    ended.abort();
+    globalThis.fetch = (async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }) as unknown as typeof fetch;
+    await expect(
+      client("http://x.test/thing", "thing", {
+        fallback: "Nope.",
+        signal: ended.signal,
+      }),
+    ).rejects.toThrow("The operation was aborted.");
+    globalThis.fetch = (async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+    await expect(client("http://x.test/thing", "thing")).rejects.toThrow(
+      "Failed to fetch",
+    );
+  });
+
   test("readScreenshot reports unavailable on a mistyped frame", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ base64: 42, width: "x", height: 1 }), {
