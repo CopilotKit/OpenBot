@@ -333,7 +333,7 @@ function surface(canvas: HTMLCanvasElement, size: number, look: OrbLook) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, box, box);
     ctx.translate(box / 2, box / 2);
-    drawBotOrb(ctx, size, pose, { dark, look });
+    drawBotOrb(ctx, size, pose, { dark, look, dpr });
   };
 }
 

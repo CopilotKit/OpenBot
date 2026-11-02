@@ -74,10 +74,11 @@ const REST: OrbPose = {
 /**
  * Just enough of a 2D context to run the drawing: it counts every stroke, counts the frames drawn,
  * each of which starts by clearing the canvas, and keeps where each soft blob and each eye is drawn
- * and in what colour.
+ * and in what colour, and every shadow blur set.
  */
 function fakeContext() {
   const marks: string[] = [];
+  const blurs: number[] = [];
   const gradient = {
     addColorStop: (_: number, colour: string) => marks.push(colour),
   };
@@ -85,6 +86,7 @@ function fakeContext() {
     strokes: 0,
     draws: 0,
     marks,
+    blurs,
     stroke() {
       this.strokes++;
     },
@@ -104,18 +106,20 @@ function fakeContext() {
     get: (target, key) =>
       key in target ? target[key as keyof typeof target] : () => {},
     set: (target, key, value) => {
+      if (key === "shadowBlur") blurs.push(value);
       (target as Record<string | symbol, unknown>)[key] = value;
       return true;
     },
   });
 }
 
-/** One frame of an orb 60px across in `pose`, drawn on a fake context. */
-const drawn = (pose: OrbPose, look: OrbLook = OPENBOT_LOOK) => {
+/** One frame of an orb 60px across in `pose`, drawn on a fake context at `dpr`. */
+const drawn = (pose: OrbPose, look: OrbLook = OPENBOT_LOOK, dpr?: number) => {
   const ctx = fakeContext();
   drawBotOrb(ctx as unknown as CanvasRenderingContext2D, 60, pose, {
     dark: false,
     look,
+    dpr,
   });
   return ctx;
 };
@@ -351,6 +355,18 @@ describe("a finish", () => {
     expect(early).toBeLessThan(finishPhase(0.24).check);
   });
 
+  test("the eye-lights' and the check's shadows are as soft against them on any screen", () => {
+    // A held finish draws the check; the rest pose draws the eyes.
+    for (const pose of [REST, { ...REST, finishAge: FINISH_HELD }]) {
+      const once = drawn(pose, OPENBOT_LOOK, 1).blurs;
+      expect(once.length).toBeGreaterThan(0);
+      // The context is scaled by the density, and a shadow's blur is not, so it is scaled here.
+      expect(drawn(pose, OPENBOT_LOOK, 2).blurs).toEqual(
+        once.map((blur) => blur * 2),
+      );
+    }
+  });
+
   test("draws its rays and its check over the orb, and nothing once it is over", () => {
     const rest = strokesOf(REST);
     expect(strokesOf({ ...REST, finishAge: 0.4 })).toBe(rest + RAYS + 1);
@@ -507,6 +523,30 @@ describe("<BotOrb>", () => {
       frames.restore();
       restore();
     }
+  });
+
+  test("draws its shadows at the screen's density", () => {
+    const blurs = (density: number) => {
+      const was = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+      Object.defineProperty(window, "devicePixelRatio", {
+        configurable: true,
+        value: density,
+      });
+      const ctx = fakeContext();
+      const restore = withContext(ctx);
+      try {
+        render(<BotOrb seed="onboarding-buddy" size={40} still />);
+        cleanup();
+        return ctx.blurs;
+      } finally {
+        restore();
+        if (was) Object.defineProperty(window, "devicePixelRatio", was);
+        else delete (window as { devicePixelRatio?: number }).devicePixelRatio;
+      }
+    };
+    const once = blurs(1);
+    expect(once.length).toBeGreaterThan(0);
+    expect(blurs(2)).toEqual(once.map((blur) => blur * 2));
   });
 
   test("still, finished is the check without the burst", () => {

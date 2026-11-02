@@ -691,6 +691,13 @@ const CHECK = [
   [0.42, -0.26],
 ] as const;
 
+/**
+ * How soft the eye-lights' and the check's shadow is, in the canvas's own pixels. `shadowBlur` is
+ * the one length a canvas transform never scales, so it is scaled by the screen's density here, or
+ * the shadow would be twice as soft against the shape on a 1x screen as on a Retina one.
+ */
+const markBlur = (R: number, dpr: number) => Math.max(1, R * 0.07) * dpr;
+
 /** The check, stroked on along its length to `drawn` (0 to 1), in the eye-lights' white. */
 function check(
   ctx: Ctx,
@@ -698,6 +705,7 @@ function check(
   drawn: number,
   alpha: number,
   dark: boolean,
+  dpr: number,
 ) {
   if (drawn <= 0 || alpha <= 0.003) return;
   const [a, b, c] = CHECK.map(([x, y]) => [x * R, y * R] as const);
@@ -711,7 +719,7 @@ function check(
   ctx.lineWidth = Math.max(1.6, R * 0.17);
   ctx.strokeStyle = "rgba(255,255,255,.97)";
   ctx.shadowColor = dark ? "rgba(8,6,20,.4)" : "rgba(20,16,33,.28)";
-  ctx.shadowBlur = Math.max(1, R * 0.07);
+  ctx.shadowBlur = markBlur(R, dpr);
   ctx.beginPath();
   ctx.moveTo(a[0], a[1]);
   if (along <= first) {
@@ -765,6 +773,7 @@ function sphere(
   look: OrbLook,
   dark: boolean,
   size: number,
+  dpr: number,
 ) {
   const na = S.noticeAge;
   const perk =
@@ -810,26 +819,26 @@ function sphere(
     ctx.translate(sx * R * 0.84, -sy * R * 0.84 + (eh - h) * 0.28);
     ctx.rotate(-roll);
     ctx.shadowColor = dark ? "rgba(8,6,20,.4)" : "rgba(20,16,33,.28)";
-    ctx.shadowBlur = Math.max(1, R * 0.07);
+    ctx.shadowBlur = markBlur(R, dpr);
     ctx.fillStyle = "rgba(255,255,255,.97)";
     eyePath(ctx, ew * fx, h, clamp(S.smile) * (1 - S.blink));
     ctx.fill();
     ctx.restore();
   }
-  check(ctx, R, finish.check, finish.checkAlpha, dark);
+  check(ctx, R, finish.check, finish.checkAlpha, dark, dpr);
   ctx.restore();
 }
 
 /**
  * The whole orb with `look`, centred on the context's origin, for a footprint of `size` CSS px.
  * Its glow, the landing's ping and a finish's rays spill past the footprint, so draw it on a canvas
- * twice its size.
+ * twice its size. `dpr` is the canvas pixels per CSS px the context is scaled by.
  */
 export function drawBotOrb(
   ctx: Ctx,
   size: number,
   S: OrbPose,
-  { dark, look }: { dark: boolean; look: OrbLook },
+  { dark, look, dpr = 1 }: { dark: boolean; look: OrbLook; dpr?: number },
 ) {
   const finish = finishPhase(S.finishAge);
   const pal = palette(
@@ -849,7 +858,7 @@ export function drawBotOrb(
   glow(ctx, r * sc, glowAmt * 0.85, mix(pal.main, pal.deep, 0.4), dark);
   ping(ctx, r, S.doneAge, pal, dark);
   rays(ctx, r, finish.rays, pal, dark);
-  sphere(ctx, r, S, pal, look, dark, size * 0.72);
+  sphere(ctx, r, S, pal, look, dark, size * 0.72, dpr);
 }
 
 /** How long each age in a pose shows, in seconds: after that the orb draws as if it never happened. */
