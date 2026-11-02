@@ -64,7 +64,7 @@ function Tools() {
 }
 
 test("a change goes to the server's gate even when nothing about approvals has loaded", async () => {
-  const posted: { path: string; body: unknown }[] = [];
+  const posted: { path: string; body?: unknown }[] = [];
   const originalFetch = global.fetch;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
