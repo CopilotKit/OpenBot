@@ -1,6 +1,7 @@
 import { useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { attentionSummary } from "@/components/bot-profile/attention";
+import { inDesktopApp } from "@/lib/desktop-app";
 import { appConfig } from "@/lib/generated/application-config";
 import {
   requestNotificationPermission,
@@ -54,6 +55,7 @@ export function notificationPreview(botName: string): {
  */
 export function useNotifyStep(botName: string): OnboardingStep {
   const permission = useNotificationPermission();
+  const desktop = inDesktopApp();
   const [asking, setAsking] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const granted = permission === "granted";
@@ -74,6 +76,28 @@ export function useNotifyStep(botName: string): OnboardingStep {
         : dismissed && permission === "default"
           ? "You can turn them on later from a Bot's page."
           : null;
+
+  /*
+   * OpenBot Desktop's window has nothing to ask: macOS's webview has no notifications for a page,
+   * and the app raises none of its own yet. So the step says so, and only moves on. The preview
+   * stays, as the notification a browser tab shows.
+   */
+  if (desktop)
+    return {
+      id: "notify",
+      title: "Get notified",
+      intro: () => (
+        <StepIntro>
+          <p>
+            Notifications aren't available in the desktop app yet. You'll see
+            what needs you on each Bot's page.
+          </p>
+        </StepIntro>
+      ),
+      demo: () => <NotifyPreview botName={botName} />,
+      optional: true,
+      footnote: `In a browser tab, ${PRODUCT} shows a notification like this when a Bot needs you.`,
+    };
 
   return {
     id: "notify",
