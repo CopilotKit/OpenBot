@@ -10,9 +10,10 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * A Bot's answers are drawn wider than the composer, about 900px against its 672px, both centred
- * in the same column and both the whole width of a small screen. Skins keep the column they were
- * drawn with, as wide as their composer.
+ * A Bot's answers are drawn wider than the composer, 768px (`max-w-3xl`) against its 672px
+ * (`max-w-2xl`), both centred in the same column and both the whole width of a small screen. 768px
+ * is the reading width ChatGPT and Claude.ai give an answer; wider, a line of prose gets long enough
+ * to be hard to read. Skins keep the column they were drawn with, as wide as their composer.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -75,7 +76,7 @@ test("a conversation's answers are wider than its composer, which keeps its widt
       />,
     );
     const { answers, composer } = columns(view.container);
-    centredUpTo(answers, "max-w-4xl");
+    centredUpTo(answers, "max-w-3xl");
     centredUpTo(composer, "max-w-2xl");
     cleanup();
   }
@@ -97,7 +98,7 @@ test("a group conversation's answers are as wide as a conversation's", async () 
       view.container.querySelector("[data-transcript-column]"),
     ).not.toBeNull(),
   );
-  centredUpTo(columns(view.container).answers, "max-w-4xl");
+  centredUpTo(columns(view.container).answers, "max-w-3xl");
 });
 
 test("every skin keeps its answers as wide as its composer", () => {

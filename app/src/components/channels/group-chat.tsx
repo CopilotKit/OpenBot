@@ -91,7 +91,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
         ref={viewportRef}
       >
         <div
-          className="mx-auto flex w-full max-w-4xl flex-col gap-5 py-6"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
           data-transcript-column
         >
           {messages.length === 0 ? (

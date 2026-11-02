@@ -2105,7 +2105,7 @@ export function ChatTranscript({
     return (
       <div className="flex size-full min-h-0 flex-col overflow-hidden">
         <div
-          className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6"
           data-transcript-column
         >
           <RestoringTranscript />
@@ -2211,7 +2211,7 @@ export function ChatTranscript({
             >
               <MessageScrollerContent
                 aria-busy={busy}
-                className="mx-auto w-full max-w-4xl px-4 py-6"
+                className="mx-auto w-full max-w-3xl px-4 py-6"
                 data-transcript-column
                 spacerClassName="order-2"
               >
