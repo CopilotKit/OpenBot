@@ -23,6 +23,7 @@ import { createDatabase } from "../src/db/client";
 import {
   accounts,
   agents,
+  auditEvents,
   credentials,
   mcpServers,
   sessions,
@@ -599,11 +600,23 @@ describe("an app calls OpenBot with a person's Entra token", () => {
     // And the second request finds her rather than signing her in again.
     const again = await api("/me", await tokenToOpenBot(ada));
     expect(again.status).toBe(200);
+    // Signing her in left no session behind: the token is what each request runs on.
     const signedIn = await database
       .select({ id: sessions.id })
       .from(sessions)
       .where(eq(sessions.userId, (await userId(ADMIN)) ?? ""));
-    expect(signedIn).toHaveLength(1);
+    expect(signedIn).toHaveLength(0);
+    // The sign-in itself is still on the trail.
+    const trail = await database
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.eventType, "session.signed_in"),
+          eq(auditEvents.actorUserId, (await userId(ADMIN)) ?? ""),
+        ),
+      );
+    expect(trail).toHaveLength(1);
   });
 
   test("an agent request with the token runs as that person too", async () => {
@@ -847,7 +860,21 @@ describe("a routine reaches the system as its person, with nobody in the browser
       .insert(users)
       .values({ id: danId, email: email("dan"), name: "dan" });
     expect(await backgroundCall(newEntra(), danId)).toBe(
-      `${REFUSAL_MARKER} HR uses your Microsoft account, and you haven't signed in to OpenBot with Microsoft. Sign in with Microsoft and ask again.`,
+      `${REFUSAL_MARKER} HR uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`,
+    );
+  });
+
+  test("somebody who has only used OpenBot through their app is told to sign in once in the browser", async () => {
+    // Signed in from their app's token alone: a user and a Microsoft account, and no refresh token.
+    const ivy = person("ivy");
+    await newEntra().sessionFrom(
+      new Headers({ authorization: `Bearer ${await tokenToOpenBot(ivy)}` }),
+    );
+    const ivyId = (await userId(ivy.upn)) ?? "";
+    expect((await storedRefreshToken(ivyId)).raw).toBeNull();
+    // Their routine runs later, in a process that never saw that token (a restart, say).
+    expect(await backgroundCall(newEntra(), ivyId)).toBe(
+      `${REFUSAL_MARKER} HR uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`,
     );
   });
 

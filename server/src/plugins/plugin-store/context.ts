@@ -65,7 +65,7 @@ import {
 function entraRefusal(reason: EntraRefusal, title: string): string {
   switch (reason) {
     case "no-sign-in":
-      return `${title} uses your Microsoft account, and you haven't signed in to OpenBot with Microsoft. Sign in with Microsoft and ask again.`;
+      return `${title} uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`;
     case "sign-in-expired":
       return `Your Microsoft sign-in has expired, so ${title} wasn't used. Sign in with Microsoft again and ask again.`;
     case "no-consent":

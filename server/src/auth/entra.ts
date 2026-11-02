@@ -1,4 +1,5 @@
 import { decryptOAuthToken, setTokenUtil } from "better-auth/oauth2";
+import { eq } from "drizzle-orm";
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 import { createEnterpriseStore } from "../admin/settings-store";
 import {
@@ -7,6 +8,7 @@ import {
   namesNoDirectory,
 } from "../config";
 import type { Database } from "../db/client";
+import { sessions } from "../db/schema";
 import { OAUTH_REQUEST_TIMEOUT_MS } from "../timeouts";
 import { emailDomainAllowed } from "./email-domain";
 import { type EntraRefusal, EntraTokenRefusedError } from "./entra-refusal";
@@ -218,8 +220,9 @@ export function createEntra(options: {
        * the user row and its role. A refusal is a request with nobody signed in.
        */
       vouched.add(token);
+      let signedIn: Awaited<ReturnType<typeof auth.api.signInSocial>>;
       try {
-        await auth.api.signInSocial({
+        signedIn = await auth.api.signInSocial({
           body: { provider: "microsoft", idToken: { token } },
         });
       } catch (error) {
@@ -233,6 +236,19 @@ export function createEntra(options: {
         return null;
       } finally {
         vouched.delete(token);
+      }
+      /*
+       * The sign-in made a session, as a browser's does, and nothing will ever use it: the token
+       * stands in for a session on every request it arrives with, and the session's own token was
+       * handed to nobody. So it goes now, by its token, rather than one being left behind for every
+       * first arrival. Deleted directly and not through Better Auth, whose session hooks are for a
+       * session somebody ended and would end every Recorder the person has (`signOutRecorders`).
+       * The sign-in itself stays on the trail, as `session.signed_in`.
+       */
+      if ("token" in signedIn && typeof signedIn.token === "string") {
+        await options.database
+          .delete(sessions)
+          .where(eq(sessions.token, signedIn.token));
       }
       user = await owner(claims);
       if (!user) return null;

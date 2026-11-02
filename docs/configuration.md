@@ -486,6 +486,12 @@ app is refused, and the server logs `entra-token-client-not-allowed` with that a
 With the setting unset, no app can call in. Routines and check-ins still reach marked servers from
 each person's stored Microsoft sign-in.
 
+**Routines need a browser sign-in once.** A token from a person's app lasts 60 to 90 minutes and
+is kept in memory only, so it can't stand in for them later. Work nobody is watching (routines,
+check-ins) uses their stored Microsoft sign-in, which only signing in to OpenBot in the browser
+with Microsoft creates. Someone who has only ever used OpenBot through an app is asked to do that
+once, in the message their routine leaves.
+
 In Entra, on OpenBot's app registration:
 
 1. **Expose an API** (an Application ID URI such as `api://<client id>` and a delegated scope such
