@@ -782,6 +782,7 @@ export function mountConnectionRoutes({
             toolkit,
             account,
             by: context.var.actor.id,
+            pressed: "connect",
           });
         } catch (confirmFailure) {
           const refusal = brokerRefusal(

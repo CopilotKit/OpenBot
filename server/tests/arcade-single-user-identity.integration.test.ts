@@ -1142,6 +1142,66 @@ describe("a Bot's call on an action Arcade was never asked to allow", () => {
   });
 });
 
+describe("Reconnect where Arcade already holds everything the app asks for", () => {
+  test("records the reconnection, so the card that offered it stops offering it", async () => {
+    /*
+     * The Bot's call was refused one action and the card offered Reconnect. By the time the person
+     * presses it, Arcade holds every scope the app asks for (approved in another tab whose return
+     * never reached here, or Arcade's own refusal was passing), so the whole-app mint answers
+     * `completed` and Connect records what Arcade holds instead of sending anybody to consent.
+     */
+    const deployment = await newDeployment();
+    await authorizeAction(deployment, READ, "me@example.test");
+    const refused = await deployment.call(SEND).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(PluginRefusedError);
+    const refusal = readConnectPrompt((refused as Error).message);
+    expect(refusal?.reason).toBe("reconnect");
+    project.grant(deployment.identity, SCOPES[SEND] ?? [], "me@example.test");
+
+    const response = await deployment.app.request(
+      `/api/plugins/servers/${ROW}/connect`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ connected: true });
+
+    // Connected since the refusal, which is what the card reads as the reconnection.
+    const [row] = await deployment.database
+      .select({ connectedAt: brokeredConnections.connectedAt })
+      .from(brokeredConnections);
+    expect(row?.connectedAt.getTime()).toBeGreaterThan(
+      Date.parse(refusal?.at ?? ""),
+    );
+    // Nobody was sent to consent, and nothing was left holding the person.
+    expect(project.minted.map((mint) => mint.path)).toEqual([
+      "/v1/tools/authorize",
+      "/v1/auth/authorize",
+    ]);
+    expect(
+      await deployment.database.select().from(pendingAuthorizations),
+    ).toEqual([]);
+    expect((await deployment.call(SEND)).text).toContain("me@example.test");
+    expect(project.unexpected).toEqual([]);
+  });
+
+  test("leaves the connection date alone when a page only confirms on load", async () => {
+    const deployment = await newDeployment();
+    await connectGmail(deployment, "me@example.test");
+    const [before] = await deployment.database
+      .select({ connectedAt: brokeredConnections.connectedAt })
+      .from(brokeredConnections);
+
+    expect(await confirm(deployment)).toEqual({ connected: true });
+    const [after] = await deployment.database
+      .select({ connectedAt: brokeredConnections.connectedAt })
+      .from(brokeredConnections);
+    expect(after?.connectedAt).toEqual(before?.connectedAt);
+  });
+});
+
 describe("a Bot's call on an Arcade grant that is gone", () => {
   test("shows the card a lost Composio account shows, ends the row, and Connect puts it back", async () => {
     const deployment = await newDeployment();

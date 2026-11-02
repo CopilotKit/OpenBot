@@ -1871,6 +1871,12 @@ export function connectionMethods(context: StoreContext) {
       toolkit: string;
       account: AccountRef;
       by: string;
+      /**
+       * Set where the person pressed Connect and the broker answered that it already holds the
+       * account, which makes this confirm the reconnection rather than a read on page load. See the
+       * write at the end.
+       */
+      pressed?: "connect";
     }): Promise<{ connected: boolean }> {
       // Before anything, and for the reason `addBrokeredApp` says it first too: a deployment with
       // no key has no broker to have connected anybody at, so there is nothing here to ask.
@@ -2100,6 +2106,26 @@ export function connectionMethods(context: StoreContext) {
        * not known WHAT the yes is evidence of. Both answers are the same act — write nothing — and
        * it is the only act available that cannot claim more than was learned.
        */
+
+      /*
+       * A CONNECT PRESSED OVER A ROW THAT STANDS IS A RECONNECTION, AND IS DATED AS ONE.
+       *
+       * `connectedAt` newer than a Bot's refusal is how the card over that refusal knows its
+       * Reconnect has happened (`AppAccess.connectedAt`). A reconnection that came back through a
+       * consent is dated by the verifier's write. One where the broker answered that it already
+       * holds everything the app asks for comes here instead, and on a consent row already verified
+       * the arms above write nothing, so the row kept its first date and the card went on offering
+       * Reconnect over an account that now allowed the action.
+       *
+       * ONLY ON A PRESS. This method also runs on every page load, and a load re-dating the row would
+       * read to that card as a reconnection nobody made. A new row is dated by its insert.
+       */
+      if (input.pressed === "connect" && existing) {
+        await database
+          .update(brokeredConnections)
+          .set({ connectedAt: new Date(), updatedAt: new Date() })
+          .where(accountRow(input.toolkit, input.account));
+      }
 
       if (!existing) {
         await recordAuditEvent(auditStore, {
