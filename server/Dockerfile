@@ -70,6 +70,11 @@ COPY --from=deps /app/worker/node_modules worker/node_modules
 
 COPY server server
 COPY shared shared
+# The egress rules and their matcher. `server/src/computer/policy-network.ts` imports them from the
+# computer's source rather than keeping a copy, so the server checks a navigation against the same
+# rules the computer's filter enforces. It needs Node built-ins and `shared/`, nothing installed, so
+# the one file is enough. Without it the server exits on its first import.
+COPY agent-computer/src/egress.ts agent-computer/src/egress.ts
 COPY toolkit toolkit
 COPY examples examples
 # Its source and manifest, not its tests. Run it with `bun ../worker/src/index.ts` from the working
