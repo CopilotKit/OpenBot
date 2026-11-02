@@ -32,6 +32,8 @@ import {
   steeringOf,
 } from "./shared-use";
 
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 export class SharedUseRequestDecidedError extends Error {
   constructor() {
     super("That request has already been decided.");
@@ -141,8 +143,9 @@ export function createSharedUseStore(
    */
   async function rowsOfApp(
     serverId: string,
+    executor: Database | Transaction = database,
   ): Promise<{ appId: string; url: string | null; ids: string[] }> {
-    const [row] = await database
+    const [row] = await executor
       .select({ url: mcpServers.url })
       .from(mcpServers)
       .where(eq(mcpServers.id, serverId))
@@ -151,7 +154,7 @@ export function createSharedUseStore(
     const toolkit = url ? appOfUrl(url) : null;
     if (!toolkit) return { appId: serverId, url, ids: [serverId] };
     const canonical = canonicalUrlOf(toolkit);
-    const siblings = await database
+    const siblings = await executor
       .select({ id: mcpServers.id })
       .from(mcpServers)
       .where(eq(mcpServers.url, canonical))
@@ -170,8 +173,11 @@ export function createSharedUseStore(
    * read and write of an approval or a request goes through this first, and callers may hand in
    * either id and land on the same key.
    */
-  async function appIdOf(serverId: string): Promise<string> {
-    return (await rowsOfApp(serverId)).appId;
+  async function appIdOf(
+    serverId: string,
+    executor: Database | Transaction = database,
+  ): Promise<string> {
+    return (await rowsOfApp(serverId, executor)).appId;
   }
 
   /** The approval row for this Bot at the app, whoever set it, and whether it may be read now. */
@@ -241,86 +247,116 @@ export function createSharedUseStore(
     };
   }
 
-  async function setApproval(input: {
+  type ApprovalInput = {
     botId: string;
     serverId: string;
     approval: SharedUseApproval;
     by: string;
     /** Who is setting it. Only {@link approveOwnerGrant} says `owner`. */
     as?: "admin" | "owner";
-  }) {
-    const serverId = await appIdOf(input.serverId);
-    const approvedAs = input.as ?? "admin";
+  };
+
+  async function setApproval(input: ApprovalInput) {
     await database.transaction(async (tx) => {
-      await tx
-        .insert(sharedUseApprovals)
-        .values({
+      const serverId = await lockApproval(tx, input.botId, input.serverId);
+      await writeApproval(tx, { ...input, serverId });
+    });
+  }
+
+  /** Lock the canonical Bot/app before either a request or its approval row is written. */
+  async function lockApproval(
+    tx: Transaction,
+    botId: string,
+    serverId: string,
+  ) {
+    const appId = await appIdOf(serverId, tx);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${JSON.stringify(["shared-use-approval", botId, appId])}))`,
+    );
+    return appId;
+  }
+
+  /** Share the decision transaction; callers already hold the canonical Bot/app lock. */
+  async function writeApproval(tx: Transaction, input: ApprovalInput) {
+    const serverId = input.serverId;
+    const approvedAs = input.as ?? "admin";
+    const insertion = tx.insert(sharedUseApprovals).values({
+      agentId: input.botId,
+      serverId,
+      audience: input.approval.audience,
+      outsideInput: input.approval.outsideInput,
+      approvedBy: input.by,
+      approvedAs,
+    });
+    const target = [sharedUseApprovals.agentId, sharedUseApprovals.serverId];
+    // An owner may fill an absence, never replace an approval another transaction just committed.
+    const written =
+      approvedAs === "owner"
+        ? await insertion
+            .onConflictDoNothing({ target })
+            .returning({ botId: sharedUseApprovals.agentId })
+        : await insertion
+            .onConflictDoUpdate({
+              target,
+              set: {
+                audience: input.approval.audience,
+                outsideInput: input.approval.outsideInput,
+                approvedBy: input.by,
+                approvedAs,
+                approvedAt: new Date(),
+              },
+            })
+            .returning({ botId: sharedUseApprovals.agentId });
+    if (written.length === 0) return false;
+    await tx
+      .delete(sharedUseApprovalMembers)
+      .where(
+        and(
+          eq(sharedUseApprovalMembers.agentId, input.botId),
+          eq(sharedUseApprovalMembers.serverId, serverId),
+        ),
+      );
+    if (
+      input.approval.audience === "people" &&
+      input.approval.members.length > 0
+    ) {
+      await tx.insert(sharedUseApprovalMembers).values(
+        input.approval.members.map((member) => ({
           agentId: input.botId,
           serverId,
-          audience: input.approval.audience,
-          outsideInput: input.approval.outsideInput,
-          approvedBy: input.by,
-          approvedAs,
-        })
-        .onConflictDoUpdate({
-          target: [sharedUseApprovals.agentId, sharedUseApprovals.serverId],
-          set: {
-            audience: input.approval.audience,
-            outsideInput: input.approval.outsideInput,
-            approvedBy: input.by,
-            approvedAs,
-            approvedAt: new Date(),
-          },
-        });
-      await tx
-        .delete(sharedUseApprovalMembers)
-        .where(
-          and(
-            eq(sharedUseApprovalMembers.agentId, input.botId),
-            eq(sharedUseApprovalMembers.serverId, serverId),
-          ),
-        );
-      if (
-        input.approval.audience === "people" &&
-        input.approval.members.length > 0
-      ) {
-        await tx.insert(sharedUseApprovalMembers).values(
-          input.approval.members.map((member) => ({
-            agentId: input.botId,
-            serverId,
-            ...member,
-          })),
-        );
+          ...member,
+        })),
+      );
+    }
+    /* A pending request this approval now answers is closed as approved, so the inbox never asks twice. */
+    const pending = await tx
+      .select()
+      .from(sharedUseRequests)
+      .where(
+        and(
+          eq(sharedUseRequests.agentId, input.botId),
+          eq(sharedUseRequests.serverId, serverId),
+          eq(sharedUseRequests.status, "pending"),
+        ),
+      );
+    for (const request of pending) {
+      const proposed = {
+        audience: request.proposedAudience,
+        outsideInput: request.proposedOutsideInput,
+        members: request.proposedMembers,
+      };
+      if (covers(input.approval, proposed)) {
+        await tx
+          .update(sharedUseRequests)
+          .set({
+            status: "approved",
+            decidedBy: input.by,
+            decidedAt: new Date(),
+          })
+          .where(eq(sharedUseRequests.id, request.id));
       }
-      /* A pending request this approval now answers is closed as approved, so the inbox never asks twice. */
-      const pending = await tx
-        .select()
-        .from(sharedUseRequests)
-        .where(
-          and(
-            eq(sharedUseRequests.agentId, input.botId),
-            eq(sharedUseRequests.serverId, serverId),
-            eq(sharedUseRequests.status, "pending"),
-          ),
-        );
-      for (const request of pending) {
-        const proposed = {
-          audience: request.proposedAudience,
-          outsideInput: request.proposedOutsideInput,
-          members: request.proposedMembers,
-        };
-        if (covers(input.approval, proposed)) {
-          await tx
-            .update(sharedUseRequests)
-            .set({
-              status: "approved",
-              decidedBy: input.by,
-              decidedAt: new Date(),
-            })
-            .where(eq(sharedUseRequests.id, request.id));
-        }
-      }
-    });
+    }
+    return true;
   }
 
   /*
@@ -372,14 +408,17 @@ export function createSharedUseStore(
       ...exposureOf(await botFacts(input.botId)),
       outsideInput: false,
     };
-    await setApproval({
-      botId: input.botId,
-      serverId,
-      approval,
-      by: input.by,
-      as: "owner",
+    const written = await database.transaction(async (tx) => {
+      const appId = await lockApproval(tx, input.botId, serverId);
+      return writeApproval(tx, {
+        botId: input.botId,
+        serverId: appId,
+        approval,
+        by: input.by,
+        as: "owner",
+      });
     });
-    return approval;
+    return written ? approval : null;
   }
 
   /**
@@ -738,33 +777,50 @@ export function createSharedUseStore(
     by: string;
     decision: "approve" | "decline";
   }) {
-    const [claimed] = await database
-      .update(sharedUseRequests)
-      .set({
-        status: input.decision === "approve" ? "approved" : "declined",
-        decidedBy: input.by,
-        decidedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(sharedUseRequests.id, input.id),
-          eq(sharedUseRequests.status, "pending"),
-        ),
-      )
-      .returning();
-    if (!claimed) throw new SharedUseRequestDecidedError();
-    if (input.decision === "approve") {
-      await setApproval({
-        botId: claimed.agentId,
-        serverId: claimed.serverId,
-        by: input.by,
-        approval: {
-          audience: claimed.proposedAudience,
-          outsideInput: claimed.proposedOutsideInput,
-          members: claimed.proposedMembers,
-        },
-      });
-    }
+    await database.transaction(async (tx) => {
+      const [request] = await tx
+        .select({
+          botId: sharedUseRequests.agentId,
+          serverId: sharedUseRequests.serverId,
+        })
+        .from(sharedUseRequests)
+        .where(
+          and(
+            eq(sharedUseRequests.id, input.id),
+            eq(sharedUseRequests.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (!request) throw new SharedUseRequestDecidedError();
+      const serverId = await lockApproval(tx, request.botId, request.serverId);
+      const [claimed] = await tx
+        .update(sharedUseRequests)
+        .set({
+          status: input.decision === "approve" ? "approved" : "declined",
+          decidedBy: input.by,
+          decidedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(sharedUseRequests.id, input.id),
+            eq(sharedUseRequests.status, "pending"),
+          ),
+        )
+        .returning();
+      if (!claimed) throw new SharedUseRequestDecidedError();
+      if (input.decision === "approve") {
+        await writeApproval(tx, {
+          botId: claimed.agentId,
+          serverId,
+          by: input.by,
+          approval: {
+            audience: claimed.proposedAudience,
+            outsideInput: claimed.proposedOutsideInput,
+            members: claimed.proposedMembers,
+          },
+        });
+      }
+    });
     const [row] = await rows(eq(sharedUseRequests.id, input.id));
     /*
      * THE CLAIM ABOVE PROVES THE REQUEST ROW IS THERE, and this read still has to be checked: `rows`

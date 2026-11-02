@@ -187,6 +187,24 @@ export function connectionMethods(context: StoreContext) {
       });
     },
 
+    /** A failed Connect client lookup, attributed to the authenticated person and never to raw errors. */
+    async recordOAuthClientReadFailure(input: {
+      serverId: string;
+      actorId: string;
+    }): Promise<void> {
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.oauth_client_read_failed",
+        targetType: "mcp_server",
+        targetId: input.serverId,
+        actorUserId: input.actorId,
+        payload: {
+          server: input.serverId,
+          operation: "connect",
+          reason: "credential_read_failed",
+        },
+      });
+    },
+
     /**
      * The deployment's OAuth client for a server, or null if none is registered.
      *
