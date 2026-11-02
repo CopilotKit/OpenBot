@@ -6,6 +6,7 @@ import {
   withApprovalContext,
 } from "@openbot/toolkit/continuation";
 import type { AuditInitiator } from "../audit";
+import { cutAtCodeUnits } from "../channels/text";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
 export type ApprovalDecision =
@@ -374,7 +375,7 @@ export function approvalPreview(args: unknown, depth = 0): unknown {
         ]),
     );
   if (typeof args === "string")
-    return (args.length > 2000 ? `${args.slice(0, 1999)}…` : args)
+    return (args.length > 2000 ? `${cutAtCodeUnits(args, 1999)}…` : args)
       .replace(
         /((?:password|token|secret|api[_-]?key)\s*[=:]\s*)[^\s;]+/gi,
         "$1[private value]",

@@ -1678,6 +1678,12 @@ const agentFetch = createAgentFetch({
   allowPrivateHosts: config.computer?.allowPrivateHosts === true,
   // Named addresses are reachable on every hop, not only the one that was registered.
   allowedHosts: config.agentEndpointAllowedHosts,
+  // The deployment's own agent, at exactly its configured addresses: a local deployment keeps it
+  // on loopback, which the private-network check would otherwise refuse on every run.
+  managedEndpoints: [
+    config.managedAgent?.endpoint,
+    config.managedAgent?.alsoRun,
+  ].filter((url): url is URL => url !== undefined),
   // The refusal is what the run already knows; this is what the deployment knows. Written here
   // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
   // target check it reuses does.

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,10 +7,14 @@ import type { ContainerProbe } from "../src/learning/auto-assign";
 import {
   cliEnvironment,
   cliLoginPresent,
+  cmdLineSafe,
   ensureLearningContainer,
   type KeyIntelligence,
   learningSetupInstructions,
   MANAGED_API,
+  npxCommand,
+  runNpx,
+  stopProcessTree,
 } from "../src/learning/ensure-container";
 
 const SELF_HOSTED = "https://intelligence.customer.example";
@@ -231,4 +236,78 @@ describe("the CopilotKit CLI", () => {
       COPILOTKIT_TELEMETRY_DISABLED: "1",
     });
   });
+
+  test("is started through a shell on Windows, where npx is a .cmd", () => {
+    expect(npxCommand("win32")).toEqual({ command: "npx.cmd", shell: true });
+    expect(npxCommand("darwin")).toEqual({ command: "npx", shell: false });
+    expect(npxCommand("linux")).toEqual({ command: "npx", shell: false });
+  });
+
+  test("passes only arguments cmd.exe would not run or expand", () => {
+    expect(
+      cmdLineSafe([
+        "--yes",
+        "copilotkit@latest",
+        "project",
+        "select",
+        "--project",
+        "a1B2c",
+        "--json",
+      ]),
+    ).toBe(true);
+    for (const unsafe of [
+      "abc&calc",
+      "abc|calc",
+      "%PATH%",
+      "a^b",
+      "a b",
+      'a"b',
+      "a<b",
+      "a>b",
+      "(a)",
+      "a=b",
+      "",
+    ])
+      expect(cmdLineSafe(["project", "select", "--project", unsafe])).toBe(
+        false,
+      );
+  });
+
+  // Since CVE-2024-27980, spawning a .cmd without a shell throws EINVAL before anything runs.
+  test.if(process.platform === "win32")(
+    "starts on this Windows machine instead of throwing EINVAL",
+    async () => {
+      const result = await runNpx(["--version"], tmpdir());
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    },
+  );
+
+  test.if(process.platform === "win32")(
+    "refuses an argument the Windows shell would run, without starting it",
+    async () => {
+      const result = await runNpx(["--version", "x&echo INJECTED"], tmpdir());
+      expect(result).toEqual({ exitCode: 1, stdout: "" });
+    },
+  );
+
+  // Killing cmd.exe alone leaves the command under it holding the pipes, so `close` waits for it.
+  test.if(process.platform === "win32")(
+    "a stopped command takes the processes under its shell with it",
+    async () => {
+      const child = spawn("ping", ["-n", "30", "127.0.0.1"], {
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      child.stdout.resume();
+      child.stderr.resume();
+      const closed = new Promise((resolve) => child.on("close", resolve));
+      // Stopped at once, cmd.exe goes before it has started ping, and there is no tree to leave.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const started = Date.now();
+      stopProcessTree(child, true);
+      await closed;
+      expect(Date.now() - started).toBeLessThan(4_000);
+    },
+  );
 });
