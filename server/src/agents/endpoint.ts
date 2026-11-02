@@ -286,8 +286,11 @@ export function createAgentFetch(
      */
     allowedHosts?: ReadonlySet<string>;
     /**
-     * Carried to every hop, for the reason `allowedHosts` is: the deployment's own agent is
-     * reachable wherever it appears, and the match stays exact on every hop.
+     * The stored address only, never a redirect hop. A run bound to the deployment's own agent
+     * dials it directly; nothing reaches it by being redirected there. An outside agent answering
+     * with a `Location` on the deployment's agent would otherwise steer a run into a service this
+     * deployment runs on a private address, so a hop onto it is refused like any other private
+     * address the deployment did not name.
      */
     managedEndpoints?: readonly (string | URL)[];
     fetchImpl?: typeof fetch;
@@ -319,19 +322,19 @@ export function createAgentFetch(
     }
     return new EndpointNotAllowedError(reason);
   };
-  const check = (address: string) =>
+  const check = (address: string, managed: "stored" | "hop") =>
     checkAgentEndpoint(address, {
       ...(options.allowPrivateHosts !== undefined
         ? { allowPrivateHosts: options.allowPrivateHosts }
         : {}),
       ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
-      ...(options.managedEndpoints
+      ...(managed === "stored" && options.managedEndpoints
         ? { managedEndpoints: options.managedEndpoints }
         : {}),
     });
 
   return async function guardedFetch(url: string, init?: RequestInit) {
-    const stored = check(url);
+    const stored = check(url, "stored");
     if (!stored.allowed) {
       throw refuse(
         url,
@@ -358,7 +361,7 @@ export function createAgentFetch(
       if (!location) return response;
 
       const next = new URL(location, target).toString();
-      const verdict = check(next);
+      const verdict = check(next, "hop");
       if (!verdict.allowed) {
         throw refuse(
           next,

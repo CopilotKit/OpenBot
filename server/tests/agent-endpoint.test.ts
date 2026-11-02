@@ -640,8 +640,11 @@ describe("dialling a stored agent endpoint", () => {
     expect(refusals.length).toBe(1);
   });
 
-  test("a redirect to the exact managed URL is followed", async () => {
+  test("a redirect to the exact managed URL is refused", async () => {
+    // The exemption covers the address a run is bound to, not a hop. An outside agent must not be
+    // able to steer a run into the deployment's own agent by answering with its address.
     const managed = ["http://127.0.0.1:41706/ag-ui"];
+    const refusals: Array<{ address: string; reason: string }> = [];
     const { calls, impl } = recorder([
       redirectTo("http://127.0.0.1:41706/ag-ui"),
       arrived,
@@ -649,10 +652,18 @@ describe("dialling a stored agent endpoint", () => {
     const dial = createAgentFetch({
       fetchImpl: impl,
       managedEndpoints: managed,
+      onRefusal: (refusal) => refusals.push(refusal),
     });
-    const response = await dial("https://agent.example.com/ag-ui", runRequest);
-    expect(response.status).toBe(200);
-    expect(calls.length).toBe(2);
+    await expect(
+      dial("https://agent.example.com/ag-ui", runRequest),
+    ).rejects.toThrow(/redirected/i);
+    expect(calls.length).toBe(1);
+    expect(refusals).toEqual([
+      {
+        address: "http://127.0.0.1:41706/ag-ui",
+        reason: expect.stringMatching(/redirected/i),
+      },
+    ]);
   });
 });
 
@@ -729,6 +740,15 @@ describe("the deployment's own agent addresses", () => {
   });
 });
 
+/**
+ * Naming a private address instead of opening the network.
+ *
+ * `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` is a floor: it permits this deployment's whole network, to
+ * browsing and to agent endpoints alike, and a production deployment refuses to start with it on.
+ * That left bring-your-own-agent unusable in the image people are told to deploy, because a company's
+ * own agent lives at an internal address. Naming the address is the narrow answer, and these are the
+ * cases that decide whether it stays narrow.
+ */
 describe("private addresses named one at a time", () => {
   const named = (...hosts: string[]) => new Set(hosts);
 
