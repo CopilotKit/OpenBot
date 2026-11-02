@@ -217,6 +217,8 @@ export const auditEventTypes = [
    * thing they are entitled to see a record of. Carries the scope the vendor actually granted.
    */
   "mcp.account_connected",
+  /** A vendor authorization answer could not be reconciled with its pending attempt. */
+  "mcp.authorization_unreconciled",
   /*
    * One person's connector access retired, by them or on their behalf.
    *
