@@ -18,6 +18,7 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { createApprovalResumeTick } from "../src/approvals/resume-sweep";
+import { createApprovalRoutes } from "../src/approvals/routes";
 import { createApprovalService } from "../src/approvals/service";
 import { createApprovalStore } from "../src/approvals/store";
 import { currentApprovalContext } from "../src/approvals/types";
@@ -320,6 +321,24 @@ const call = (user: string, path: string, method = "GET") =>
     method,
     headers: { "x-test-user": user },
   });
+app.route(
+  "/api/approvals",
+  createApprovalRoutes(approvalService, async (context, next) => {
+    const id = context.req.header("x-test-user") ?? "";
+    context.set("actor", { id, email: `${id}@example.test`, role: "user" });
+    await next();
+  }),
+);
+/** What the browser is told before it sends a Bot's look at a page straight to the computer. */
+const asksEveryStep = async (user: string, threadId: string) =>
+  (
+    (await (
+      await app.request(
+        `/api/approvals/threads/${encodeURIComponent(threadId)}`,
+        { headers: { "x-test-user": user } },
+      )
+    ).json()) as { asksEveryStep: boolean }
+  ).asksEveryStep;
 
 /* ------------------------------------------------------------------------------------------------
  * A person, their Bot, their own conversation with it, and an item a check-in raised.
@@ -747,6 +766,22 @@ describe("where a task stands", () => {
     });
     expect((await approvalStore.get(owner.id, id)).status).toBe("pending");
     expect(sent.length).toBe(sentBefore);
+  });
+
+  test("the browser is told a task's conversation asks before every step, and nobody else's does", async () => {
+    const { owner, own, item } = await seed();
+    script = (input) => reply(input, "Looked.");
+    const task = await start(owner, item.id);
+    await tasks.idle();
+    const { threadId } = await taskStore.get(owner.id, task.id);
+    if (!threadId) throw new Error("The task has no conversation.");
+
+    expect(await asksEveryStep(owner.id, threadId)).toBe(true);
+    // Their own conversation with the Bot asks as their switch says, not before every step.
+    expect(await asksEveryStep(owner.id, own.threadId)).toBe(false);
+    // Somebody else asking about this person's task learns nothing about it.
+    const stranger = await person();
+    expect(await asksEveryStep(stranger.id, threadId)).toBe(false);
   });
 
   test("a turn that fails twice reads failed, says so in its conversation, and Try again runs once however often it is pressed", async () => {

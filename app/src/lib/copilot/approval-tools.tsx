@@ -3,14 +3,10 @@ import {
   useCopilotKit,
   useFrontendTool as useSDKFrontendTool,
 } from "@copilotkit/react-core/v2";
-import {
-  type InfiniteData,
-  type QueryClient,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
-import { type ChannelPage, channelKeys } from "@/lib/channels/queries";
+import { threadAsksEveryStepQueryOptions } from "@/lib/approvals";
 import { tryClient } from "@/lib/client";
 import { failedComputerCall } from "@/lib/computers/call";
 import { useActiveBotHolder } from "./active-bot";
@@ -23,6 +19,10 @@ const needsConversation = (outcome: unknown) =>
   typeof outcome === "object" &&
   (outcome as { needsConversation?: unknown }).needsConversation === true;
 
+/** What the Bot is told when a step in a conversation that asks first has nowhere to ask. */
+const NOT_ASKED =
+  "Not done: this conversation asks before every step, and this step couldn't be asked about here.";
+
 const writes = new Set([
   "computer_click",
   "computer_type",
@@ -32,25 +32,31 @@ const writes = new Set([
 ]);
 
 /**
- * Whether the run asking is in a task's own conversation, as the conversation list this app holds
- * says. A task started from a check-in asks before every step, a look at a page included, and only
- * the gate can ask: a look sent straight to the computer carries no conversation to ask in.
+ * Whether the run asking is in a conversation that asks before every step, which a task's started
+ * from a check-in does: then a look at a page goes through the gate too, since a look sent straight
+ * to the computer carries no conversation to ask in.
+ *
+ * ASKED OF THE SERVER, FOR THIS THREAD, and decided by the rule its gate applies. Never inferred
+ * from the conversation list this app happens to hold: a task opened by a link, or one past the
+ * list's first page, is not in it. Anything but a plain no (the check failed, or has no answer)
+ * sends the look through the gate, where the server decides; that costs a larger request, never a
+ * look nobody was asked about.
  */
-function inTaskConversation(
+async function asksEveryStep(
   queries: QueryClient,
   threadId: string | undefined,
-): boolean {
+): Promise<boolean> {
   if (!threadId) return false;
-  const listed = queries.getQueryData<InfiniteData<ChannelPage>>(
-    channelKeys.list(),
-  );
-  return (
-    listed?.pages.some((page) =>
-      page.channels.some(
-        (channel) => channel.threadId === threadId && channel.task === true,
-      ),
-    ) ?? false
-  );
+  try {
+    return (
+      (await queries.fetchQuery({
+        ...threadAsksEveryStepQueryOptions(threadId),
+        retry: false,
+      })) !== false
+    );
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -71,7 +77,8 @@ function inTaskConversation(
  * and that call arrives with no conversation to ask in, so the computer answers `needsConversation`
  * having done nothing. It is sent again here through the gate, where the person is asked; before
  * this, the Bot was handed the refusal and could only apologise for a card nobody was shown. In a
- * task's own conversation every look goes through the gate first, since a task asks before each one.
+ * task's own conversation every look goes through the gate first, since a task asks before each one
+ * (`asksEveryStep`, answered by the server for the thread).
  */
 export function useFrontendTool<T extends Record<string, unknown>>(
   tool: ReactFrontendTool<T>,
@@ -103,10 +110,11 @@ export function useFrontendTool<T extends Record<string, unknown>>(
     handler: tool.handler
       ? async (args, context) => {
           let direct: unknown;
-          if (
-            !writes.has(tool.name) &&
-            !inTaskConversation(queryClient, context.agent?.threadId)
-          ) {
+          const everyStep = await asksEveryStep(
+            queryClient,
+            context.agent?.threadId,
+          );
+          if (!writes.has(tool.name) && !everyStep) {
             direct = await tool.handler?.(args, context);
             if (!needsConversation(direct)) return direct;
           }
@@ -114,8 +122,13 @@ export function useFrontendTool<T extends Record<string, unknown>>(
           try {
             snapshot = frontendApprovalSnapshot(context);
           } catch {
-            // A surface with no observed conversation. The server still gates the action; it can
-            // run it when nothing asks, and says why when something does. A look already went.
+            /*
+             * A surface with no observed conversation. The server still gates the action; it can
+             * run it when nothing asks, and says why when something does. A look already went.
+             * Not in a conversation that asks before every step: sent without its conversation,
+             * the server could not tell, so the step is not taken at all.
+             */
+            if (everyStep) return { ok: false, reason: NOT_ASKED };
             return direct ?? tool.handler?.(args, context);
           }
           let response: Response;
