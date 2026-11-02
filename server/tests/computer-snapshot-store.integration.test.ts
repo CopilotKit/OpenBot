@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import type { SnapshotElement } from "../src/computer/schema";
 import {
   createSnapshotStore,
@@ -146,4 +146,8 @@ describe("a snapshot taken on one server", () => {
       "Open",
     );
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

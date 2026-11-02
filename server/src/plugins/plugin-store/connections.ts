@@ -423,12 +423,13 @@ export function connectionMethods(context: StoreContext) {
        * and the filter keeps that a fact this query states rather than one it happens to rely on.
        */
       /*
-       * NO PROVIDER PREDICATE HERE, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT. Each row is resolved
-       * below at the ACTIVE provider's canonical url, so another provider's row would be silently
-       * dropped from the page. What keeps that unreachable is the startup activation refusal
-       * (`assertActivatable`, called from `server/src/index.ts`): it will not boot when the
-       * configured provider differs from the one on the existing rows. No flow relaxes that refusal
-       * today; whoever builds one must add the `brokerProvider` predicate here.
+       * SCOPED TO THE ACTIVE PROVIDER. The settings page draws rows the ACTIVE broker's
+       * canonical scheme resolves, so a row filed under another provider would be silently
+       * dropped from the page anyway; filtering at the read keeps that true out loud. It is
+       * unreachable today because the startup activation refusal (`assertActivatable`, called
+       * from `server/src/index.ts`) will not boot a deployment whose configured provider differs
+       * from the one on the existing rows — so this predicate costs nothing now, and is already
+       * right when any flow relaxes that refusal (#783).
        */
       const connections = await database
         .select({
@@ -441,6 +442,7 @@ export function connectionMethods(context: StoreContext) {
         .from(brokeredConnections)
         .where(
           and(
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.holder, "person"),
             eq(brokeredConnections.userId, userId),
           ),
@@ -3339,19 +3341,20 @@ export function connectionMethods(context: StoreContext) {
        * order.
        */
       /*
-       * NO PROVIDER PREDICATE HERE, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT. The sweep below
-       * revokes through the ACTIVE broker, so a row filed under another provider would be a
-       * revocation requested at the wrong vendor, which would not recognise the connection, and an
-       * audit row claiming `vendorRevocationRequested` about access that was never removed. What
-       * keeps that unreachable is the startup activation refusal (`assertActivatable`, called from
-       * `server/src/index.ts`): a deployment holding both providers' rows cannot boot. No flow relaxes
-       * that refusal today; whoever builds one must add the `brokerProvider` predicate here.
+       * THE ACTIVE BROKER'S ROWS ONLY. The sweep below revokes through the ACTIVE broker, so a
+       * row filed under another provider would be a revocation requested at a vendor that would
+       * not recognise the connection, and an audit row claiming `vendorRevocationRequested` about
+       * access that was never removed — the one reading of that field that must never be written.
+       * Unreachable today, because the startup activation refusal (`assertActivatable`, called
+       * from `server/src/index.ts`) will not boot a deployment holding both providers' rows; the
+       * predicate keeps the sweep correct the moment any flow relaxes that refusal (#783).
        */
       const brokered = await database
         .select({ toolkit: brokeredConnections.app })
         .from(brokeredConnections)
         .where(
           and(
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.holder, "person"),
             eq(brokeredConnections.userId, userId),
           ),
@@ -3485,10 +3488,15 @@ export function connectionMethods(context: StoreContext) {
        * those are exactly the rows the recovery needs. Deleting none — what a throw used to do —
        * leaves a row and an open `(toolkit, user_id)` gate for an account that is already gone at
        * Composio, so the table claims a connection this person does not have.
+       *
+       * The active provider's rows only, as the read above. The app list alone does not scope it:
+       * the same app filed under the other provider is a different row, never revoked here, and
+       * deleting it would drop the only record of a connection that is still live at that vendor.
        */
       if (withdrawn.length > 0) {
         await database.delete(brokeredConnections).where(
           and(
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.holder, "person"),
             eq(brokeredConnections.userId, userId),
             inArray(

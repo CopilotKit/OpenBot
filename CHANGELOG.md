@@ -78,8 +78,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 - Bots now check in on their own and tell a person when something needs them (below). It is on by
-  default for every Bot a person has talked to. Migrations `0070_proactive_check_ins` and
-  `0071_check_in_read_labels` add its tables. Admin → Check-ins turns it off for everyone.
+  default for every Bot a person has talked to. Migrations `0071_proactive_check_ins` and
+  `0072_check_in_read_labels` add its tables. Admin → Check-ins turns it off for everyone.
+- Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
+  the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
+  the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
+  affected.
 
 ### Bots tell you when something needs you
 
@@ -93,6 +97,31 @@ every send or change; Hide keeps it from coming back for 30 days. A person turns
 → Notifications and chooses where these go under "Something needs you"; an admin turns it off for
 everyone, changes the daily limit (24 check-ins per Bot) and sees how often items are started under
 Admin → Check-ins.
+
+### Each Bot keeps a fact it formed, even when another Bot formed it first
+
+A memory a Bot forms from what it read was deduplicated per person, but each Bot recalls only the
+memories it formed itself. So when a second Bot formed a fact the first already held, it was told
+the fact was remembered and could then never recall it. Each Bot now keeps its own copy, and
+resetting one Bot leaves the other's alone. Forgetting stays the person's: a fact forgotten from any
+Bot is not formed again by another.
+
+### A Bot made with "Run it here" runs when the deployment's own agent is on a private address
+
+A Bot created in the app with no endpoint is bound to the deployment's own agent,
+`MANAGED_AGENT_AG_UI_URL`. Where that address is private, as on a local deployment that keeps it on
+loopback, the endpoint check refused it like an address a person typed in, and every message to the
+Bot failed with "This deployment will not dial". The deployment's own agent addresses
+(`MANAGED_AGENT_AG_UI_URL`, and `PICKED_HARNESS_URL` when `PICKED_HARNESS_IMAGE` is set) are now
+allowed at exactly those URLs: when a Bot is saved, in Test connection, and on every run. Another
+path on the same host and port, and a redirect onto the agent's own address, are still refused.
+
+### A tool's link and a vendor's refusal are cut between characters
+
+When a tool answers with a link, its title, name and description are each cut to 400 characters
+before the Bot reads them, and the reason a vendor gives for refusing a request is cut to 400 too.
+When the cut landed inside an emoji, the Bot was handed a broken character before the "…". The cut
+now drops the half character instead.
 
 ### An approval cuts a long value between characters
 
@@ -210,6 +239,14 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 `COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
+
+### A store connection is checked against the store itself
+
+After connecting a key, OpenBot checks it with one argument-free read, preferring an identity read
+and otherwise taking the first safe read alphabetically. For Shopify that was `SHOPIFY_COUNT_BLOGS`,
+which needs the `read_content` scope a store app with only order and product scopes does not have,
+so a working key was reported as rejected. A store's own details now count as an identity read, so
+the check calls `SHOPIFY_GET_SHOP_DETAILS` instead.
 
 ### A message naming different Bots' apps stays on the default when routing is unsure
 
@@ -1041,6 +1078,15 @@ thing itself — a card naming the app, with a Connect button.
 With `OPENBOT_SINGLE_USER=true`, an address such as `example.com:3010` in `OPENBOT_PUBLIC_URL`,
 `OPENBOT_APP_URL` or `TRUSTED_ORIGINS` now refuses startup. It previously counted as a private
 network address and only warned, even though the missing URL scheme left its host unidentified.
+
+### `setup-learning.ts` runs on Windows
+
+On Windows, `bun scripts/setup-learning.ts` stopped at once with `spawn npx.cmd EINVAL` and wrote
+nothing to `.env`. Since CVE-2024-27980, Node and Bun refuse to start a `.cmd` without a shell, and
+`npx` is one there. The CopilotKit CLI is now started through `cmd.exe` on Windows. An argument the
+shell would run or expand, such as a project id containing `&` or `%`, is refused instead of passed.
+A CLI that outlives its two minutes now has its whole process tree stopped. The server's own
+Learning setup at boot calls the CLI the same way, and is fixed with it.
 
 ### A reply's tool calls fold into one line
 

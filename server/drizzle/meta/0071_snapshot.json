@@ -1,6 +1,6 @@
 {
-  "id": "ebb770c1-53a5-42b8-981c-d713e4056456",
-  "prevId": "4f4992de-ef6b-4523-b3ea-df45137eefd8",
+  "id": "662165f3-2fc3-403a-9f6f-2a5c7f54eaa2",
+  "prevId": "1efe7e4b-13fe-4bcf-be24-06a90698fbfc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3127,13 +3127,6 @@
           "notNull": true,
           "default": false
         },
-        "declared_read": {
-          "name": "declared_read",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "version": {
           "name": "version",
           "type": "text",
@@ -5917,11 +5910,17 @@
           "method": "btree",
           "with": {}
         },
-        "personal_memories_formed_digest_idx": {
-          "name": "personal_memories_formed_digest_idx",
+        "personal_memories_formed_digest_per_bot_idx": {
+          "name": "personal_memories_formed_digest_per_bot_idx",
           "columns": [
             {
               "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "formed_by_agent_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
