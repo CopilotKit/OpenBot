@@ -230,3 +230,7 @@ test("a re-added app a Bot was never granted again refuses the call", async () =
       .catch(() => undefined);
   }
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

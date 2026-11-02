@@ -363,3 +363,7 @@ describe("an unattended routine turn answering with a governed chart", () => {
     }
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

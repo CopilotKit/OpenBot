@@ -51,6 +51,8 @@ export function parseAgentInput(
   allowPrivateHosts = false,
   /** Private addresses this deployment named as acceptable. Empty is the default posture. */
   allowedHosts: ReadonlySet<string> = new Set(),
+  /** The deployment's own agent addresses, reachable at exactly those URLs; see checkAgentEndpoint. */
+  managedEndpoints?: readonly (string | URL)[],
 ): AgentInputParseResult {
   if (!isAgentInputObject(input)) {
     return { ok: false, error: "Agent input must be a JSON object." };
@@ -94,6 +96,7 @@ export function parseAgentInput(
     const verdict = checkAgentEndpoint(input.endpoint, {
       allowPrivateHosts,
       allowedHosts,
+      ...(managedEndpoints ? { managedEndpoints } : {}),
     });
     if (!verdict.allowed) return { ok: false, error: verdict.reason };
     endpoint = verdict.url;
@@ -524,6 +527,9 @@ export function createAgentRoutes(
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
       allowPrivateHosts,
       allowedHosts,
+      // Our own addresses are reachable at exactly their URLs: the test must not refuse the Bot
+      // this deployment started, and must not open anything else on its host.
+      ...(managedRun ? { managedEndpoints: managedRun.endpoints } : {}),
     });
     // 200 either way: the request succeeded, and the verdict is the payload. A failed connection test
     // is an answer, not an error, and a 4xx here would have the surface render it as a broken button.
@@ -612,6 +618,7 @@ export function createAgentRoutes(
       await context.req.json().catch(() => null),
       allowPrivateHosts,
       allowedHosts,
+      managedRun?.endpoints,
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
     if (parsed.value.isolated === true && !isolationAvailable) {
@@ -682,6 +689,7 @@ export function createAgentRoutes(
       await context.req.json().catch(() => null),
       allowPrivateHosts,
       allowedHosts,
+      managedRun?.endpoints,
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
     if (parsed.value.isolated === true && !isolationAvailable) {

@@ -1,5 +1,5 @@
 {
-  "id": "59264619-3af1-4691-9330-e82a067e3189",
+  "id": "1efe7e4b-13fe-4bcf-be24-06a90698fbfc",
   "prevId": "ab8a3370-f719-40eb-9066-b19d682c8e6a",
   "version": "7",
   "dialect": "postgresql",
@@ -3008,12 +3008,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "entra_scope": {
-          "name": "entra_scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "tools_refreshed_at": {
           "name": "tools_refreshed_at",
           "type": "timestamp with time zone",
@@ -5916,11 +5910,17 @@
           "method": "btree",
           "with": {}
         },
-        "personal_memories_formed_digest_idx": {
-          "name": "personal_memories_formed_digest_idx",
+        "personal_memories_formed_digest_per_bot_idx": {
+          "name": "personal_memories_formed_digest_per_bot_idx",
           "columns": [
             {
               "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "formed_by_agent_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
