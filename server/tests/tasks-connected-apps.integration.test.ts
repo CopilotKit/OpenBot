@@ -74,7 +74,8 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * THE MODEL'S CONNECTION ENDS AS A REAL PROVIDER'S DOES, a moment after its last event, through a
  * relay in front of the mock. The mock alone closes its response with the last event, and that
  * difference is the whole of how a Bot's tool calls lost their conversation in a real deployment
- * while every test passed: see `openRunOf` in toolkit/src/native-approval.ts.
+ * while every test passed: see `NativeRunScope` in toolkit/src/native-approval.ts. It shows on the
+ * Bun this repository pins (`packageManager`); an older Bun keeps the context and passes regardless.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -120,6 +121,28 @@ const actorFor = async (id: string): Promise<AgentActor> => ({
 
 /** Every tool call the server carried out, in order. Notion answers only the person's own token. */
 const vendorCalls: { tool: string; args: unknown }[] = [];
+/** A page Notion takes its time over: its read holds until the test lets it go. */
+const SLOW_PAGE = "slow";
+const slowPage = (() => {
+  let reached = () => {};
+  let release = () => {};
+  const latch = {
+    reached: () => reached(),
+    released: Promise.resolve(),
+    /** Arm the latch; resolves once the slow read is being answered. */
+    arm() {
+      const arrived = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      latch.released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return arrived;
+    },
+    release: () => release(),
+  };
+  return latch;
+})();
 
 function notionServer() {
   const mcp = new McpServer({ name: "notion", version: "1.0.0" });
@@ -155,6 +178,10 @@ function notionServer() {
     },
     async ({ id }) => {
       vendorCalls.push({ tool: FETCH, args: { id } });
+      if (id === SLOW_PAGE) {
+        slowPage.reached();
+        await slowPage.released;
+      }
       return {
         content: [
           {
@@ -582,7 +609,7 @@ const resumeApproval = createApprovalResumeTick({
  * A person, their Bot holding the apps, and an item a check-in raised.
  * ---------------------------------------------------------------------------------------------- */
 
-async function seed() {
+async function seed(title = "Reply to Sam about the spec") {
   const id = `tasks-apps-${suite}-${randomUUID()}`;
   await database
     .insert(users)
@@ -620,7 +647,7 @@ async function seed() {
       agentId: bot.id,
       settingId,
       runId: `tasks-apps-${suite}-run`,
-      title: "Reply to Sam about the spec",
+      title,
       detail: "Sam asked for the spec by Friday.",
       sourceApp: "Notion",
       sourceRef: ref(NOTION, GET_REQUEST),
@@ -889,5 +916,78 @@ describe("a task works with the apps the person connected", () => {
       { tool: SEARCH, args: { query: "spec template" } },
     ]);
     expect(await pendingFor(owner.id)).toHaveLength(1);
+  });
+
+  test("two people's tasks whose models name a tool call alike each ask in their own conversation", async () => {
+    // Some providers and every scripted model number their calls, so two runs open at once can
+    // both have a `call_0`. Each run's calls must still belong to that run and nobody else's.
+    const reader = await seed("Read the long page");
+    const sender = await seed();
+    script = (request) => {
+      if (answeredSinceAsk(request) > 0) return { content: "Done." };
+      return lastAsk(request).includes("Read the long page")
+        ? {
+            toolCalls: [
+              {
+                id: "call_0",
+                name: modelName(NOTION, FETCH),
+                arguments: JSON.stringify({ id: SLOW_PAGE }),
+              },
+            ],
+          }
+        : {
+            toolCalls: [
+              {
+                id: "call_0",
+                name: modelName(NOTION, COMMENT),
+                arguments: JSON.stringify({
+                  page_id: "r-1",
+                  text: "Friday works for the spec.",
+                }),
+              },
+            ],
+          };
+    };
+    const startNow = async (owner: AgentActor, itemId: string) =>
+      tasks.startFromItem({
+        ownerUserId: owner.id,
+        item: await proactive.resolveSuggestion(owner.id, itemId, "started"),
+      });
+
+    // The first person's run reads a page that holds, so their `call_0` stays open...
+    const reading = slowPage.arm();
+    const readerTask = await startNow(reader.owner, reader.item.id);
+    await reading;
+    // ...while the second person's run calls its own `call_0`: a send, which asks.
+    const senderTask = await startNow(sender.owner, sender.item.id);
+    const deadline = Date.now() + 15_000;
+    while (
+      (await pendingFor(sender.owner.id)).length === 0 &&
+      (await taskStore.get(sender.owner.id, senderTask.id)).status !==
+        "failed" &&
+      Date.now() < deadline
+    )
+      await Bun.sleep(25);
+    slowPage.release();
+    await tasks.idle();
+
+    // The send asked in the sender's own task conversation, and nothing was sent.
+    expect(callsOf(COMMENT)).toEqual([]);
+    const asked = await pendingFor(sender.owner.id);
+    expect(asked.map((request) => request.action)).toMatchObject([
+      {
+        toolRef: ref(NOTION, COMMENT),
+        toolCallId: "call_0",
+        threadId: (await taskStore.get(sender.owner.id, senderTask.id))
+          .threadId,
+        policy: { behaviour: "ask", source: "task" },
+      },
+    ]);
+    // The reader's run finished its own read, unasked, and nobody asked them about the send.
+    expect(callsOf(FETCH)).toEqual([{ tool: FETCH, args: { id: SLOW_PAGE } }]);
+    expect(await pendingFor(reader.owner.id)).toEqual([]);
+    expect(await taskStore.get(reader.owner.id, readerTask.id)).toMatchObject({
+      status: "ready_for_review",
+    });
   });
 });

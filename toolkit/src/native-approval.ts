@@ -22,60 +22,48 @@ type NativeRun = {
   messages: Message[];
   state: unknown;
   waiting?: HeadlessToolSuspension;
-  /** The tool calls this run has emitted, by id. */
-  captured: ReadonlySet<string>;
   waitForCall(id: string): Promise<void>;
   suspend(error: HeadlessToolSuspension): void;
 };
 const nativeRuns = new AsyncLocalStorage<NativeRun>();
 
 /**
- * Every native run still open in this process, so a tool call that arrives without its run in scope
- * is matched to the run that emitted it.
+ * The run a built-in Bot's tools belong to, held by the agent that runs them.
  *
  * THE SCOPE DOES NOT SURVIVE THE MODEL'S STREAM ON BUN. The AI SDK runs a step's tools when the
  * provider's stream ends, from the provider's `flush`, and Bun calls a stream's `flush` with no
  * async context when the end of a fetched body arrives on its own, after the last event: the way a
  * real provider closes its connection a moment after it has finished. So every native tool call in a
  * real conversation ran with no run in scope, and so with no approval context: the gate had no
- * conversation to ask in and let a change through unasked, and a send to other people was refused
- * outright as "not part of a run that can ask". A fake model that closes its body with its last event
- * keeps the scope, which is how this went unseen.
+ * conversation to ask in, and a send to other people was refused outright as "not part of a run
+ * that can ask". A fake model that closes its body with its last event keeps the scope, which is how
+ * this went unseen.
  *
- * The call's id is the run's own fact, carried by the AI SDK into every tool execution, so the run
- * is found by it instead: the one open run that emitted that call.
+ * SO THE RUN IS CARRIED BY THE TOOL, NOT LOOKED UP. An agent holds one of these, wraps each of its
+ * tools with {@link withinNativeRun}, and hands it to {@link nativeApprovalRun}, which puts the run
+ * in it when the run starts. A tool then re-enters exactly that run, however the call reached it.
+ * An agent runs one run at a time (a built-in agent refuses a second while one is open), so the run
+ * a tool finds is the one that called it by construction. Looking the run up by the call's id
+ * instead matched across every person's open runs, and call ids are not unique: two runs numbering
+ * their calls alike could fail a call, or ask in another person's conversation.
  */
-const openRuns = new Set<NativeRun>();
-/** Tool calls asked about before any open run had emitted them, by id. */
-const awaitedCalls = new Map<string, Set<(run: NativeRun) => void>>();
+export type NativeRunScope = { run?: NativeRun };
+export const nativeRunScope = (): NativeRunScope => ({});
 
-/**
- * The open run that emitted this call, waiting briefly for it to be emitted. Undefined when no
- * native run is open at all: a tool executed outside any conversation, which runs as it always has.
- */
-async function openRunOf(id: string): Promise<NativeRun | undefined> {
-  if (openRuns.size === 0) return undefined;
-  const emitted = [...openRuns].filter((run) => run.captured.has(id));
-  // Two conversations claiming one call cannot be told apart, and guessing would ask in the wrong one.
-  if (emitted.length > 1)
-    throw new Error(
-      "This tool call could not be matched to one conversation, so it was not run.",
-    );
-  if (emitted[0]) return emitted[0];
-  return new Promise<NativeRun>((resolve, reject) => {
-    const waiters = awaitedCalls.get(id) ?? new Set();
-    const found = (run: NativeRun) => {
-      clearTimeout(timer);
-      resolve(run);
-    };
-    const timer = setTimeout(() => {
-      waiters.delete(found);
-      if (waiters.size === 0) awaitedCalls.delete(id);
-      reject(new Error("The native tool call was not emitted through AG-UI."));
-    }, 2_000);
-    waiters.add(found);
-    awaitedCalls.set(id, waiters);
-  });
+/** A tool's execute, re-entering the run its agent is in when it is called. */
+export function withinNativeRun<A extends unknown[], R>(
+  scope: NativeRunScope,
+  execute: (...args: A) => R,
+): (...args: A) => R {
+  return (...args) => {
+    const run = scope.run;
+    // Only the agent's own run calls its tools, so a call with none has no conversation to ask in.
+    if (!run)
+      throw new Error(
+        "This tool call is not part of a conversation, so it was not run.",
+      );
+    return nativeRuns.run(run, () => execute(...args));
+  };
 }
 
 export async function executeNativeApprovalTool<T>(
@@ -85,9 +73,8 @@ export async function executeNativeApprovalTool<T>(
   initiator: AuditInitiator | undefined,
   execute: () => Promise<T>,
 ): Promise<T> {
-  if (!toolCallId) return execute();
-  const run = nativeRuns.getStore() ?? (await openRunOf(toolCallId));
-  if (!run) return execute();
+  const run = nativeRuns.getStore();
+  if (!run || !toolCallId) return execute();
   if (run.waiting) throw run.waiting;
   await run.waitForCall(toolCallId);
   if (run.waiting) throw run.waiting;
@@ -135,6 +122,9 @@ class NativeStream extends AbstractAgent {
   }
 }
 class NativeApprovalMiddleware extends Middleware {
+  constructor(private readonly scope?: NativeRunScope) {
+    super();
+  }
   run(input: RunAgentInput, next: AbstractAgent) {
     return new Observable<BaseEvent>((subscriber) => {
       let subscription: Subscription | undefined;
@@ -151,7 +141,6 @@ class NativeApprovalMiddleware extends Middleware {
         input,
         messages: input.messages,
         state: input.state,
-        captured,
         waitForCall(id) {
           if (captured.has(id)) return Promise.resolve();
           return new Promise<void>((resolve, reject) => {
@@ -205,7 +194,8 @@ class NativeApprovalMiddleware extends Middleware {
           subscription?.unsubscribe();
         },
       };
-      openRuns.add(run);
+      // Kept after the run ends: a call still arriving belongs to it, and finds it waiting or done.
+      if (this.scope) this.scope.run = run;
       subscription = nativeRuns.run(run, () =>
         this.runNextWithState(input, next).subscribe({
           next({ event, messages, state }) {
@@ -223,9 +213,6 @@ class NativeApprovalMiddleware extends Middleware {
                 awaiting.delete(event.toolCallId);
                 pending.resolve();
               }
-              const waiters = awaitedCalls.get(event.toolCallId);
-              awaitedCalls.delete(event.toolCallId);
-              for (const found of waiters ?? []) found(run);
             }
           },
           error: (error) => subscriber.error(error),
@@ -233,7 +220,6 @@ class NativeApprovalMiddleware extends Middleware {
         }),
       );
       return () => {
-        openRuns.delete(run);
         subscription?.unsubscribe();
         for (const pending of awaiting.values()) {
           clearTimeout(pending.timer);
@@ -247,8 +233,10 @@ class NativeApprovalMiddleware extends Middleware {
 export function nativeApprovalRun(
   input: RunAgentInput,
   source: () => Observable<BaseEvent>,
+  /** Where this run is put for the agent's tools to find. See {@link NativeRunScope}. */
+  scope?: NativeRunScope,
 ) {
-  return new NativeApprovalMiddleware().run(
+  return new NativeApprovalMiddleware(scope).run(
     input,
     new NativeStream(source, input),
   );
