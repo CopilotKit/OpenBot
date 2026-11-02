@@ -1,12 +1,11 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
 import { Composer, toAgentOptions } from "@/components/channels/composer";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useRotatingPlaceholder } from "@/hooks/use-rotating-placeholder";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
@@ -17,10 +16,6 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
-import { appConfig } from "@/lib/generated/application-config";
-import { homeExamples } from "@/lib/home-examples";
-import { cn } from "@/lib/utils";
-import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -40,43 +35,6 @@ function RouteComponent() {
   const explore = agents?.filter(isSharedWithYou);
   const { start, startChosen, pending } = useStartChannel();
   const [error, setError] = useState<string | null>(null);
-  // OpenBot's own home. A skin keeps the home it had: the eyebrow, the hint and a still placeholder.
-  const openbot = useSkinId() === DEFAULT_SKIN;
-  const [composerFocused, setComposerFocused] = useState(false);
-  const [composerHasText, setComposerHasText] = useState(false);
-  // From the Bots this person can reach, so the placeholder never suggests a job for a Bot they don't
-  // have. System Bots count: on a new deployment they are the only ones there.
-  const placeholder = useRotatingPlaceholder(
-    openbot ? homeExamples(agents ?? []) : [],
-    { paused: composerFocused || composerHasText },
-  );
-
-  const composerAreaRef = useRef<HTMLDivElement>(null);
-  /*
-   * The composer does not report focus or its draft, so the area around it listens. The editor's
-   * text is read on the events that can change it while the person is here: typing, and leaving.
-   */
-  useEffect(() => {
-    const area = composerAreaRef.current;
-    if (!area) return;
-    const syncText = () =>
-      setComposerHasText(
-        Boolean(area.querySelector('[role="textbox"]')?.textContent?.trim()),
-      );
-    const onFocusIn = () => setComposerFocused(true);
-    const onFocusOut = (event: FocusEvent) => {
-      setComposerFocused(area.contains(event.relatedTarget as Node | null));
-      syncText();
-    };
-    area.addEventListener("focusin", onFocusIn);
-    area.addEventListener("focusout", onFocusOut);
-    area.addEventListener("input", syncText);
-    return () => {
-      area.removeEventListener("focusin", onFocusIn);
-      area.removeEventListener("focusout", onFocusOut);
-      area.removeEventListener("input", syncText);
-    };
-  }, []);
 
   /** Default recipient when the composer draft has no mention. */
   const fallback = defaultAgentProfile(
@@ -91,36 +49,14 @@ function RouteComponent() {
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center">
-          <h1
-            className={cn(
-              "tracking-tight text-center",
-              openbot ? "text-3xl font-bold" : "text-2xl font-semibold",
-            )}
-          >
+          <h1 className="text-2xl font-semibold tracking-tight text-center">
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
             )}
           </h1>
-          {/* In OpenBot's own look the hint moves up here, ahead of the composer it explains. */}
-          {openbot ? (
-            <p className="mt-2 max-w-[60ch] text-center text-base text-muted-foreground">
-              Ask for an answer, a draft, or a job done on a Bot's own computer.
-              {/* The routing sentence is the old hint, shown only while there is a Bot to route to. */}
-              {fallback ? (
-                <>
-                  {" "}
-                  {appConfig.brand.productName} picks the right Bot. Type{" "}
-                  <code>@</code> to choose one.
-                </>
-              ) : null}
-            </p>
-          ) : null}
         </div>
-        <div
-          className="mt-8 w-full flex flex-col items-center"
-          ref={composerAreaRef}
-        >
+        <div className="mt-8 w-full flex flex-col items-center">
           <Composer
             agents={toAgentOptions(agents)}
             className="w-full max-w-2xl"
@@ -158,11 +94,8 @@ function RouteComponent() {
               }
             }}
             pending={pending}
-            placeholder={placeholder}
-            variant={openbot ? "raised" : "default"}
           />
-          {/* On OpenBot's own home the subheader says this, so the hint is only a skin's. */}
-          {fallback && !openbot ? (
+          {fallback ? (
             // Said out loud: a message that silently reaches somebody you did not choose is the
             // kind of surprise that costs trust the first time it happens.
             <p className="mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center">
@@ -202,7 +135,7 @@ function RouteComponent() {
         <div className="mt-10 w-full max-w-2xl">
           {loading ? (
             <>
-              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
               <Skeleton className="mt-4 h-[140px]" />
             </>
           ) : explore?.length ? (
@@ -211,7 +144,10 @@ function RouteComponent() {
             // nothing to explore, which would be false while this list is still populated.
             <section aria-labelledby="explore-agents-heading">
               <div className="flex flex-row items-center justify-between gap-4">
-                <h2 id="explore-agents-heading" className="font-bold text-lg">
+                <h2
+                  id="explore-agents-heading"
+                  className="font-semibold text-base"
+                >
                   Explore Bots
                 </h2>
                 {explore.length > EXPLORE_SHOWN ? (
@@ -243,7 +179,7 @@ function RouteComponent() {
             // card there would say the opposite of what a populated composer beside it (still
             // working off that same, successfully loaded `agents`) proves.
             <>
-              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
               <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
@@ -257,7 +193,7 @@ function RouteComponent() {
             // when it failed but `agents` is defined — a loaded, empty slice either way. Same
             // plain copy for both: an empty roster is a fact, not an error.
             <>
-              <h2 className="font-bold text-lg">Explore Bots</h2>
+              <h2 className="font-semibold text-base">Explore Bots</h2>
               <Empty className="mt-4 h-[140px] border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
