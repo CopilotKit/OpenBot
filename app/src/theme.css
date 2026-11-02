@@ -2,75 +2,94 @@
 
 :root {
   color-scheme: light;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
+  /*
+   * Three surfaces, darkest to lightest, the way Linear draws them: the frame (the sidebar's tint,
+   * which the window edge shares), the panel the page sits in, and the white cards on it. The frame
+   * is CopilotKit's pale lavender, the grays lean towards its lilac, the ring is its periwinkle, and
+   * the selected sidebar row is a lilac tint. Only shadcn's own tokens, so a stock shadcn theme drops in.
+   */
+  --background: oklch(0.983 0.003 286.4);
+  --foreground: oklch(0.108 0.015 220.9);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.108 0.015 220.9);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.96 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --success: oklch(0.6 0.118 184.704);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.97 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.5 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.108 0.015 220.9);
+  --primary: oklch(0.108 0.015 220.9);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.956 0.005 286.3);
+  --secondary-foreground: oklch(0.108 0.015 220.9);
+  --muted: oklch(0.956 0.005 286.3);
+  --muted-foreground: oklch(0.506 0.013 285.9);
+  --accent: oklch(0.956 0.005 286.3);
+  --accent-foreground: oklch(0.108 0.015 220.9);
+  --destructive: oklch(0.504 0.178 22.9);
+  --success: oklch(0.514 0.1 167.2);
+  --border: oklch(0.894 0.014 286.1);
+  --input: oklch(0.894 0.014 286.1);
+  --ring: oklch(0.644 0.167 276.1);
+  --chart-1: oklch(0.869 0.022 252.894);
+  --chart-2: oklch(0.554 0.046 257.417);
+  --chart-3: oklch(0.446 0.043 257.281);
+  --chart-4: oklch(0.372 0.044 257.287);
+  --chart-5: oklch(0.279 0.041 260.031);
+  --radius: 0.625rem;
+  /*
+   * The pattern behind empty states, in three parts so a customer can change each without touching
+   * a component: the tile (an SVG used as a mask, so only its shapes' opacity matters), its colour,
+   * and how strongly it shows. Turn it off with `--empty-pattern-opacity: 0`. Skins turn it off in
+   * skins.css, since it is drawn for this palette.
+   */
+  --empty-pattern: url("./assets/patterns/dot-matrix.svg");
+  --empty-pattern-color: oklch(0.746 0.117 279.9);
+  --empty-pattern-opacity: 0.25;
+  --sidebar: oklch(0.948 0.011 286.2);
+  --sidebar-foreground: oklch(0.108 0.015 220.9);
+  --sidebar-primary: oklch(0.108 0.015 220.9);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
+  --sidebar-accent-foreground: oklch(0.108 0.015 220.9);
+  --sidebar-border: oklch(0.894 0.014 286.1);
+  --sidebar-ring: oklch(0.644 0.167 276.1);
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --success: oklch(0.704 0.14 182.503);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --empty-pattern-color: oklch(0.832 0.085 281.4);
+  --empty-pattern-opacity: 0.15;
+  /* The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest. */
+  --background: oklch(0.182 0.023 296.6);
+  --foreground: oklch(0.956 0.005 286.3);
+  --card: oklch(0.212 0.028 297.1);
+  --card-foreground: oklch(0.956 0.005 286.3);
+  --popover: oklch(0.212 0.028 297.1);
+  --popover-foreground: oklch(0.956 0.005 286.3);
+  --primary: oklch(0.956 0.005 286.3);
+  --primary-foreground: oklch(0.108 0.015 220.9);
+  /* Lighter than the cards, as shadcn's dark fills are, so a button or badge never reads as a hole. */
+  --secondary: oklch(0.253 0.032 297.6);
+  --secondary-foreground: oklch(0.956 0.005 286.3);
+  --muted: oklch(0.253 0.032 297.6);
+  --muted-foreground: oklch(0.69 0.017 285.9);
+  --accent: oklch(0.28 0.037 297.7);
+  --accent-foreground: oklch(0.956 0.005 286.3);
+  --destructive: oklch(0.792 0.121 16.4);
+  --success: oklch(0.832 0.13 170.1);
+  --border: oklch(0.28 0.035 298.6);
+  --input: oklch(0.28 0.035 298.6);
+  --ring: oklch(0.713 0.151 277.7);
+  --chart-1: oklch(0.869 0.022 252.894);
+  --chart-2: oklch(0.554 0.046 257.417);
+  --chart-3: oklch(0.446 0.043 257.281);
+  --chart-4: oklch(0.372 0.044 257.287);
+  --chart-5: oklch(0.279 0.041 260.031);
+  --sidebar: oklch(0.156 0.017 295.8);
+  --sidebar-foreground: oklch(0.956 0.005 286.3);
+  --sidebar-primary: oklch(0.956 0.005 286.3);
+  --sidebar-primary-foreground: oklch(0.108 0.015 220.9);
+  --sidebar-accent: oklch(0.832 0.085 281.4 / 12%);
+  --sidebar-accent-foreground: oklch(0.956 0.005 286.3);
+  --sidebar-border: oklch(0.28 0.035 298.6);
+  --sidebar-ring: oklch(0.713 0.151 277.7);
 }
 
 * {
