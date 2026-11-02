@@ -143,6 +143,15 @@ export const documented = {
     arguments: JSON.stringify({ pattern: "**/*.py" }),
     result: "/workspace/greet.py\n/workspace/tests/test_greet.py",
   },
+  apiError: {
+    name: "Bash",
+    arguments: JSON.stringify({
+      command: "curl -s https://api.example.com/v1/orders",
+      description: "Fetch the orders",
+    }),
+    // What the harness sends for that output: it parses JSON text and sends it re-serialised.
+    result: '{"error": true, "message": "rate limited"}',
+  },
   replaceAll: {
     name: "Edit",
     arguments: JSON.stringify({

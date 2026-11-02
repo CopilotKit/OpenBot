@@ -166,6 +166,16 @@ test("a failed command shows its exit code, live and after a reload", async () =
   }
 });
 
+test("a command that printed JSON with an error field still worked", async () => {
+  const view = draw(turn([documented.apiError], [documented.apiError.result]));
+  const command = await card(view, "Ran a command");
+  expect(command.queryByText("Didn't work")).toBeNull();
+  expect(command.queryByText(/Exit code/)).toBeNull();
+  expect(
+    command.getByText('{"error": true, "message": "rate limited"}'),
+  ).toBeTruthy();
+});
+
 test("an edit is a diff of what it replaced, in red, and what it put in, in green", async () => {
   const view = live(recorded.edit);
   const edit = await card(view, "Edited a file");

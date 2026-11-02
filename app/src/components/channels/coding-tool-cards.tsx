@@ -39,10 +39,10 @@ export type CodingOutcome =
  * A result, and whether the tool said it failed.
  *
  * `ag-ui-claude-sdk` has nowhere in an AG-UI result to put Claude Code's `is_error`, so while the
- * turn streams it wraps a failed result as `{"error": true, "content": "..."}`, and adds
- * `"error": true` to one that was already a JSON object. The history it sends when the turn ends
- * carries the bare text, so a failure is also known by Claude Code's own marks on it: a command's
- * exit code on the first line, and `<tool_use_error>` around anything else that was refused.
+ * turn streams it wraps a failed result as `{"error": true, "content": "..."}`. The history it sends
+ * when the turn ends carries the bare text, so a failure is also known by Claude Code's own marks on
+ * it: a command's exit code on the first line, and `<tool_use_error>` around anything else that was
+ * refused.
  */
 export function codingOutcome(
   result: string | undefined,
@@ -68,17 +68,27 @@ export function codingOutcome(
   return { state: "done", text };
 }
 
+/**
+ * The text of a failure wrapped as the harness wraps one, or undefined.
+ *
+ * ONLY THAT EXACT SHAPE: `error: true` and a string `content`, and nothing else. The harness also
+ * parses a result that is JSON text and sends it on re-serialised, so a command that printed an
+ * API's `{"error": true, "message": "..."}` arrives looking like a flagged failure, and reading any
+ * `error: true` as one drew a request that worked as "Didn't work". The harness adds `error: true`
+ * to a failed result that was a JSON object too, but Claude Code's own tools answer in text, and a
+ * failed one starts with its exit code or `<tool_use_error>`, so none of the calls drawn here fails
+ * that way. What stays ambiguous is output that is itself exactly `{"error": true, "content": "..."}`:
+ * the two are the same string, and nothing else in the stream tells them apart.
+ */
 function flaggedFailure(answer: string): string | undefined {
   if (!answer.trimStart().startsWith("{")) return undefined;
   try {
     const parsed: unknown = JSON.parse(answer);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       return undefined;
-    const { error, ...rest } = parsed as Record<string, unknown>;
-    if (error !== true) return undefined;
-    return typeof rest.content === "string"
-      ? rest.content
-      : JSON.stringify(rest, null, 2);
+    const { error, content, ...rest } = parsed as Record<string, unknown>;
+    if (error !== true || typeof content !== "string") return undefined;
+    return Object.keys(rest).length === 0 ? content : undefined;
   } catch {
     return undefined;
   }
