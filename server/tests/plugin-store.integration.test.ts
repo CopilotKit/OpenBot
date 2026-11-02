@@ -7964,6 +7964,10 @@ test("offboarding a brokered account nobody held any more withdraws nothing, and
  * it and deleted it also answers a smaller count once the sweep is otherwise correct, so only the
  * standing row distinguishes "left alone" from "silently taken" — and the audit read beside it
  * says the trail never claimed a withdrawal this deployment could not have performed.
+ *
+ * THE SAME APP UNDER BOTH PROVIDERS, because that is the row the delete after the sweep can reach.
+ * It deletes by app name among the apps the active broker withdrew, so a foreign row for a
+ * different app is never in that list and would pass whether or not the delete is scoped.
  */
 test("offboarding does not revoke or audit another provider's rows", async () => {
   const { broker, order } = brokerSpy({ revoke: async () => true });
@@ -7977,10 +7981,10 @@ test("offboarding does not revoke or audit another provider's rows", async () =>
     userId: "user_leaver",
     vendorUserId: "user_leaver",
   });
-  // A row filed under the provider this deployment does not use.
+  // The same app, filed under the provider this deployment does not use.
   await database.insert(brokeredConnections).values({
     provider: "arcade",
-    app: "slack",
+    app: "gmail",
     holder: "person",
     userId: "user_leaver",
     vendorUserId: "user_leaver",
@@ -7999,7 +8003,7 @@ test("offboarding does not revoke or audit another provider's rows", async () =>
     })
     .from(brokeredConnections)
     .where(eq(brokeredConnections.userId, "user_leaver"));
-  expect(standing).toEqual([{ provider: "arcade", app: "slack" }]);
+  expect(standing).toEqual([{ provider: "arcade", app: "gmail" }]);
 
   const disconnected = auditStore
     .recorded()

@@ -3410,10 +3410,15 @@ export function connectionMethods(context: StoreContext) {
        * those are exactly the rows the recovery needs. Deleting none — what a throw used to do —
        * leaves a row and an open `(toolkit, user_id)` gate for an account that is already gone at
        * Composio, so the table claims a connection this person does not have.
+       *
+       * The active provider's rows only, as the read above. The app list alone does not scope it:
+       * the same app filed under the other provider is a different row, never revoked here, and
+       * deleting it would drop the only record of a connection that is still live at that vendor.
        */
       if (withdrawn.length > 0) {
         await database.delete(brokeredConnections).where(
           and(
+            eq(brokeredConnections.provider, brokerProvider),
             eq(brokeredConnections.holder, "person"),
             eq(brokeredConnections.userId, userId),
             inArray(
