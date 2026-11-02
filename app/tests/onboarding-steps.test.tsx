@@ -612,7 +612,7 @@ test("in the desktop app, Get notified says they aren't there yet, asks nothing,
 
     expect(
       view.getByText(
-        "Notifications aren't available in the desktop app yet. You'll see what needs you on each Bot's page.",
+        "Notifications aren't available in the desktop app yet. You'll see what needs you in Tasks and on each Bot's page.",
       ),
     ).toBeTruthy();
     expect(view.queryByText(/browser can't|site settings/)).toBeNull();

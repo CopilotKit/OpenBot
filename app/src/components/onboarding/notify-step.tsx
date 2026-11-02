@@ -90,7 +90,7 @@ export function useNotifyStep(botName: string): OnboardingStep {
         <StepIntro>
           <p>
             Notifications aren't available in the desktop app yet. You'll see
-            what needs you on each Bot's page.
+            what needs you in Tasks and on each Bot's page.
           </p>
         </StepIntro>
       ),
