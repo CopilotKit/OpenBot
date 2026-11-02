@@ -100,6 +100,20 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
 
+### The default look: an inset page, OpenBot's palette and Bots as orbs
+
+Each page now sits in a panel inset from the window, on a darker frame shared with the sidebar,
+with white cards on a light page; admin and settings scroll inside it like the rest of the app.
+The palette leans towards CopilotKit's lilac, with a plum dark mode, and the type is Atkinson
+Hyperlegible. Each Bot appears as an orb in its own colors. The sidebar says "Waiting for you"
+on a conversation that needs you, and orange means nothing else. Home has a subheader and cycles
+through example jobs from your own Bots; a conversation opens with its Bot's orb, name and role.
+Rows show an app's logo or initial instead of the same plug; Home shows Bots as compact cards;
+Connections tiles no longer cut their text off; and the Composio directory shows its rows loading.
+Colors, card edges and shadows are theme tokens in `theme.css`, and empty states carry a faint dot
+pattern whose file, color and strength are tokens too (`--empty-pattern*`), so a deployment can
+restyle or turn them off. Skins keep their own look.
+
 ### A computer closes browsers nobody is using when its memory runs high
 
 A computer runs one browser for each Bot that is browsing, and the only limits were a count and half
