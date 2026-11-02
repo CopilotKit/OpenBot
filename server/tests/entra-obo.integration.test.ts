@@ -729,6 +729,22 @@ describe("an app calls OpenBot with a person's Entra token", () => {
     await store.grant("mcp", `${SERVER}/whoami`, BOT, ADMIN);
   });
 
+  test("re-adding it the way the app's add-by-URL request does keeps it reached as the signed-in person", async () => {
+    // What `addCustomServerMutationOptions` in the app sends: no `entraScope`, which it knows nothing of.
+    const response = await api(
+      "/plugins/servers/custom",
+      await tokenToOpenBot(ada),
+      { id: SERVER, title: "HR", url: `https://${HR_HOST}/mcp` },
+    );
+    expect(response.status).toBe(200);
+    const { server } = (await response.json()) as {
+      server: { entraScope: string | null; lastError: string | null };
+    };
+    expect(server.entraScope).toBe(HR_SCOPE);
+    // And it was asked what it offers as the admin, as a marked server is, not on a missing token.
+    expect(server.lastError).toBeNull();
+  });
+
   test("two people each reach the system as themselves, on the token their app sent", async () => {
     const aliceToken = await tokenToOpenBot(alice);
     const bobToken = await tokenToOpenBot(bob);
@@ -883,6 +899,39 @@ describe("what does not change", () => {
       "You are the deployment.",
     );
     expect(entra.requests.length).toBe(asked);
+  });
+
+  test("a scope of null puts a marked server back on the deployment's credential, and a token alone is refused", async () => {
+    const id = `obo-switch-${tag}`;
+    const url = `https://${HR_HOST}/mcp`;
+    await store.addCustomServer({
+      id,
+      title: "Switch",
+      url,
+      entraScope: HR_SCOPE,
+      by: ADMIN,
+      actorId: (await userId(ADMIN)) ?? "",
+    });
+    // A token sent without saying how it is reached would never be used, so it is refused aloud.
+    await expect(
+      store.addCustomServer({
+        id,
+        title: "Switch",
+        url,
+        credentialId: DEPLOYMENT_CREDENTIAL,
+        by: ADMIN,
+      }),
+    ).rejects.toThrow(
+      `${id} is reached as the signed-in person, so it takes no token. To reach it on a token, send entraScope as null with it.`,
+    );
+    const unmarked = await store.addCustomServer({
+      id,
+      title: "Switch",
+      url,
+      entraScope: null,
+      by: ADMIN,
+    });
+    expect(unmarked.entraScope).toBeNull();
   });
 
   test("a server cannot be marked this way where Microsoft sign-in is not set up", async () => {

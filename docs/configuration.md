@@ -465,7 +465,9 @@ is the person's token to OpenBot's own API: the one their app sent, or, for work
 (routines, check-ins), one OpenBot gets from their stored Microsoft sign-in. Tokens are reused until
 a few minutes before they expire. A person who has not signed in with Microsoft, whose sign-in has
 expired, or whose admin has not granted OpenBot access to the system is told so in those words.
-Marking a server this way needs Microsoft sign-in configured.
+Marking a server this way needs Microsoft sign-in configured. Adding the same server again without
+`entraScope` keeps the mark; send `"entraScope": null` to reach it on a token again. The server's
+page under Plugins shows the mark and its scope.
 
 **Apps can call OpenBot with an Entra token.** An app that signed somebody in with Entra asks for a
 token to `MICROSOFT_OAUTH_API_SCOPE` and sends it as `Authorization: Bearer <token>` on any API or

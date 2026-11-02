@@ -244,13 +244,20 @@ export function mountServerRoutes({
         400,
       );
     }
-    // Marks the server as reached as the signed-in person through Microsoft, with this scope.
+    /*
+     * Marks the server as reached as the signed-in person through Microsoft, with this scope. Null
+     * puts it back on the deployment's credential; absent leaves it as it is.
+     */
     if (
       body.entraScope !== undefined &&
+      body.entraScope !== null &&
       (typeof body.entraScope !== "string" || !body.entraScope.trim())
     ) {
       return context.json(
-        { error: "An Entra scope must be a non-empty string." },
+        {
+          error:
+            "An Entra scope must be a non-empty string, or null to stop reaching the server as the signed-in person.",
+        },
         400,
       );
     }
@@ -267,7 +274,9 @@ export function mountServerRoutes({
         entraScope:
           typeof body.entraScope === "string"
             ? body.entraScope.trim()
-            : undefined,
+            : body.entraScope === null
+              ? null
+              : undefined,
         by: actorEmail(context),
         actorId: context.var.actor.id,
       });
