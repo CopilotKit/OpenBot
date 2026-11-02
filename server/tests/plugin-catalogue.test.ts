@@ -362,7 +362,8 @@ describe("what a task runs without asking: a read a reviewed list names", () => 
     expect(reviewedRead(null, "GMAIL_FETCH_EMAILS", nothing)).toBe(false);
     // An entry that names no reads: being off its write list says nothing.
     const parallel = catalogueEntry("parallel");
-    expect(parallel?.readTools).toBeUndefined();
+    if (!parallel) throw new Error("Parallel is in the catalogue.");
+    expect("readTools" in parallel).toBe(false);
     expect(reviewedRead(parallel, "web_search_preview", nothing)).toBe(false);
   });
 
