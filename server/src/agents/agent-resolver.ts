@@ -24,6 +24,11 @@ import type { AgentActor } from "./profile-types";
 export type AgentResolutionContext = {
   initiator?: AuditInitiator;
   depth?: number;
+  /**
+   * A subagent's run (agents/subagent.ts): the same Bot with no coordination at all, so it can
+   * neither start a subagent of its own nor reach past itself to another Bot or a person.
+   */
+  subagent?: boolean;
 };
 
 export class CoworkerUnavailableError extends Error {}
@@ -129,7 +134,9 @@ export function createActorAgentResolver(
       deps.loadVendors,
       checkIn ? undefined : deps.selectionForActor?.(actor.id),
       deps.agentFetch,
-      deps.handoffForActor?.(actor.id, context?.initiator, context?.depth),
+      context?.subagent
+        ? undefined
+        : deps.handoffForActor?.(actor.id, context?.initiator, context?.depth),
       onlyAgentId,
       deps.loadInstructionsForActor?.(actor.id),
       context?.initiator,

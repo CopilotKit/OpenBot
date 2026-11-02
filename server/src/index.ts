@@ -45,6 +45,7 @@ import { createBotReset } from "./agents/lifecycle-reset";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
+import { createSubagents, SUBAGENT_HANDED_BACK } from "./agents/subagent";
 import { serverTurnAdmission } from "./agents/turn-admission";
 import {
   createWakeUpRunner,
@@ -1774,11 +1775,14 @@ const buildAgentFor = async ({
   agentId,
   initiator,
   depth,
+  subagent,
 }: {
   ownerUserId: string;
   agentId: string;
   initiator: AuditInitiator;
   depth?: number;
+  /** A subagent's run: the same Bot with no coordination. See agents/subagent.ts. */
+  subagent?: boolean;
 }) => {
   const actor = await actorFor(ownerUserId);
   let agent: AbstractAgent | undefined;
@@ -1786,6 +1790,7 @@ const buildAgentFor = async ({
     agent = await actorAgentResolver.resolveAgentForActor(actor, agentId, {
       initiator,
       depth,
+      ...(subagent ? { subagent } : {}),
     });
   } catch (error) {
     if (!(error instanceof CoworkerUnavailableError)) throw error;
@@ -1842,6 +1847,37 @@ const routineRunner = createRoutineRunner({
 });
 
 /**
+ * Subagents: every Bot's way to give part of its work to a fresh run of itself (agents/subagent.ts).
+ *
+ * A subagent's turn is a background turn like a routine's, on the same runner and with the same
+ * computer, built as a subagent so it holds no coordination. Its approval requests are withdrawn
+ * without resuming its thread, because the action goes back to the conversation instead.
+ */
+const subagents = createSubagents({
+  turn: {
+    admission: serverTurnAdmission,
+    intelligence: routineIntelligence,
+    runner: routineAgentRunner,
+    toolsForTurn: ({ ownerUserId, agentId, initiator }) =>
+      approvalComputerTools(ownerUserId, agentId, initiator),
+    learningContainerForThread: (input) =>
+      copilotRuntime.learning?.containerForThread(input) ??
+      Promise.resolve(undefined),
+  },
+  buildAgentFor: (input) => buildAgentFor({ ...input, subagent: true }),
+  withdrawApprovals: async (ownerUserId, runId) =>
+    approvalService.store.policy?.withdrawPending(
+      ownerUserId,
+      SUBAGENT_HANDED_BACK,
+      (action) => action.runId === runId,
+      { resume: false },
+    ),
+  asksEveryStep: async (ownerUserId, threadId) =>
+    (await approvalService.store.asksEveryChange?.(ownerUserId, threadId)) ===
+    true,
+});
+
+/**
  * The runtime, and the two things beside it a hop needs.
  *
  * `agentFor` builds the addressed Bot exactly the way a person's run builds it, and `history` reads
@@ -1867,11 +1903,18 @@ const actorAgentResolver = createActorAgentResolver({
   loadVendors,
   selectionForActor,
   agentFetch,
+  // Handing work on and asking a person, then a subagent of its own, offered on every run.
   handoffForActor: (actorId, initiator, depth) =>
-    restrictCoordinationForRun(
-      initiator,
-      coordinationForActor(actorId, initiator, depth),
-    ),
+    restrictCoordinationForRun(initiator, async (botId, input) => [
+      ...(await coordinationForActor(actorId, initiator, depth)(botId, input)),
+      subagents.toolForRun({
+        actorId,
+        botId,
+        threadId: input.threadId,
+        initiator: initiator ?? PERSON_INITIATOR,
+        ...(depth ? { depth } : {}),
+      }),
+    ]),
   loadInstructionsForActor,
   loadNameForActor: async (actorId) => {
     const profile = await profileStore.read(actorId);

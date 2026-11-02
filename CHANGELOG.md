@@ -85,6 +85,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
   affected.
 
+### Every Bot gives parts of its work to subagents
+
+A Bot, built in or an AG-UI agent somebody brings, can now hand a piece of its work to a subagent: a
+fresh run of the same Bot, as the same person, with the same tools, approval rules and standing
+instructions, that sees none of the conversation and hands back only its answer. Bots are told to
+work this way by default, giving anything that needs many tool calls or a lot of reading to
+subagents (up to five at once for one answer) and keeping the decisions and the answer themselves,
+so a question that needs several lookups makes more model calls than before. A subagent never waits
+on the person: an action that needs approval is handed back, and the Bot asks in the conversation.
+Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
+OpenBot runs the tool itself, so a remote agent needs no change.
+
 ### Bots tell you when something needs you
 
 A Bot a person has talked to now checks what that person connected (any app or server they
