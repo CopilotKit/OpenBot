@@ -19,7 +19,7 @@ function attachmentResult(url: string, mimetype = "image/jpeg"): string {
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** A fetch that records what it was asked for and answers `body`. */
-function fakeFetch(body: Uint8Array = PNG) {
+function fakeFetch(body: Uint8Array<ArrayBuffer> = PNG) {
   const asked: string[] = [];
   const impl = (async (input: URL | string) => {
     asked.push(String(input));
