@@ -40,10 +40,11 @@ export type CodingOutcome =
  * A result, and whether the tool said it failed.
  *
  * `ag-ui-claude-sdk` has nowhere in an AG-UI result to put Claude Code's `is_error`, so while the
- * turn streams it wraps a failed result as `{"error": true, "content": "..."}`. The history it sends
- * when the turn ends carries the bare text, so a failure is also known by Claude Code's own marks on
- * it: a command's exit code on the first line, and `<tool_use_error>` around anything else that was
- * refused.
+ * turn streams it wraps a failed result as `{"error": true, "content": "..."}`. OpenBot's harness
+ * keeps that wrapper in the history it sends when the turn ends (`agent-claude-sdk/src/adapter.py`).
+ * History from before it did, or from another copy of the harness, carries the bare text, so a
+ * failure is also known by Claude Code's own marks on it: a command's exit code on the first line,
+ * and `<tool_use_error>` around anything else that was refused.
  */
 export function codingOutcome(
   result: string | undefined,
