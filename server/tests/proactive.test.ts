@@ -601,4 +601,16 @@ describe("private information sharing check", () => {
     expect((await check(input)).status).toBe("allowed");
     expect(opened).toHaveLength(0);
   });
+
+  test("the stored preview cuts long content between characters, not inside an emoji", async () => {
+    const { store, opened } = approvals("pending");
+    // The cut at 280 lands between the two halves of the emoji that follows the letters.
+    await createPrivateShareCheck({ approvals: store })({
+      ...input,
+      content: `${"a".repeat(279)}😀${"b".repeat(20)}`,
+    });
+    const preview = (opened[0] as { args: { preview: string } }).args.preview;
+    expect(preview).toBe("a".repeat(279));
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(preview)).toBe(false);
+  });
 });

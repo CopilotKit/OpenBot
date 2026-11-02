@@ -1,7 +1,7 @@
 import {
+  IconBolt,
   IconChevronRight,
   IconPlus,
-  IconRobot,
   IconShare,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -123,7 +123,7 @@ export function BotRoster() {
                 </Button>
               )
             }
-            icon={IconRobot}
+            icon={IconBolt}
             title={
               yoursPinned
                 ? "All pinned"
