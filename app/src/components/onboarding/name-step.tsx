@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { BotOrb } from "@/components/agents/orb/bot-orb";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { useSaveProfileName } from "@/components/settings/profile";
 import { Input } from "@/components/ui/input";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -15,7 +15,7 @@ import type { OnboardingStep } from "./onboarding-wizard";
  * beside Continue everywhere else, and Enter in the field submits as it would in any form.
  *
  * THREE STATES ON THE WAY OUT. Get started; Saving… while the name and then the completion are
- * saved; then, while the orb plays its finish (`finished`), All set, green with a check, which is
+ * saved; then, while the orb shows done (`finished`), All set, green with a check, which is
  * what has happened. Nothing can be submitted twice: the field is disabled from the first press,
  * and a press during the finish does nothing. A save or a completion that fails is said under the
  * field, and the button reads Get started again.
@@ -26,7 +26,7 @@ export function useNameStep({
 }: {
   /** Saves completion and plays the finish. Resolves when the app is about to open. */
   finish: () => Promise<void>;
-  /** The orb is playing its finish. */
+  /** The orb is showing done. */
   finished: boolean;
 }): OnboardingStep {
   const formId = useId();
@@ -91,8 +91,8 @@ export function useNameStep({
 }
 
 /**
- * OpenBot's orb, listening while somebody types their name. `finished` plays its finish once: the
- * check and its burst of rays, which is how onboarding ends.
+ * OpenBot's orb, listening while somebody types their name. `finished` turns it done, which is how
+ * onboarding ends.
  */
 export function NameOrb({
   finished = false,
@@ -101,12 +101,14 @@ export function NameOrb({
   finished?: boolean;
   size?: number;
 }) {
+  const state = finished ? "done" : "listening";
   return (
     <span
       className="flex justify-center"
       data-onboarding-finish={finished ? "" : undefined}
+      data-state={state}
     >
-      <BotOrb size={size} state={finished ? "finished" : "listening"} />
+      <AgentOrb size={`${size}px`} state={state} />
     </span>
   );
 }

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BotOrb } from "@/components/agents/orb/bot-orb";
+import { BotOrb } from "@/components/agents/bot-orb";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
@@ -77,7 +77,7 @@ export function TeamDemo() {
         .join(", ")}, and one of your own`}
       rest={-1}
     >
-      {({ beat, playing }) => (
+      {({ beat }) => (
         <>
           {cards.map((card, at) => {
             const working = at === beat;
@@ -91,12 +91,16 @@ export function TeamDemo() {
                 data-working={working ? "" : undefined}
                 key={card.id}
               >
-                <span className="inline-flex shrink-0 overflow-hidden rounded-full">
+                {/* Hidden: the card names the Bot beside its orb. */}
+                <span
+                  aria-hidden="true"
+                  className="inline-flex shrink-0 overflow-hidden rounded-full"
+                >
                   <BotOrb
+                    name={card.name}
                     seed={card.avatarSeed}
                     size={44}
-                    state={working ? "thinking" : "idle"}
-                    still={!playing}
+                    state={working ? "working" : "idle"}
                   />
                 </span>
                 <div className="min-w-0 flex-1">

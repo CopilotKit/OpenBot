@@ -1,5 +1,5 @@
 import { IconCheck, IconMail } from "@tabler/icons-react";
-import { BotOrb } from "@/components/agents/orb/bot-orb";
+import { BotOrb } from "@/components/agents/bot-orb";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
 
@@ -36,19 +36,22 @@ export function ApprovalDemo() {
       label={`A Bot asks before it sends an email to Ana, with ${APPROVAL_CHOICES.join(", ")}. It sends it only after Allow once.`}
       rest={0}
     >
-      {({ beat, playing }) => {
+      {({ beat }) => {
         const pressed = beat >= 1;
         const sent = beat === 2;
         return (
           <div className="rounded-xl bg-card p-4 shadow-(--shadow-card)">
             <div className="flex items-center gap-3">
-              <span className="inline-flex shrink-0 overflow-hidden rounded-full">
-                {/* The team step's Research Analyst, with the same face. */}
+              {/* The team step's Research Analyst, with the same orb. Hidden: the line beside it names
+                  the Bot. */}
+              <span
+                aria-hidden="true"
+                className="inline-flex shrink-0 overflow-hidden rounded-full"
+              >
                 <BotOrb
+                  name="Research Analyst"
                   seed="example-research"
                   size={36}
-                  state={sent ? "done" : "idle"}
-                  still={!playing}
                 />
               </span>
               <div className="min-w-0 flex-1">

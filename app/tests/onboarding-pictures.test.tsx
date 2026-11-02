@@ -1,10 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { ApprovalDemo } from "@/components/onboarding/demos/approval-demo";
+import { TeamDemo } from "@/components/onboarding/demos/team-demo";
 import { WelcomeDemo } from "@/components/onboarding/demos/welcome-demo";
 import { useNotifyStep } from "@/components/onboarding/notify-step";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -24,8 +27,22 @@ function NotifyPicture() {
   return <>{useNotifyStep("General Assistant").demo?.()}</>;
 }
 
+/** The team step's picture, on a deployment with no Bots of its own to show, so it shows examples. */
+function TeamPicture() {
+  const client = new QueryClient();
+  client.setQueryData(agentListQueryOptions().queryKey, []);
+  return (
+    <QueryClientProvider client={client}>
+      <TeamDemo />
+    </QueryClientProvider>
+  );
+}
+
+// Each is one picture, read once by its label: `getByRole("img")` finds exactly one, so no Bot's orb
+// inside it is announced as an image of its own.
 const PICTURES: Array<[string, () => ReactNode]> = [
   ["The Welcome", () => <WelcomeDemo />],
+  ["The team step", () => <TeamPicture />],
   ["The approval step", () => <ApprovalDemo />],
   ["The Get notified", () => <NotifyPicture />],
 ];

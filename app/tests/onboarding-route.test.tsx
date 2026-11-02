@@ -35,7 +35,7 @@ import { settleReactWork } from "./settle-react-work";
  * Where somebody is in onboarding lives in the address: `?step=<id>`. A reload stays on the step,
  * browser Back walks back one, a consent comes back to the step it left from, and every move is
  * saved, so arriving without a step opens the one they were on. The name step is the way out: Get
- * started saves the name, completes onboarding, plays the orb's finish and opens the app.
+ * started saves the name, completes onboarding, shows the orb done and opens the app.
  */
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost:3010" }));
@@ -633,7 +633,7 @@ test("the failed line goes once the person moves on, and doesn't come back with 
   expect(view.queryByRole("alert")).toBeNull();
 });
 
-test("Get started on the name step saves the name, finishes, plays the orb's finish, then opens the app", async () => {
+test("Get started on the name step saves the name, finishes, shows the orb done, then opens the app", async () => {
   const view = open("/onboarding?step=name");
   await heading(view, "What should we call you?");
   // The frame's primary is the name form's Get started, not a Continue.
@@ -649,14 +649,14 @@ test("Get started on the name step saves the name, finishes, plays the orb's fin
   await waitFor(() =>
     expect(
       view.container.querySelector(
-        '[data-onboarding-finish] [data-state="finished"]',
+        '[data-onboarding-finish][data-state="done"]',
       ),
     ).not.toBeNull(),
   );
   expect(named).toBe("Maya");
   expect(completed).toBe(true);
   expect(view.queryByText("Home")).toBeNull();
-  // While the orb finishes, the button says what has happened.
+  // While the orb shows done, the button says what has happened.
   expect(
     view.getByRole("button", { name: "All set" }).hasAttribute("data-done"),
   ).toBe(true);

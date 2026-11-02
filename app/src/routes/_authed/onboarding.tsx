@@ -8,7 +8,6 @@ import {
 } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
-import { FINISH_MS } from "@/components/agents/orb/bot-orb";
 import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import {
@@ -169,6 +168,9 @@ function dropConsentDeparture() {
     // Nothing to drop.
   }
 }
+
+/** How long the orb shows done before the app opens: long enough to see it land. */
+const ORB_DONE_MS = 1200;
 
 export const Route = createFileRoute("/_authed/onboarding")({
   /*
@@ -452,9 +454,9 @@ function RouteComponent() {
 
   /*
    * THE WAY OUT IS THE NAME STEP'S GET STARTED. It saves the name, then completion is saved, then
-   * the orb plays its finish, the page fades, and the app opens: home, or the page a link on a step
+   * the orb shows done, the page fades, and the app opens: home, or the page a link on a step
    * asked for. The button says Saving… until completion is saved, then All set while the orb
-   * finishes (see `useNameStep`). A completion that fails is said by the form, under it.
+   * shows done (see `useNameStep`). A completion that fails is said by the form, under it.
    */
   const reduced = useReducedMotion() === true;
   const [finished, setFinished] = React.useState(false);
@@ -463,7 +465,7 @@ function RouteComponent() {
     await complete.mutateAsync(undefined);
     setFinished(true);
     await new Promise((resolve) =>
-      setTimeout(resolve, reduced ? 150 : FINISH_MS),
+      setTimeout(resolve, reduced ? 150 : ORB_DONE_MS),
     );
     setLeaving(search.open ?? "/");
   };

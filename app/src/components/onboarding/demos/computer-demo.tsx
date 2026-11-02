@@ -1,4 +1,4 @@
-import { BotOrb } from "@/components/agents/orb/bot-orb";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { DesktopIllustration } from "@/components/computer/desktop-illustration";
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
 import { DemoStage } from "../demo-stage";
@@ -25,7 +25,7 @@ export function ComputerDemo() {
           <ComputerPlaceholder className="absolute inset-0 h-full w-full" />
           <DesktopIllustration still={!playing} />
           <div className="glass absolute bottom-3 left-3 flex items-center gap-2 rounded-full py-1 pr-3 pl-1 shadow-(--shadow-glass)">
-            <BotOrb size={28} state="thinking" still={!playing} />
+            <AgentOrb size="28px" state="thinking" />
             <span className="type-caption font-medium text-foreground">
               {beat === 0 ? "Reading the page" : "Saving it to a file"}
             </span>

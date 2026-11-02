@@ -18,7 +18,7 @@ import { settleReactWork } from "./settle-react-work";
 /**
  * Onboarding's name step. Its button is the frame's, so Back sits beside Get started as it does
  * beside Continue on every other step. Get started saves the name, then finishes: Saving… while it
- * saves, and All set, green with a check, while the orb plays its finish.
+ * saves, and All set, green with a check, while the orb shows done.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -124,7 +124,7 @@ test("Back sits beside Get started, before it, as on every other step", () => {
   expect(primary(view).getAttribute("type")).toBe("submit");
 });
 
-test("Get started saves first, then finishes, and reads All set while the orb finishes", async () => {
+test("Get started saves first, then finishes, and reads All set while the orb shows done", async () => {
   let release: (response: Response) => void = () => {};
   const response = new Promise<Response>((resolve) => {
     release = resolve;
@@ -238,15 +238,16 @@ test("Continue on the step before moves on to the name, and submits nothing", as
   expect(finishes).toBe(0);
 });
 
-test("the orb is OpenBot's violet, listening, and plays its finish when onboarding ends", () => {
+test("the orb is OpenBot's own, listening, and shows done when onboarding ends", () => {
   const view = render(<NameOrb />);
-  const orb = () =>
-    view.container.querySelector<HTMLElement>("[data-palette]") as HTMLElement;
-  expect(orb().getAttribute("data-palette")).toBe("violet");
-  expect(orb().getAttribute("data-state")).toBe("listening");
+  const state = () =>
+    view.container.querySelector<HTMLElement>("[data-state]") as HTMLElement;
+  // OpenBot's own mark, as on sign-in: AgentOrb, not a Bot's orb.
+  expect(state().querySelector(".agent-orb")).not.toBeNull();
+  expect(state().getAttribute("data-state")).toBe("listening");
   expect(view.container.querySelector("[data-onboarding-finish]")).toBeNull();
 
   view.rerender(<NameOrb finished />);
-  expect(orb().getAttribute("data-state")).toBe("finished");
-  expect(orb().closest("[data-onboarding-finish]")).not.toBeNull();
+  expect(state().getAttribute("data-state")).toBe("done");
+  expect(state().closest("[data-onboarding-finish]")).not.toBeNull();
 });

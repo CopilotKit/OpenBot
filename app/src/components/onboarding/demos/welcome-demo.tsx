@@ -1,6 +1,6 @@
 import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { BotOrb } from "@/components/agents/orb/bot-orb";
+import AgentOrb from "@/components/agents/orb/agent-orb";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
 
@@ -80,11 +80,7 @@ function WelcomeScene({
   const state = typing ? "listening" : beat === 1 ? "thinking" : "done";
   return (
     <>
-      <BotOrb
-        size={72}
-        state={reduced ? "listening" : state}
-        still={!playing}
-      />
+      <AgentOrb size="72px" state={reduced ? "listening" : state} />
       <div className="w-full max-w-md">
         <div className="flex min-h-[7.5rem] flex-col justify-between gap-3 rounded-2xl bg-card/80 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
           <p
