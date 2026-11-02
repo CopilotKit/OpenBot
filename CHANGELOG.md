@@ -78,6 +78,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A long text message is cut between characters
+
+A message too long for one SMS is cut and ends with "Open OpenBot to read the full message.". When
+the cut landed inside an emoji, the person received a "�" before the "…". The cut now drops the
+half character instead.
+
 ### A late conversation title is discarded after deletion
 
 A generated title that arrives after a conversation was deleted is discarded. The naming job is
