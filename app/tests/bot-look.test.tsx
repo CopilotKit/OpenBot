@@ -275,6 +275,23 @@ test("the Look section shows the Bot's face large, and its colour named and chos
   expect(seeds(view).preview).toEqual(["expenses"]);
 });
 
+test("Tab reaches the colours in any browser, at the chosen one, and stops there once", async () => {
+  serve();
+  const { view, user } = draw();
+  const look = await lookOf(view);
+  // Safari's Tab passes over a radio with no tabindex of its own, so the chosen colour has one.
+  const stops = () =>
+    (look.getAllByRole("radio") as HTMLInputElement[]).map((radio) =>
+      radio.getAttribute("tabindex"),
+    );
+  const only = (at: number) =>
+    COLOURS.map((_, index) => (index === at ? "0" : "-1"));
+  expect(stops()).toEqual(only(COLOURS.indexOf("Blue")));
+
+  await user.click(look.getByRole("radio", { name: "Green" }));
+  expect(stops()).toEqual(only(COLOURS.indexOf("Green")));
+});
+
 test("a colour shows at once, saves after a pause, and every avatar of the Bot follows", async () => {
   serve();
   const { view, user } = draw();

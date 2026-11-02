@@ -59,7 +59,8 @@ export const SAVE_AFTER_MS = 700;
  * whoever may edit the Bot, the people who may also rename it.
  *
  * The colours are native radios, so the group is one stop for Tab and the arrow keys move through
- * it, as they do in any radio group. Moving through them only previews: the face shows each colour
+ * it, as they do in any radio group. The chosen one carries the stop as its tabindex, which Safari
+ * needs to reach a radio by Tab at all. Moving through them only previews: the face shows each colour
  * at once, and the one the person stops on is saved after a short pause, or as soon as focus leaves
  * the group, so browsing restyles the Bot for nobody else and saves it once. New face saves at once.
  * Either can be taken back with Undo, which saves the look from before. One that can't be saved
@@ -244,6 +245,10 @@ export function LookSection({ agent }: { agent: AgentProfile }) {
                     className="peer sr-only"
                     name={group}
                     onChange={() => pick(option)}
+                    // Safari's Tab, and the desktop app's on a Mac, passes over a radio unless it
+                    // has a tabindex of its own. The chosen colour has one, so the group stays a
+                    // single stop, and the arrow keys move through it from there.
+                    tabIndex={option === colour ? 0 : -1}
                     type="radio"
                     value={option}
                   />
