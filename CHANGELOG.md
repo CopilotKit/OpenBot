@@ -78,6 +78,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Allowing a Gmail send always no longer allows it to anybody
+
+A Bot sending or replying through Composio's Gmail (`GMAIL_SEND_EMAIL`, `GMAIL_REPLY_TO_THREAD`)
+names the recipient in `recipient_email` and `extra_recipients`, which the private-share check did
+not read. Every email was filed under the app and the action instead of the person it went to, so
+the approval did not say who would receive it, and "Always allow" given for one email let the Bot
+send any later one to any address without asking. Those emails are now addressed to their
+recipients, and an "Always allow" covers only the people it was given for.
+
 ### An allowed site on a non-default port opens
 
 With a network allowlist, a Bot opening an allowed site on a port that is not the scheme's default,
