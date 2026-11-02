@@ -214,7 +214,3 @@ describe("a Bot at its own endpoint, handing work on", () => {
     expect(targets).toEqual(expect.arrayContaining([BUILT_IN, OTHER_REMOTE]));
   });
 });
-
-afterAll(async () => {
-  await database.$client.close();
-});

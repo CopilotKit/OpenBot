@@ -1,5 +1,12 @@
 // server/tests/shared-brokered-store.integration.test.ts
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { and, eq, inArray } from "drizzle-orm";

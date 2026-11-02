@@ -279,7 +279,3 @@ test("a push token registered by one person cannot be moved to another person's 
   ]);
   expect(await store.devices(owner)).toEqual([]);
 });
-
-afterAll(async () => {
-  await db.$client.close();
-});

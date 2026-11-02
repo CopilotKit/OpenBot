@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 
 /**
  * Every test file that opens a database pool closes it.
@@ -16,13 +17,18 @@ import { expect, test } from "bun:test";
  * restriction, and `server/tests` is outside `tsc`, so types will not catch a missing one either.
  */
 test("a file that opens a database pool closes it", async () => {
+  // From this file's own folder, not the working directory: run from anywhere else, a path relative
+  // to the working directory matches no file at all and the check passes having read nothing.
   const files = await Array.fromAsync(
-    new Bun.Glob("server/tests/**/*.test.ts").scan({ cwd: process.cwd() }),
+    new Bun.Glob("**/*.test.ts").scan({ cwd: import.meta.dir }),
   );
   const leaking: string[] = [];
   for (const file of files) {
-    const source = await Bun.file(file).text();
-    if (source.includes("createDatabase(") && !source.includes("$client.close")) {
+    const source = await Bun.file(join(import.meta.dir, file)).text();
+    // `end` releases the pool as `close` does, and is what the files that already ended theirs call.
+    const released =
+      source.includes("$client.close") || source.includes("$client.end");
+    if (source.includes("createDatabase(") && !released) {
       leaking.push(file);
     }
   }

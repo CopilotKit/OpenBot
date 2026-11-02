@@ -1,5 +1,12 @@
 // server/tests/account-mode.integration.test.ts
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";

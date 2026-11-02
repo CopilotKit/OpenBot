@@ -384,7 +384,3 @@ test("editing an Intelligence-only memory while Intelligence is down answers una
     store.update(ada, `intelligence:${id}`, { content: "Speaks Spanish" }),
   ).rejects.toBeInstanceOf(MemoryUnavailableError);
 });
-
-afterAll(async () => {
-  await database.$client.close();
-});

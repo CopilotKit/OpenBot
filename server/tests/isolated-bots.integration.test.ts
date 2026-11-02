@@ -664,7 +664,3 @@ describe("duplicating", () => {
     }
   });
 });
-
-afterAll(async () => {
-  await database.$client.close();
-});
