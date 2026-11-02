@@ -77,10 +77,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+- Bots now check in on their own and tell a person when something needs them (below). It is on by
+  default for every Bot a person has talked to. Migrations `0071_proactive_check_ins` and
+  `0072_check_in_read_labels` add its tables. Admin → Check-ins turns it off for everyone.
 - Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
   the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
   the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
   affected.
+
+### Bots tell you when something needs you
+
+A Bot a person has talked to now checks what that person connected (any app or server they
+connected with their own account), quietly and at most once an hour, and only reads. When it finds
+something that needs the person, it says why and where it came from, and the person hears about it
+at most once an hour, with every Bot's items in one message: in the app (Needs you, a badge and a
+browser notification), by phone push, and on Slack, Teams or SMS where the person already talks to
+a Bot. Nothing is sent when nothing needs them. Start turns an item into a task that asks before
+every send or change; Hide keeps it from coming back for 30 days. A person turns it off in Settings
+→ Notifications and chooses where these go under "Something needs you"; an admin turns it off for
+everyone, changes the daily limit (24 check-ins per Bot) and sees how often items are started under
+Admin → Check-ins.
 
 ### Each Bot keeps a fact it formed, even when another Bot formed it first
 
@@ -124,6 +140,12 @@ half character instead.
 A generated title that arrives after a conversation was deleted is discarded. The naming job is
 settled without changing the deleted row or announcing a new summary, and a missing conversation is
 not reported as successfully named.
+
+### A group reached in two ways can be approved for a shared app
+
+Approving a Bot for a shared app now succeeds when the same group appears in its published audience
+and its assigned groups. Repeated people or groups are stored once; a person and a group with the
+same name remain separate, and no additional audience is approved.
 
 ### Concurrent routine edits keep their limit and saved schedule
 
@@ -201,7 +223,7 @@ An admin can mark a server added by URL with an Entra scope, and each call then 
 Entra issues for the person asking through the on-behalf-of exchange, from their app's Entra token
 or, for routines, their stored Microsoft sign-in. Apps listed in `MICROSOFT_OAUTH_ALLOWED_CLIENTS`
 can also call OpenBot's API with a person's Entra token; a token issued to any other app is refused.
-Migration `0071_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
+Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
 ### An unreconciled app authorization always reaches the audit trail
@@ -211,6 +233,20 @@ When an attempt settles as unreconciled, its status and its audit row are writte
 transaction, so the trail always says what happened to it, without the authorization's id, consent
 link or vendor account. If the audit row cannot be written, nothing changes and the attempt stays
 pending, rather than settling with no record.
+
+### Following a link is judged as opening its address
+
+A Bot's click on a link to another page now opens that page's address instead of clicking, so it is
+judged exactly as `computer_navigate` is: a read, with the same allowlist, policy, approval and
+audit. Before, it was judged as a click, which is a change, so a Bot reading an ordering system was
+handed back to you by the built-in payments requirement for clicking a link on a page at
+`/purchase-orders/...`, while typing the same address went straight through. Buttons, links to a
+spot on the same page (`#`), `javascript:` and `mailto:` links, links inside an iframe, and links
+with no address are still clicked and judged as before. A deny rule about the link itself
+(`element.name`) still refuses it, and a rule about where pages open (`page.url`) now applies to it.
+Snapshots now carry each top-page link's absolute address as `url`. As with a click, Stop cancels a
+followed link, including while it waits for approval, and the computer refuses a link as stale when
+the page has moved on since the snapshot it came from or the link now goes somewhere else.
 
 ### Refunds now go to the person
 

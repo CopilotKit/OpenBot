@@ -174,6 +174,21 @@ export type ComputerTransportOptions = {
  */
 export type SeatAddress = string | { botId: string; personId?: string };
 
+/**
+ * What a navigation carries besides its address.
+ *
+ * `signal` is the person's Stop: a navigation aborted before it is sent is never sent, and one aborted
+ * in flight is answered as stopped, as every other acting call is.
+ *
+ * `citation` is set when the navigation is a followed link: the ref and snapshot it was read from.
+ * The computer checks them against the live page exactly as `/click` would, and refuses the
+ * navigation as stale when the page has moved on, so an old snapshot cannot open its old links.
+ */
+export type NavigateOptions = {
+  signal?: AbortSignal;
+  citation?: { ref: string; snapshotId: number };
+};
+
 /** Internal HTTP interface used only by ComputerGateway. */
 export interface ComputerTransport {
   call<T>(
@@ -199,6 +214,7 @@ export interface ComputerTransport {
     botId: SeatAddress,
     url: string,
     toolCallId?: string,
+    options?: NavigateOptions,
   ): Promise<NavigateResult>;
   download(
     baseUrl: string,
@@ -381,6 +397,7 @@ export function createComputerTransport(
     botId: SeatAddress,
     url: string,
     toolCallId?: string,
+    navigateOptions?: NavigateOptions,
   ): Promise<NavigateResult> {
     const verdict = checkNavigationTarget(url, {
       allowPrivateHosts: options.allowPrivateHosts,
@@ -388,10 +405,20 @@ export function createComputerTransport(
     if (!verdict.allowed) {
       throw new NavigationRefusedError(verdict.reason);
     }
-    return post<NavigateResult>(baseUrl, botId, "/navigate", {
-      url: verdict.url,
-      ...(toolCallId ? { toolCallId } : {}),
-    });
+    const citation = navigateOptions?.citation;
+    return post<NavigateResult>(
+      baseUrl,
+      botId,
+      "/navigate",
+      {
+        url: verdict.url,
+        ...(toolCallId ? { toolCallId } : {}),
+        ...(citation
+          ? { ref: citation.ref, snapshotId: citation.snapshotId }
+          : {}),
+      },
+      navigateOptions?.signal,
+    );
   }
 
   return { call, post, navigate, download };

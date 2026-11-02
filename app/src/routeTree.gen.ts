@@ -37,6 +37,7 @@ import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_auth
 import { Route as AuthedAdminLearningRouteImport } from './routes/_authed/admin/learning'
 import { Route as AuthedAdminPeopleRouteImport } from './routes/_authed/admin/people'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
+import { Route as AuthedAdminProactiveRouteImport } from './routes/_authed/admin/proactive'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
@@ -222,6 +223,11 @@ const AuthedAdminPeopleRoute = AuthedAdminPeopleRouteImport.update({
 const AuthedAdminPlaygroundRoute = AuthedAdminPlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminProactiveRoute = AuthedAdminProactiveRouteImport.update({
+  id: '/proactive',
+  path: '/proactive',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedAdminSkillsRoute = AuthedAdminSkillsRouteImport.update({
@@ -510,6 +516,7 @@ export interface FileRoutesByFullPath {
   '/admin/learning': typeof AuthedAdminLearningRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
+  '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -581,6 +588,7 @@ export interface FileRoutesByTo {
   '/admin/learning': typeof AuthedAdminLearningRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
+  '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -657,6 +665,7 @@ export interface FileRoutesById {
   '/_authed/admin/learning': typeof AuthedAdminLearningRoute
   '/_authed/admin/people': typeof AuthedAdminPeopleRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
+  '/_authed/admin/proactive': typeof AuthedAdminProactiveRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/_authed/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -734,6 +743,7 @@ export interface FileRouteTypes {
     | '/admin/learning'
     | '/admin/people'
     | '/admin/playground'
+    | '/admin/proactive'
     | '/admin/skills'
     | '/settings/approvals'
     | '/settings/browsers'
@@ -805,6 +815,7 @@ export interface FileRouteTypes {
     | '/admin/learning'
     | '/admin/people'
     | '/admin/playground'
+    | '/admin/proactive'
     | '/admin/skills'
     | '/settings/approvals'
     | '/settings/browsers'
@@ -880,6 +891,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/learning'
     | '/_authed/admin/people'
     | '/_authed/admin/playground'
+    | '/_authed/admin/proactive'
     | '/_authed/admin/skills'
     | '/_authed/settings/approvals'
     | '/_authed/settings/browsers'
@@ -1131,6 +1143,13 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/admin/playground'
       preLoaderRoute: typeof AuthedAdminPlaygroundRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/proactive': {
+      id: '/_authed/admin/proactive'
+      path: '/proactive'
+      fullPath: '/admin/proactive'
+      preLoaderRoute: typeof AuthedAdminProactiveRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/admin/skills': {
@@ -1469,6 +1488,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminLearningRoute: typeof AuthedAdminLearningRoute
   AuthedAdminPeopleRoute: typeof AuthedAdminPeopleRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
+  AuthedAdminProactiveRoute: typeof AuthedAdminProactiveRoute
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminBoundariesIndexRoute: typeof AuthedAdminBoundariesIndexRoute
@@ -1495,6 +1515,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminLearningRoute: AuthedAdminLearningRoute,
   AuthedAdminPeopleRoute: AuthedAdminPeopleRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
+  AuthedAdminProactiveRoute: AuthedAdminProactiveRoute,
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminBoundariesIndexRoute: AuthedAdminBoundariesIndexRoute,

@@ -215,6 +215,7 @@ describe("what a channel is waiting on", () => {
       createdAt: since,
       pinned: false,
       lastReadAt: null,
+      task: false,
     });
     const store = fakeStore({
       list: async () => ({
@@ -235,6 +236,35 @@ describe("what a channel is waiting on", () => {
     expect(body.channels[1]).toBeDefined();
     expect(body.channels[1]).not.toHaveProperty("busy");
     expect(body.channels[1]?.work).toEqual([]);
+  });
+
+  test("the roster says which conversation is a task's own", async () => {
+    const summary = (id: string, task: boolean) => ({
+      ...channel({ id }),
+      summary: null,
+      lastMessage: null,
+      lastMessageAgentId: null,
+      createdAt: since,
+      pinned: false,
+      lastReadAt: null,
+      task,
+    });
+    const store = fakeStore({
+      list: async () => ({
+        channels: [summary("own", false), summary("task", true)],
+        nextCursor: null,
+      }),
+      workIn: async () => new Map(),
+    });
+
+    const response = await appFor(store).request("http://openbot.test/");
+    const body = (await response.json()) as {
+      channels: Array<{ id: string; task: boolean }>;
+    };
+    expect(body.channels.map(({ id, task }) => ({ id, task }))).toEqual([
+      { id: "own", task: false },
+      { id: "task", task: true },
+    ]);
   });
 });
 

@@ -12,7 +12,8 @@ export type CapabilityKey =
   | "slackTeams"
   | "teamBots"
   | "ownerApps"
-  | "isolatedComputers";
+  | "isolatedComputers"
+  | "proactive";
 
 /** One switch as the server stored it at each scope. `null` means no row: the scope inherits. */
 export type CapabilitySetting = {
@@ -52,6 +53,8 @@ export type EnterpriseSettings = {
   mcpAllowlist: { enabled: boolean; servers: string[] };
   /** People may open the Skills learned from their recordings to every Bot. Off by default. */
   skillSharing: boolean;
+  /** How many check-ins each Bot may run for one person in a day. 24 by default. */
+  proactiveDailyRuns: number;
 };
 
 export type EnterpriseOverview = {
@@ -101,12 +104,68 @@ export type ActionRecord = {
   createdAt: string;
 };
 
+/** Why a check-in stopped before the model. */
+export type CheckInSkipReason =
+  | "off_admin"
+  | "off_person"
+  | "paused"
+  | "capped"
+  | "unreachable"
+  | "no_sources"
+  | "busy";
+
+/**
+ * One Bot's check-ins over the window, as the admin's Check-ins page reads them. Counts only: the
+ * server sends no titles and no people.
+ *
+ * `items` are the ones raised in the window, by where each stands now, so `raised` is the sum of the
+ * other four. `acceptance` is started out of started and hidden, null until somebody answered one.
+ */
+export type BotCheckInMetrics = {
+  agentId: string;
+  name: string;
+  avatarSeed: string;
+  /** People whose check-ins with this Bot are on now. */
+  peopleOn: number;
+  runs: {
+    quiet: number;
+    raised: number;
+    failed: number;
+    skipped: Record<CheckInSkipReason, number>;
+  };
+  items: {
+    raised: number;
+    started: number;
+    hidden: number;
+    cleared: number;
+    open: number;
+  };
+  acceptance: number | null;
+  /** This Bot's items that a ping carried. */
+  pinged: number;
+};
+
+export type CheckInMetrics = {
+  days: 7 | 30;
+  /** The daily cap in force. */
+  dailyRuns: number;
+  bots: BotCheckInMetrics[];
+  /** One ping folds every Bot's items for a person, so pings are counted for everybody at once. */
+  pings: { sent: number; itemsPerPing: number | null };
+};
+
 export const enterpriseKeys = {
   all: ["enterprise"] as const,
   overview: () => ["enterprise", "overview"] as const,
   modelUsage: (days: number) =>
     ["enterprise", "model-usage", { days }] as const,
   actions: () => ["enterprise", "actions"] as const,
+  /*
+   * Under the enterprise root although the route is `/api/admin/proactive`: who has check-ins on and
+   * the cap in force both move when a switch or a setting is saved, and every enterprise write
+   * invalidates this root.
+   */
+  checkIns: (days: 7 | 30) => ["enterprise", "check-ins", { days }] as const,
 };
 
 export function enterpriseOverviewQueryOptions() {
@@ -131,6 +190,18 @@ export function modelUsageQueryOptions(days = 30) {
       (
         await client(`/api/admin/enterprise/models/usage?days=${days}`, {
           fallback: "Could not load model usage",
+        })
+      ).json(),
+  });
+}
+
+export function checkInMetricsQueryOptions(days: 7 | 30) {
+  return queryOptions({
+    queryKey: enterpriseKeys.checkIns(days),
+    queryFn: async (): Promise<CheckInMetrics> =>
+      (
+        await client(`/api/admin/proactive?days=${days}`, {
+          fallback: "Couldn't load check-ins",
         })
       ).json(),
   });

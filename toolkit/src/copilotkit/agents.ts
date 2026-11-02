@@ -19,7 +19,12 @@ import {
   takeUntil,
 } from "rxjs";
 import { sanitizeSeededHistory } from "../history-sanitize";
-import { nativeApprovalRun } from "../native-approval";
+import {
+  type NativeRunScope,
+  nativeApprovalRun,
+  nativeRunScope,
+  withinNativeRun,
+} from "../native-approval";
 import { historyOrEmpty } from "../thread-history";
 
 /**
@@ -135,14 +140,21 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
    * another one of THIS class, and a seam lost in a clone is a seam that never runs.
    */
   private readonly hooks: BuiltInAgentHooks;
+  /**
+   * The run this agent is in, which its tools re-enter when the AI SDK calls them. One per agent,
+   * and so one per clone: the runtime clones before every run. See `NativeRunScope`.
+   */
+  private readonly scope: NativeRunScope;
 
   constructor(
     configuration: BuiltInAgentConfiguration,
     hooks: BuiltInAgentHooks,
   ) {
-    super(configuration);
+    const scope = nativeRunScope();
+    super(toolsWithin(configuration, scope));
     this.configuration = configuration;
     this.hooks = hooks;
+    this.scope = scope;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -161,8 +173,10 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
      * this existed.
      */
     if (!inline)
-      return nativeApprovalRun({ ...input, messages: history }, () =>
-        observe(super.run({ ...input, messages: history })),
+      return nativeApprovalRun(
+        { ...input, messages: history },
+        () => observe(super.run({ ...input, messages: history })),
+        this.scope,
       );
     /*
      * Deferred, because `run` has to answer with a stream straight away and reading the bytes is a
@@ -175,8 +189,10 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
         inline(history, input.threadId),
       ).pipe(
         switchMap((messages) =>
-          nativeApprovalRun({ ...input, messages }, () =>
-            observe(super.run({ ...input, messages })),
+          nativeApprovalRun(
+            { ...input, messages },
+            () => observe(super.run({ ...input, messages })),
+            this.scope,
           ),
         ),
       ),
@@ -204,6 +220,26 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
     ];
     return cloned;
   }
+}
+
+/**
+ * The configuration with each tool's execute re-entering the agent's run, so a tool the AI SDK calls
+ * from a stream that lost its async context still asks in the conversation that called it. A factory
+ * configuration builds its own tools and has none here.
+ */
+function toolsWithin(
+  configuration: BuiltInAgentConfiguration,
+  scope: NativeRunScope,
+): BuiltInAgentConfiguration {
+  if ("factory" in configuration || !configuration.tools) return configuration;
+  return {
+    ...configuration,
+    tools: configuration.tools.map((tool) =>
+      tool.execute
+        ? { ...tool, execute: withinNativeRun(scope, tool.execute) }
+        : tool,
+    ),
+  };
 }
 
 /**

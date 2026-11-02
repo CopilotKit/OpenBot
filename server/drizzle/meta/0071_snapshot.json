@@ -1,5 +1,5 @@
 {
-  "id": "014bceb1-e436-4170-b33f-e2d5bc2a130f",
+  "id": "662165f3-2fc3-403a-9f6f-2a5c7f54eaa2",
   "prevId": "1efe7e4b-13fe-4bcf-be24-06a90698fbfc",
   "version": "7",
   "dialect": "postgresql",
@@ -3004,12 +3004,6 @@
         },
         "owner_grants": {
           "name": "owner_grants",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "entra_scope": {
-          "name": "entra_scope",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6079,6 +6073,404 @@
       },
       "isRLSEnabled": false
     },
+    "public.proactive_people": {
+      "name": "proactive_people",
+      "schema": "",
+      "columns": {
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_pinged_at": {
+          "name": "last_pinged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "proactive_people_owner_user_id_users_id_fk": {
+          "name": "proactive_people_owner_user_id_users_id_fk",
+          "tableFrom": "proactive_people",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.proactive_pings": {
+      "name": "proactive_pings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_count": {
+          "name": "item_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "push_body": {
+          "name": "push_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "offered_at": {
+          "name": "offered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "proactive_pings_owner_created_idx": {
+          "name": "proactive_pings_owner_created_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "proactive_pings_unoffered_idx": {
+          "name": "proactive_pings_unoffered_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"proactive_pings\".\"offered_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "proactive_pings_owner_user_id_users_id_fk": {
+          "name": "proactive_pings_owner_user_id_users_id_fk",
+          "tableFrom": "proactive_pings",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "proactive_pings_item_count_check": {
+          "name": "proactive_pings_item_count_check",
+          "value": "\"proactive_pings\".\"item_count\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.proactive_runs": {
+      "name": "proactive_runs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "setting_id": {
+          "name": "setting_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'running'"
+        },
+        "skip_reason": {
+          "name": "skip_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "items_raised": {
+          "name": "items_raised",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "reads": {
+          "name": "reads",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "proactive_runs_setting_started_idx": {
+          "name": "proactive_runs_setting_started_idx",
+          "columns": [
+            {
+              "expression": "setting_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "proactive_runs_owner_started_idx": {
+          "name": "proactive_runs_owner_started_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "proactive_runs_agent_started_idx": {
+          "name": "proactive_runs_agent_started_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "proactive_runs_one_running_idx": {
+          "name": "proactive_runs_one_running_idx",
+          "columns": [
+            {
+              "expression": "setting_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"proactive_runs\".\"outcome\" = 'running'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "proactive_runs_setting_id_proactive_settings_id_fk": {
+          "name": "proactive_runs_setting_id_proactive_settings_id_fk",
+          "tableFrom": "proactive_runs",
+          "tableTo": "proactive_settings",
+          "columnsFrom": [
+            "setting_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "proactive_runs_owner_user_id_users_id_fk": {
+          "name": "proactive_runs_owner_user_id_users_id_fk",
+          "tableFrom": "proactive_runs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "proactive_runs_agent_id_agents_id_fk": {
+          "name": "proactive_runs_agent_id_agents_id_fk",
+          "tableFrom": "proactive_runs",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "proactive_runs_trigger_check": {
+          "name": "proactive_runs_trigger_check",
+          "value": "\"proactive_runs\".\"trigger\" IN ('schedule', 'run_now')"
+        },
+        "proactive_runs_outcome_check": {
+          "name": "proactive_runs_outcome_check",
+          "value": "\"proactive_runs\".\"outcome\" IN ('running', 'quiet', 'raised', 'failed', 'skipped')"
+        },
+        "proactive_runs_skip_reason_check": {
+          "name": "proactive_runs_skip_reason_check",
+          "value": "(\"proactive_runs\".\"outcome\" = 'skipped' AND \"proactive_runs\".\"skip_reason\" IS NOT NULL AND \"proactive_runs\".\"skip_reason\" IN ('off_admin', 'off_person', 'paused', 'capped', 'unreachable', 'no_sources', 'busy')) OR (\"proactive_runs\".\"outcome\" <> 'skipped' AND \"proactive_runs\".\"skip_reason\" IS NULL)"
+        },
+        "proactive_runs_finished_check": {
+          "name": "proactive_runs_finished_check",
+          "value": "(\"proactive_runs\".\"outcome\" = 'running') = (\"proactive_runs\".\"finished_at\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.proactive_settings": {
       "name": "proactive_settings",
       "schema": "",
@@ -6132,7 +6524,7 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 240
+          "default": 60
         },
         "next_run_at": {
           "name": "next_run_at",
@@ -6333,6 +6725,18 @@
           "notNull": true,
           "default": "'open'"
         },
+        "dedupe_key": {
+          "name": "dedupe_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ping_id": {
+          "name": "ping_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "delivered_at": {
           "name": "delivered_at",
           "type": "timestamp with time zone",
@@ -6395,6 +6799,50 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "proactive_suggestions_open_dedupe_idx": {
+          "name": "proactive_suggestions_open_dedupe_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dedupe_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"proactive_suggestions\".\"status\" = 'open' AND \"proactive_suggestions\".\"dedupe_key\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "proactive_suggestions_unpinged_idx": {
+          "name": "proactive_suggestions_unpinged_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"proactive_suggestions\".\"status\" = 'open' AND \"proactive_suggestions\".\"ping_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -6436,6 +6884,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "proactive_suggestions_ping_id_proactive_pings_id_fk": {
+          "name": "proactive_suggestions_ping_id_proactive_pings_id_fk",
+          "tableFrom": "proactive_suggestions",
+          "tableTo": "proactive_pings",
+          "columnsFrom": [
+            "ping_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6445,6 +6906,209 @@
         "proactive_suggestions_status_check": {
           "name": "proactive_suggestions_status_check",
           "value": "\"proactive_suggestions\".\"status\" IN ('open', 'dismissed', 'started', 'superseded')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.bot_tasks": {
+      "name": "bot_tasks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "suggestion_id": {
+          "name": "suggestion_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "why": {
+          "name": "why",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_app": {
+          "name": "source_app",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_link": {
+          "name": "source_link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "bot_tasks_owner_created_idx": {
+          "name": "bot_tasks_owner_created_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bot_tasks_channel_idx": {
+          "name": "bot_tasks_channel_idx",
+          "columns": [
+            {
+              "expression": "channel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bot_tasks_suggestion_idx": {
+          "name": "bot_tasks_suggestion_idx",
+          "columns": [
+            {
+              "expression": "suggestion_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "bot_tasks_owner_user_id_users_id_fk": {
+          "name": "bot_tasks_owner_user_id_users_id_fk",
+          "tableFrom": "bot_tasks",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "bot_tasks_agent_id_agents_id_fk": {
+          "name": "bot_tasks_agent_id_agents_id_fk",
+          "tableFrom": "bot_tasks",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "bot_tasks_channel_id_channels_id_fk": {
+          "name": "bot_tasks_channel_id_channels_id_fk",
+          "tableFrom": "bot_tasks",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "bot_tasks_suggestion_id_proactive_suggestions_id_fk": {
+          "name": "bot_tasks_suggestion_id_proactive_suggestions_id_fk",
+          "tableFrom": "bot_tasks",
+          "tableTo": "proactive_suggestions",
+          "columnsFrom": [
+            "suggestion_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "bot_tasks_origin_check": {
+          "name": "bot_tasks_origin_check",
+          "value": "\"bot_tasks\".\"origin\" IN ('check_in')"
         }
       },
       "isRLSEnabled": false

@@ -10,9 +10,8 @@ import { MuseEmpty, MuseScreen } from "../ui";
 import { NoBot } from "./activity";
 
 /**
- * Ideas: the next steps the centre Bot's background research suggested, and the research itself.
- * Both are OpenBot's own sections, so starting, dismissing and running research behave as on the
- * Bot's page.
+ * Ideas: what the centre Bot's check-ins found, and its check-ins themselves. Both are OpenBot's own
+ * sections, so starting, hiding and running a check-in behave as on the Bot's page.
  */
 export function IdeasScreen() {
   const { bot } = useMuse();
@@ -32,9 +31,9 @@ export function IdeasScreen() {
       <div className="[&>section:first-child]:mt-0">
         {none ? (
           <MuseEmpty
-            detail={`${bot.name} suggests next steps here once background research is on.`}
+            detail={`When ${bot.name}'s check-ins find something that needs you, it shows up here.`}
             icon={IconBulb}
-            title="No suggestions yet"
+            title="Nothing needs you right now"
           />
         ) : (
           <SuggestionsInbox agentId={bot.id} />

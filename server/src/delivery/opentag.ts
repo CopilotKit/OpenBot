@@ -358,6 +358,8 @@ export function confirmWriteInterrupt(input: {
   approver: string;
   effect?: string;
   fields: { label: string; value: string }[];
+  /** Whether the card offers "Always allow". Not for a check-in task's approval. */
+  allowAlways?: boolean;
 }) {
   return {
     __opentag_interrupt_id__: interruptIdForApproval(input.approvalId),
@@ -371,7 +373,7 @@ export function confirmWriteInterrupt(input: {
         ["read", "write", "destructive"].includes(input.effect)
           ? { effect: input.effect }
           : {}),
-        allow_always: true,
+        allow_always: input.allowAlways ?? true,
       },
     },
   };

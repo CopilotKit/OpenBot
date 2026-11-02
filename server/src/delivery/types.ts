@@ -45,13 +45,22 @@ export type DeliveryInbox = DeliveryScope & {
   state: DeliveryState;
   error: string | null;
 };
+/**
+ * What a delivery is about. `attention` is a ping: one message to a person that something their
+ * Bots' check-ins found needs them, every Bot's items folded into it (proactive/ping.ts).
+ */
+export type DeliveryKind = "reply" | "question" | "approval" | "attention";
 export type DeliveryOutbox = DeliveryScope & {
   id: string;
   bindingId: string | null;
   deviceId: string | null;
   transport: BindingTransport | "push";
+  /**
+   * What is sent. A ping's push row carries its title on the first line and its body after it,
+   * since one row holds one text; every other push is titled "OpenBot".
+   */
   text: string;
-  kind: "reply" | "question" | "approval";
+  kind: DeliveryKind;
   requestId: string | null;
   state: DeliveryState;
   providerId: string | null;

@@ -7,6 +7,7 @@ import {
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { defer, from, type Observable, switchMap } from "rxjs";
 import { z } from "zod";
+import { MEMORY_TOOLS_SERVER } from "../plugins/plugin-store/model";
 import type { MemoryIngestion } from "./ingestion";
 import type { MemoryStore } from "./store";
 import {
@@ -82,7 +83,7 @@ export function memoryTools(options: {
   ): GrantedTool {
     return {
       name,
-      ref: `memory/${name}`,
+      ref: `${MEMORY_TOOLS_SERVER}/${name}`,
       description,
       parameters,
       async execute(args) {
