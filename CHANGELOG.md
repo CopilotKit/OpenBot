@@ -209,6 +209,20 @@ transaction, so the trail always says what happened to it, without the authoriza
 link or vendor account. If the audit row cannot be written, nothing changes and the attempt stays
 pending, rather than settling with no record.
 
+### Following a link is judged as opening its address
+
+A Bot's click on a link to another page now opens that page's address instead of clicking, so it is
+judged exactly as `computer_navigate` is: a read, with the same allowlist, policy, approval and
+audit. Before, it was judged as a click, which is a change, so a Bot reading an ordering system was
+handed back to you by the built-in payments requirement for clicking a link on a page at
+`/purchase-orders/...`, while typing the same address went straight through. Buttons, links to a
+spot on the same page (`#`), `javascript:` and `mailto:` links, links inside an iframe, and links
+with no address are still clicked and judged as before. A deny rule about the link itself
+(`element.name`) still refuses it, and a rule about where pages open (`page.url`) now applies to it.
+Snapshots now carry each top-page link's absolute address as `url`. As with a click, Stop cancels a
+followed link, including while it waits for approval, and the computer refuses a link as stale when
+the page has moved on since the snapshot it came from or the link now goes somewhere else.
+
 ### Refunds now go to the person
 
 The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
