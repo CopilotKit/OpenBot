@@ -44,7 +44,7 @@ export function BotOrb({
         role="img"
         aria-label={name}
         data-variant="static"
-        className="inline-block shrink-0 rounded-full"
+        className="inline-block shrink-0 rounded-full ring-1 ring-foreground/10"
         style={
           {
             "--c1": colors.c1,
@@ -52,7 +52,6 @@ export function BotOrb({
             "--c3": colors.c3,
             "--c4": colors.c4,
             background: STATIC_FILL,
-            boxShadow: "var(--orb-edge)",
             height: size,
             width: size,
           } as CSSProperties
@@ -66,8 +65,8 @@ export function BotOrb({
       role="img"
       aria-label={name}
       data-variant="live"
-      className="bot-orb-live inline-flex shrink-0 rounded-full"
-      style={{ boxShadow: "var(--orb-edge)", height: size, width: size }}
+      className="bot-orb-live inline-flex shrink-0 rounded-full ring-1 ring-foreground/10"
+      style={{ height: size, width: size }}
     >
       {/* Hidden so the Bot is announced once, by name. A waiting Bot idles: the next move is the
           person's, not the Bot's. */}

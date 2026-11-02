@@ -1,8 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import Avatar from "boring-avatars";
 import { memo, type ReactNode } from "react";
+import { useBotLook } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
-import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
@@ -14,7 +16,8 @@ import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
  * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
  * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
  *
- * OpenBot's own look draws each Bot as its orb, seeded by its id; a skin keeps the faces. The orbs
+ * Where Bots are orbs (`useBotLook`), each is drawn from its `avatarSeed`, as `AbstractAvatar`
+ * draws it, so a Bot is one color everywhere; a skin that has not opted in keeps the faces. The orbs
  * are hidden from screen readers: the row beside the avatar names the conversation, and an id read
  * aloud would name nothing.
  */
@@ -27,7 +30,7 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
-  const orbs = useSkinId() === DEFAULT_SKIN;
+  const orbs = useBotLook() === "orb";
   const face = orbs ? orbFace : boringFace;
   const avatar =
     participantIds.length === 1 ? (
@@ -87,9 +90,18 @@ function boringFace(id: string, size: number) {
 }
 
 function orbFace(id: string, size: number) {
+  return <OrbFace id={id} size={size} />;
+}
+
+/** A participant that is not a listed Bot, such as a computer, is seeded by its id. */
+function OrbFace({ id, size }: { id: string; size: number }) {
+  const { data: seed } = useQuery({
+    ...agentListQueryOptions(),
+    select: (agents) => agents.find((agent) => agent.id === id)?.avatarSeed,
+  });
   return (
     <span aria-hidden="true" className="contents">
-      <BotOrb name={id} seed={id} size={size} />
+      <BotOrb name={id} seed={seed ?? id} size={size} />
     </span>
   );
 }

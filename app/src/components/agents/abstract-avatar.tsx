@@ -1,11 +1,8 @@
 import Avatar from "boring-avatars";
+import { useBotLook } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
-import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
-/**
- * A Bot's avatar. OpenBot's own look draws the Bot as its orb; a skin keeps the face it was
- * designed with.
- */
+/** A Bot's avatar: its orb, or its face in a skin that has not opted in to orbs. */
 export function AbstractAvatar({
   name,
   seed,
@@ -15,8 +12,7 @@ export function AbstractAvatar({
   seed: string;
   size?: number;
 }) {
-  const skin = useSkinId();
-  if (skin === DEFAULT_SKIN) {
+  if (useBotLook() === "orb") {
     return <BotOrb name={name} seed={seed} size={size} />;
   }
 
