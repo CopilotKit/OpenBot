@@ -78,6 +78,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A failed shared-app approval can be tried again
+
+Deciding a shared-app request now commits the decision and the access it grants together. If the
+approval or its audience cannot be saved, the request stays pending instead of disappearing as
+approved without granting access. An administrator can retry after the write failure is resolved.
+Concurrent direct approvals and request decisions take the same Bot/app transaction lock before
+writing either row, so they do not deadlock by acquiring those rows in opposite orders. An owner
+grant that races an administrator now leaves the administrator's approval and audience in place.
+
 ### A rule on activation also catches Enter or Space pressed with a modifier
 
 A Bot's `computer_key` call names its key the way Playwright reads it, so `Shift+Enter` is Enter with
