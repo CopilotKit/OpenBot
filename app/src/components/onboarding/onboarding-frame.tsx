@@ -20,8 +20,8 @@ import { cn } from "@/lib/utils";
  *
  * FROM `lg` UP, TWO PANES. On the left, filling the rest of the screen, the step's picture. On the
  * right, one line with the product's name and where somebody is ("Step 5 of 9"), then the step's
- * heading and sentence, and Back and Continue at the bottom of the pane, where they sit at the same
- * height on every step however long its words are.
+ * heading and sentence, and Back and Continue at the bottom right of the pane, where they sit at
+ * the same place on every step however long its words are.
  *
  * THE STEP COMES FIRST, AND THE LIST IS ON DEMAND. The whole list of steps used to sit above the
  * heading, nine rows that pushed every step's words 300 to 640 px down a laptop's screen. Where
@@ -96,7 +96,7 @@ export function OnboardingFrame({
     "h-[52px] w-full rounded-full px-5 text-sm font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg";
   return (
     <div
-      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:grid-rows-[auto_auto_1fr_auto]"
+      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(0,1fr)_minmax(28rem,40rem)] lg:grid-rows-[auto_auto_1fr_auto]"
       data-onboarding-frame=""
     >
       <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-2 pt-[env(safe-area-inset-top)] lg:static lg:bg-transparent lg:px-10 lg:pt-10">
@@ -135,7 +135,7 @@ export function OnboardingFrame({
 
       <div
         className={cn(
-          "col-start-1 min-w-0 px-4 lg:col-start-2 lg:row-start-2 lg:px-10 lg:pt-12",
+          "col-start-1 min-w-0 px-4 lg:col-start-2 lg:row-start-2 lg:px-10 lg:pt-24",
           demoFirst ? "row-start-3" : "row-start-2 pt-1.5",
         )}
         data-onboarding-intro=""
@@ -167,7 +167,7 @@ export function OnboardingFrame({
        * pane, under the row that takes up the space between them and the sentence.
        */}
       <footer className="sticky bottom-0 col-start-1 row-start-5 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:col-start-2 lg:row-start-4 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
-        <div className="mx-auto flex w-full max-w-md flex-col gap-3 lg:mx-0">
+        <div className="mx-auto flex w-full max-w-md flex-col gap-3 lg:mx-0 lg:max-w-none">
           {notice}
           {footnote ? (
             <p
@@ -177,7 +177,7 @@ export function OnboardingFrame({
               {footnote}
             </p>
           ) : null}
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-end lg:gap-3">
             {index > 0 ? (
               <button
                 className={cn(
