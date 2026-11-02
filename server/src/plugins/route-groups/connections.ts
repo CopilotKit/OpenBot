@@ -27,6 +27,7 @@ import { type AccountRef, asAccountRef } from "../shared-accounts";
 import {
   CatalogueEntryUnknownError,
   type OAuthClient,
+  OAuthClientReadError,
   PluginRefusedError,
 } from "../store";
 import {
@@ -878,6 +879,18 @@ export function mountConnectionRoutes({
             error: `${entry.title} hasn't been added yet. Ask an admin to add it.`,
           },
           409,
+        );
+      }
+      if (error instanceof OAuthClientReadError) {
+        await store.recordOAuthClientReadFailure({
+          serverId,
+          actorId: context.var.actor.id,
+        });
+        return context.json(
+          {
+            error: `Couldn't connect ${entry.title}. Try again, or ask an admin if it keeps happening.`,
+          },
+          503,
         );
       }
       throw error;

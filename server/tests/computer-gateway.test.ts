@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import {
@@ -9,6 +10,7 @@ import {
 import {
   ActionRefusedError,
   createComputerGateway,
+  hostOf,
   WorkspaceNotFoundError,
   WorkspaceRefusedError,
   WorkspaceTooLargeError,
@@ -648,6 +650,41 @@ describe("the computer gateway", () => {
     expect(calls).toEqual(["navigate"]);
   });
 
+  test("a host rule is not evaded by writing the destination with a root dot", async () => {
+    // `intranet.example.com.` is the same name to DNS, to Chromium and to the computer's own network
+    // filter. A rule about the host has to see the same name, or one trailing dot walks past it.
+    const { gateway, calls } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['page.host == "intranet.example.com"'],
+    });
+
+    await expect(
+      gateway.navigate(
+        botSeat("bot-1"),
+        ACTOR,
+        "https://intranet.example.com./hr",
+      ),
+    ).rejects.toThrow(ActionRefusedError);
+    await expect(
+      gateway.navigate(
+        botSeat("bot-1"),
+        ACTOR,
+        "https://INTRANET.example.com../hr",
+      ),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(calls).toEqual([]);
+  });
+
+  test("the host a rule sees keeps its port and drops the root dot", () => {
+    expect(hostOf("https://intranet.example.com./hr")).toBe(
+      "intranet.example.com",
+    );
+    expect(hostOf("http://erp.internal.:8080/")).toBe("erp.internal:8080");
+    expect(hostOf("https://example.com/")).toBe("example.com");
+    expect(hostOf("http://[::1]:3000/")).toBe("[::1]:3000");
+    expect(hostOf("not a url")).toBe("");
+  });
+
   /*
    * "not in the current snapshot" is a statement about a ref that could not be resolved, and it used
    * to be written on every action that never named an element at all. A reader looking at a
@@ -1123,6 +1160,65 @@ describe("the computer gateway", () => {
       expect(calls).toEqual([]);
     });
 
+    test("a key held with a modifier is still an activation", async () => {
+      // Playwright presses `Shift+Enter` as Enter with Shift held, and Chromium submits the form and
+      // clicks the focused button for it just as for Enter. Spelled with a modifier, it must not
+      // read as typing and walk past a rule on activation.
+      for (const key of [
+        "Shift+Enter",
+        "Control+Enter",
+        "Shift+NumpadEnter",
+        "Shift+Space",
+        "Shift+ ",
+      ]) {
+        const { gateway, calls } = await gatewayWith({
+          ...PERMISSIVE,
+          deny: ['intent == "activate"'],
+        });
+        await expect(
+          gateway.key(botSeat("bot-1"), ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key,
+          }),
+        ).rejects.toThrow(ActionRefusedError);
+        expect(calls).toEqual([]);
+      }
+
+      // A modifier on a key that presses nothing is still typing.
+      for (const key of ["Shift+Tab", "Control+a", "Shift++"]) {
+        const { gateway, calls } = await gatewayWith({
+          ...PERMISSIVE,
+          deny: ['intent == "activate"'],
+        });
+        await gateway.key(botSeat("bot-1"), ACTOR, {
+          ref: "e1",
+          snapshotId: 7,
+          key,
+        });
+        expect(calls).toEqual(["key"]);
+      }
+    });
+
+    test("a newline or a carriage return is Enter, alone or with a modifier", async () => {
+      // `key` is free text, and Playwright's keyboard layout names `\n` and `\r` as aliases of
+      // Enter, so either one submits the form. Read as typing, they walked past a rule on activation.
+      for (const key of ["\n", "\r", "Shift+\n", "Control+\r"]) {
+        const { gateway, calls } = await gatewayWith({
+          ...PERMISSIVE,
+          deny: ['intent == "activate"'],
+        });
+        await expect(
+          gateway.key(botSeat("bot-1"), ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key,
+          }),
+        ).rejects.toThrow(ActionRefusedError);
+        expect(calls).toEqual([]);
+      }
+    });
+
     /*
      * The rule the product ships, run against every door it claims to close.
      *
@@ -1132,7 +1228,30 @@ describe("the computer gateway", () => {
      * either copy that reopens a door fails here.
      */
     const SHIPPED_NEVER_SUBMIT =
-      '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")';
+      '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && intent == "activate")';
+
+    test("both shipped copies are the rule pinned here", () => {
+      // Pinned as written, so a copy that drifts back to `key == "Enter"` fails here rather than
+      // quietly letting Shift+Enter submit the form on a deployment that followed the advice.
+      const example = readFileSync(
+        new URL("../../.env.example", import.meta.url),
+        "utf8",
+      );
+      const line = example
+        .split("\n")
+        .find((one) => one.startsWith("# AGENT_COMPUTER_POLICY="));
+      expect(line).toBeDefined();
+      const policy = JSON.parse(
+        (line ?? "").slice("# AGENT_COMPUTER_POLICY=".length),
+      ) as { deny: string[] };
+      expect(policy.deny).toEqual([SHIPPED_NEVER_SUBMIT]);
+
+      const presets = readFileSync(
+        new URL("../../app/src/lib/boundaries/rules.ts", import.meta.url),
+        "utf8",
+      );
+      expect(presets).toContain(`rule: '${SHIPPED_NEVER_SUBMIT}',`);
+    });
 
     test("the shipped preset closes the button, the keypress and the submit flag", async () => {
       const shipped = { ...PERMISSIVE, deny: [SHIPPED_NEVER_SUBMIT] };
@@ -1155,6 +1274,19 @@ describe("the computer gateway", () => {
         }),
       ).rejects.toThrow();
       expect(enter.calls).toEqual([]);
+
+      // Enter spelled any other way the computer presses as Enter, and Space on a focused button.
+      for (const key of ["Shift+Enter", "Control+Enter", "\n", "Space"]) {
+        const pressed = await gatewayWith(shipped);
+        await expect(
+          pressed.gateway.key(botSeat("bot-1"), ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key,
+          }),
+        ).rejects.toThrow(ActionRefusedError);
+        expect(pressed.calls).toEqual([]);
+      }
 
       const submit = await gatewayWith(shipped);
       await expect(
