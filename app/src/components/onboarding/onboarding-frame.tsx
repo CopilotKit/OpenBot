@@ -175,7 +175,16 @@ export function OnboardingFrame({
               {footnote}
             </p>
           ) : null}
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
+          {/*
+           * The buttons are each step's own, never the last step's redrawn. A browser acts on a
+           * button only after the click's handlers have redrawn the page, so a Continue that turned
+           * into the next step's submit in place would submit the next step's form with the same
+           * click: Continue on Get notified would finish onboarding with the name unasked.
+           */}
+          <div
+            className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3"
+            key={index}
+          >
             {index > 0 ? (
               <button
                 className={cn(

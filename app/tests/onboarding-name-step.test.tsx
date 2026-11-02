@@ -1,7 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { useState } from "react";
 import { NameOrb, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
@@ -43,8 +49,10 @@ function client(needsName = true) {
 /** The name step after one plain step, in the real frame, with a finish the test controls. */
 function NameOnboarding({
   finish,
+  from = "name",
 }: {
   finish: (setFinished: (finished: boolean) => void) => Promise<void>;
+  from?: "notify" | "name";
 }) {
   const [finished, setFinished] = useState(false);
   const name = useNameStep({
@@ -53,7 +61,7 @@ function NameOnboarding({
   });
   return (
     <OnboardingWizard
-      initialStepId="name"
+      initialStepId={from}
       steps={[
         {
           id: "notify",
@@ -69,10 +77,11 @@ function NameOnboarding({
 function draw(
   finish: (setFinished: (finished: boolean) => void) => Promise<void>,
   needsName = true,
+  from: "notify" | "name" = "name",
 ) {
   return render(
     <QueryClientProvider client={client(needsName)}>
-      <NameOnboarding finish={finish} />
+      <NameOnboarding finish={finish} from={from} />
     </QueryClientProvider>,
   );
 }
@@ -183,6 +192,50 @@ test("a completion that fails is said under the field too", async () => {
     "Onboarding could not be saved",
   );
   expect(primary(view).textContent).toBe("Get started");
+});
+
+/**
+ * A click as a browser makes it. React redraws between the click's listeners and the button's own
+ * action (the browser runs microtasks in between), so the button's action reads the button as it is
+ * after the redraw: if the very element clicked is now a form's submit button, the browser submits
+ * that form. `fireEvent` alone redraws only after both, so this runs the action afterwards.
+ */
+function browserClick(button: HTMLButtonElement) {
+  fireEvent.click(button);
+  const form = button.isConnected && button.type === "submit" && button.form;
+  if (form) act(() => form.requestSubmit(button));
+}
+
+test("Continue on the step before moves on to the name, and submits nothing", async () => {
+  let fetched = 0;
+  globalThis.fetch = Object.assign(
+    async () => {
+      fetched += 1;
+      return Response.json({ profile: { name: "Sam", needsName: false } });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  let finishes = 0;
+  // A saved name, so the name step's form could be submitted at once.
+  const view = draw(
+    async () => {
+      finishes += 1;
+    },
+    false,
+    "notify",
+  );
+
+  browserClick(
+    view.getByRole("button", { name: "Continue" }) as HTMLButtonElement,
+  );
+  await settleReactWork();
+
+  expect(
+    view.getByRole("heading", { name: "What should we call you?" }),
+  ).toBeTruthy();
+  expect(primary(view).textContent).toBe("Get started");
+  expect(fetched).toBe(0);
+  expect(finishes).toBe(0);
 });
 
 test("the orb is OpenBot's violet, listening, and plays its finish when onboarding ends", () => {
