@@ -144,9 +144,14 @@ test("the step's words and its picture sit in their own panes, words first", () 
       demo &&
       intro.compareDocumentPosition(demo) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  // The desktop's two columns: the picture fills the right, held in view.
-  expect(demo?.className).toContain("lg:col-start-2");
+  // The desktop's two columns: the picture fills the left, held in view, and the words the right,
+  // with the buttons at the bottom of their pane.
+  expect(demo?.className).toContain("lg:col-start-1");
   expect(demo?.className).toContain("lg:sticky");
+  expect(intro?.className).toContain("lg:col-start-2");
+  const footer = view.container.querySelector("footer");
+  expect(footer?.className).toContain("lg:col-start-2");
+  expect(footer?.className).toContain("lg:row-start-4");
 });
 
 test("a step with its picture first puts it above the heading on a phone", () => {
@@ -159,9 +164,9 @@ test("a step with its picture first puts it above the heading on a phone", () =>
   const demo = view.container.querySelector("[data-onboarding-demo]");
   expect(demo?.className).toContain("row-start-2");
   expect(intro?.className).toContain("row-start-3");
-  // On a desktop it is still the right-hand pane, and the words still head the left.
+  // On a desktop it is still the left-hand pane, and the words still head the right.
   expect(intro?.className).toContain("lg:row-start-2");
-  expect(demo?.className).toContain("lg:col-start-2");
+  expect(demo?.className).toContain("lg:col-start-1");
   // Without the phone's margin under it, which would stop the stretched pane short of the bottom.
   expect(demo?.className).toContain("lg:my-0");
 });
@@ -486,7 +491,7 @@ test("on a desktop, only the one line sits above the step's heading, and the lis
 
   const frame = view.container.querySelector("[data-onboarding-frame]");
   expect(frame?.className).toContain("lg:h-svh");
-  expect(frame?.className).toContain("lg:grid-rows-[auto_auto_auto_1fr]");
+  expect(frame?.className).toContain("lg:grid-rows-[auto_auto_1fr_auto]");
   // Above the heading, the header holds the phone's bar and the desktop's one line, nothing more.
   const header = view.container.querySelector("header");
   expect(header?.querySelectorAll("li")).toHaveLength(0);

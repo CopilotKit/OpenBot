@@ -18,9 +18,10 @@ import { cn } from "@/lib/utils";
 /**
  * The frame every onboarding step sits in: one DOM, laid out two ways by CSS.
  *
- * FROM `lg` UP, TWO PANES. On the left, one line with the product's name and where somebody is
- * ("Step 5 of 9"), then the step's heading and sentence, then Back and Continue. On the right,
- * filling the rest of the screen, the step's picture.
+ * FROM `lg` UP, TWO PANES. On the left, filling the rest of the screen, the step's picture. On the
+ * right, one line with the product's name and where somebody is ("Step 5 of 9"), then the step's
+ * heading and sentence, and Back and Continue at the bottom of the pane, where they sit at the same
+ * height on every step however long its words are.
  *
  * THE STEP COMES FIRST, AND THE LIST IS ON DEMAND. The whole list of steps used to sit above the
  * heading, nine rows that pushed every step's words 300 to 640 px down a laptop's screen. Where
@@ -95,10 +96,10 @@ export function OnboardingFrame({
     "h-[52px] w-full rounded-full px-5 text-sm font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg";
   return (
     <div
-      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(22rem,30rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_auto_1fr]"
+      className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:grid-rows-[auto_auto_1fr_auto]"
       data-onboarding-frame=""
     >
-      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background pt-[env(safe-area-inset-top)] lg:static lg:bg-transparent lg:px-10 lg:pt-10">
+      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-2 pt-[env(safe-area-inset-top)] lg:static lg:bg-transparent lg:px-10 lg:pt-10">
         {/*
          * The phone's chrome. Back is not drawn on the first step, rather than drawn disabled: there
          * is nowhere behind it, and a control that does nothing is one more thing a screen reader
@@ -134,7 +135,7 @@ export function OnboardingFrame({
 
       <div
         className={cn(
-          "col-start-1 min-w-0 px-4 lg:row-start-2 lg:px-10 lg:pt-12",
+          "col-start-1 min-w-0 px-4 lg:col-start-2 lg:row-start-2 lg:px-10 lg:pt-12",
           demoFirst ? "row-start-3" : "row-start-2 pt-1.5",
         )}
         data-onboarding-intro=""
@@ -151,7 +152,7 @@ export function OnboardingFrame({
       {demo ? (
         <div
           className={cn(
-            "col-start-1 flex min-w-0 flex-col px-4 lg:sticky lg:top-0 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:my-0 lg:max-h-svh lg:overflow-y-auto lg:border-l lg:border-border lg:bg-muted/40 lg:px-10 lg:py-10",
+            "col-start-1 flex min-w-0 flex-col px-4 lg:sticky lg:top-0 lg:col-start-1 lg:row-span-4 lg:row-start-1 lg:my-0 lg:max-h-svh lg:overflow-y-auto lg:border-r lg:border-border lg:bg-muted/40 lg:px-10 lg:py-10",
             demoFirst ? "row-start-2 mb-6" : "row-start-3 mt-8",
           )}
           data-onboarding-demo=""
@@ -162,9 +163,10 @@ export function OnboardingFrame({
 
       {/*
        * On a phone, a step taller than the screen scrolls under the buttons rather than being cut
-       * at them: the fade above says there is more. On a desktop the buttons follow the sentence.
+       * at them: the fade above says there is more. On a desktop they sit at the bottom of the
+       * pane, under the row that takes up the space between them and the sentence.
        */}
-      <footer className="sticky bottom-0 col-start-1 row-start-5 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:row-start-3 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
+      <footer className="sticky bottom-0 col-start-1 row-start-5 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:col-start-2 lg:row-start-4 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
         <div className="mx-auto flex w-full max-w-md flex-col gap-3 lg:mx-0">
           {notice}
           {footnote ? (
@@ -397,7 +399,7 @@ export const StepTitle = createContext<string | undefined>(undefined);
 
 /**
  * A step's heading and sentence, the way every step draws them: centred on a phone, flush left in
- * the desktop's left pane. `children` is the sentence; `after` is a control that belongs with it.
+ * the desktop's right pane. `children` is the sentence; `after` is a control that belongs with it.
  * The heading is the step's own title from the list unless `title` says otherwise.
  */
 export function StepIntro({
