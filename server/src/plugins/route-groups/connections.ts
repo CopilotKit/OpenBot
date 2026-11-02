@@ -801,6 +801,21 @@ export function mountConnectionRoutes({
       };
 
       /*
+       * One address for both brokers' Connect, checked before anything is minted. See
+       * {@link consentReturnUrl}.
+       */
+      const back = consentReturnUrl(
+        connect.appUrl,
+        serverId,
+        returnTo,
+        `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
+      );
+      if ("refusal" in back) {
+        return context.json({ error: back.refusal.error }, back.refusal.status);
+      }
+      const { returnUrl } = back;
+
+      /*
        * A BROKER THAT RUNS A CORRELATED FLOW CONNECTS THROUGH IT, AS ITS AUTHORIZE DOES.
        *
        * Arcade's consent comes back through the verifier, and the verifier binds a return to the
@@ -810,20 +825,6 @@ export function mountConnectionRoutes({
        * met the adapter's refusal. A presence test on the declared flow, never the vendor's name.
        */
       if (composio.broker.authorizations) {
-        let returnUrl: string;
-        try {
-          returnUrl = brokerReturnUrl(
-            connectedAccountsUrlFor(connect.appUrl, { serverId }, returnTo),
-            activeProvider,
-          );
-        } catch (error) {
-          logReturnUrlRefusal(error, serverId);
-          const refusal = brokerRefusal(
-            error,
-            `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
-          );
-          return context.json({ error: refusal.error }, refusal.status);
-        }
         return startAuthorization(context, {
           broker: composio.broker,
           serverId,
@@ -847,33 +848,11 @@ export function mountConnectionRoutes({
       let redirectUrl: string;
       try {
         ({ redirectUrl } = await withVendorDeadline(() =>
-          composio.broker.authorize({
-            account,
-            toolkit,
-            /*
-             * THE REFUSAL ABOVE CHECKS THAT A SETTING IS SET; THIS CHECKS THAT IT IS AN ADDRESS.
-             * `appUrl` is an environment string — `OPENBOT_APP_URL`, or the first `TRUSTED_ORIGINS`
-             * entry — and nothing between there and Composio has ever looked at it, so
-             * `openbot.example.com` with the scheme left off builds a callback that is not a
-             * callback. That failure lands after somebody has consented, on the vendor's page, where
-             * this deployment cannot tell them anything; the guard moves it to before the link is
-             * minted, where nobody has spent a consent on it yet.
-             *
-             * WHO IS READING DECIDES WHAT IS SAID, AND HERE THAT IS A PERSON. This route is
-             * `requireUser`: whoever pressed Connect gets the refusal's own sentence, which names no
-             * vendor and no variable because they can act on neither. The operator's half of it is
-             * logged below instead, where an operator looks and a person does not.
-             */
-            returnUrl: brokerReturnUrl(
-              connectedAccountsUrlFor(connect.appUrl, { serverId }, returnTo),
-              activeProvider,
-            ),
-          }),
+          composio.broker.authorize({ account, toolkit, returnUrl }),
         ));
       } catch (error) {
         // See `adoptHeld` above.
         if (error instanceof BrokerAccountHeldError) return adoptHeld();
-        logReturnUrlRefusal(error, serverId);
         const refusal = brokerRefusal(
           error,
           `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
@@ -1425,6 +1404,44 @@ export function mountConnectionRoutes({
   );
 
   /**
+   * Where a broker's consent sends the person back to, or the refusal to answer with when that is
+   * not an address. Connect, on both brokers, and Authorize build it here and nowhere else, so the
+   * check and the operator's log line cannot drift apart between them.
+   *
+   * BUILT FROM THIS DEPLOYMENT'S APP URL AND THE PAGE THE CALLER NAMES, NEVER FROM THE REQUEST.
+   * Whoever chooses it chooses where somebody lands holding a just-completed consent, so the caller
+   * may pick one of two pages ({@link ConnectOrigin}) and nothing more.
+   *
+   * CHECKED BEFORE ANYTHING IS MINTED. `appUrl` is an environment string, `OPENBOT_APP_URL` or the
+   * first `TRUSTED_ORIGINS` entry, and `openbot.example.com` with the scheme left off builds a
+   * callback that is not a callback. That failure would land after somebody had consented, on the
+   * vendor's page, where this deployment cannot tell them anything; {@link brokerReturnUrl} moves it
+   * to before the link is minted, where nobody has spent a consent on it yet.
+   *
+   * WHO IS READING DECIDES WHAT IS SAID. These routes are `requireUser`, so the person who pressed
+   * gets `refused`, which names no vendor and no variable because they can act on neither. The
+   * operator's half is logged by {@link logReturnUrlRefusal}, where an operator looks.
+   */
+  const consentReturnUrl = (
+    appUrl: string,
+    serverId: string,
+    returnTo: ConnectOrigin,
+    refused: string,
+  ): { returnUrl: string } | { refusal: ReturnType<typeof brokerRefusal> } => {
+    try {
+      return {
+        returnUrl: brokerReturnUrl(
+          connectedAccountsUrlFor(appUrl, { serverId }, returnTo),
+          activeProvider,
+        ),
+      };
+    } catch (error) {
+      logReturnUrlRefusal(error, serverId);
+      return { refusal: brokerRefusal(error, refused) };
+    }
+  };
+
+  /**
    * Claim an attempt, mint the consent at the broker and bind the two: the sequence Authorize and,
    * on a broker that runs a correlated flow, Connect both run once they have decided whose account
    * the consent is for. Answers the response the route sends.
@@ -1854,19 +1871,14 @@ export function mountConnectionRoutes({
     }
     const returnTo: ConnectOrigin =
       context.req.query("returnTo") === "admin" ? "admin" : "settings";
-    let returnUrl: string;
-    try {
-      returnUrl = brokerReturnUrl(
-        connectedAccountsUrlFor(connect.appUrl, { serverId }, returnTo),
-        activeProvider,
-      );
-    } catch (error) {
-      logReturnUrlRefusal(error, serverId);
-      const refusal = brokerRefusal(
-        error,
-        "Couldn't build the address to bring you back to, so nothing was started.",
-      );
-      return context.json({ error: refusal.error }, refusal.status);
+    const back = consentReturnUrl(
+      connect.appUrl,
+      serverId,
+      returnTo,
+      "Couldn't build the address to bring you back to, so nothing was started.",
+    );
+    if ("refusal" in back) {
+      return context.json({ error: back.refusal.error }, back.refusal.status);
     }
 
     return startAuthorization(context, {
@@ -1875,7 +1887,7 @@ export function mountConnectionRoutes({
       account,
       toolkit,
       action,
-      returnUrl,
+      returnUrl: back.returnUrl,
     });
   });
 
