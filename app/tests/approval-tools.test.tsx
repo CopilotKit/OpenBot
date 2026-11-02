@@ -70,7 +70,7 @@ test("a change goes to the server's gate even when nothing about approvals has l
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       posted.push({
         path: String(path),
-        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
       });
       if (String(path).startsWith("/api/approvals/threads/"))
         return Response.json({ asksEveryStep: false });
@@ -139,7 +139,7 @@ test("a change goes to the server's gate even when nothing about approvals has l
     stop();
     expect(direct).toEqual([]);
     expect(posted).toEqual([
-      { path: "/api/approvals/threads/thread", body: undefined },
+      { path: "/api/approvals/threads/thread" },
       {
         path: "/api/approvals/computer/default",
         body: expect.objectContaining({
