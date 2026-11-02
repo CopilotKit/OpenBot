@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { safetyRequirement } from "../src/approvals/policy";
 import type { ApprovalCandidate } from "../src/approvals/types";
 import type { AuditEventInput, AuditStore } from "../src/audit";
-import { StaleSnapshotError } from "../src/computer/client";
+import {
+  ComputerStoppedError,
+  StaleSnapshotError,
+} from "../src/computer/client";
 import { botSeat } from "../src/computer/computer-key";
 import {
   ActionRefusedError,
@@ -54,6 +57,10 @@ function harness(options?: {
   policy?: ActionPolicy;
   /** What `/navigate` answers, for the challenge case. */
   navigated?: Record<string, unknown>;
+  /** A status for `/navigate` to answer with instead, as the computer does for a stale citation. */
+  navigateStatus?: number;
+  /** Holds the action at the approval gate until this settles, as a person deciding would. */
+  approvalHold?: Promise<void>;
 }) {
   const reached: Array<{ path: string; body: unknown }> = [];
   const candidates: ApprovalCandidate[] = [];
@@ -72,6 +79,11 @@ function harness(options?: {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     if (path === "/snapshot") return Response.json(SNAPSHOT);
     reached.push({ path, body });
+    if (path === "/navigate" && options?.navigateStatus)
+      return Response.json(
+        { error: "That list of elements is out of date.", stale: true },
+        { status: options.navigateStatus },
+      );
     if (path === "/navigate")
       return Response.json({
         url: body?.url,
@@ -99,13 +111,14 @@ function harness(options?: {
       options?.policy ?? { mode: "enforce", deny: [], allow: ["true"] },
     approvalGate: async (candidate) => {
       candidates.push(candidate);
+      await options?.approvalHold;
       return undefined;
     },
   });
   const seat = botSeat("bot-1");
-  const click = async (ref: string, snapshotId = 3) => {
+  const click = async (ref: string, snapshotId = 3, signal?: AbortSignal) => {
     await gateway.snapshot(seat);
-    return gateway.click(seat, { id: "user-1" }, { ref, snapshotId });
+    return gateway.click(seat, { id: "user-1" }, { ref, snapshotId }, signal);
   };
   return { click, reached, candidates, rows };
 }
@@ -243,5 +256,35 @@ describe("a click on a link to another page", () => {
     const { click } = harness({ navigated: { challenge } });
     const result = await click("e2");
     expect(result.challenge).toEqual(challenge as never);
+  });
+  test("carries its ref and snapshot to the computer, which checks them against the live page", async () => {
+    const { click, reached } = harness();
+    await click("e2");
+    expect(reached[0]?.body).toMatchObject({ ref: "e2", snapshotId: 3 });
+  });
+
+  test("the browser has moved on but the stored snapshot has not: the computer's stale answer refuses it", async () => {
+    // The server still holds snapshot 3, so the ref resolves here; only the computer knows the page
+    // has changed since, and its 409 is what stops the old link opening.
+    const { click } = harness({ navigateStatus: 409 });
+    await expect(click("e2")).rejects.toThrow(StaleSnapshotError);
+  });
+
+  test("Stop pressed while it waits for approval opens nothing, as it does for a button", async () => {
+    for (const ref of ["e2", "e6"]) {
+      let release!: () => void;
+      const approvalHold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const { click, reached, candidates } = harness({ approvalHold });
+      const stop = new AbortController();
+      const pending = click(ref, 3, stop.signal);
+      while (candidates.length === 0)
+        await new Promise((r) => setTimeout(r, 1));
+      stop.abort();
+      release();
+      await expect(pending).rejects.toThrow(ComputerStoppedError);
+      expect(reached).toEqual([]);
+    }
   });
 });

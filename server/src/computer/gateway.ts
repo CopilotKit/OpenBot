@@ -1360,8 +1360,21 @@ export function createComputerGateway(
             targetUrl: follow.url,
             ...(signal ? { signal } : {}),
           },
-          async () =>
-            transport.navigate(await locate(seat), addressOf(seat), follow.url),
+          // The signal and the citation travel with it: Stop still lands (as it does on a click,
+          // including one pressed while the action waits for approval), and the computer checks the
+          // ref against the live page as `/click` does, so a link from a snapshot the browser has
+          // since left is refused as stale rather than opened.
+          async (address) =>
+            transport.navigate(
+              address ?? (await locate(seat)),
+              addressOf(seat),
+              follow.url,
+              undefined,
+              {
+                ...(signal ? { signal } : {}),
+                citation: { ref: input.ref, snapshotId: input.snapshotId },
+              },
+            ),
         );
         return {
           action: "click",

@@ -96,7 +96,9 @@ handed back to you by the built-in payments requirement for clicking a link on a
 spot on the same page (`#`), `javascript:` and `mailto:` links, links inside an iframe, and links
 with no address are still clicked and judged as before. A deny rule about the link itself
 (`element.name`) still refuses it, and a rule about where pages open (`page.url`) now applies to it.
-Snapshots now carry each top-page link's absolute address as `url`.
+Snapshots now carry each top-page link's absolute address as `url`. As with a click, Stop cancels a
+followed link, including while it waits for approval, and the computer refuses a link as stale when
+the page has moved on since the snapshot it came from or the link now goes somewhere else.
 
 ### Refunds now go to the person
 

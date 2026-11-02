@@ -657,6 +657,31 @@ async function resolveRef(
   return locator;
 }
 
+/**
+ * The ref and snapshot a followed link was read from, none for a plain navigation, or "invalid" when
+ * only half of the pair was sent.
+ */
+function navigationCitation(
+  body: { ref?: unknown; snapshotId?: unknown } | null,
+): { ref: string; snapshotId: number } | undefined | "invalid" {
+  const ref = body?.ref;
+  const snapshotId = body?.snapshotId;
+  if (ref === undefined && snapshotId === undefined) return undefined;
+  if (typeof ref !== "string" || !ref || typeof snapshotId !== "number")
+    return "invalid";
+  return { ref, snapshotId };
+}
+
+/** Whether a link's live `href` and the address being opened are the same, resolved against the page. */
+function sameAddress(live: string, opening: string, pageUrl: string): boolean {
+  if (!live) return false;
+  try {
+    return new URL(live, pageUrl).href === new URL(opening).href;
+  } catch {
+    return false;
+  }
+}
+
 class StaleSnapshotError extends Error {
   constructor(message: string) {
     super(message);
@@ -1383,16 +1408,51 @@ serve<StreamData>({
         const body = (await request.json().catch(() => null)) as {
           url?: unknown;
           toolCallId?: unknown;
+          ref?: unknown;
+          snapshotId?: unknown;
         } | null;
         const parsed = parseNavigateUrl(body?.url);
         if (!parsed.ok) {
           return json({ error: parsed.error }, 400);
+        }
+        const citation = navigationCitation(body);
+        if (citation === "invalid") {
+          return json(
+            { error: "A followed link needs both its ref and snapshotId." },
+            400,
+          );
         }
 
         const startedAt = Date.now();
         try {
           const target = await currentPage(botId, "navigate");
           session.control.assertBotMayAct(true);
+          // A followed link is checked against the live page as a click on it would be: the snapshot
+          // it came from must still be current, the ref must still name an element, and that element
+          // must still go where the server was told it goes. Otherwise it is stale, and nothing opens.
+          if (citation) {
+            const link = await resolveRef(
+              session,
+              target,
+              citation.ref,
+              citation.snapshotId,
+            );
+            const live = await link
+              .evaluate((element) =>
+                "href" in element && typeof element.href === "string"
+                  ? element.href
+                  : (element.getAttribute("href") ?? ""),
+              )
+              .catch(() => "");
+            if (!sameAddress(live, parsed.url, target.url())) {
+              throw new StaleSnapshotError(
+                `Link ${citation.ref} no longer goes to that address. Take a new snapshot and use the refs from it.`,
+              );
+            }
+          }
+          // The person's Stop, landing after the request arrived: nothing has been opened yet.
+          if (request.signal.aborted)
+            return json({ error: "Stopped.", stopped: true }, 499);
           const response = await navigateWebPage(
             target,
             parsed.url,
@@ -1426,6 +1486,9 @@ serve<StreamData>({
             error instanceof SnapshotRequiredError
           )
             throw error;
+          // A followed link from a superseded snapshot: the caller's to fix, as on `/click`.
+          if (error instanceof StaleSnapshotError)
+            return json({ error: error.message, stale: true }, 409);
           // The page is the Bot's working surface, so a failed navigation is reported rather than
           // thrown: the transcript needs to say what happened, and the browser stays usable.
           return json(
