@@ -202,6 +202,14 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
 
+### A store connection is checked against the store itself
+
+After connecting a key, OpenBot checks it with one argument-free read, preferring an identity read
+and otherwise taking the first safe read alphabetically. For Shopify that was `SHOPIFY_COUNT_BLOGS`,
+which needs the `read_content` scope a store app with only order and product scopes does not have,
+so a working key was reported as rejected. A store's own details now count as an identity read, so
+the check calls `SHOPIFY_GET_SHOP_DETAILS` instead.
+
 ### A message naming different Bots' apps stays on the default when routing is unsure
 
 When the router cannot decide and a message names apps held by different Bots, OpenBot keeps the
