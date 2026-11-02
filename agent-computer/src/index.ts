@@ -581,13 +581,18 @@ async function snapshotPage(
   const before = session.control.get();
   const yaml = await target.ariaSnapshot({ mode: "ai" });
   const title = await target.title();
+  // What a relative link resolves against: the base the page declares, else its own address. A page
+  // that will not answer leaves links without an address, and they are clicked as before.
+  const baseUrl = await target
+    .evaluate(() => document.baseURI)
+    .catch(() => undefined);
   if (
     session.snapshotId === snapshotId &&
     before.holder === "bot" &&
     !before.requested
   )
     session.control.snapshotTaken();
-  const parsed = parseAriaSnapshot(yaml);
+  const parsed = parseAriaSnapshot(yaml, baseUrl);
   return {
     snapshotId,
     url: target.url(),

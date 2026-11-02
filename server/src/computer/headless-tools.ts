@@ -151,12 +151,20 @@ export function createHeadlessComputerTools(options: {
     ),
     tool(
       "computer_click",
-      "Click an element using its ref and snapshotId from the latest snapshot.",
+      "Click an element using its ref and snapshotId from the latest snapshot. A link to another page is opened at its address.",
       z.strictObject({ ref, snapshotId }),
-      async (input, { signal }) => ({
-        ok: true,
-        ...(await gateway.click(seat, actor, input, signal)),
-      }),
+      async (input, { signal }) => {
+        const result = await gateway.click(seat, actor, input, signal);
+        // A followed link is a navigation, so a page that wants a person stops here as one does.
+        if (result.challenge)
+          throw new HeadlessToolSuspension(result.challenge.reason, {
+            kind: "computer_handoff",
+            botId,
+            requestId: result.challenge.requestId,
+            source: result.challenge.kind,
+          });
+        return { ok: true, ...result };
+      },
     ),
     tool(
       "computer_type",
