@@ -1482,6 +1482,32 @@ type WholeAppRequirement = {
 const requirementName = (value: unknown): string | undefined | null =>
   value === undefined || value === null ? undefined : (textOf(value) ?? null);
 
+const moreThanOneRequirement = (toolkit: string) =>
+  new BrokerRefusalError(
+    `${toolkit}'s actions sign in to more than one account, so they can't all be connected at once. Authorize the actions you want in Connections.`,
+  );
+
+type RequirementNames = Omit<WholeAppRequirement, "oauth2">;
+
+/**
+ * Two actions' names for one auth provider instance, as one: each field from whichever action named
+ * it. `null` where both name a field and disagree, which is not one requirement.
+ */
+function mergedRequirement(
+  held: RequirementNames | undefined,
+  next: RequirementNames,
+): RequirementNames | null {
+  if (!held) return next;
+  const merged: RequirementNames = { ...held };
+  for (const field of ["id", "provider_id", "provider_type"] as const) {
+    const value = next[field];
+    if (value === undefined) continue;
+    if (merged[field] !== undefined && merged[field] !== value) return null;
+    merged[field] = value;
+  }
+  return merged;
+}
+
 const unreadableRequirement = (toolkit: string) =>
   new BrokerRefusalError(
     `OpenBot couldn't read what one of ${toolkit}'s actions asks for, so ${toolkit} can't be connected all at once. Nothing was asked of your account. Authorize the actions you want in Connections.`,
@@ -1506,6 +1532,25 @@ const unreadableRequirement = (toolkit: string) =>
  * nothing to connect. Each is a {@link BrokerRefusalError}, because the mint route reads an authored
  * refusal as DEFINITE: nothing was minted, so the attempt it claimed is freed at once.
  *
+ * TWO ACTIONS NAME THE SAME REQUIREMENT WHEN THEY NAME THE SAME AUTH PROVIDER INSTANCE, which is
+ * `id` (see {@link authProviderInstances} for the three words). The fields are not published
+ * alike across one toolkit, and a key on all three split one requirement in two. Measured against
+ * the live catalogue on 2026-11-02, 8,724 tools in 75 toolkits that ask for authorization:
+ *
+ * - `SquareupApi` publishes `{id: "arcade-squareup", provider_id: "squareup"}` on some actions and
+ *   `{id: "arcade-squareup"}` on others. One instance, one consent; keyed on all three fields its
+ *   Connect refused with "more than one account".
+ * - `XeroApi` publishes `{id: "arcade-xero"}` and `{id: "xero"}`, neither with a `provider_id`. Two
+ *   instances, two consents; keyed on `provider_id` and `provider_type` the two would have merged
+ *   into one consent that leaves half the app's actions refused.
+ * - No toolkit names `id` on some actions and not on others.
+ *
+ * So actions are grouped on `id`, or on `provider_id` where there is no `id` (Arcade takes either:
+ * "one of ID or ProviderID must be set"), and the fields of one group are merged, each taken from
+ * whichever action named it. Two actions that name the same instance and DISAGREE about a field
+ * they both name, and one action naming an instance beside another naming only a provider, are not
+ * known to be one consent, so they count as two and refuse.
+ *
  * NO `user_id` IS SENT AND `requirements.met` IS NOT READ, for `grantStateOf`'s reason: what an app
  * asks for is the same for everybody.
  */
@@ -1513,7 +1558,7 @@ async function wholeAppRequirementOf(
   client: Arcade,
   toolkit: string,
 ): Promise<WholeAppRequirement> {
-  const named = new Map<string, Omit<WholeAppRequirement, "oauth2">>();
+  const named = new Map<string, RequirementNames>();
   const scopes = new Set<string>();
   for await (const item of pagedItems({
     pageSize: CATALOGUE_PAGE_SIZE,
@@ -1542,22 +1587,24 @@ async function wholeAppRequirementOf(
     const asked = requiredScopesOf(item);
     if (asked.kind === "unreadable") throw unreadableRequirement(toolkit);
     for (const scope of asked.scopes) scopes.add(scope);
-    named.set(JSON.stringify([id, providerId, providerType]), {
+    const instance = id
+      ? JSON.stringify(["id", id])
+      : JSON.stringify(["provider", providerId ?? ""]);
+    const merged = mergedRequirement(named.get(instance), {
       ...(id ? { id } : {}),
       ...(providerId ? { provider_id: providerId } : {}),
       ...(providerType ? { provider_type: providerType } : {}),
     });
+    // A disagreement inside one instance is two requirements as far as anybody can tell.
+    if (merged === null) throw moreThanOneRequirement(toolkit);
+    named.set(instance, merged);
   }
   if (named.size === 0) {
     throw new BrokerRefusalError(
       `${toolkit} doesn't ask for any account, so there's nothing to connect. Bots that can use it already work.`,
     );
   }
-  if (named.size > 1) {
-    throw new BrokerRefusalError(
-      `${toolkit}'s actions sign in to more than one account, so they can't all be connected at once. Authorize the actions you want in Connections.`,
-    );
-  }
+  if (named.size > 1) throw moreThanOneRequirement(toolkit);
   const [requirement] = named.values();
   // Arcade takes a requirement by `id` or by `provider_id`, and one naming neither names nothing.
   if (!requirement?.id && !requirement?.provider_id) {

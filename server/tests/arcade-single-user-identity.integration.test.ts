@@ -139,8 +139,26 @@ const recorded = fixture.tools as unknown as Record<
 >;
 const envelope = fixture.page_envelope as Record<string, unknown>;
 
+/**
+ * The names an action's `requirements.authorization` carries. The live listing does not publish all
+ * three on every action: see `wholeAppRequirementOf` in `src/plugins/arcade-adapter.ts`.
+ */
+type RequirementNames = {
+  id?: string;
+  provider_id?: string;
+  provider_type?: string;
+};
+
 /** One Gmail action as the live listing publishes it: the recorded shape, Gmail's names. */
-function published(qualified: string, metadata: unknown) {
+function published(
+  qualified: string,
+  metadata: unknown,
+  names: RequirementNames = {
+    id: PROVIDER,
+    provider_id: PROVIDER_TYPE,
+    provider_type: "oauth2",
+  },
+) {
   const name = qualified.slice(TOOLKIT.length + 1);
   return {
     fully_qualified_name: `${qualified}@3.1.0`,
@@ -156,9 +174,7 @@ function published(qualified: string, metadata: unknown) {
     requirements: {
       met: true,
       authorization: {
-        id: PROVIDER,
-        provider_id: PROVIDER_TYPE,
-        provider_type: "oauth2",
+        ...names,
         oauth2: { scopes: SCOPES[qualified] },
         status: "active",
       },
@@ -212,6 +228,8 @@ const page = (items: unknown[], url: URL) => {
  * holds, every authorization it minted, every tool it ran and every request it was sent.
  */
 function arcadeProject() {
+  /** The listing every `/v1/tools` request reads, Gmail's two actions unless a test republishes. */
+  let catalogue = CATALOGUE;
   const connections: Connection[] = [];
   const flows = new Map<string, Flow>();
   const byHandle = new Map<string, string>();
@@ -297,25 +315,28 @@ function arcadeProject() {
 
     if (route === "GET /v1/tools") {
       const userId = url.searchParams.get("user_id");
-      const items = CATALOGUE.filter(
-        (item) => item.toolkit.name === url.searchParams.get("toolkit"),
-      ).map((item) =>
-        // Asked about somebody, the listing answers about them, on `token_status`.
-        userId
-          ? {
-              ...item,
-              requirements: {
-                ...item.requirements,
-                authorization: {
-                  ...item.requirements.authorization,
-                  token_status: holds(userId, SCOPES[item.qualified_name] ?? [])
-                    ? "completed"
-                    : "not_started",
+      const items = catalogue
+        .filter((item) => item.toolkit.name === url.searchParams.get("toolkit"))
+        .map((item) =>
+          // Asked about somebody, the listing answers about them, on `token_status`.
+          userId
+            ? {
+                ...item,
+                requirements: {
+                  ...item.requirements,
+                  authorization: {
+                    ...item.requirements.authorization,
+                    token_status: holds(
+                      userId,
+                      SCOPES[item.qualified_name] ?? [],
+                    )
+                      ? "completed"
+                      : "not_started",
+                  },
                 },
-              },
-            }
-          : item,
-      );
+              }
+            : item,
+        );
       return Response.json(page(items, url));
     }
     if (route === "POST /v1/tools/authorize") {
@@ -441,6 +462,10 @@ function arcadeProject() {
 
   return {
     handle,
+    /** Arcade's listing changed: what every later `/v1/tools` request answers with. */
+    publish(items: typeof CATALOGUE) {
+      catalogue = items;
+    },
     connections,
     minted,
     ran,
@@ -982,6 +1007,54 @@ describe("Connect on an app Arcade already holds for this deployment's name", ()
       await deployment.database.select().from(pendingAuthorizations),
     ).toEqual([]);
     expect((await deployment.call(SEND)).text).toContain("me@example.test");
+    expect(project.unexpected).toEqual([]);
+  });
+});
+
+describe("Connect on an app whose actions name their Arcade requirement in different ways", () => {
+  test("asks for one consent where they name one provider instance, with and without its provider", async () => {
+    // The live `SquareupApi` shape: one instance, its provider named on some actions only.
+    const deployment = await newDeployment();
+    project.publish([
+      published(READ, recorded.read?.metadata),
+      published(SEND, recorded.write?.metadata, {
+        id: PROVIDER,
+        provider_type: "oauth2",
+      }),
+    ]);
+
+    // One consent for both actions' scopes, naming everything any action said about the instance.
+    await connectGmail(deployment, "me@example.test");
+    expect((await deployment.call(SEND)).text).toContain("me@example.test");
+    expect(project.unexpected).toEqual([]);
+  });
+
+  test("refuses where they name two provider instances, and mints nothing", async () => {
+    // The live `XeroApi` shape: two instances, and no provider on either.
+    const deployment = await newDeployment();
+    project.publish([
+      published(READ, recorded.read?.metadata, {
+        id: PROVIDER,
+        provider_type: "oauth2",
+      }),
+      published(SEND, recorded.write?.metadata, {
+        id: "google-openbot",
+        provider_type: "oauth2",
+      }),
+    ]);
+
+    const response = await deployment.app.request(
+      `/api/plugins/servers/${ROW}/connect`,
+      { method: "POST" },
+    );
+    expect(response.ok).toBe(false);
+    expect(((await response.json()) as { error: string }).error).toBe(
+      "Gmail's actions sign in to more than one account, so they can't all be connected at once. Authorize the actions you want in Connections.",
+    );
+    expect(project.minted).toEqual([]);
+    expect(
+      await deployment.database.select().from(pendingAuthorizations),
+    ).toEqual([]);
     expect(project.unexpected).toEqual([]);
   });
 });
