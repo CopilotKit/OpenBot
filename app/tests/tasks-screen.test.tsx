@@ -412,6 +412,26 @@ test("the keyboard moves through the list with ↓ ↑ and j k, Enter opens a ta
   );
 });
 
+test("j and k move through the list on any layout: a Russian or Greek one writes another letter on the same key", async () => {
+  serve({ tasks: everyState });
+  const { view } = draw();
+  await view.findByText("Reply to Rosa");
+  const at = () => document.activeElement?.getAttribute("data-task-id");
+  // On Russian the J key writes "о", and on Greek the K key writes "κ".
+  fireEvent.keyDown(document.body, { key: "о", code: "KeyJ" });
+  expect(at()).toBe("ask");
+  fireEvent.keyDown(document.activeElement as Element, {
+    key: "о",
+    code: "KeyJ",
+  });
+  expect(at()).toBe("broke");
+  fireEvent.keyDown(document.activeElement as Element, {
+    key: "κ",
+    code: "KeyK",
+  });
+  expect(at()).toBe("ask");
+});
+
 test("the list's keys leave someone typing alone", async () => {
   serve({ tasks: everyState });
   const { view, router, user } = draw("/tasks/run");

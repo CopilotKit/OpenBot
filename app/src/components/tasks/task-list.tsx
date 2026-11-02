@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
+import { keyOf } from "@/lib/hotkeys/hotkeys";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { matchingTasks, type TaskItem, taskGroups } from "@/lib/tasks/groups";
 import { TASK_STATUS_LABEL, taskListQueryOptions } from "@/lib/tasks/queries";
@@ -47,11 +48,14 @@ export function shortAgo(iso: string, now = Date.now()): string {
   return agoFormat.format(-Math.round(elapsed / scale.size), scale.unit);
 }
 
-/** The row before or after the focused one, by the keys the list moves on. */
+/**
+ * The row before or after the focused one, by the keys the list moves on, as `keyOf` spells them:
+ * j and k are the keys, so a Russian or Greek layout that writes another letter there moves too.
+ */
 const STEP: Record<string, 1 | -1> = {
-  ArrowDown: 1,
+  arrowdown: 1,
   j: 1,
-  ArrowUp: -1,
+  arrowup: -1,
   k: -1,
 };
 
@@ -65,7 +69,7 @@ export function taskRows(root: ParentNode): HTMLElement[] {
  * any link does. Only while focus is on a row, so a key typed anywhere else is never taken.
  */
 export function moveThroughRows(event: KeyboardEvent<HTMLElement>) {
-  const step = STEP[event.key];
+  const step = STEP[keyOf(event.nativeEvent)];
   if (!step || event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target as HTMLElement;
   if (!target.hasAttribute(TASK_ROW)) return;

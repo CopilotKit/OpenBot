@@ -22,6 +22,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { approvalInboxOptions } from "@/lib/approvals";
+import { keyOf } from "@/lib/hotkeys/hotkeys";
 import { firstNeedingYou } from "@/lib/tasks/groups";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
@@ -122,7 +123,9 @@ function TasksLayout() {
       const idle =
         event.target === document.body ||
         event.target === document.documentElement;
-      if (idle && (event.key === "j" || event.key === "k")) {
+      // `keyOf`, so j and k are the keys a Russian or Greek layout writes other letters on.
+      const key = keyOf(event);
+      if (idle && (key === "j" || key === "k")) {
         event.preventDefault();
         const shown = rows();
         (
