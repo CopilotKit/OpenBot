@@ -1011,16 +1011,6 @@ const ALLOW: Allowed[] = [
     finding: "NEW (round 2 did not find this)",
   },
   {
-    file: "app/tests/user-preferences.test.tsx",
-    shape: "c",
-    context: [
-      '"loads preferences from the account and renders the saved emphasis"',
-    ],
-    expression:
-      'expect(requests).toEqual([{path:"/api/settings/preferences",method:"GET",body:undefined},])',
-    finding: "NEW (round 2 did not find this)",
-  },
-  {
     file: "server/tests/agent-handoff.test.ts",
     shape: "c",
     context: [

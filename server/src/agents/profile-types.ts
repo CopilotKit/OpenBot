@@ -68,3 +68,11 @@ export type CreateAgentInput = Pick<
    */
   isolated?: boolean;
 };
+
+/**
+ * An edit to a Bot: everything a create takes, and optionally a new look.
+ *
+ * `avatarSeed` is the Bot's face (`@openbot/shared/bot-look`). Absent leaves it as it is, so an edit
+ * to anything else never changes how the Bot looks. Not on create, where the seed is the Bot's id.
+ */
+export type UpdateAgentInput = CreateAgentInput & { avatarSeed?: string };
