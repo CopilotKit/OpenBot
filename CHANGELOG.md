@@ -78,6 +78,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A rule on activation also catches Enter or Space pressed with a modifier
+
+A Bot's `computer_key` call names its key the way Playwright reads it, so `Shift+Enter` is Enter with
+Shift held, and the browser submits the form or clicks the focused button for it just as for Enter.
+The gateway only counted the bare `Enter`, `NumpadEnter` and `Space` as `intent == "activate"`, so the
+same key with a modifier was decided as typing and passed a deny rule on activation. It now judges the
+key a press ends on, so `Shift+Enter`, `Control+Enter` and `Shift+Space` are activations too, and so
+are `\n` and `\r`, which Playwright presses as Enter.
+
+The shipped "Never submit a form" rule (the Boundaries preset and the `AGENT_COMPUTER_POLICY` example
+in `.env.example`) now refuses a keypress on `intent == "activate"` instead of `key == "Enter"`, so it
+catches those spellings too, and Space. A deployment running the old rule keeps the old gap until it
+adds the preset again or changes `key == "Enter"` to `intent == "activate"` in its own copy.
+
 ### A boundary rule about a host also covers that host written with a root dot
 
 `page.host` kept the root dot a URL can end its host with, so a navigation to
