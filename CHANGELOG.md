@@ -78,6 +78,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### A tool's link and a vendor's refusal are cut between characters
+
+When a tool answers with a link, its title, name and description are each cut to 400 characters
+before the Bot reads them, and the reason a vendor gives for refusing a request is cut to 400 too.
+When the cut landed inside an emoji, the Bot was handed a broken character before the "…". The cut
+now drops the half character instead.
+
 ### An approval cuts a long value between characters
 
 An approval shows what a Bot is about to type, write or send, cut to 2,000 characters, and each field
