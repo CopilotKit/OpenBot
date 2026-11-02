@@ -8,7 +8,10 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { LLMock } from "@copilotkit/aimock";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import {
+  COMPONENT_GUIDANCE,
+  PROVENANCE_GUIDANCE,
+} from "@openbot/shared/bot-prompt";
 import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -54,6 +57,7 @@ import {
 import { checkInToolsFor, createCheckInScope } from "../src/proactive/scope";
 import { createProactiveStore } from "../src/proactive/store";
 import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
+import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -843,6 +847,8 @@ describe("a check-in reads what the person connected, through the tools that say
     expect(system).toContain("Plans the person's week.");
     // Said once: the guidance its standing role ends with is the guidance OpenBot gives every Bot.
     expect(system.split(PROVENANCE_GUIDANCE)).toHaveLength(2);
+    expect(system.split(COMPONENT_GUIDANCE)).toHaveLength(2);
+    expect(system.split(UNTRUSTED_GUIDANCE)).toHaveLength(2);
     expect(vendorCalls.map((call) => call.tool)).toEqual(["MAIL_FETCH_EMAILS"]);
     const [item] = await itemsOf(harness);
     expect(item).toMatchObject({
