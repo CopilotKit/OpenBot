@@ -27,3 +27,20 @@ export function signOutMutationOptions(queryClient: QueryClient) {
     },
   });
 }
+
+/** Saves the person's display name, then refreshes who they are. */
+export function updateProfileNameMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (name: string) =>
+      client("/api/me/profile", "profile", {
+        method: "PATCH",
+        body: { name },
+        fallback: "Your name could not be saved",
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: authKeys.currentUser(),
+        refetchType: "all",
+      }),
+  });
+}

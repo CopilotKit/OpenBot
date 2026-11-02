@@ -1128,6 +1128,26 @@ useful answer is that the image could not be fetched. Somewhere that must never 
 
 `docs/releasing.md` shows reading the digests straight out of a release's `container-images.json`.
 
+## Setup checklist
+
+Onboarding's Check your setup step, and **Settings → Setup** afterwards, show one row each for
+CopilotKit Intelligence, the AI model, the Bot computer, more apps (Composio or Arcade) and Slack and
+Teams. They are read from `GET /api/setup`, and `POST /api/setup/check` asks again.
+
+- **Ready means it works.** Intelligence is read from its own entitlement answer and the model from
+  the provider's answer for the key in use now. A computer is Ready when every running one took its
+  network policy; with none running it reads "not checked". More apps and Slack and Teams read Ready
+  when they are configured.
+- **Who reads it decides what it says.** An admin, and somebody running OpenBot alone
+  (`OPENBOT_SINGLE_USER`), is shown the page or the variable that closes each gap. Everybody else sees
+  whether it works and "Your admin sets this up.", and their response carries no variable name.
+  Only those who can act on it get the Settings page.
+- **What it costs.** Both routes need a signed-in person. Answers from Intelligence, the provider and
+  the computers are kept for five minutes. A read asks again sooner only when one of them could not
+  be had (Intelligence did not answer, or the provider was never asked about the key in use); a
+  refusal waits for Check again or for the five minutes. Asking again, by a read or by Check again,
+  happens at most once every ten seconds for the whole server, and never wakes a stopped computer.
+
 ## Ports
 
 | Service           | Default port               | Setting           |
@@ -1322,7 +1342,7 @@ model:
 
 `provider` must be `openai` or `anthropic`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.
 
-At start-up the server asks OpenAI or Anthropic, once, whether the configured key can call `default_model`. A key that cannot (a project key whose model allowlist leaves it out, say) would otherwise fail at the first message; instead the log says `model-unavailable`, naming the model and the fix. A rejected key logs `model-credential-rejected`. Nothing is asked with no key configured yet, or of an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, and start-up never waits for the answer.
+At start-up the server asks OpenAI or Anthropic, once, whether the configured key can call `default_model`. A key that cannot (a project key whose model allowlist leaves it out, say) would otherwise fail at the first message; instead the log says `model-unavailable`, naming the model and the fix. A rejected key logs `model-credential-rejected`. Nothing is asked with no key configured yet, or of an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` to another host. A base URL that is the provider's own API written out (`https://api.openai.com/v1`, say) is still asked. Start-up never waits for the answer, which the [setup checklist](#setup-checklist) also shows.
 
 ### `knowledge.yaml`
 
