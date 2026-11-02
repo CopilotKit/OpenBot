@@ -332,6 +332,36 @@ describe("built-in safety requirements", () => {
       }),
     ).toBeUndefined();
   });
+
+  test("a field nested past the depth cap still counts by its name", () => {
+    // Values deeper than the cap are not read, so a field there flattens to nothing whether or not
+    // it holds anything. Its name is all the rule gets to see of it, and an unread value is not an
+    // empty one: dropping the name too let a money field through just by nesting it deep enough.
+    const sent = (args: Record<string, unknown>) =>
+      safetyRequirement(
+        candidate({
+          toolRef: "composio-shopify/SHOPIFY_GRAPHQL_MUTATION",
+          scope: "composio-shopify",
+          args,
+          target: {
+            serverId: "composio-shopify",
+            toolName: "SHOPIFY_GRAPHQL_MUTATION",
+            url: "https://mcp.composio.dev/shopify",
+            effect: "write",
+          },
+        }),
+      )?.id;
+    const nested = (leaf: Record<string, unknown>) =>
+      sent({ a: { b: { c: { d: { e: { f: leaf } } } } } });
+    expect(nested({ payment_method: { card: "tok_123" } })).toBe("payments");
+    expect(nested({ billing: [{ line: 1 }] })).toBe("payments");
+    // A list read at the cap whose entries are past it is not empty either.
+    expect(
+      sent({ a: { b: { c: { d: { e: { refund_lines: [{ id: 1 }] } } } } } }),
+    ).toBe("payments");
+    // Past the cap as well, but genuinely empty: still nothing sent.
+    expect(nested({ billing_address: {}, refund: [] })).toBeUndefined();
+  });
 });
 
 describe("the reviewer's safety classification", () => {
