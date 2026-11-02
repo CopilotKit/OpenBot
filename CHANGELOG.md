@@ -8,12 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A late conversation title is discarded after deletion
-
-A generated title that arrives after a conversation was deleted is discarded. The naming job is
-settled without changing the deleted row or announcing a new summary, and a missing conversation is
-not reported as successfully named.
-
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
@@ -83,6 +77,12 @@ not reported as successfully named.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+
+### A late conversation title is discarded after deletion
+
+A generated title that arrives after a conversation was deleted is discarded. The naming job is
+settled without changing the deleted row or announcing a new summary, and a missing conversation is
+not reported as successfully named.
 
 ### An unreconciled app authorization always reaches the audit trail
 
