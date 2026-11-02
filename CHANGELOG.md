@@ -93,6 +93,15 @@ Bot's navigation against the network policy, so a container built from `server/D
 start with a module-not-found error and restarted in a loop. The image now carries that file. The
 all-in-one `openbot` image was not affected.
 
+### An isolated Bot's computer is reachable with a longer namespace
+
+With the supervisor on a shared network (Compose), the server reaches a computer by its container
+name. Docker's network DNS answers only for names of up to 63 characters, and an isolated Bot's,
+`<namespace>-computer-bot-agent_<uuid>`, is exactly 63 with the default `openbot` namespace. Any
+longer `COMPUTER_NAMESPACE` made every isolated Bot's computer start healthy while the server, unable
+to resolve its name, reported it as not running on every action. The supervisor now gives the server the container's short
+id, which Docker also answers for, whenever the name is too long. Names that fit are used as before.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
