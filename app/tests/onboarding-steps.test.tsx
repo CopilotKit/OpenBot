@@ -604,3 +604,29 @@ test("a browser with no notifications says so, and offers Continue", () => {
   expect(view.getByRole("button", { name: "Continue" })).toBeTruthy();
   expect(view.queryByRole("button", { name: "Not now" })).toBeNull();
 });
+
+test("in the desktop app, Get notified says they aren't there yet, asks nothing, and moves on", async () => {
+  (globalThis as { isTauri?: unknown }).isTauri = true;
+  try {
+    const view = render(<NotifyOnboarding />);
+
+    expect(
+      view.getByText(
+        "Notifications aren't available in the desktop app yet. You'll see what needs you on each Bot's page.",
+      ),
+    ).toBeTruthy();
+    expect(view.queryByText(/browser can't|site settings/)).toBeNull();
+    expect(
+      view.queryByRole("button", { name: "Turn on notifications" }),
+    ).toBeNull();
+    expect(view.queryByRole("button", { name: "Not now" })).toBeNull();
+
+    fireEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(
+      await view.findByRole("heading", { name: "Check your setup" }),
+    ).toBeTruthy();
+    expect(asked).toBe(0);
+  } finally {
+    delete (globalThis as { isTauri?: unknown }).isTauri;
+  }
+});
