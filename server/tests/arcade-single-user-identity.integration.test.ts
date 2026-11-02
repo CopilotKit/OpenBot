@@ -1,6 +1,7 @@
 // server/tests/arcade-single-user-identity.integration.test.ts
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -532,6 +533,14 @@ beforeAll(() => {
 
 beforeEach(() => {
   project = arcadeProject();
+});
+
+/*
+ * Each test's databases are closed when it ends, so their pools do not pile up across the file.
+ * Two connections a deployment, held to the end, ran a full CI run's Postgres out of clients.
+ */
+afterEach(async () => {
+  for (const database of opened.splice(0)) await database.$client.close();
 });
 
 // Every database this file created is dropped here, and there are a few dozen of them.
