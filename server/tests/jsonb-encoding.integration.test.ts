@@ -68,3 +68,7 @@ describe("what a jsonb column actually stores", () => {
     // Left in place: the trail is append-only, so a test cannot tidy up after itself. One row.
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

@@ -7,6 +7,7 @@ import {
   NAMESPACE,
   NAMESPACE_LABEL,
   namesFor as namesOf,
+  networkHostFor,
   OWNER_LABEL,
   PERSON_LABEL,
 } from "../src/names";
@@ -164,5 +165,39 @@ describe("whose computer a name is", () => {
       workspaceVolume: `${NAMESPACE}-workspace-notes-bot`,
     });
     expect(legacyNamesFor("../x").ok).toBe(false);
+  });
+});
+
+/**
+ * The address a computer is reached by on a shared network.
+ *
+ * Docker's network DNS answers for a container name of up to 63 characters, one DNS label, and not a
+ * character more. An isolated Bot's name with the default namespace is exactly that long.
+ */
+describe("the name a computer is reached by", () => {
+  const agent = "agent_3e08c0e4-f039-4595-b096-c6170d552126";
+
+  test("a name DNS can carry is used as it is", () => {
+    const container = `openbot-computer-bot-${agent}`;
+    expect(container.length).toBe(63);
+    expect(networkHostFor(container, "1dc615a5bf1d")).toBe(container);
+    expect(
+      networkHostFor("openbot-computer-person-u-ada", "1dc615a5bf1d"),
+    ).toBe("openbot-computer-person-u-ada");
+  });
+
+  test("a longer one is reached by its short id instead", () => {
+    // A namespace one character longer than the default is enough.
+    expect(
+      networkHostFor(`openbots-computer-bot-${agent}`, "1dc615a5bf1d"),
+    ).toBe("1dc615a5bf1d");
+    expect(
+      networkHostFor(`acme-openbot-computer-bot-${agent}`, "1dc615a5bf1d"),
+    ).toBe("1dc615a5bf1d");
+  });
+
+  test("without a short id the name is all there is", () => {
+    const container = `acme-openbot-computer-bot-${agent}`;
+    expect(networkHostFor(container, undefined)).toBe(container);
   });
 });

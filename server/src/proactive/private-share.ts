@@ -26,6 +26,7 @@ import {
   approvalPreview,
   currentApprovalContext,
 } from "../approvals/types";
+import { cutAtCodeUnits } from "../channels/text";
 
 export const PRIVATE_SHARE_TOOL_REF = "openbot/share_private_information";
 export const PRIVATE_SHARE_EFFECT = "share_private";
@@ -149,7 +150,7 @@ export function createPrivateShareCheck(deps: {
         audience: input.audience.label ?? scope,
         recipients: input.audience.recipientUserIds.length,
         contentDigest,
-        preview: approvalPreview(input.content.slice(0, 280)),
+        preview: approvalPreview(cutAtCodeUnits(input.content, 280)),
       },
       target: { kind: input.audience.kind, id: input.audience.id },
       continuation,
