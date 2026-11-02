@@ -6,20 +6,20 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
-import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
-import { ChannelWorkRows } from "@/components/channels/channel-work";
+import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
-import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import {
   seedMessage,
   takeFirstMessage,
   transcriptMessages,
 } from "@/components/channels/transcript-messages";
+import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
+import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -31,10 +31,16 @@ import {
   type ChannelSummary,
   channelKeys,
 } from "@/lib/channels/queries";
+import {
+  onTurnFinishedAway,
+  turnFinishedAway,
+} from "@/lib/channels/turns-finished-away";
 import { useActiveBot } from "@/lib/copilot/active-bot";
+import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
+import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -44,14 +50,14 @@ import {
   voiceContext,
   withVoiceContext,
 } from "@/lib/voice/agent-bridge";
-import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import {
-  loadVoiceArchive,
   cachedVoiceArchive,
+  loadVoiceArchive,
   useVoiceArchive,
   voiceArchiveContext,
   withVoiceChats,
 } from "@/lib/voice/archive";
+import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
 
@@ -67,6 +73,9 @@ const JOIN_DEADLINE_MS = 1500;
  * Backstop for a message typed before the runtime agent exists; it must not be discarded.
  */
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
+
+/** What a turn that never left the browser says, with the person's words back in the box. */
+const NOT_SENT = "Your message wasn't sent. Try again.";
 
 type ChannelActivitySignature = {
   agentId: string;
@@ -85,6 +94,48 @@ function sameActivity(
     left.at === right.at &&
     left.text === right.text
   );
+}
+
+/**
+ * Whether the transcript still waits behind the placeholder.
+ *
+ * A channel opened from the roster waits for its whole history: the stored thread (`restoring`) and
+ * its voice chats. A channel just started from the compose screen has no history; its first message
+ * is already in hand and shows at once, not after a voice-chat request with nothing in it.
+ *
+ * Exported for its tests.
+ */
+export function historyIsLoading({
+  restoring,
+  seeded,
+  voicePending,
+  voiceWaitedOut = false,
+}: {
+  restoring: boolean;
+  seeded: boolean;
+  voicePending: boolean;
+  /** The voice chats have had their `VOICE_WAIT_MS` since the thread came in. */
+  voiceWaitedOut?: boolean;
+}): boolean {
+  return restoring || (!seeded && voicePending && !voiceWaitedOut);
+}
+
+/**
+ * How long, once the thread is in, the conversation waits for its voice chats before showing
+ * without them. A slow or failing voice service must not hold up text chat; cards that arrive after
+ * this join the transcript where they belong.
+ */
+export const VOICE_WAIT_MS = 1500;
+
+/** Whether `VOICE_WAIT_MS` has passed since `waiting` became true. Reset whenever it is false. */
+function useWaitedOut(waiting: boolean, key: string): boolean {
+  const [waitedOut, setWaitedOut] = useState<string | null>(null);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setTimeout(() => setWaitedOut(key), VOICE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [waiting, key]);
+  return waiting && waitedOut === key;
 }
 
 export function channelHistoryNotice({
@@ -280,6 +331,9 @@ export function ChannelChat({
   const { copilotkit } = useCopilotKit();
   // Mentions are scoped to the channel's permitted agents.
   const { data: agentProfiles } = useQuery(agentListQueryOptions());
+  const botProfile = agentProfiles?.find(
+    (profile) => profile.id === runtimeAgentId,
+  );
   const channelAgentId = `channel:${channel.id}`;
   const { agent, isReady } = useAgent({
     agentId: channelAgentId,
@@ -519,6 +573,11 @@ export function ChannelChat({
         pull();
       }
     });
+    /*
+     * A turn of this channel that outlived the chat it was started in, finished now. Its reply was stored and never
+     * streamed here, so it is read: see `turns-finished-away.ts`.
+     */
+    const offFinishedAway = onTurnFinishedAway(channel.id, pull);
     void (async () => {
       await joinGatePromise;
       if (
@@ -532,6 +591,7 @@ export function ChannelChat({
     return () => {
       cancelled = true;
       unsubscribe();
+      offFinishedAway();
     };
   }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
 
@@ -539,8 +599,24 @@ export function ChannelChat({
   useActiveBot(runtimeAgentId);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
-  const historyNotice = channelHistoryNotice({
+  /*
+   * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
+   * it until all three are in, so it lands once at the bottom instead of drawing the conversation
+   * and then splicing call cards into it; the notice waits for the same moment, so it appears in
+   * the commit that shows the history rather than a render later, shrinking the view under it.
+   */
+  const voiceWaitedOut = useWaitedOut(
+    !restoring && seed === null && voiceArchive.pending,
+    channel.id,
+  );
+  const historyLoading = historyIsLoading({
     restoring,
+    seeded: seed !== null,
+    voicePending: voiceArchive.pending,
+    voiceWaitedOut,
+  });
+  const historyNotice = channelHistoryNotice({
+    restoring: historyLoading,
     messageCount: agent.messages.length,
     lastMessageAt: channel.lastMessageAt,
     historyAvailability,
@@ -582,6 +658,8 @@ export function ChannelChat({
    */
   const turnFailure = useRef<string | null>(null);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
+  /** The reply this turn last told the roster about, so a later run of the turn says only what's new. */
+  const reportedReply = useRef<string | null>(null);
 
   /*
    * TWO DIFFERENT FACTS ABOUT ONE TURN, AND NEITHER OF THEM IS `agent.isRunning`.
@@ -610,6 +688,14 @@ export function ChannelChat({
   const [turnsInFlight, setTurnsInFlight] = useState(0);
   /* Authoritative once this screen unmounts, where `setTurnsInFlight` becomes a no-op. */
   const turnsRef = useRef(0);
+  /** Whether this chat is still on screen, for a turn that finishes after it closed. */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
   const [runsInFlight, setRunsInFlight] = useState(0);
 
   /**
@@ -690,6 +776,7 @@ export function ChannelChat({
 
     setRunError(null);
     turnFailure.current = null;
+    reportedReply.current = null;
     assistantMessagesBeforeRun.current = new Set(
       target.messages
         .filter((message) => message.role === "assistant")
@@ -742,13 +829,37 @@ export function ChannelChat({
       target.setMessages(repaired as typeof target.messages);
     }
 
+    // A wait the server already answered must not hold this message back. See the module.
+    releaseServerOwnedInterrupts(target);
+    /*
+     * Whether the run got past the agent's own checks and left the browser. One refused there (an
+     * interrupt something else still waits on) never reaches a subscriber's `onRunFailed`, and
+     * `copilotkit.runAgent` resolves as if it had answered, so without this the message was counted
+     * as sent: the box emptied, and the words were gone on the next reload.
+     */
+    let started = false;
+    const watching = target.subscribe({
+      onRunInitialized: () => {
+        started = true;
+      },
+    });
     setRunsInFlight((count) => count + 1);
     try {
       await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
         copilotkit.runAgent({ agent: target }),
       );
     } finally {
+      watching.unsubscribe();
       setRunsInFlight((count) => count - 1);
+    }
+    if (!started && turnFailure.current === null && awaitingReply.current) {
+      awaitingReply.current = false;
+      // It never left this browser, so it is not part of the conversation: the words go back in the box.
+      target.setMessages(
+        target.messages.filter((message) => existingMessageIds.has(message.id)),
+      );
+      turnFailure.current = NOT_SENT;
+      setRunError(NOT_SENT);
     }
 
     /*
@@ -816,7 +927,14 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      return await deliver(trimmed, skillInstructions, attachments);
+      const reply = await deliver(trimmed, skillInstructions, attachments);
+      /*
+       * The person left while this turn was running (holding control of the Bot's browser, say) and the turn went on
+       * without this screen. The run-finished subscription that tells the roster what the Bot said went with it, so the
+       * reply is reported here.
+       */
+      if (!onScreen.current) reportRef.current(reply, runtimeAgentId);
+      return reply;
     } finally {
       turnsRef.current -= 1;
       setTurnsInFlight(turnsRef.current);
@@ -825,6 +943,8 @@ export function ChannelChat({
       if (turnsRef.current === 0) {
         void setChannelBusy({ channelId: channel.id, busy: false });
       }
+      // And the conversation open now, if the person came back, reads what this turn stored.
+      if (!onScreen.current) turnFinishedAway(channel.id);
     }
   };
 
@@ -845,17 +965,27 @@ export function ChannelChat({
       onRunFinishedEvent: () => {
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
-        if (!wasOurs) return;
+        /*
+         * EVERY RUN OF A TURN STILL GOING HERE, not only its first. A turn that touches the browser
+         * is several runs: the first ends on the call the browser answers (a click, a card waiting on
+         * the person) and has said nothing yet, and the answer comes in a later run of the same turn.
+         * Told only about the first, the roster kept the person's message as the last thing said, and
+         * a task's list read their own words as its outcome.
+         */
+        if (!wasOurs && turnsRef.current === 0) return;
 
         const reply = [...agent.messages]
           .reverse()
           .find(
             (message) =>
               message.role === "assistant" &&
-              !assistantMessagesBeforeRun.current.has(message.id),
+              !assistantMessagesBeforeRun.current.has(message.id) &&
+              typeof message.content === "string" &&
+              message.content.trim() !== "",
           );
-        const content = typeof reply?.content === "string" ? reply.content : "";
-        if (content) reportRef.current(content, runtimeAgentId);
+        if (!reply || reply.id === reportedReply.current) return;
+        reportedReply.current = reply.id;
+        reportRef.current(String(reply.content), runtimeAgentId);
       },
     });
     return () => subscription?.unsubscribe();
@@ -960,6 +1090,10 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            intro={
+              /* From the roster this screen already reads; nothing while it loads. */
+              botProfile ? <ConversationIntro agent={botProfile} /> : undefined
+            }
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
@@ -1064,7 +1198,7 @@ export function ChannelChat({
              * above.
              */
             queueWhileBusy
-            restoring={restoring}
+            restoring={historyLoading}
             /*
              * The run, not the turn. Stop reaches a run through the core's abort controller, and that
              * controller does not exist until `say` has finished waiting for the runtime agent — so

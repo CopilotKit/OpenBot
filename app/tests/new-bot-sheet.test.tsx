@@ -18,6 +18,13 @@ import {
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  ISOLATED_EXPLAINED,
+  ISOLATED_PUBLIC,
+  ISOLATION_NOT_ALLOWED,
+  ISOLATION_UNAVAILABLE,
+} from "@/lib/agents/isolation";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -51,6 +58,9 @@ afterAll(async () => {
 
 const originalFetch = global.fetch;
 let builtInAvailable = true;
+/** Whether the deployment can make a computer for one Bot, and whether the person holds the switch. */
+let isolationAvailable = true;
+let mayIsolate = true;
 /** What the server says when asked to reach an address. */
 let verdict: { ok: true; events: string[] } | { ok: false; reason: string };
 /** Every create sent, with its body. */
@@ -68,6 +78,8 @@ let given: string[] = [];
 
 beforeEach(() => {
   builtInAvailable = true;
+  isolationAvailable = true;
+  mayIsolate = true;
   verdict = { ok: true, events: ["RUN_STARTED"] };
   creates = [];
   dialled = [];
@@ -77,7 +89,16 @@ beforeEach(() => {
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       if (path === "/api/agents/capabilities") {
-        return Response.json({ capabilities: { builtInAvailable } });
+        return Response.json({
+          capabilities: { builtInAvailable, isolationAvailable },
+        });
+      }
+      // The switches as they apply to this person, shaped as `/api/admin/enterprise/me` answers.
+      if (path === "/api/admin/enterprise/me") {
+        return Response.json({
+          capabilities: { isolatedComputers: mayIsolate },
+          enforced: true,
+        });
       }
       if (path === "/api/agents/test-connection") {
         dialled.push(body.endpoint);
@@ -111,9 +132,12 @@ function draw(screen: ReactNode) {
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => screen }),
   });
+  // Inside the provider the app's root gives every tooltip.
   return render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <TooltipProvider>
+        <RouterProvider router={router} />
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -328,6 +352,75 @@ test("a person with no apps to give is asked nothing about apps", async () => {
   await view.findByLabelText("Name");
   await settle();
   expect(view.queryByText("Apps it can use")).toBeNull();
+});
+
+/** On the details step the sheet opens on, with a name typed. */
+async function named(name = "Research") {
+  const { view, user } = await opened();
+  await user.type(await view.findByLabelText("Name"), name);
+  await settle();
+  return { view, user };
+}
+
+/** The text of the tooltip beside Isolated, opened the way a pointer opens it. */
+async function isolatedTooltip(
+  view: Awaited<ReturnType<typeof named>>["view"],
+  user: Awaited<ReturnType<typeof named>>["user"],
+) {
+  await user.hover(view.getByRole("button", { name: "What Isolated means" }));
+  return (await view.findByText(new RegExp(ISOLATED_EXPLAINED.slice(0, 30))))
+    .textContent;
+}
+
+test("Isolated is offered with what it means, and a public Bot is told who shares it", async () => {
+  const { view, user } = await named();
+  const isolated = await view.findByRole("checkbox", { name: "Isolated" });
+  expect(isolated.getAttribute("aria-checked")).toBe("false");
+  expect(isolated.hasAttribute("data-disabled")).toBe(false);
+  expect(await isolatedTooltip(view, user)).toBe(ISOLATED_EXPLAINED);
+
+  await user.unhover(view.getByRole("button", { name: "What Isolated means" }));
+  await user.click(view.getByRole("button", { name: /Public/ }));
+  expect(await isolatedTooltip(view, user)).toBe(
+    `${ISOLATED_EXPLAINED} ${ISOLATED_PUBLIC}`,
+  );
+});
+
+test("a ticked Isolated is sent with the Bot, and an unticked one says no", async () => {
+  const { view, user } = await named("Research");
+  await user.click(await view.findByRole("checkbox", { name: "Isolated" }));
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(await view.findByText("Research is ready")).toBeTruthy();
+  expect(creates[0]).toMatchObject({ name: "Research", isolated: true });
+
+  cleanup();
+  creates = [];
+  const again = await named("Plain");
+  await again.user.click(
+    again.view.getByRole("button", { name: "Create Bot" }),
+  );
+  expect(await again.view.findByText("Plain is ready")).toBeTruthy();
+  expect(creates[0]).toMatchObject({ name: "Plain", isolated: false });
+});
+
+test("a deployment that cannot make a second computer shows Isolated disabled, and says why", async () => {
+  isolationAvailable = false;
+  const { view, user } = await named();
+  const isolated = await view.findByRole("checkbox", { name: "Isolated" });
+  expect(isolated.hasAttribute("data-disabled")).toBe(true);
+  expect(view.getByText(ISOLATION_UNAVAILABLE)).toBeTruthy();
+  await user.click(isolated);
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  await view.findByText("Research is ready");
+  expect(creates[0]).toMatchObject({ isolated: false });
+});
+
+test("somebody an admin has not allowed sees Isolated disabled, and why", async () => {
+  mayIsolate = false;
+  const { view } = await named();
+  const isolated = await view.findByRole("checkbox", { name: "Isolated" });
+  expect(isolated.hasAttribute("data-disabled")).toBe(true);
+  expect(await view.findByText(ISOLATION_NOT_ALLOWED)).toBeTruthy();
 });
 
 test("custom-agent selection validates the name before advancing", async () => {

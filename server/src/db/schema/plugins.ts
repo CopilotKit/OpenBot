@@ -265,6 +265,19 @@ export const mcpTools = pgTable(
      */
     destructive: boolean("destructive").notNull().default(false),
     /**
+     * Whether the server marked this action read-only (MCP `readOnlyHint`), as it said it.
+     *
+     * Its own fact, and NOT an input to {@link mcpTools.effect}: chat goes on deciding whether to ask
+     * first exactly as it did, because a hint from a server nobody reviewed is not believed there.
+     * A check-in reads it, and only for an app the person connected with their own account, where
+     * the tool's own read-only label is what decides whether a background run may call it. See
+     * `labelledRead` in `plugins/catalogue.ts`.
+     *
+     * `false` for an action nothing said about, and for rows listed before this column existed: an
+     * app is re-read on its next refresh.
+     */
+    declaredRead: boolean("declared_read").notNull().default(false),
+    /**
      * The vendor's version for this action, as the listing gave it — `20260903_00` and the like.
      *
      * NOT OPTIONAL BOOKKEEPING. Composio refuses to execute an action without a specific version,

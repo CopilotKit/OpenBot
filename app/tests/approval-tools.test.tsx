@@ -64,14 +64,16 @@ function Tools() {
 }
 
 test("a change goes to the server's gate even when nothing about approvals has loaded", async () => {
-  const posted: { path: string; body: unknown }[] = [];
+  const posted: { path: string; body?: unknown }[] = [];
   const originalFetch = global.fetch;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       posted.push({
         path: String(path),
-        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
       });
+      if (String(path).startsWith("/api/approvals/threads/"))
+        return Response.json({ asksEveryStep: false });
       return Response.json(
         { waiting: true, approvalId: "approval-1" },
         { status: 202 },
@@ -137,6 +139,7 @@ test("a change goes to the server's gate even when nothing about approvals has l
     stop();
     expect(direct).toEqual([]);
     expect(posted).toEqual([
+      { path: "/api/approvals/threads/thread" },
       {
         path: "/api/approvals/computer/default",
         body: expect.objectContaining({
@@ -298,10 +301,18 @@ function LookTools() {
   return null;
 }
 
+/**
+ * One client for every look: the SDK keeps the handler from the first render, and the client with
+ * it, as the app's one client is kept.
+ */
+const lookQueries = new QueryClient();
 async function navigateWith(
   answer: (path: string) => Promise<Response>,
+  { observed = true }: { observed?: boolean } = {},
 ): Promise<{ result: unknown; paths: string[] }> {
   const paths: string[] = [];
+  // Each look starts from an app that has asked nothing about this conversation yet.
+  lookQueries.clear();
   const originalFetch = global.fetch;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0]) => {
@@ -312,7 +323,7 @@ async function navigateWith(
   );
   try {
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={lookQueries}>
         <LookTools />
       </QueryClientProvider>,
     );
@@ -340,7 +351,9 @@ async function navigateWith(
         return { unsubscribe: () => undefined };
       },
     };
-    const stop = observeApprovalAgent(agent as never);
+    const stop = observed
+      ? observeApprovalAgent(agent as never)
+      : () => undefined;
     for (const subscriber of subscribers)
       subscriber.onRunInitialized?.({
         input: {
@@ -367,6 +380,14 @@ async function navigateWith(
   }
 }
 
+/** The server's answer to "does this conversation ask before every step?", then `rest` for the gate. */
+const threadAnswers =
+  (asksEveryStep: boolean, rest: () => Promise<Response>) =>
+  async (path: string) =>
+    path === "/api/approvals/threads/thread"
+      ? Response.json({ asksEveryStep })
+      : rest();
+
 test("a look a rule asks about goes again through the gate, with its conversation", async () => {
   looked.length = 0;
   stopped.length = 0;
@@ -375,11 +396,19 @@ test("a look a rule asks about goes again through the gate, with its conversatio
     needsConversation: true,
     notPerformed: true,
   });
-  const { result, paths } = await navigateWith(async () =>
-    Response.json({ waiting: true, approvalId: "approval-2" }, { status: 202 }),
+  const { result, paths } = await navigateWith(
+    threadAnswers(false, async () =>
+      Response.json(
+        { waiting: true, approvalId: "approval-2" },
+        { status: 202 },
+      ),
+    ),
   );
   expect(looked).toHaveLength(1);
-  expect(paths).toEqual(["/api/approvals/computer/default"]);
+  expect(paths).toEqual([
+    "/api/approvals/threads/thread",
+    "/api/approvals/computer/default",
+  ]);
   expect(result).toEqual({ waiting: true });
   expect(stopped).toHaveLength(1);
 });
@@ -387,12 +416,71 @@ test("a look a rule asks about goes again through the gate, with its conversatio
 test("a look nothing asks about goes straight to the computer and nowhere else", async () => {
   looked.length = 0;
   lookOutcome = { ok: true, title: "Example Domain" };
-  const { result, paths } = await navigateWith(async () => {
-    throw new Error("The gate should not be called.");
-  });
+  const { result, paths } = await navigateWith(
+    threadAnswers(false, async () => {
+      throw new Error("The gate should not be called.");
+    }),
+  );
   expect(looked).toHaveLength(1);
-  expect(paths).toEqual([]);
+  // Asked once about the conversation, and the answer kept: it never changes.
+  expect(paths).toEqual(["/api/approvals/threads/thread"]);
   expect(result).toEqual({ ok: true, title: "Example Domain" });
+});
+
+test("in a task's own conversation, opened with no conversation list loaded, a look goes to the gate first", async () => {
+  // A task opened by a link: the app holds no conversation list, so only the server can say.
+  looked.length = 0;
+  stopped.length = 0;
+  lookOutcome = { ok: true, title: "Example Domain" };
+  const { result, paths } = await navigateWith(
+    threadAnswers(true, async () =>
+      Response.json(
+        { waiting: true, approvalId: "approval-3" },
+        { status: 202 },
+      ),
+    ),
+  );
+  expect(looked).toEqual([]);
+  expect(paths).toEqual([
+    "/api/approvals/threads/thread",
+    "/api/approvals/computer/default",
+  ]);
+  expect(result).toEqual({ waiting: true });
+  expect(stopped).toHaveLength(1);
+});
+
+test("a look whose conversation couldn't be checked goes through the gate, where the server decides", async () => {
+  looked.length = 0;
+  lookOutcome = { ok: true, title: "Example Domain" };
+  const { result, paths } = await navigateWith(async (path) =>
+    path === "/api/approvals/threads/thread"
+      ? Response.json({ error: "Unavailable." }, { status: 503 })
+      : Response.json({ result: { ok: true, title: "Example Domain" } }),
+  );
+  expect(looked).toEqual([]);
+  expect(paths).toEqual([
+    "/api/approvals/threads/thread",
+    "/api/approvals/computer/default",
+  ]);
+  expect(result).toEqual({ ok: true, title: "Example Domain" });
+});
+
+test("in a task's own conversation, a look with no conversation to ask in is not taken at all", async () => {
+  looked.length = 0;
+  lookOutcome = { ok: true, title: "Example Domain" };
+  const { result, paths } = await navigateWith(
+    threadAnswers(true, async () => {
+      throw new Error("The gate should not be called.");
+    }),
+    { observed: false },
+  );
+  expect(looked).toEqual([]);
+  expect(paths).toEqual(["/api/approvals/threads/thread"]);
+  expect(result).toEqual({
+    ok: false,
+    reason:
+      "Not done: this conversation asks before every step, and this step couldn't be asked about here.",
+  });
 });
 
 test("needing a conversation is not read as stale refs", () => {

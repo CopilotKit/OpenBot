@@ -10,8 +10,8 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
 import { Route as ArcadeRoute } from "@/routes/_authed/admin/plugins/arcade";
+import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
 
 /**
  * THE MEASURED LINES, ON A SCREEN SOMEBODY CAN REACH.

@@ -39,9 +39,9 @@ test("a navigation a rule asks about comes back as needing its conversation, not
   servers.push(computer);
   const provider: ComputerProvider = {
     name: "test",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => `http://127.0.0.1:${computer.port}`,
-    status: async (botId) => ({ botId, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
     list: async () => [],

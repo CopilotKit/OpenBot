@@ -12,9 +12,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Hono } from "hono";
 import { fileURLToPath } from "node:url";
-import { lockProviderCredentials } from "../src/provider-oauth-lock";
+import { Hono } from "hono";
 import {
   clearDesktopConnectionFailure,
   mountDesktopConnectionFailure,
@@ -24,6 +23,7 @@ import {
   type ModelOAuthRecord,
   mountProviderOAuthProxy,
 } from "../src/provider-oauth";
+import { lockProviderCredentials } from "../src/provider-oauth-lock";
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

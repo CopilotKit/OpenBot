@@ -281,6 +281,8 @@ test("a session the organization ended, however it ended there, ends the Recorde
     )?.payload,
   ).toEqual({
     connectionId: connection.id,
+    // How the connection was made, and, apart from it, how the sign-in ended.
+    via: "web",
     reason: "signed_out",
     ending: "organization",
   });

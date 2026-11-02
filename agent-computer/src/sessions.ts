@@ -69,6 +69,8 @@ export type SessionsOptions = {
   profilesDirectory?: string;
   /** Injected so a test can name the run it expects rather than match a uuid. */
   mintRun?: () => string;
+  /** Told when the wheel leaves the person who held this Bot's browser (see `createControl`'s `onWheelLeft`). */
+  onWheelLeft?: (botId: string) => Promise<unknown> | undefined;
 };
 
 /**
@@ -102,13 +104,22 @@ export function createSessions(options: SessionsOptions) {
     for (const [botId, session] of [...sessions.entries()]) {
       if (session.viewer.occupied()) continue;
       if (options.isLive(botId)) continue;
-      if (
-        session.control.get().request?.status === "waiting" ||
-        session.control.get().holder === "human"
-      )
-        continue;
+      if (wheelWithPerson(session)) continue;
       sessions.delete(botId);
     }
+  }
+
+  /**
+   * Whether a person holds this Bot's wheel, or the Bot has asked one to take it and is waiting.
+   *
+   * Either way the browser is somebody's to work in or about to be, so it is kept: here, when the map
+   * is trimmed, and by the computer when it closes browsers for memory or closes a Bot's idle tabs.
+   * A request that has waited past its time has expired by the time this asks (`get` expires it), so
+   * a Bot that asked and was never answered does not hold its browser for ever.
+   */
+  function wheelWithPerson(session: BotSession): boolean {
+    const state = session.control.get();
+    return state.request?.status === "waiting" || state.holder === "human";
   }
 
   function sessionFor(botId: string): BotSession {
@@ -123,6 +134,7 @@ export function createSessions(options: SessionsOptions) {
         invalidateSnapshot: () => {
           generation += 1;
         },
+        onWheelLeft: () => options.onWheelLeft?.(botId),
       }),
       get snapshotId() {
         return generation;
@@ -165,6 +177,17 @@ export function createSessions(options: SessionsOptions) {
     },
 
     /**
+     * Whether a person holds this Bot's wheel or has been asked to take it (`wheelWithPerson`).
+     *
+     * Asks without answering, like `get`: a Bot with no session has nobody at its wheel, and this is
+     * asked on the paths that close browsers, where creating an entry would grow the map.
+     */
+    personHasTheWheel(botId: string): boolean {
+      const session = sessions.get(botId);
+      return session ? wheelWithPerson(session) : false;
+    },
+
+    /**
      * Start a new run for this Bot, because its browser session is over.
      *
      * A reset closes the browser and deletes the profile, and the session survives it: nothing takes
@@ -176,17 +199,31 @@ export function createSessions(options: SessionsOptions) {
      * on its own when a session is genuinely new, and zeroing it here would hand the server a fresh
      * generation one under a fresh run for a counter that never restarted.
      */
-    renewRun(botId: string): string {
+    renewRun(
+      botId: string,
+      {
+        keepWheel = false,
+      }: {
+        /**
+         * The browser went because the person holding the wheel cleared it, which is not a restart under them: they
+         * keep the wheel and work the fresh browser. Every ref handed out before is retired all the same.
+         */
+        keepWheel?: boolean;
+      } = {},
+    ): string {
       const existing = sessions.get(botId);
       // Nothing to renew: a Bot nobody has touched yet gets a session, and its run is already new.
       if (!existing) return sessionFor(botId).run;
       // A browser that closed or was replaced underneath the request is a restart, so its page stays
       // for a request raised from the blank browser that follows. A deliberate stop or reset clears
-      // it straight after, in its own route.
-      existing.control.interrupt(
-        "The browser was stopped or replaced; request help again to continue.",
-        { keepPage: true },
-      );
+      // it straight after, in its own route. A clear leaves the wheel where it is, and retires the
+      // refs as the interruption would have.
+      if (keepWheel) existing.snapshotId += 1;
+      else
+        existing.control.interrupt(
+          "The browser was stopped or replaced; request help again to continue.",
+          { keepPage: true },
+        );
       existing.livePage = undefined;
       existing.browserContext = undefined;
       existing.run = mintRun();

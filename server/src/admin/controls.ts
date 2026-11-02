@@ -19,7 +19,7 @@
  */
 
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import {
   type AuditStore,
@@ -28,6 +28,7 @@ import {
   recordAuditEvent,
 } from "../audit";
 import { isConfiguredAdmin } from "../auth/roles";
+import { type ComputerKey, computerKeyText } from "../computer/computer-key";
 import {
   type PolicyContext,
   type PolicyDecision,
@@ -41,25 +42,29 @@ import {
 } from "../computer/policy-network";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { agentProfiles, agents, auditEvents } from "../db/schema";
+import { agentProfiles, agents } from "../db/schema";
+import type { ProactiveAdmin } from "../proactive/contracts";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
+import type { WebBotAuth } from "../web-bot-auth";
+import { lastUsedByComputer, runningComputers } from "../work/culler";
 import {
   type Capability,
   type CapabilityRow,
   capabilityRefusal,
+  DEFAULT_CAPABILITIES,
   type Member,
   resolveAllCapabilities,
   resolveCapability,
 } from "./capabilities";
 import {
   createEnterpriseStore,
+  DEFAULT_ENTERPRISE_SETTINGS,
   ENTERPRISE_TOPIC,
   type EnterpriseSettings,
   type EnterpriseStore,
   type NetworkPolicyRow,
 } from "./settings-store";
-import type { WebBotAuth } from "../web-bot-auth";
 
 /** Action Recording keeps 90 days, as Grok Bot's does. */
 export const ACTION_RECORD_RETENTION_DAYS = 90;
@@ -82,6 +87,16 @@ export type EnterpriseDeps = {
   /** Where a person's own OpenBot browser may go (browser/egress.ts): pushed to it instead of a Bot's policy, which says
    * where Bots may go. Absent, a person's browser is pushed `deny_all`, the answer for a computer with no policy. */
   personBrowserPolicy?: EgressPolicy;
+  /**
+   * A Bot's policy as it must be for now, from the one its owner is under: wider while a person records in the Bot's
+   * browser, so the Recorder there reaches OpenBot and the gateway (browser/bot-browser.ts), and the Bot's own once
+   * nobody does. Applied to every push of a Bot's policy, the periodic one and the push on wake, so neither takes the
+   * Recorder's way out away mid-recording, and neither leaves it to the Bot afterwards. Absent: the owner's policy.
+   */
+  duringRecording?: (
+    botId: string,
+    policy: EgressPolicy,
+  ) => Promise<EgressPolicy>;
   /** Pushed to every computer with its policy; see `computer/policy-network.ts`. */
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
@@ -116,8 +131,9 @@ export type EnterpriseControls = {
     userId: string,
     by: { id?: string; email: string },
   ) => Promise<{
+    /** The computers stopped: `person:<id>`, and `bot:<id>` for each of their isolated Bots. */
     stopped: string[];
-    failed: { botId: string; reason: string }[];
+    failed: { computer: string; reason: string }[];
   }>;
   terminateInactiveComputers: () => Promise<{ stopped: string[] } | null>;
   pushNetworkPolicies: () => Promise<void>;
@@ -220,12 +236,19 @@ export function decideFromSnapshot(
    * decided without DNS: an IP-range rule needs the resolved address, which the computer's filter has
    * and this server does not.
    */
-  if (context.intent === "navigate" && context.page.host) {
+  const destination =
+    context.intent === "navigate" && context.page.host
+      ? destinationOf(context.page.url)
+      : null;
+  if (destination) {
     const policy = effectiveNetworkPolicy(snapshot.network, member, true);
     const hasRanges = policy.rules.some((rule) => rule.type === "cidr");
-    if (!hasRanges || /^[\d.:[\]]+$/.test(context.page.host)) {
-      const port = portOf(context.page.url);
-      const decision = egressDecision(policy, context.page.host, port);
+    if (!hasRanges || /^[\d.:[\]]+$/.test(destination.host)) {
+      const decision = egressDecision(
+        policy,
+        destination.host,
+        destination.port,
+      );
       if (!decision.allowed) {
         return refusal(
           `network:${policy.from}`,
@@ -237,12 +260,25 @@ export function decideFromSnapshot(
   return null;
 }
 
-function portOf(url: string): number {
+/**
+ * The host and port a navigation opens, as the egress matcher wants them: apart.
+ *
+ * Not `page.host`. That is `URL.host`, which carries the port whenever it is not the scheme's
+ * default (`erp.internal:8080`), because a boundary rule written as `page.host == "..."` matches
+ * against it. Handed to the matcher as the host, it was compared with the domain rules as
+ * `erp.internal:8080` and matched none of them, so every allowed destination on a non-default port
+ * was refused here, before the computer's filter, which reads the host and port apart, was asked.
+ */
+function destinationOf(url: string): { host: string; port: number } | null {
   try {
     const parsed = new URL(url);
-    return Number(parsed.port || (parsed.protocol === "http:" ? 80 : 443));
+    if (!parsed.hostname) return null;
+    return {
+      host: parsed.hostname,
+      port: Number(parsed.port || (parsed.protocol === "http:" ? 80 : 443)),
+    };
   } catch {
-    return 443;
+    return null;
   }
 }
 
@@ -404,7 +440,7 @@ export async function installEnterpriseControls(
       member,
       cloudNetwork,
     );
-    return policy;
+    return deps.duringRecording ? deps.duringRecording(botId, policy) : policy;
   };
 
   let pushing: Promise<void> | undefined;
@@ -453,16 +489,29 @@ export async function installEnterpriseControls(
     async (userId, by) => {
       const result = {
         stopped: [] as string[],
-        failed: [] as { botId: string; reason: string }[],
+        failed: [] as { computer: string; reason: string }[],
       };
       if (!deps.provider) return result;
-      for (const botId of await ownedBots(userId)) {
+      /*
+       * Their own computer, which every Bot they used runs on, and the computer of each Bot of theirs
+       * that has one of its own. Asking about an isolated Bot that never had a computer is a stop of
+       * nothing, which answers that nothing was running.
+       */
+      const keys: ComputerKey[] = [
+        { kind: "person", personId: userId },
+        ...(await ownedBots(userId)).map((botId) => ({
+          kind: "bot" as const,
+          botId,
+        })),
+      ];
+      for (const key of keys) {
+        const computer = computerKeyText(key);
         try {
-          const { wasRunning } = await deps.provider.stop(botId);
-          if (wasRunning) result.stopped.push(botId);
+          const { wasRunning } = await deps.provider.stop({ key });
+          if (wasRunning) result.stopped.push(computer);
         } catch (error) {
           result.failed.push({
-            botId,
+            computer,
             reason: error instanceof Error ? error.message : String(error),
           });
         }
@@ -504,45 +553,35 @@ export async function installEnterpriseControls(
       >`select pg_try_advisory_lock(4192011) as held`;
       if (!lock?.held) return null;
       const tx = deps.database;
-      const running = (await (deps.provider as ComputerProvider).list()).filter(
-        (computer) => computer.status === "running",
+      const running = runningComputers(
+        await (deps.provider as ComputerProvider).list(),
       );
       if (running.length === 0) return { stopped: [] };
-      const bot = sql<string>`${auditEvents.payload}->>'bot'`;
-      const used = new Map(
-        (
-          await tx
-            .select({ bot, last: sql<string>`max(${auditEvents.createdAt})` })
-            .from(auditEvents)
-            .where(
-              and(
-                like(auditEvents.eventType, "computer.%"),
-                inArray(
-                  bot,
-                  running.map((computer) => computer.botId),
-                ),
-              ),
-            )
-            .groupBy(bot)
-        ).map((row) => [row.bot, new Date(row.last)] as const),
+      // By computer, as the idle culler reads it: a person's computer is in use while any Bot is.
+      const used = await lastUsedByComputer(
+        tx,
+        running.map((computer) => computer.computer),
       );
       const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
       const stopped: string[] = [];
       for (const computer of running) {
         const since =
-          used.get(computer.botId) ??
+          used.get(computer.computer) ??
           (computer.startedAt ? new Date(computer.startedAt) : undefined);
         if (!since || since.getTime() > cutoff) continue;
         try {
-          await (deps.provider as ComputerProvider).stop(computer.botId);
-          stopped.push(computer.botId);
+          await (deps.provider as ComputerProvider).stop({ key: computer.key });
+          stopped.push(computer.computer);
           await audit({
             eventType: "computer.terminated_inactive",
             targetType: "computer",
-            targetId: computer.botId,
+            targetId: computer.computer,
             initiator: DEPLOYMENT_INITIATOR,
             payload: {
-              bot: computer.botId,
+              computer: computer.computer,
+              ...(computer.key.kind === "bot"
+                ? { bot: computer.key.botId }
+                : {}),
               idleSince: since.toISOString(),
               inactiveDays: days,
             },
@@ -551,7 +590,7 @@ export async function installEnterpriseControls(
           console.warn(
             JSON.stringify({
               type: "inactive-computer-stop-failed",
-              botId: computer.botId,
+              computer: computer.computer,
               error: String(error),
             }),
           );
@@ -700,11 +739,9 @@ export function guardDeliveryStore<T extends DeliveryLike>(
   const bind = store.bind.bind(store);
   const removeBinding = store.removeBinding.bind(store);
   store.bind = (async (input: Parameters<T["bind"]>[0]) => {
+    const chat = input.transport === "slack" || input.transport === "teams";
     const controls = enterpriseControls();
-    if (
-      controls &&
-      (input.transport === "slack" || input.transport === "teams")
-    ) {
+    if (controls && chat) {
       let allowed = false;
       try {
         allowed = await controls.capabilityFor(input.ownerUserId, "slackTeams");
@@ -724,6 +761,20 @@ export function guardDeliveryStore<T extends DeliveryLike>(
         realm: input.realm,
         channelId: input.channelId ?? null,
         agentId: input.agentId ?? null,
+        /*
+         * Which chat account now speaks as the owner, for Slack and Teams only.
+         *
+         * A link code there is redeemed by whoever sends it, and that account then runs the Bot as
+         * its owner and decides approvals as them. The row is filed under the owner, so without
+         * this a binding somebody else redeemed reads as the owner connecting their own account,
+         * and once the binding is removed nothing anywhere says which account it was. Recorded on
+         * the link only: `delivery.unlinked` carries the same `targetId`, so the trail joins them.
+         *
+         * Not for SMS or push. There `identity` is a phone number or a device token, the trail is
+         * readable by every administrator, and the code-in-a-shared-chat risk does not exist —
+         * an SMS code proves possession of the phone it was sent to.
+         */
+        ...(chat ? { identity: input.identity } : {}),
       },
     }).catch(() => undefined);
     return bound;
@@ -905,6 +956,53 @@ export function auditRoutineStore<T extends RoutineLike>(
 /* ------------------------------ headless turns ------------------------------ */
 
 /**
+ * One usage row for a headless turn that reached the model, as the gate writes one for each browser
+ * run (`gate.ts`): the configured model for a built-in Bot, `unknown` for a remote one, which chooses
+ * its own and was not watched here.
+ *
+ * Without it a turn nobody started from the browser served a model and left no row, so an admin
+ * reading usage never saw what background check-ins cost. Called only once the turn was admitted, so
+ * a turn the allowlist refused keeps the one refused row `headlessTurnRefusal` wrote for it. A failed
+ * write is logged and never fails the turn, as the gate's is.
+ */
+export async function recordHeadlessUsage(input: {
+  ownerUserId: string;
+  agentId: string;
+  threadId: string;
+  runId: string;
+}): Promise<void> {
+  const controls = installed;
+  if (!controls) return;
+  try {
+    const [row] = await controls.deps.database
+      .select({ type: agents.type })
+      .from(agents)
+      .where(eq(agents.id, input.agentId))
+      .limit(1);
+    const model =
+      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+    // A model nobody named is allowed only while there is no list, as the gate records it.
+    const listed = controls.snapshot()?.settings.modelAllowlist?.enabled;
+    await controls.store.recordModelUsage({
+      userId: input.ownerUserId,
+      agentId: input.agentId,
+      threadId: input.threadId,
+      runId: input.runId,
+      model: model ?? `remote:${input.agentId}`,
+      source: model ? "configured" : "unknown",
+      allowed: model !== undefined || !listed,
+    });
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "model-usage-write-failed",
+        error: String(error),
+      }),
+    );
+  }
+}
+
+/**
  * Whether a turn nobody started from the browser may run, and the sentence to refuse it with.
  *
  * The HTTP gate (`gate.ts`) applies "Use Bots" and the model allowlist to a browser run. Routines,
@@ -963,3 +1061,55 @@ export async function headlessTurnRefusal(input: {
     return "This deployment's enterprise controls could not be checked, so the Bot did not run.";
   }
 }
+
+/* ------------------------------ check-ins ------------------------------ */
+
+/**
+ * The admin's say over check-ins, as the proactive engine asks it before any model call
+ * (`proactive/engine.ts`): the "Check-ins" switch for this person, and how many check-ins a Bot may
+ * run for one person in a day.
+ *
+ * Both read fresh, never from the snapshot, as every asynchronous check here does: a switch an admin
+ * flipped a second ago stops the next check-in on every replica. Without the controls installed (a
+ * script, a test that never installs them) the defaults stand, which is check-ins on and 24 a day.
+ * A switch that can't be read refuses, as every other one does, and says so in the log: a check-in
+ * then is skipped, never run unchecked.
+ */
+export const proactiveAdmin: ProactiveAdmin = {
+  async proactiveAllowed(ownerUserId) {
+    const controls = installed;
+    if (!controls) return DEFAULT_CAPABILITIES.proactive;
+    return controls
+      .capabilityFor(ownerUserId, "proactive")
+      .catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            type: "proactive-capability-read-failed",
+            userId: ownerUserId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return false;
+      });
+  },
+  /*
+   * One number for every Bot: the cap is per Bot, so a person with five Bots gets five Bots' worth,
+   * and the admin sets how many each may use.
+   */
+  async proactiveDailyRuns(_agentId) {
+    const controls = installed;
+    if (!controls) return DEFAULT_ENTERPRISE_SETTINGS.proactiveDailyRuns;
+    return controls.store
+      .settings()
+      .then((settings) => settings.proactiveDailyRuns)
+      .catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            type: "proactive-daily-runs-read-failed",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return 0;
+      });
+  },
+};

@@ -758,10 +758,7 @@ test("a rebuilt but unchanged row of files compares equal", () => {
   const rebuilt = ONE_FILE.map((file) => ({ ...file }));
 
   expect(
-    sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: rebuilt, delay: 0 },
-    ),
+    sameAttachmentRow({ attachments: ONE_FILE }, { attachments: rebuilt }),
   ).toBe(true);
 });
 
@@ -777,30 +774,18 @@ test("a row that actually changed does not compare equal", () => {
 
   for (const file of changed) {
     expect(
-      sameAttachmentRow(
-        { attachments: ONE_FILE, delay: 0 },
-        { attachments: [file], delay: 0 },
-      ),
+      sameAttachmentRow({ attachments: ONE_FILE }, { attachments: [file] }),
     ).toBe(false);
   }
 
-  // A file added, a file taken away, and the entrance delay itself — all of them redraw.
+  // A file added or a file taken away — both redraw.
   expect(
-    sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: [], delay: 0 },
-    ),
+    sameAttachmentRow({ attachments: ONE_FILE }, { attachments: [] }),
   ).toBe(false);
   expect(
     sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: [...ONE_FILE, ONE_FILE[0]], delay: 0 },
-    ),
-  ).toBe(false);
-  expect(
-    sameAttachmentRow(
-      { attachments: ONE_FILE, delay: 0 },
-      { attachments: ONE_FILE, delay: 0.04 },
+      { attachments: ONE_FILE },
+      { attachments: [...ONE_FILE, ONE_FILE[0]] },
     ),
   ).toBe(false);
 });

@@ -957,28 +957,28 @@ for (const variant of VARIANTS) {
     );
 
     test.skipIf(variant.window !== "screen")(
-      "a Bot's browser beside it stays a test browser, with no Recorder in it",
+      "a Bot's browser beside it has a Recorder of its own, which the person's connection never reaches",
       async () => {
+        // A Bot's browser takes the Recorder from OPENBOT_RECORDER_DIR at its launch, as this computer's do
+        // (`shared/bot-browser.ts`), and keeps it disconnected until a person holding its wheel records.
         const previous = process.env.OPENBOT_RECORDER_DIR;
         process.env.OPENBOT_RECORDER_DIR = FIXTURE;
         try {
           const page = await profiles.page("bot-beside");
-          const session = await page
-            .context()
-            .browser()
-            ?.newBrowserCDPSession();
-          const { targetInfos } = (await session?.send(
-            "Target.getTargets",
-          )) ?? {
-            targetInfos: [],
-          };
-          expect(
-            targetInfos.filter((target) =>
-              target.url.startsWith("chrome-extension://"),
-            ),
-          ).toEqual([]);
+          const bot = profiles.bot("bot-beside");
+          if (!bot?.recorder)
+            throw new Error("The Bot's Recorder should be in it.");
+          expect(await bot.recorder.launcher.state()).toMatchObject({
+            connected: false,
+            phase: "idle",
+          });
+          // The person's is connected, in their own browser, and theirs alone.
+          expect((await state()).recorder).toMatchObject({
+            connected: true,
+            userId: "user-1",
+          });
           const switches = await commandLine(page);
-          expect(switches).toContain("--disable-extensions");
+          expect(switches).toContain(`--load-extension=${FIXTURE}`);
           expect(disabledFeatures(switches)).toEqual([
             ...PLAYWRIGHT_DISABLED_FEATURES,
             "AcceptCHFrame",

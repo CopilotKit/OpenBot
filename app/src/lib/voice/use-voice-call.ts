@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
-import { connectVoice, voiceSupported } from "./connection";
-import { VoiceSession } from "./session";
 import { saveVoiceSession } from "./archive";
+import { connectVoice, voiceSupported } from "./connection";
 import { voiceCallOwner } from "./outbox";
+import { VoiceSession } from "./session";
 
 export function useVoiceCall(options: {
   channelId: string;

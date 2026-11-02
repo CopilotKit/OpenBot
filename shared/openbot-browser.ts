@@ -85,6 +85,13 @@ export type LauncherState = {
     stoppedAt: number;
     actions: number;
     phrases: number;
+    /**
+     * True while some of this recording is still on its way to Intelligence after Stop. Absent once all of it is sent,
+     * or once what is left is kept for later (held by Intelligence's refusal, or waiting for its person to connect this
+     * browser again) or discarded. Whoever disconnects the Recorder after a Stop waits for it, because a disconnect
+     * keeps what is not sent yet for the person's next connection here instead of sending it now.
+     */
+    sending?: boolean;
   };
 };
 
@@ -143,6 +150,11 @@ export const browserComputerPaths = {
   tabs: "/browser/tabs",
   navigate: "/browser/navigate",
   close: "/browser/close",
+  /**
+   * POST, no body: wipe the person's browser, open or closed, as a Bot's is wiped (`shared/bot-browser.ts`, CLEARING A
+   * BROWSER), and leave it closed: only the server can hand its Recorder a connection again. Answers `BrowserState`.
+   */
+  clear: "/browser/clear",
 } as const;
 
 /**
@@ -267,6 +279,11 @@ export const browserApiPaths = {
   navigate: "/api/browser/navigate",
   /** POST: close the person's browser. */
   close: "/api/browser/close",
+  /**
+   * POST, no body: clear the person's browser (`shared/bot-browser.ts`, CLEARING A BROWSER). One that was open opens
+   * again, fresh. Answers `BrowserApiState`. Audited as `computer.browser_cleared`.
+   */
+  clear: "/api/browser/clear",
 } as const;
 
 /* THE PERSON'S REAL BROWSER (OpenBot Desktop). Where the person's own everyday Chrome or Edge can hold the Recorder,

@@ -139,13 +139,13 @@ jobs:
       # The headless run of the Web Bot Auth test is also the one that checks the user agent fix.
       - run: >-
           bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
-          tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
+          tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
           tests/handoff-page-restore.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
-          tests/screencast-keys-browser.test.ts
+          tests/bot-browser.test.ts tests/bot-browser-computer.test.ts
+          tests/screencast-keys-browser.test.ts tests/browser-memory.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
-          OPENBOT_DEMONSTRATION_LIVE: '1'
           COMPUTER_BROWSER_MODE: headless
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its
       # own Xvfb, and the signing again with cross-site frames in processes of their own.

@@ -10,8 +10,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   cleanup,
   fireEvent,
-  render,
   type RenderResult,
+  render,
   waitFor,
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";

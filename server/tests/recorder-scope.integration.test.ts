@@ -15,14 +15,11 @@ import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
 import { agents, users } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
-import { demonstrations } from "../src/db/schema/demonstrations";
 import {
   learningOpenSkills,
   learningSkillSharing,
 } from "../src/db/schema/learning";
 import { skills } from "../src/db/schema/plugins";
-import { createDemonstrationRecorder } from "../src/demonstrations/recording";
-import { createDemonstrationStore } from "../src/demonstrations/store";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
@@ -56,12 +53,6 @@ const agentProfileStore = {
 } as never;
 const auditStore = { insert: async (_event: AuditEventInput) => {} };
 
-const demonstrationStore = createDemonstrationStore(database);
-const demonstrationRecorder = createDemonstrationRecorder({
-  store: demonstrationStore,
-  ownsBot: async () => true,
-  ownsSkill: async () => true,
-});
 const recorder = createRecorderExtension({
   config,
   database,
@@ -140,10 +131,6 @@ args[34] = {
     sharingAllowed: async () => true,
   },
   approvals: {} as never,
-  demonstrations: {
-    store: demonstrationStore,
-    recorder: demonstrationRecorder,
-  },
 };
 const app = createApp(...args);
 
@@ -162,14 +149,12 @@ const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
 async function counts() {
   const of = async (
     table:
-      | typeof demonstrations
       | typeof routines
       | typeof skills
       | typeof learningSkillSharing
       | typeof learningOpenSkills,
   ) => (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
   return {
-    demonstrations: await of(demonstrations),
     routines: await of(routines),
     skills: await of(skills),
     sharing: await of(learningSkillSharing),
@@ -178,7 +163,6 @@ async function counts() {
 }
 
 let token = "";
-let stoppedId = "";
 
 beforeAll(async () => {
   spies.push(
@@ -228,16 +212,10 @@ beforeAll(async () => {
   });
   expect(exchanged.status).toBe(201);
   token = ((await exchanged.json()) as ExchangeResponse).token;
-  const started = await demonstrationStore.start(owner, BOT, "Seeded");
-  await demonstrationStore.stop(owner, started.id);
-  stoppedId = started.id;
 });
 afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
-  await database
-    .delete(demonstrations)
-    .where(inArray(demonstrations.ownerUserId, [owner]));
   await database.delete(agents).where(eq(agents.id, BOT));
   await database.delete(users).where(inArray(users.id, [owner]));
   await database.$client.close();
@@ -254,12 +232,6 @@ describe("a recorder bearer works only on the Recorder's own routes", () => {
   test("every other route answers 401 and changes nothing", async () => {
     const before = await counts();
     const routes: Array<[string, string, unknown?]> = [
-      ["GET", `/api/demonstrations?botId=${BOT}`],
-      ["POST", "/api/demonstrations", { botId: BOT, title: "Sneaky" }],
-      ["POST", `/api/demonstrations/${stoppedId}/draft`, {}],
-      ["POST", `/api/demonstrations/${stoppedId}/published`, {}],
-      ["POST", `/api/demonstrations/${stoppedId}/schedule`, {}],
-      ["DELETE", `/api/demonstrations/${stoppedId}`],
       ["GET", "/api/agents"],
       ["POST", "/api/agents", { name: "Sneaky" }],
       ["GET", "/api/approvals"],

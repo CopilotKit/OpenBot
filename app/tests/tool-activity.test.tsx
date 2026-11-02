@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, renderHook } from "@testing-library/react";
-import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import type { ReactNode } from "react";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import {
@@ -62,16 +62,26 @@ test("adjacent connector calls fold into one row named after the first", () => {
   ];
   const grouped = groupToolSteps(items, drawn);
   expect(grouped.map((item) => item.kind)).toEqual(["tools", "text"]);
-  expect(grouped[0]).toMatchObject({ id: "search", steps: items.slice(0, 3) });
+  expect(grouped[0]).toMatchObject({
+    id: "group:search",
+    steps: items.slice(0, 3),
+  });
 });
 
 test("one connector call keeps its own line, and anything the app draws stays where it is", () => {
-  expect(groupToolSteps([search()], drawn)).toEqual([search()]);
+  // Drawn as its own line, inside the one row type a run uses, so a second call does not rebuild it.
+  expect(groupToolSteps([search()], drawn)).toEqual([
+    { kind: "tools", id: "group:search", steps: [search()] },
+  ]);
   const chart = call("chart", "showBarChart");
   const help = call("help", "computer_request_help");
   for (const boundary of [chart, help, text("between")]) {
     const grouped = groupToolSteps([search("a"), boundary, search("b")], drawn);
-    expect(grouped.map((item) => item.id)).toEqual(["a", boundary.id, "b"]);
+    expect(grouped.map((item) => item.id)).toEqual([
+      "group:a",
+      boundary.id,
+      "group:b",
+    ]);
   }
 });
 
@@ -81,10 +91,10 @@ test("a run of tools the app does not draw folds like connector calls do", () =>
   );
   const grouped = groupToolSteps([...commands, text("answer")], drawn);
   expect(grouped.map((item) => item.kind)).toEqual(["tools", "text"]);
-  expect(grouped[0]).toMatchObject({ id: "cmd1", steps: commands });
+  expect(grouped[0]).toMatchObject({ id: "group:cmd1", steps: commands });
   // On its own it keeps its own line, as a lone connector call does.
   expect(groupToolSteps([commands[0] as ToolItem], drawn)).toEqual([
-    commands[0] as ToolItem,
+    { kind: "tools", id: "group:cmd1", steps: [commands[0] as ToolItem] },
   ]);
   // And it joins a run of connector calls rather than splitting it.
   const mixed = groupToolSteps([search("a"), commands[0] as ToolItem], drawn);
@@ -101,7 +111,11 @@ test("a tool the app draws ends a run, whatever it is called", () => {
     ],
     drawn,
   );
-  expect(grouped.map((item) => item.id)).toEqual(["a", "chart", "c"]);
+  expect(grouped.map((item) => item.id)).toEqual([
+    "group:a",
+    "chart",
+    "group:c",
+  ]);
 });
 
 test("a tool step is named in words and counted as tools", () => {
@@ -198,7 +212,11 @@ test("the app-access card stays out of a group, even before its answer arrives",
   ]) {
     const card = call("card", "show_app_access", { app: "gmail" }, result);
     const grouped = groupToolSteps([search("a"), card, search("b")], drawn);
-    expect(grouped.map((item) => item.id)).toEqual(["a", "card", "b"]);
+    expect(grouped.map((item) => item.id)).toEqual([
+      "group:a",
+      "card",
+      "group:b",
+    ]);
   }
 });
 

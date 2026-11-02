@@ -1,6 +1,6 @@
 /**
  * The OpenBot Browser's routes on this computer: open a person's browser with the Recorder in it and
- * connected, and act for the person in it (record, narrate, tabs, navigate, close).
+ * connected, and act for the person in it (record, narrate, tabs, navigate, close, clear).
  *
  * Under the computer token like every other route, with the person's browser id in
  * `x-openbot-bot-id`; `index.ts` checks the token, this checks the id. The server is the only caller:
@@ -17,7 +17,6 @@ import type { BrowserContext, Page } from "playwright";
 import {
   type BrowserOpenRequest,
   type BrowserState,
-  type BrowserTab,
   browserComputerPaths,
   browserNarrationRequestSchema,
   browserNavigateRequestSchema,
@@ -28,7 +27,7 @@ import {
   type LauncherState,
   type Narration,
 } from "../../shared/openbot-browser";
-import { navigationFailure } from "./navigation";
+import { createTabBar } from "./browser-tabs";
 import { BROWSER_NOT_OPEN, BrowserNotOpenError } from "./person-access";
 import {
   NoInstalledBrowserError,
@@ -37,14 +36,24 @@ import {
 } from "./person-browser";
 import type { OpenPersonBrowser, Profiles } from "./profiles";
 import { findRecorder } from "./recorder";
-import { RecorderUnavailableError } from "./recorder-launcher";
-import { addressFrom } from "./request-validation";
+import {
+  RecorderUnavailableError,
+  SENDING_WAIT_MS,
+  untilSent,
+} from "./recorder-launcher";
 
 export type BrowserHostOptions = {
   profiles: Profiles;
   /** `OPENBOT_RECORDER_DIR`, read at every open so a rebuilt Recorder is the one the next browser gets. */
   recorderDir: () => string | undefined;
   navigationTimeoutMs: number;
+  /**
+   * Told while a person's browser is being cleared, once it has closed and before it can open again: the computer
+   * forgets the browser it described (`profiles.clear`).
+   */
+  forget?: (botId: string) => void;
+  /** How long a clear waits for a recording it stopped to reach Intelligence: `SENDING_WAIT_MS` unless a test's own. */
+  sendingWaitMs?: number;
 };
 
 /** What the person is told when their browser did not open for a reason that is not the computer's setup: the reason
@@ -91,17 +100,6 @@ async function within<T>(
   }
 }
 
-/**
- * Where Chromium's error page lives. A tab whose page did not load shows it, and Playwright reports
- * the error page's own address, `chrome-error://chromewebdata/`, as the tab's. The tab itself still
- * names the address that failed, as a browser's address bar does: DevTools' target for the tab says
- * so. Measured on Playwright 1.62.1's Chromium for a name that does not resolve and a port that
- * refuses.
- */
-const ERROR_PAGE = "chrome-error://";
-/** How long a failed navigation waits for the tab to show its error page. */
-const ERROR_PAGE_MS = 2_000;
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -110,7 +108,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Enough of a contract schema to check a body with, whichever copy of zod built it. */
-type Schema<T> = {
+export type Schema<T> = {
   safeParse(input: unknown):
     | { success: true; data: T }
     | {
@@ -120,7 +118,7 @@ type Schema<T> = {
 };
 
 /** The first thing wrong with a body, in the words of the field it is about. */
-function parseBody<T>(
+export function parseBody<T>(
   schema: Schema<T>,
   body: unknown,
 ): { ok: true; value: T } | { ok: false; error: string; response: Response } {
@@ -148,50 +146,9 @@ type Opening = {
 
 export function createBrowserHost(options: BrowserHostOptions) {
   const { profiles } = options;
-  /** Each tab's DevTools target id, which stays the same for the life of the tab. */
-  const tabIds = new WeakMap<Page, string>();
-  /** How many documents each tab's main frame has committed, counted from when it was first asked. */
-  const commits = new WeakMap<Page, { count: number }>();
-
-  const commitsOf = (page: Page): number => {
-    let counted = commits.get(page);
-    if (!counted) {
-      const counter = { count: 0 };
-      page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) counter.count += 1;
-      });
-      commits.set(page, counter);
-      counted = counter;
-    }
-    return counted.count;
-  };
-
-  const tabIdOf = async (
-    browser: OpenPersonBrowser,
-    page: Page,
-  ): Promise<string | undefined> => {
-    const known = tabIds.get(page);
-    if (known) return known;
-    const session = await browser.context.newCDPSession(page);
-    try {
-      const { targetInfo } = await session.send("Target.getTargetInfo");
-      tabIds.set(page, targetInfo.targetId);
-      return targetInfo.targetId;
-    } finally {
-      await session.detach().catch(() => undefined);
-    }
-  };
-
-  const pageFor = async (
-    browser: OpenPersonBrowser,
-    tabId: string,
-  ): Promise<Page | undefined> => {
-    for (const page of browser.pages()) {
-      if ((await tabIdOf(browser, page).catch(() => undefined)) === tabId)
-        return page;
-    }
-    return undefined;
-  };
+  const bar = createTabBar({
+    navigationTimeoutMs: options.navigationTimeoutMs,
+  });
 
   /**
    * In a native window the person changes tabs in the browser itself, which tells this process
@@ -232,46 +189,6 @@ export function createBrowserHost(options: BrowserHostOptions) {
     if (front && front !== browser.active()) browser.activate(front);
   };
 
-  /** The address a tab shows: its page's, or on an error page the address that failed. */
-  const shownUrl = (page: Page, target: { url: string } | undefined): string =>
-    page.url().startsWith(ERROR_PAGE) && target?.url ? target.url : page.url();
-
-  const tabsOf = async (browser: OpenPersonBrowser): Promise<BrowserTab[]> => {
-    const { targetInfos } = await browser.session.send("Target.getTargets");
-    const targets = new Map(
-      targetInfos.map((target) => [target.targetId, target]),
-    );
-    const active = browser.active();
-    const tabs: BrowserTab[] = [];
-    for (const page of browser.pages()) {
-      const id = await tabIdOf(browser, page).catch(() => undefined);
-      if (!id) continue;
-      tabs.push({
-        id,
-        url: shownUrl(page, targets.get(id)),
-        title: targets.get(id)?.title ?? "",
-        active: page === active,
-      });
-    }
-    return tabs;
-  };
-
-  /** One tab's shown address, for a sentence about a page that did not open. */
-  const addressOf = async (
-    browser: OpenPersonBrowser,
-    page: Page,
-  ): Promise<string> => {
-    if (!page.url().startsWith(ERROR_PAGE)) return page.url();
-    const id = await tabIdOf(browser, page).catch(() => undefined);
-    const { targetInfos } = await browser.session
-      .send("Target.getTargets")
-      .catch(() => ({ targetInfos: [] }));
-    return shownUrl(
-      page,
-      targetInfos.find((target) => target.targetId === id),
-    );
-  };
-
   const stateOf = async (
     browser: OpenPersonBrowser,
     recorder?: LauncherState,
@@ -288,7 +205,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
     };
     const [report, tabs] = await Promise.all([
       recorder ?? ask(),
-      tabsOf(browser),
+      bar.tabsOf(browser),
     ]);
     return {
       open: true,
@@ -325,44 +242,6 @@ export function createBrowserHost(options: BrowserHostOptions) {
   };
 
   const closedState: BrowserState = { open: false, tabs: [] };
-
-  /** Bring a tab to the front: in its window, and so on the live screen and for the Recorder. */
-  const putInFront = async (browser: OpenPersonBrowser, page: Page) => {
-    browser.activate(page);
-    await page.bringToFront().catch(() => undefined);
-  };
-
-  /**
-   * A page that did not open, said in a sentence once the tab shows that it did not.
-   *
-   * Chromium commits its error page a moment after the navigation fails: when `goto` threw, the tab
-   * still reported the address it had before (or none, for a new tab), and the error page with the
-   * failed address about 100 ms later, measured on Playwright 1.62.1's Chromium and on Chrome. The
-   * app asks for the tabs as soon as this answers, and showed the earlier address beside the error
-   * page, so this waits for that commit first, briefly, and answers either way. Only for a network
-   * error: a navigation that timed out is still loading, and one that became a download or was
-   * aborted shows no error page.
-   */
-  const navigation = async (
-    page: Page,
-    since: number,
-    address: string,
-    error: unknown,
-  ) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/net::ERR_/.test(message) && !/net::ERR_ABORTED/.test(message)) {
-      // A document committed since the navigation began, and it is the error page: a reload of a
-      // page that had already failed is on one before its own commits.
-      const deadline = Date.now() + ERROR_PAGE_MS;
-      while (
-        Date.now() < deadline &&
-        !page.isClosed() &&
-        !(commitsOf(page) > since && page.url().startsWith(ERROR_PAGE))
-      )
-        await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return json({ error: navigationFailure(address, error) }, 502);
-  };
 
   /*
    * OPENS OF ONE BROWSER TAKE TURNS, AND EACH HANDS THE RECORDER THE NEWEST CONNECTION.
@@ -468,7 +347,8 @@ export function createBrowserHost(options: BrowserHostOptions) {
     const browser = profiles.person(botId);
     if (!browser) return failed("launch", 409, BROWSER_NOT_OPEN);
     // Already open: the window comes to the front and nothing new opens.
-    if (wasOpen && browser.window === "native") await putInFront(browser, page);
+    if (wasOpen && browser.window === "native")
+      await bar.putInFront(browser, page);
 
     /*
      * An open that brought no connection, with none from another open waiting either, hands the Recorder nothing: it
@@ -524,6 +404,50 @@ export function createBrowserHost(options: BrowserHostOptions) {
     }
   }
 
+  /**
+   * Wipe the person's browser, open or closed (`shared/bot-browser.ts`, CLEARING A BROWSER), and leave it closed: only
+   * the server can hand its Recorder a connection, so it is the server that opens it again. A recording running in it
+   * is stopped first, and the last of it waited for, because what it has not sent is kept in the storage about to go.
+   * Never fails for the Recorder: a browser cleared because it went wrong may well have a Recorder that does not answer,
+   * and is cleared all the same.
+   */
+  async function clear(botId: string): Promise<Response> {
+    const browser = profiles.person(botId);
+    if (browser) {
+      try {
+        const report = await browser.launcher.state();
+        if (report.phase !== "idle") {
+          const stopped = await browser.launcher.record({ action: "stop" });
+          const sent = await untilSent(
+            browser.launcher,
+            stopped.ok ? stopped.state : report,
+            options.sendingWaitMs ?? SENDING_WAIT_MS,
+          );
+          console.info(
+            JSON.stringify({
+              type: "computer-browser-recording-ended",
+              botId,
+              reason: "the browser's data was cleared",
+              ...(stopped.ok ? {} : { error: stopped.error }),
+              ...(sent.stillSending ? { stillSending: true } : {}),
+            }),
+          );
+        }
+      } catch (error) {
+        console.info(
+          JSON.stringify({
+            type: "computer-browser-recording-not-ended",
+            botId,
+            error: messageOf(error),
+          }),
+        );
+      }
+    }
+    await profiles.clear(botId, () => options.forget?.(botId));
+    console.info(JSON.stringify({ type: "computer-browser-cleared", botId }));
+    return json(closedState);
+  }
+
   async function handle(
     request: Request,
     pathname: string,
@@ -549,6 +473,8 @@ export function createBrowserHost(options: BrowserHostOptions) {
       await profiles.stop(botId);
       return json(closedState);
     }
+
+    if (pathname === browserComputerPaths.clear) return clear(botId);
 
     /*
      * OpenBot revoked this browser's connection: the Recorder forgets it now rather than at its next
@@ -623,7 +549,7 @@ export function createBrowserHost(options: BrowserHostOptions) {
         // The Recorder records the tab the browser has in front, so a hosted browser's front tab is
         // made the one the live screen shows before it starts.
         if (recording.value.action === "start" && browser.window === "screen")
-          await putInFront(browser, browser.active());
+          await bar.putInFront(browser, browser.active());
         const result = await browser.launcher.record(recording.value);
         if (!result.ok) return json({ error: result.error }, 409);
         return json(await stateOf(browser, result.state));
@@ -651,74 +577,17 @@ export function createBrowserHost(options: BrowserHostOptions) {
       }
 
       if (tabs?.ok) {
-        const action = tabs.value;
-        if (action.action === "new") {
-          const address =
-            action.url === undefined ? undefined : addressFrom(action.url);
-          if (action.url !== undefined && !address)
-            return json({ error: "That is not a web address." }, 400);
-          const page = await browser.context.newPage();
-          await putInFront(browser, page);
-          if (address) {
-            const since = commitsOf(page);
-            try {
-              await page.goto(address, {
-                waitUntil: "domcontentloaded",
-                timeout: options.navigationTimeoutMs,
-              });
-            } catch (error) {
-              return navigation(page, since, address, error);
-            }
-          }
-          return json(await stateOf(browser));
-        }
-        const page = await pageFor(browser, action.tabId);
-        if (!page) return json({ error: "There is no such tab." }, 404);
-        if (action.action === "activate") {
-          await putInFront(browser, page);
-          return json(await stateOf(browser));
-        }
-        // The hosted browser always keeps a tab: the live screen needs a page to show, and the
-        // person has no window of their own to close instead.
-        if (browser.window === "screen" && browser.pages().length === 1)
-          await putInFront(browser, await browser.context.newPage());
-        await page.close();
+        const done = await bar.tabs(browser, tabs.value);
+        if (!done.ok) return json({ error: done.error }, done.status);
+        // A closed tab can take the browser's last window with it.
         const after = profiles.person(botId);
         return json(after ? await stateOf(after) : closedState);
       }
 
       if (navigate?.ok) {
         await followNativeTabs(browser);
-        const page = browser.active();
-        const go = navigate.value;
-        const waiting = {
-          waitUntil: "domcontentloaded" as const,
-          timeout: options.navigationTimeoutMs,
-        };
-        // The address the person asked for, or for back, forward and reload the page they were on.
-        let address = await addressOf(browser, page);
-        const since = commitsOf(page);
-        try {
-          if ("url" in go) {
-            const asked = addressFrom(go.url);
-            if (!asked)
-              return json({ error: "That is not a web address." }, 400);
-            address = asked;
-            await page.goto(asked, waiting);
-          } else if (go.action === "reload") await page.reload(waiting);
-          else {
-            /*
-             * Back and Forward wait only for the page to commit. A person's native browser keeps
-             * the back and forward cache, which brings a page back whole without loading it again,
-             * so it never fires the load events a fresh page does and waiting for one never ends.
-             */
-            const history = { ...waiting, waitUntil: "commit" as const };
-            if (go.action === "back") await page.goBack(history);
-            else await page.goForward(history);
-          }
-        } catch (error) {
-          return navigation(page, since, address, error);
-        }
+        const done = await bar.navigate(browser, navigate.value);
+        if (!done.ok) return json({ error: done.error }, done.status);
         return json(await stateOf(browser));
       }
     } catch (error) {

@@ -35,7 +35,7 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { navigationFor } from "@/lib/navigation";
-import { relativeTime } from "@/lib/relative-time";
+import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
@@ -187,7 +187,7 @@ function ChannelRow({
         lastMessage={channel.lastMessage ?? undefined}
         lastMessageAt={
           channel.lastMessageAt
-            ? relativeTime(channel.lastMessageAt)
+            ? relativeTimeShort(channel.lastMessageAt)
             : undefined
         }
         pinned={channel.pinned}
@@ -221,7 +221,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const navigation = navigationFor(currentUser?.role);
 
   return (
-    <Sidebar {...props}>
+    <Sidebar variant="inset" {...props}>
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">

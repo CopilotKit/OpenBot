@@ -85,6 +85,11 @@ export type ChannelSummary = AgentChannel & {
    * hop, a relay — sets it, which is how the roster shows work the browser never streamed.
    */
   busy?: boolean;
+  /**
+   * Whether this is a task's own conversation, which holds one piece of work started from a
+   * check-in. Absent from a server that predates tasks, which reads as not one.
+   */
+  task?: boolean;
 };
 
 export const channelKeys = {

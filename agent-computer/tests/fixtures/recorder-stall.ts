@@ -14,7 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { type CDPSession, chromium } from "playwright";
-import { personLaunchOptions } from "../../src/person-launch";
+import { recorderLaunchOptions } from "../../src/person-launch";
 import { findRecorder } from "../../src/recorder";
 import { createRecorderLauncher } from "../../src/recorder-launcher";
 
@@ -27,7 +27,7 @@ const found = await findRecorder(join(import.meta.dir, "recorder"));
 if (!found.ok) throw new Error(found.error);
 const context = await chromium.launchPersistentContext(dir, {
   channel: "chromium",
-  ...personLaunchOptions(
+  ...recorderLaunchOptions(
     {
       recorderDir: found.recorder.dir,
       headless: true,

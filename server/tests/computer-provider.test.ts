@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  botSeat,
+  type ComputerSeat,
+  personSeat,
+} from "../src/computer/computer-key";
+import {
   createComputerProvider,
   createSharedComputerProvider,
   describeComputerIsolation,
   ProviderError,
 } from "../src/computer/provider";
 import type { ComputerConfig } from "../src/config";
+
+/** Ada's seat on a Bot, which is what every call to the shared computer is now made for. */
+const ada = (botId: string): ComputerSeat => personSeat("ada", botId);
+const adaKey = { kind: "person", personId: "ada" } as const;
 
 const servers: { stop(closeActiveConnections?: boolean): void }[] = [];
 
@@ -25,6 +34,7 @@ type FakeAgentComputerHandler = {
   stop?: (request: Request) => Response | Promise<Response>;
   reset?: (request: Request) => Response | Promise<Response>;
   run?: (request: Request) => Response | Promise<Response>;
+  carryOver?: (request: Request) => Response | Promise<Response>;
 };
 
 function serveAgentComputer(
@@ -61,6 +71,11 @@ function serveAgentComputer(
     if (url.pathname === "/run" && request.method === "GET") {
       if (handlers.run) return handlers.run(request);
       return Response.json({ run: "run-1" });
+    }
+
+    if (url.pathname === "/computers/carry-over" && request.method === "POST") {
+      if (handlers.carryOver) return handlers.carryOver(request);
+      return Response.json({ outcome: "moved" });
     }
 
     if (url.pathname === "/computers/reset" && request.method === "POST") {
@@ -100,7 +115,7 @@ describe("shared computer provider", () => {
     const provider = createSharedComputerProvider({
       baseUrl: "http://computer:4100/",
     });
-    expect(await provider.locate("sales")).toBe("http://computer:4100/");
+    expect(await provider.locate(ada("sales"))).toBe("http://computer:4100/");
   });
 
   test("reports a healthy shared computer as ready", async () => {
@@ -113,7 +128,7 @@ describe("shared computer provider", () => {
     });
     const provider = createSharedComputerProvider({ baseUrl });
 
-    expect(await provider.status("sales")).toEqual({
+    expect(await provider.status(ada("sales"))).toEqual({
       botId: "sales",
       state: "ready",
     });
@@ -126,7 +141,7 @@ describe("shared computer provider", () => {
     });
     const provider = createSharedComputerProvider({ baseUrl });
 
-    expect(await provider.status("sales")).toEqual({
+    expect(await provider.status(ada("sales"))).toEqual({
       botId: "sales",
       state: "unreachable",
       reason: "The shared computer answered 503.",
@@ -138,6 +153,7 @@ describe("shared computer provider", () => {
       path: string;
       method: string;
       botId: string | null;
+      person: string | null;
       token: string | null;
     }[] = [];
     const baseUrl = serveAgentComputer(
@@ -148,6 +164,7 @@ describe("shared computer provider", () => {
             path: new URL(request.url).pathname,
             method: request.method,
             botId,
+            person: request.headers.get("x-openbot-person-id"),
             token: request.headers.get("x-openbot-computer-token"),
           });
           const wasRunning = botId === "running-bot";
@@ -161,23 +178,29 @@ describe("shared computer provider", () => {
       token: "computer-secret",
     });
 
-    const runningResult = await provider.stop("running-bot");
+    const runningResult = await provider.stop({
+      key: adaKey,
+      botId: "running-bot",
+    });
     expect(runningResult).toEqual({ wasRunning: true });
 
-    const idleResult = await provider.stop("idle-bot");
+    const idleResult = await provider.stop({ key: adaKey, botId: "idle-bot" });
     expect(idleResult).toEqual({ wasRunning: false });
 
+    // The person travels with the Bot, so the stop reaches Ada's seat and nobody else's.
     expect(requests).toEqual([
       {
         path: "/computers/stop",
         method: "POST",
         botId: "running-bot",
+        person: "ada",
         token: "computer-secret",
       },
       {
         path: "/computers/stop",
         method: "POST",
         botId: "idle-bot",
+        person: "ada",
         token: "computer-secret",
       },
     ]);
@@ -210,7 +233,7 @@ describe("shared computer provider", () => {
       token: "computer-secret",
     });
 
-    const resetResult = await provider.reset("sales");
+    const resetResult = await provider.reset({ key: adaKey, botId: "sales" });
     expect(resetResult).toEqual({ cleared: true });
 
     expect(requests).toEqual([
@@ -245,6 +268,13 @@ describe("shared computer provider", () => {
               status: "running",
               egress: null,
             },
+            {
+              seat: "ada~sales",
+              botId: "sales",
+              personId: "ada",
+              running: true,
+              egress: null,
+            },
           ],
         }),
     });
@@ -252,6 +282,7 @@ describe("shared computer provider", () => {
 
     expect(await provider.list()).toEqual([
       {
+        key: { kind: "bot", botId: "sales" },
         botId: "sales",
         status: "running",
         url: baseUrl,
@@ -259,13 +290,23 @@ describe("shared computer provider", () => {
         egress: null,
       },
       {
+        key: { kind: "bot", botId: "support" },
         botId: "support",
         status: "stopped",
         url: baseUrl,
         egress: "us-east-egress",
       },
       {
+        key: { kind: "bot", botId: "analytics" },
         botId: "analytics",
+        status: "running",
+        url: baseUrl,
+        egress: null,
+      },
+      // A seat names whose it is: Ada's profile for that Bot, not the Bot's for everyone.
+      {
+        key: { kind: "person", personId: "ada" },
+        botId: "sales",
         status: "running",
         url: baseUrl,
         egress: null,
@@ -307,7 +348,7 @@ describe("shared computer provider", () => {
       token: "computer-secret",
     });
 
-    expect(await provider.sessionOf?.("sales")).toBe("d7c0f1");
+    expect(await provider.sessionOf?.(ada("sales"))).toBe("d7c0f1");
     // Addressed and authenticated like every other call, or one Bot would be told about another's.
     expect(asked).toEqual([
       { path: "/run", botId: "sales", token: "computer-secret" },
@@ -323,8 +364,10 @@ describe("shared computer provider", () => {
     });
     const provider = createSharedComputerProvider({ baseUrl });
 
-    expect(await provider.sessionOf?.("sales")).toBe("run-of-sales");
-    expect(await provider.sessionOf?.("analytics")).toBe("run-of-analytics");
+    expect(await provider.sessionOf?.(ada("sales"))).toBe("run-of-sales");
+    expect(await provider.sessionOf?.(ada("analytics"))).toBe(
+      "run-of-analytics",
+    );
   });
 
   test("asks again rather than remembering, because a restart is not announced", async () => {
@@ -337,9 +380,9 @@ describe("shared computer provider", () => {
     });
     const provider = createSharedComputerProvider({ baseUrl });
 
-    expect(await provider.sessionOf?.("sales")).toBe("run-1");
+    expect(await provider.sessionOf?.(ada("sales"))).toBe("run-1");
     run = "run-2";
-    expect(await provider.sessionOf?.("sales")).toBe("run-2");
+    expect(await provider.sessionOf?.(ada("sales"))).toBe("run-2");
   });
 
   test("answers undefined when the computer cannot say, rather than throwing", async () => {
@@ -353,7 +396,7 @@ describe("shared computer provider", () => {
 
     // Asserted first, or a provider with no `sessionOf` at all would pass this vacuously.
     expect(provider.sessionOf).toBeDefined();
-    expect(await provider.sessionOf?.("sales")).toBeUndefined();
+    expect(await provider.sessionOf?.(ada("sales"))).toBeUndefined();
   });
 
   test("answers undefined when the computer answers without one", async () => {
@@ -362,7 +405,7 @@ describe("shared computer provider", () => {
 
     // Asserted first, or a provider with no `sessionOf` at all would pass this vacuously.
     expect(provider.sessionOf).toBeDefined();
-    expect(await provider.sessionOf?.("sales")).toBeUndefined();
+    expect(await provider.sessionOf?.(ada("sales"))).toBeUndefined();
   });
 
   test("aborts fetch that never settles with configurable timeoutMs and throws ProviderError", async () => {
@@ -372,7 +415,102 @@ describe("shared computer provider", () => {
       timeoutMs: 25,
     });
 
-    await expect(provider.stop("sales")).rejects.toThrow(ProviderError);
+    await expect(
+      provider.stop({ key: adaKey, botId: "sales" }),
+    ).rejects.toThrow(ProviderError);
+  });
+});
+
+/**
+ * One computer for everybody, and a seat on it per person and Bot.
+ *
+ * The regression: every layer keyed the shared computer by the Bot alone, so a public Bot had one
+ * profile there, and whoever signed it into a site signed it in for everybody using it.
+ */
+describe("seats on the shared computer", () => {
+  test("two people on one public Bot reach two seats, so neither sees the other's logins", async () => {
+    const seen: string[] = [];
+    const baseUrl = serveAgentComputer({
+      run: (request) => {
+        const seat = `${request.headers.get("x-openbot-person-id")}~${request.headers.get("x-openbot-bot-id")}`;
+        seen.push(seat);
+        return Response.json({ run: `run-of-${seat}` });
+      },
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    const adas = await provider.sessionOf?.(personSeat("ada", "pub-bot"));
+    const bos = await provider.sessionOf?.(personSeat("bo", "pub-bot"));
+    expect(adas).toBe("run-of-ada~pub-bot");
+    expect(bos).toBe("run-of-bo~pub-bot");
+    expect(seen).toEqual(["ada~pub-bot", "bo~pub-bot"]);
+  });
+
+  test("a private Bot's old profile is asked for once, for its owner's seat", async () => {
+    const asked: (string | null)[][] = [];
+    const baseUrl = serveAgentComputer({
+      carryOver: (request) => {
+        asked.push([
+          request.headers.get("x-openbot-person-id"),
+          request.headers.get("x-openbot-bot-id"),
+        ]);
+        return Response.json({ outcome: "moved" });
+      },
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+    const owners = { ...personSeat("ada", "notes"), inheritsProfile: true };
+
+    await provider.locate(owners);
+    await provider.locate(owners);
+    expect(asked).toEqual([["ada", "notes"]]);
+  });
+
+  test("a public Bot's seat never takes the old shared profile", async () => {
+    let asked = 0;
+    const baseUrl = serveAgentComputer({
+      carryOver: () => {
+        asked += 1;
+        return Response.json({ outcome: "moved" });
+      },
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    await provider.locate(personSeat("bo", "pub-bot"));
+    expect(asked).toBe(0);
+  });
+
+  test("stopping a person's computer stops every seat of theirs and no one else's", async () => {
+    const stopped: string[] = [];
+    const baseUrl = serveAgentComputer({
+      computers: () =>
+        Response.json({
+          computers: [
+            {
+              seat: "ada~sales",
+              botId: "sales",
+              personId: "ada",
+              running: true,
+            },
+            {
+              seat: "ada~notes",
+              botId: "notes",
+              personId: "ada",
+              running: true,
+            },
+            { seat: "bo~sales", botId: "sales", personId: "bo", running: true },
+          ],
+        }),
+      stop: (request) => {
+        stopped.push(
+          `${request.headers.get("x-openbot-person-id")}~${request.headers.get("x-openbot-bot-id")}`,
+        );
+        return Response.json({ stopped: true, wasRunning: true });
+      },
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    expect(await provider.stop({ key: adaKey })).toEqual({ wasRunning: true });
+    expect(stopped).toEqual(["ada~sales", "ada~notes"]);
   });
 });
 
@@ -422,8 +560,12 @@ describe("building the sandbox provider", () => {
         templateFile: "/nowhere/sandbox-template.json",
       });
 
-      const first = await provider.status("bot-1").catch((e: unknown) => e);
-      const second = await provider.status("bot-1").catch((e: unknown) => e);
+      const first = await provider
+        .status(botSeat("bot-1"))
+        .catch((e: unknown) => e);
+      const second = await provider
+        .status(botSeat("bot-1"))
+        .catch((e: unknown) => e);
 
       expect(first).toBeInstanceOf(Error);
       expect(second).toBeInstanceOf(Error);

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MIGRATIONS_JOURNAL } from "../src/db/apply-migrations";
 import {
   type AppliedMigration,
   type FolderMigration,
@@ -12,7 +13,6 @@ import {
   outOfReachRefusal,
   readMigrationFolder,
 } from "../src/db/migration-reach";
-import { MIGRATIONS_JOURNAL } from "../src/db/apply-migrations";
 
 /**
  * The check that `migration-journal.test.ts` cannot make.

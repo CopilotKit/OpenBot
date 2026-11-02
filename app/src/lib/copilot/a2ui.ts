@@ -4,48 +4,31 @@ import {
   type GenerativeUITheme,
   standardUI,
 } from "@copilotkit/react-core/v2/generative-ui";
+import { SERIES_COLOURS } from "@/components/gallery/palette";
 
 /**
- * The A2UI 1.0 basic components: the same set the A2UI 0.9 basic catalog drew before. These are
- * declarative primitives, not the separately granted OpenBot gallery components.
+ * The standard components a Bot is not given.
+ *
+ * - Map needs maplibre-gl, which OpenBot does not ship. Without it the SDK draws a list of places,
+ *   which the model would then be promising as a map.
+ * - Favicon, LinkCard and Citation load site icons from Google's favicon service, which would send
+ *   every linked domain to Google.
  */
-export const A2UI_BASIC_COMPONENTS = [
-  "Text",
-  "Image",
-  "Icon",
-  "Video",
-  "AudioPlayer",
-  "Row",
-  "Column",
-  "List",
-  "Card",
-  "Tabs",
-  "Divider",
-  "Modal",
-  "Button",
-  "CheckBox",
-  "TextField",
-  "DateTimeInput",
-  "ChoicePicker",
-  "Slider",
+export const OMITTED_STANDARD_COMPONENTS = [
+  "Map",
+  "Favicon",
+  "LinkCard",
+  "Citation",
 ] as const;
 
-const basic: ReadonlySet<string> = new Set(A2UI_BASIC_COMPONENTS);
-
 /**
- * The components a Bot can draw an interface from: CopilotKit's standard catalog, cut down to the
- * A2UI 1.0 basic components, which it carries under their A2UI names. The rest of the standard
- * catalog stays out until an admin can see and govern it.
+ * The components a Bot can draw an interface from: CopilotKit's standard catalog, which carries the
+ * A2UI 1.0 basic components under their A2UI names, less the ones above. These are declarative
+ * primitives, not the separately granted OpenBot gallery components.
  */
 export const OPENBOT_UI = createGenerativeUI({
   id: "openbot/ui@1",
-  extends: [
-    standardUI.omit(
-      Object.keys(standardUI.manifestComponents).filter(
-        (name) => !basic.has(name),
-      ) as Parameters<typeof standardUI.omit>[0],
-    ),
-  ],
+  extends: [standardUI.omit([...OMITTED_STANDARD_COMPONENTS])],
   components: {},
 });
 
@@ -98,6 +81,13 @@ export const OPENBOT_UI_THEME: GenerativeUITheme = {
   "--a2ui-radius-2xl": radius(1.8),
   "--a2ui-radius-3xl": radius(2.2),
   "--a2ui-radius-4xl": radius(2.6),
+  // The gallery's fixed series colours, so a series reads the same in either kind of chart.
+  "--a2ui-chart-1": SERIES_COLOURS[0],
+  "--a2ui-chart-2": SERIES_COLOURS[1],
+  "--a2ui-chart-3": SERIES_COLOURS[2],
+  "--a2ui-chart-4": SERIES_COLOURS[3],
+  "--a2ui-chart-5": SERIES_COLOURS[4],
+  "--a2ui-chart-6": SERIES_COLOURS[5],
 };
 
 const GENERATIVE_UI = {

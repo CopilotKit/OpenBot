@@ -27,17 +27,17 @@ import {
 } from "../src/protocol/messages";
 import type { DrainRecord } from "../src/shared/storage";
 import {
-  type ChromeFake,
-  type FakePort,
-  installChromeFake,
-} from "./support/chrome-fake";
-import {
-  type Fixture as TrafficFixture,
   firstThreadOf,
   later,
   loadFixture as loadTraffic,
   observationsOf,
+  type Fixture as TrafficFixture,
 } from "./agent-traffic";
+import {
+  type ChromeFake,
+  type FakePort,
+  installChromeFake,
+} from "./support/chrome-fake";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 import { fakeMicrophone, fakeSpeech } from "./support/fake-speech";
 

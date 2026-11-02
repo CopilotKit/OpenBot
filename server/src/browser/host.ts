@@ -4,6 +4,7 @@ import {
   type BrowserWindow,
   isPersonBrowserId,
 } from "@openbot/shared/openbot-browser";
+import { botSeat, type ComputerSeat } from "../computer/computer-key";
 import type { ComputerGateway } from "../computer/gateway";
 import {
   type EgressPolicy,
@@ -34,7 +35,33 @@ export function personBrowserRefusal(
   browserUrl: string | undefined,
 ): string | null {
   if (browserUrl || !provider) return null;
-  return provider.isolation === "per-bot" ? null : SHARED_COMPUTER;
+  return provider.isolation === "shared" ? SHARED_COMPUTER : null;
+}
+
+/**
+ * What the person is told where Record in a Bot's browser cannot run here: every Bot shares the one computer.
+ *
+ * RECORD IN A BOT'S BROWSER NEEDS A COMPUTER THE BOT DOES NOT SHARE. Record hands the Recorder in the Bot's browser the
+ * person's own connection, which it keeps in the Bot's profile on disk until Stop, and a recording it has not sent yet
+ * stays there after. On the shared computer every other Bot's shell (`/exec`) can read that profile, so a
+ * prompt-injected Bot would hold a live connection into the person's Learning space. The person's own browser is
+ * refused there for the same reason (`SHARED_COMPUTER`), and the computer refuses Record there too (agent-computer's
+ * `bot-browser-host.ts`), so neither can be talked into it alone.
+ */
+export const SHARED_COMPUTER_RECORD =
+  "This OpenBot can't record in a Bot's browser, because its Bots share one computer.";
+
+/**
+ * Why Record in a Bot's browser cannot run on these computers, or null where it can: a provider that gives every person
+ * a computer of their own (`per-person`), where a Bot's browser sits on the recording person's own computer, beside
+ * only their own Bots, or on an isolated Bot's computer of its own. Null too where there is no provider, where there is
+ * no Bot's browser to record in.
+ */
+export function botRecordRefusal(
+  provider: Pick<ComputerProvider, "isolation"> | undefined,
+): string | null {
+  if (!provider) return null;
+  return provider.isolation === "shared" ? SHARED_COMPUTER_RECORD : null;
 }
 
 /**
@@ -75,33 +102,33 @@ export function withPersonBrowsers(
   const refusal = personBrowserRefusal(provider, browserUrl);
   if (refusal)
     return Object.assign(Object.create(provider) as ComputerProvider, {
-      locate: (botId: string) =>
-        isPersonBrowserId(botId)
+      locate: (seat: ComputerSeat) =>
+        isPersonBrowserId(seat.botId)
           ? Promise.reject(new ProviderError(refusal))
-          : provider.locate(botId),
+          : provider.locate(seat),
       // Absent rather than unreachable: nothing of the person's runs here, and nothing is going to.
-      status: (botId: string) =>
-        isPersonBrowserId(botId)
-          ? Promise.resolve({ botId, state: "absent" as const })
-          : provider.status(botId),
-      sessionOf: async (botId: string) =>
-        isPersonBrowserId(botId) ? undefined : provider.sessionOf?.(botId),
+      status: (seat: ComputerSeat) =>
+        isPersonBrowserId(seat.botId)
+          ? Promise.resolve({ botId: seat.botId, state: "absent" as const })
+          : provider.status(seat),
+      sessionOf: async (seat: ComputerSeat) =>
+        isPersonBrowserId(seat.botId) ? undefined : provider.sessionOf?.(seat),
     });
   if (!browserUrl) return provider;
   return Object.assign(Object.create(provider) as ComputerProvider, {
-    locate: (botId: string) =>
-      isPersonBrowserId(botId)
+    locate: (seat: ComputerSeat) =>
+      isPersonBrowserId(seat.botId)
         ? Promise.resolve(browserUrl)
-        : provider.locate(botId),
+        : provider.locate(seat),
     // A host process OpenBot Desktop keeps running with the stack: there is nothing to wake, and what the browser itself
     // is doing, the computer's own state route says.
-    status: (botId: string) =>
-      isPersonBrowserId(botId)
-        ? Promise.resolve({ botId, state: "ready" as const })
-        : provider.status(botId),
+    status: (seat: ComputerSeat) =>
+      isPersonBrowserId(seat.botId)
+        ? Promise.resolve({ botId: seat.botId, state: "ready" as const })
+        : provider.status(seat),
     // Unknown rather than the Bots' computer's run, which would say nothing about this one.
-    sessionOf: async (botId: string) =>
-      isPersonBrowserId(botId) ? undefined : provider.sessionOf?.(botId),
+    sessionOf: async (seat: ComputerSeat) =>
+      isPersonBrowserId(seat.botId) ? undefined : provider.sessionOf?.(seat),
   });
 }
 
@@ -126,9 +153,10 @@ export function gatewayBrowserComputers(
 ): BrowserComputers {
   return {
     shows: personBrowserShows(browserUrl),
-    locate: (computerId) => gateway.locate(computerId),
+    // A person's browser is a computer of its own, never a seat on the person's computer beside their Bots.
+    locate: (computerId) => gateway.locate(botSeat(computerId)),
     running: async (computerId) =>
-      (await gateway.status(computerId)).state === "ready",
+      (await gateway.status(botSeat(computerId))).state === "ready",
   };
 }
 

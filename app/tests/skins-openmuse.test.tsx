@@ -94,6 +94,9 @@ function agent(
     systemOwned: false,
     title: "",
     visibility: "private",
+    isolated: false,
+    isolationActive: false,
+    isolationOffReason: null,
     ...overrides,
   };
 }
@@ -193,6 +196,8 @@ const attention: BotAttention[] = [
     unread: 0,
     paused: false,
     notify: "all",
+    items: 0,
+    tasks: { needsInput: 0, ready: 0, failed: 0 },
   },
   {
     agentId: scout.id,
@@ -203,6 +208,8 @@ const attention: BotAttention[] = [
     unread: 1,
     paused: false,
     notify: "all",
+    items: 0,
+    tasks: { needsInput: 0, ready: 0, failed: 0 },
   },
 ];
 
@@ -260,7 +267,9 @@ const suggestions: ProactiveSuggestion[] = [
     title: "Book a table for Friday dinner",
     detail: "Jamie asked about Friday.\nThe thread is in your inbox.",
     sourceApp: "Gmail",
+    sourceRef: "gmail/thread",
     sourceLink: "https://mail.example.com/thread/1",
+    pingId: "ping-1",
     createdAt: now,
   },
   {
@@ -269,7 +278,9 @@ const suggestions: ProactiveSuggestion[] = [
     title: "Compare pricing pages",
     detail: "A competitor changed theirs.",
     sourceApp: null,
+    sourceRef: null,
     sourceLink: null,
+    pingId: null,
     createdAt: now,
   },
 ];
@@ -385,12 +396,12 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
     "/api/agents": { agents: [scout, muse] },
     "/api/channels": { channels, nextCursor: null },
     "/api/approvals": inbox,
-    "/api/bots/attention": { bots: attention },
+    "/api/bots/attention": { bots: attention, lastPingId: null },
     [`/api/bots/${muse.id}/activity`]: { activity },
     [`/api/bots/${scout.id}/activity`]: {
       activity: { inProgress: [], scheduled: [], completed: [] },
     },
-    "/api/proactive/settings": { settings },
+    "/api/proactive/settings": { settings, allowed: true },
     "/api/proactive/suggestions": { suggestions },
     "/api/routines": {
       routines,
@@ -869,11 +880,9 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
       await page().findByText("Book a table for Friday dinner"),
     ).toBeTruthy();
     expect(page().queryByText("Compare pricing pages")).toBeNull();
-    // OpenBot's own background-research section for the Bot sits under the suggestions.
-    expect(
-      page().getByRole("heading", { name: "Background research" }),
-    ).toBeTruthy();
-    fireEvent.click(page().getByRole("button", { name: "Start as task" }));
+    // OpenBot's own check-ins section for the Bot sits under the suggestions.
+    expect(page().getByRole("heading", { name: "Check-ins" })).toBeTruthy();
+    fireEvent.click(page().getByRole("button", { name: "Start" }));
     await waitFor(() =>
       expect(
         calls.some(
@@ -982,6 +991,8 @@ describe("the rules the frame runs on", () => {
       unread: 0,
       paused: false,
       notify: "all" as const,
+      items: 0,
+      tasks: { needsInput: 0, ready: 0, failed: 0 },
     };
     expect(
       statusLine({ attention: undefined, channels: busy, agentId: "b" }),

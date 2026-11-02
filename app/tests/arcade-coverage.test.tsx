@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
-import type { ComposioApp } from "@/lib/plugins/queries";
 import { CoverageNote } from "@/components/plugins/broker-directory";
 import { coverageWarning } from "@/lib/plugins/enablement-notes";
+import type { ComposioApp } from "@/lib/plugins/queries";
+import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
 
 /**
  * The D8 coverage warning on the enablement screen. Driven by `classifiedCount` against

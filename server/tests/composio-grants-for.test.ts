@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ConnectedAppBroker, GrantState } from "../src/plugins/broker";
 import {
-  type ComposioVendor,
   buildComposioClient,
+  type ComposioVendor,
 } from "../src/plugins/composio-adapter";
 
 /**

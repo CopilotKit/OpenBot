@@ -37,8 +37,9 @@ logs `intelligence-entitlement-not-ready`, naming the fix, when the answer is no
 
 `MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
-server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and creating a
-coworker without its own endpoint is refused. A leftover token with no URL is ignored. The
+server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and a coworker
+created without its own endpoint runs in the server as a built-in Bot on its role description. A
+leftover token with no URL is ignored. The
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
 at `agent-langgraph` on a laptop.
 
@@ -72,8 +73,9 @@ at `agent-langgraph` on a laptop.
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
-in a sandboxed iframe, and A2UI 1.0 interfaces built from its 18 basic components. Their buttons send
-their named action and the values entered back to the current conversation's Bot.
+in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
+standard component except Map, Favicon, LinkCard and Citation). Their buttons send their named action
+and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.
@@ -651,7 +653,9 @@ is still the record.
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. A person's browser in a native window (OpenBot Desktop) counts toward it and is closed only when no Bot's browser is left to close; a person's cloud browser is ranked by use like a Bot's. |
 | `COMPUTER_SEPARATE_WORKSPACES`       | `on` gives each Bot its own folder of files on a computer many Bots share, with its shell starting there. On for Helm's `shared` computer and the docker-compose `agent-computer`; off elsewhere. Files saved before it was on stay at the root of the volume. Commands can still read other folders: use `computers.mode: sandbox` to keep people apart. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident. A person's cloud browser takes the same rule: the Browser page touches it every second while it is open, so it closes once nobody is on that page. A person's native window (OpenBot Desktop) is never closed for being idle. |
-| `OPENBOT_RECORDER_DIR`               | The built OpenBot Recorder (`extension/dist` after `bun run build`), absolute. Every person's browser the computer opens has it loaded and connected; without it, or pointed at anything that is not a built Recorder, the computer still serves Bots and refuses to open a person's browser, saying why. The computer image sets it to the Recorder it carries. |
+| `COMPUTER_MEMORY_HIGH_PERCENT`       | At what share of its memory limit a computer starts closing browsers nobody is using, least recently used first and one at a time, until it is ten points under that share (75% at the default). `85` by default; `0` switches it off. Memory is the container's working set, as the kubelet reads it (usage less the inactive page cache), checked before every launch and every minute, one pass at a time however many launches arrive together. It is a check, not a guarantee: a page that grows between two checks can still run the container out of memory. A container with no limit is measured against the machine's memory; a computer outside a container (OpenBot Desktop's) closes nothing for memory. Never closed for memory: the browser being launched, the most recently used one, any used in the last minute, a person's own browser (cloud or native), and a Bot's whose wheel a person holds or has been asked to take. In the all-in-one image the share counts the database and the API server as well as the browsers, on purpose: the kernel's out-of-memory kill counts them too and can take the database down, and closing a browser first is how the database is protected. Each close logs `computer-browser-closed-for-memory` with the working set and the limit in bytes. |
+| `COMPUTER_TAB_IDLE_MS`               | How long a Bot's background tab may sit untouched before it is closed. 10 minutes by default; `0` keeps them. A Bot is always on its newest page, so an older tab (the page a sign-in popup opened from, a link opened in a new tab) is one it cannot go back to. Navigating, being acted on, or being in front counts as use. Never closed: the page the Bot is on, a person's own browser, and any tab of a Bot whose wheel a person holds. |
+| `OPENBOT_RECORDER_DIR`               | The built OpenBot Recorder (`extension/dist` after `bun run build`), absolute. Every person's browser the computer opens has it loaded and connected. Every Bot's browser has it loaded too (except in local Chrome), disconnected and silent until a person holding the Bot's control presses Record. Without it, or pointed at anything that is not a built Recorder, the computer still serves Bots, whose browsers then launch without it and cannot record, and refuses to open a person's browser, saying why. The computer image sets it to the Recorder it carries. |
 | `COMPUTER_PEOPLE_ONLY`               | `on` for a computer that runs people's own browsers and no Bot (OpenBot Desktop sets it on its host-side computer); it refuses every Bot. A person's browser runs only on a computer of its own: this one, or one started for it alone (`COMPUTER_BOT_ID`, as the supervisor and a Sandbox start each computer). The shared computer refuses it, and so does the server, whose Browser page says why, because a Bot's shell there could read the person's logins off the disk. |
 | `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
 | `COMPUTER_BROWSER_MODE`              | Managed defaults to `headed` on Linux, which is every hosted computer (a container, a pod, the desktop app's engine): full Chromium on the computer's own Xvfb display. A computer run directly on macOS or Windows defaults to `headless`, where headed would open windows on the desktop. `headless` is full Chromium's new headless mode. Local Chrome requires `headed`. See [Getting past bot checks](#getting-past-bot-checks). |
@@ -1002,6 +1006,10 @@ When optional SPIRE services are used:
 - computers read `SPIFFE_ENDPOINT_SOCKET`;
 - Compose also uses `SPIRE_JOIN_TOKEN` and `COMPOSE_PROJECT_NAME`.
 
+A computer fetches its identity and reports it on its own `/health` route. Nothing checks it yet:
+the server does not ask for it, and `scripts/start.sh` and the Helm chart do not start SPIRE. It
+names a computer; it does not yet gate anything.
+
 ## Images
 
 Every service `docker-compose.yml` can build is published by a release, so a machine can run the
@@ -1054,7 +1062,7 @@ from the same `.env` does. Threads are listed per Bot and carry nothing else tha
 conversation came from, so the name goes into every thread id a deployment mints and is how its own
 conversations stay tellable from the other's.
 
-Set `OPENBOT_ONE_COMPUTER_EACH=false` when using `start.sh` to run all Bots against one shared computer.
+Set `OPENBOT_ONE_COMPUTER_EACH=false` when using `start.sh` to run everybody's Bots against one shared computer instead of one per person.
 
 ## Tenant package
 
@@ -1235,6 +1243,12 @@ sources:
 ```
 
 Supported source types are `google-drive` and `microsoft-onedrive`.
+
+The server checks this file at startup and refuses a malformed one, but nothing reads the sources
+yet. The connector that used them indexed a whole Drive with one service account, so every answer
+came back as the deployment rather than as the person asking, and it was removed. There is no
+OneDrive connector. What the Knowledge Bot can read is whatever its grants reach: Google Drive or
+Notion, connected by each person under Connections.
 
 ### `skills.yaml` (optional)
 

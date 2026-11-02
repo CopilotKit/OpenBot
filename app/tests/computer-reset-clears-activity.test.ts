@@ -43,7 +43,11 @@ afterEach(() => {
 
 async function run(action: "stop" | "reset") {
   const options = setComputerStateMutationOptions(queryClient);
-  const variables = { action, botId: "general-assistant" } as const;
+  const variables = {
+    action,
+    computer: "bot:general-assistant",
+    botId: "general-assistant",
+  } as const;
   await options.mutationFn?.(variables, mutationContext(queryClient));
   await options.onSuccess?.(
     undefined as never,

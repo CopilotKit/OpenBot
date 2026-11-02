@@ -18,14 +18,14 @@
  * hands in, not a channel post written into the tool.
  */
 
-import { z } from "zod";
 import { PUT_TO } from "@openbot/shared/handoff-markers";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { z } from "zod";
 import {
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import type { RunAssertion } from "./callback-token";
 
 /** What the model is offered. One name, so a transcript can find every escalation by searching. */

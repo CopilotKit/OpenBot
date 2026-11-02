@@ -105,22 +105,65 @@ const SAFETY_REQUIREMENTS: readonly {
     pattern:
       // A wire of money, not a news wire: "Business Wire" is where press releases go out, so a Bot
       // filling in where its research came from would otherwise hand that typing to the person.
-      /payment|\bpay(ing)?\b|pay[-_ ]?now|checkout|purchase|place[-_ ]?order|buy[-_ ]?now|(?<!\b(business|news|press)[-_ ]?)\bwire\b|bank[-_ ]?transfer|transfer[-_ ]?(money|funds)|send[-_ ]?money|credit[-_ ]?card|card[-_ ]?number|\bcvv\b|\biban\b|routing[-_ ]?number|billing/i,
+      /payment|refund|\bpay(ing)?\b|pay[-_ ]?now|checkout|purchase|place[-_ ]?order|buy[-_ ]?now|(?<!\b(business|news|press)[-_ ]?)\bwire\b|bank[-_ ]?transfer|transfer[-_ ]?(money|funds)|send[-_ ]?money|credit[-_ ]?card|card[-_ ]?number|\bcvv\b|\biban\b|routing[-_ ]?number|billing/i,
   },
 ];
 
+/** How deep a value is read. Anything nested further is not, so matching stays cheap. */
+const MAX_DEPTH = 6;
+
 function flatten(value: unknown, depth = 0): string {
-  if (depth > 6 || value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
+  return words(value, depth).text;
+}
+
+/**
+ * The words of a value, and whether it holds anything at all.
+ *
+ * `filled` is separate from `text` because of the depth cap. A value past the cap is never read, so
+ * its text is empty whether or not it holds something, and an unread value is not an empty one.
+ */
+function words(
+  value: unknown,
+  depth: number,
+): { text: string; filled: boolean } {
+  if (value === null || value === undefined) return { text: "", filled: false };
+  // Not read, so not known to be empty. Only a value that is plainly empty on its face counts as
+  // nothing sent; anything else keeps its field's name in the words.
+  if (depth > MAX_DEPTH) return { text: "", filled: !plainlyEmpty(value) };
+  if (typeof value === "string") return { text: value, filled: value !== "" };
   if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
-  if (Array.isArray(value))
-    return value.map((entry) => flatten(entry, depth + 1)).join(" ");
-  if (typeof value === "object")
-    return Object.entries(value)
-      .map(([key, entry]) => `${key} ${flatten(entry, depth + 1)}`)
-      .join(" ");
-  return "";
+    return { text: String(value), filled: true };
+  if (Array.isArray(value)) {
+    const entries = value.map((entry) => words(entry, depth + 1));
+    return {
+      text: entries.map((entry) => entry.text).join(" "),
+      filled: entries.some((entry) => entry.filled),
+    };
+  }
+  if (typeof value === "object") {
+    const fields = Object.entries(value).map(([key, entry]) => {
+      // A field left empty says nothing about the action: match the arguments actually
+      // sent, not a name like "billing_address" with nothing in it.
+      const read = words(entry, depth + 1);
+      return {
+        text: read.filled ? `${key} ${read.text}` : "",
+        filled: read.filled,
+      };
+    });
+    return {
+      text: fields.map((field) => field.text).join(" "),
+      filled: fields.some((field) => field.filled),
+    };
+  }
+  return { text: "", filled: false };
+}
+
+function plainlyEmpty(value: unknown): boolean {
+  if (value === "") return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object" && value !== null)
+    return Object.keys(value).length === 0;
+  return false;
 }
 
 /**

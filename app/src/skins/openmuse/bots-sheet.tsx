@@ -9,7 +9,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
-  needsInput,
+  waitingOnYou,
 } from "@/components/bot-profile/attention";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -64,7 +64,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
               const waiting = attention.data?.find(
                 (entry) => entry.agentId === agent.id,
               );
-              const asks = waiting ? needsInput(waiting) : 0;
+              const asks = waiting ? waitingOnYou(waiting) : 0;
               const summary = waiting ? attentionSummary(waiting) : "";
               const selected = agent.id === centre?.id;
               return (

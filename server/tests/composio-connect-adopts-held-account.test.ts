@@ -9,8 +9,8 @@ import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
 import {
-  type ComposioVendor,
   buildComposioClient,
+  type ComposioVendor,
 } from "../src/plugins/composio-adapter";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";

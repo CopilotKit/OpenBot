@@ -37,6 +37,9 @@ const BOT: AgentProfile = {
   builtIn: true,
   hasAuth: false,
   hasCallbackToken: false,
+  isolated: false,
+  isolationActive: false,
+  isolationOffReason: null,
   hidden: false,
   pinned: false,
   systemOwned: false,
@@ -88,7 +91,7 @@ function serving(
       });
     }
     if (url === "/api/proactive/settings") {
-      return Response.json({ settings: [] });
+      return Response.json({ settings: [], allowed: true });
     }
     if (url === "/api/approvals") {
       return Response.json({

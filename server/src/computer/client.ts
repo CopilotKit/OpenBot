@@ -165,11 +165,35 @@ export type ComputerTransportOptions = {
   fetchImpl?: typeof fetch;
 };
 
+/**
+ * Which seat on the computer a request is for.
+ *
+ * The Bot alone on a computer of one person's own (or an isolated Bot's), where each Bot is a seat;
+ * the Bot and the person on the computer many people share, where the seat is the pair. A string is
+ * the Bot alone.
+ */
+export type SeatAddress = string | { botId: string; personId?: string };
+
+/**
+ * What a navigation carries besides its address.
+ *
+ * `signal` is the person's Stop: a navigation aborted before it is sent is never sent, and one aborted
+ * in flight is answered as stopped, as every other acting call is.
+ *
+ * `citation` is set when the navigation is a followed link: the ref and snapshot it was read from.
+ * The computer checks them against the live page exactly as `/click` would, and refuses the
+ * navigation as stale when the page has moved on, so an old snapshot cannot open its old links.
+ */
+export type NavigateOptions = {
+  signal?: AbortSignal;
+  citation?: { ref: string; snapshotId: number };
+};
+
 /** Internal HTTP interface used only by ComputerGateway. */
 export interface ComputerTransport {
   call<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
@@ -178,7 +202,7 @@ export interface ComputerTransport {
   ): Promise<T>;
   post<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     payload: unknown,
     caller?: AbortSignal,
@@ -187,17 +211,28 @@ export interface ComputerTransport {
   ): Promise<T>;
   navigate(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     url: string,
     toolCallId?: string,
+    options?: NavigateOptions,
   ): Promise<NavigateResult>;
   download(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     caller?: AbortSignal,
     timeoutMs?: number,
   ): Promise<ComputerDownload>;
+}
+
+/** The headers that name a seat to the computer. See {@link SeatAddress}. */
+export function seatHeaders(seat: SeatAddress): Record<string, string> {
+  const { botId, personId } =
+    typeof seat === "string" ? { botId: seat, personId: undefined } : seat;
+  return {
+    "x-openbot-bot-id": botId,
+    ...(personId ? { "x-openbot-person-id": personId } : {}),
+  };
 }
 
 /**
@@ -214,7 +249,7 @@ export function createComputerTransport(
 
   async function request(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
@@ -240,7 +275,7 @@ export function createComputerTransport(
         ...init,
         headers: {
           ...(init?.headers as Record<string, string> | undefined),
-          "x-openbot-bot-id": botId,
+          ...seatHeaders(botId),
           ...(options.token
             ? { "x-openbot-computer-token": options.token }
             : {}),
@@ -273,7 +308,7 @@ export function createComputerTransport(
 
   async function call<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
@@ -299,7 +334,7 @@ export function createComputerTransport(
 
   async function download(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     caller?: AbortSignal,
     timeoutMs?: number,
@@ -337,7 +372,7 @@ export function createComputerTransport(
 
   function post<T>(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     path: string,
     payload: unknown,
     caller?: AbortSignal,
@@ -359,9 +394,10 @@ export function createComputerTransport(
 
   async function navigate(
     baseUrl: string,
-    botId: string,
+    botId: SeatAddress,
     url: string,
     toolCallId?: string,
+    navigateOptions?: NavigateOptions,
   ): Promise<NavigateResult> {
     const verdict = checkNavigationTarget(url, {
       allowPrivateHosts: options.allowPrivateHosts,
@@ -369,10 +405,20 @@ export function createComputerTransport(
     if (!verdict.allowed) {
       throw new NavigationRefusedError(verdict.reason);
     }
-    return post<NavigateResult>(baseUrl, botId, "/navigate", {
-      url: verdict.url,
-      ...(toolCallId ? { toolCallId } : {}),
-    });
+    const citation = navigateOptions?.citation;
+    return post<NavigateResult>(
+      baseUrl,
+      botId,
+      "/navigate",
+      {
+        url: verdict.url,
+        ...(toolCallId ? { toolCallId } : {}),
+        ...(citation
+          ? { ref: citation.ref, snapshotId: citation.snapshotId }
+          : {}),
+      },
+      navigateOptions?.signal,
+    );
   }
 
   return { call, post, navigate, download };

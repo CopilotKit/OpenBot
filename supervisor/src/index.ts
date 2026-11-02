@@ -1,21 +1,24 @@
 import { serve } from "bun";
 import { Hono } from "hono";
 import { authorised } from "./authorisation";
-import { environmentFor } from "./environment";
+import { computerMemoryBytes } from "./computer-memory-bytes";
 import {
+  type CarryOverOutcome,
   ComputerNotAnsweringError,
+  carryOverProfile,
   DockerUnavailableError,
   ensure,
   listOwned,
   NameHeldError,
   reachable,
   reset,
+  retireLegacyComputers,
   stop,
 } from "./docker";
+import { environmentFor } from "./environment";
 import { registerEntry } from "./identity";
-import { namesFor } from "./names";
-import { computerMemoryBytes } from "./computer-memory-bytes";
 import { listenPort } from "./listen-port";
+import { legacyNamesFor, namesFor } from "./names";
 
 /**
  * The container supervisor: the only thing here that holds the Docker socket.
@@ -26,11 +29,11 @@ import { listenPort } from "./listen-port";
  * injection through a Bot's own output and every dependency in a large tree sits one mistake away
  * from owning the machine.
  *
- * So the socket lives behind four verbs, expressed in Bots rather than in Docker: ensure a computer
- * for this Bot, stop it, reset it, list them. There is no passthrough and no way to name a container
- * directly, names are derived from the Bot id, which is validated first. A compromised API server
- * can ask for a Bot's computer to be restarted. It cannot ask for anything else, because nothing
- * else is expressible.
+ * So the socket lives behind four verbs, expressed in whose computer it is rather than in Docker:
+ * ensure a computer for this person (or this isolated Bot), stop it, reset it, list them. There is
+ * no passthrough and no way to name a container directly; names are derived from the kind and the
+ * id, which are validated first. A compromised API server can ask for a computer to be restarted. It
+ * cannot ask for anything else, because nothing else is expressible.
  *
  * The shared secret is not the boundary; the vocabulary is. `SUPERVISOR_TOKEN` keeps other
  * processes on the same network from driving it, but even with the token the worst available action
@@ -88,30 +91,84 @@ app.get("/health", async (context) =>
   context.json({ status: "ok", docker: await reachable() }),
 );
 
-/** The Bot id in the path, validated before it becomes any kind of name. */
-function resolve(raw: string) {
-  return namesFor(raw);
+/**
+ * Whose computer the path names, validated before it becomes any kind of name.
+ *
+ * `/computers/person/<id>` is a person's computer, which carries every Bot they use;
+ * `/computers/bot/<id>` is an isolated Bot's own.
+ */
+function resolve(kind: string, id: string) {
+  return namesFor(kind, id);
 }
 
-app.post("/computers/:botId/ensure", async (context) => {
-  const parsed = resolve(context.req.param("botId"));
+/**
+ * The private Bots whose old profile the server asks to give to this person, checked like any id.
+ *
+ * Optional, and only ever about a person's computer: an isolated Bot's computer inherits nothing.
+ */
+async function carryOverOf(
+  request: Request,
+): Promise<{ ok: true; bots: string[] } | { ok: false; reason: string }> {
+  const text = await request.text().catch(() => "");
+  if (!text.trim()) return { ok: true, bots: [] };
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: "The body is not JSON." };
+  }
+  const carryOver = (body as { carryOver?: unknown } | null)?.carryOver;
+  if (carryOver === undefined) return { ok: true, bots: [] };
+  if (!Array.isArray(carryOver) || carryOver.length > 20) {
+    return { ok: false, reason: "carryOver is a list of at most 20 bot ids." };
+  }
+  for (const bot of carryOver) {
+    const checked = legacyNamesFor(bot);
+    if (!checked.ok) return { ok: false, reason: checked.reason };
+  }
+  return { ok: true, bots: carryOver as string[] };
+}
+
+app.post("/computers/:kind/:id/ensure", async (context) => {
+  const parsed = resolve(context.req.param("kind"), context.req.param("id"));
   if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+  const asked = await carryOverOf(context.req.raw);
+  if (!asked.ok) return context.json({ error: asked.reason }, 400);
+  if (asked.bots.length > 0 && parsed.names.kind !== "person") {
+    return context.json(
+      { error: "Only a person's computer inherits a Bot's profile." },
+      400,
+    );
+  }
 
   try {
-    // Registered before the computer is handed out, so it can prove which Bot it is from its first
+    // Registered before the computer is handed out, so it can prove whose it is from its first
     // request.
     const identity = await registerEntry(parsed.names);
 
     const state = await ensure(parsed.names, {
       image,
-      environment: environmentFor(parsed.names.botId),
+      environment: environmentFor(parsed.names),
       ...(network ? { network } : {}),
       ...(runtime ? { runtime } : {}),
       ...(memoryBytes ? { memoryBytes } : {}),
       ...(spireSocketVolume ? { spireSocketVolume } : {}),
     });
+    /*
+     * After the computer is up, before the server is answered: the server sends the Bot nothing until
+     * this returns, so the Bot's folder in the profile volume does not exist yet and the copy can
+     * land without racing a browser for it.
+     */
+    const carriedOver: Record<string, CarryOverOutcome> = {};
+    for (const bot of asked.bots) {
+      carriedOver[bot] = await carryOverProfile(parsed.names, bot, {
+        image,
+        ...(runtime ? { runtime } : {}),
+      });
+    }
     return context.json({
       ...state,
+      ...(asked.bots.length > 0 ? { carriedOver } : {}),
       ...(identity.registered
         ? { spiffeId: identity.spiffeId }
         : { identity: identity.reason }),
@@ -136,8 +193,8 @@ app.post("/computers/:botId/ensure", async (context) => {
   }
 });
 
-app.post("/computers/:botId/stop", async (context) => {
-  const parsed = resolve(context.req.param("botId"));
+app.post("/computers/:kind/:id/stop", async (context) => {
+  const parsed = resolve(context.req.param("kind"), context.req.param("id"));
   if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
   try {
     const stopped = await stop(parsed.names);
@@ -150,8 +207,8 @@ app.post("/computers/:botId/stop", async (context) => {
   }
 });
 
-app.post("/computers/:botId/reset", async (context) => {
-  const parsed = resolve(context.req.param("botId"));
+app.post("/computers/:kind/:id/reset", async (context) => {
+  const parsed = resolve(context.req.param("kind"), context.req.param("id"));
   if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
   try {
     const wasThere = await reset(parsed.names);
@@ -174,6 +231,32 @@ app.get("/computers", async (context) => {
     throw error;
   }
 });
+
+/*
+ * The computers from before one per person, which nothing reaches any more, stopped once at start so
+ * they stop holding a browser each. Their volumes stay. Not fatal: a supervisor that cannot do this
+ * still serves today's computers, and says why in its log.
+ */
+void retireLegacyComputers()
+  .then((stopped) => {
+    if (stopped.length > 0) {
+      console.info(
+        JSON.stringify({
+          type: "computer-legacy-stopped",
+          stopped,
+          note: "Computers from before one computer per person. Their volumes are kept.",
+        }),
+      );
+    }
+  })
+  .catch((error: unknown) =>
+    console.warn(
+      JSON.stringify({
+        type: "computer-legacy-stop-failed",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
 
 serve({ port, fetch: app.fetch, idleTimeout: 120 });
 

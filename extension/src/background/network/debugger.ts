@@ -12,7 +12,7 @@ import {
   textBody,
   unavailableBody,
 } from "../../shared/network-body";
-import { requestKey, type RunVerdict } from "./agent";
+import { type RunVerdict, requestKey } from "./agent";
 import { callSignature, type RepeatMemory, screenCall } from "./screen";
 import { isPrefetch, isTelemetry } from "./telemetry";
 

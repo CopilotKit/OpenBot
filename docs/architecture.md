@@ -78,7 +78,7 @@ startup.
 
 Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a shell reaches whatever its container reaches, so the database is on a `data` network carrying only itself and `migrate`, and everything else is on `default`. A deployment that runs the API server inside Compose rather than on the host joins it to both, which is the one place the two meet.
 
-With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
+With `COMPUTER_SUPERVISOR_URL`, each person gets a computer container of their own, and every Bot they use has its own folder and browser profile in it; a Bot marked Isolated gets a container of its own instead. Without it, all Bots share `AGENT_COMPUTER_URL`, still with a profile and folder for each person and Bot.
 
 Each computer also filters its own outbound connections. The browser and shell commands go through a filter proxy that applies the Bot's network policy (`allow_all`, `defaults_plus_allowlist`, `allowlist_only` or `deny_all`, which is what a Bot gets when its owner's Cloud network access is switched off). The server pushes the policy before the computer acts and whenever it wakes, and until one arrives nothing may leave. `EGRESS_POLICY_REQUIRED=0` is for a computer run with no API server. Cloud metadata addresses are refused in every mode. A process that ignores the proxy variables and opens a raw socket is not stopped by this; that is a Kubernetes NetworkPolicy's job.
 
@@ -154,7 +154,7 @@ Secret entry is separate from chat content. The audit trail records that a secre
 
 ## Watching a Bot work
 
-Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity tab is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
+Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity list under it is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
 
 Activity is held in the browser for the open conversation and is gone on reload. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
 
@@ -167,6 +167,11 @@ A coworker is a durable Bot profile:
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+For a message with no named Bot, the intent router chooses from the person's roster. If it cannot
+choose confidently, a unique app holder may receive the message instead of the default Bot. When
+different named apps point to different unique holders, that fallback is ambiguous and the default
+stays selected; roster order does not decide which Bot owns the conversation.
 
 A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (`group_bot_threads`), and what the people in it read is a shared transcript (`group_messages`) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
 
@@ -375,7 +380,7 @@ Required package files:
 Optional: `skills.yaml`, `theme.css`, and an `agents/` directory holding a coworker per file, read
 alongside `agents.yaml`. See [configuration.md](configuration.md#agents).
 
-The server validates the package at startup. Channel agent IDs must match declared agents. Knowledge sources currently support Google Drive and Microsoft OneDrive declarations.
+The server validates the package at startup. Channel agent IDs must match declared agents. `knowledge.yaml` accepts Google Drive and Microsoft OneDrive declarations and is validated, but nothing reads it yet; see [configuration.md](configuration.md#knowledgeyaml).
 
 Connector credentials are stored through the credential vault and referenced by id, not stored inline in YAML.
 
@@ -390,7 +395,7 @@ Connector credentials are stored through the credential vault and referenced by 
 - Signing in, being refused, and being granted the administrator role by configuration each write an audit row. They are the only record that somebody who can edit `INITIAL_ADMIN_EMAILS` promoted themselves, and the only evidence a revoked person was ever here, since revoking them deletes their sessions.
 - Removing somebody deletes their sessions and denies their address, because deleting the user row alone is not removal: the next sign-in through the provider recreates it.
 - With no identity provider configured, the deployment refuses to start unless `OPENBOT_SINGLE_USER=true` says every request may be one fixed administrator. That flag is the only thing that permits it; `NODE_ENV` does not. The flag alone is not enough on a public address: if `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL` or any `TRUSTED_ORIGINS` entry resolves to an address the public internet routes to, the deployment refuses to start anyway, because no sign-in there means every visitor is the administrator. Loopback is silent, and a private address (a home LAN, a Tailnet, a VPN, a `.local` name) is allowed with a warning naming it, since that is the deployment the flag exists for.
-- `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`.
+- `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`. A vault read or decryption fault stops an OAuth client lookup without registering a replacement, so a misconfigured replica cannot replace a client still usable by the others. Connect records `mcp.oauth_client_read_failed` with the authenticated person and server before returning a safe 503; raw vault errors and causes are neither retained nor included in the audit payload.
 - Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
 - Browser navigation allows `http` and `https`; cloud metadata addresses are refused under every configuration.
 - `POST /api/model-provider/v1/chat/completions` exists only when `OPENBOT_MODEL_OAUTH_FILE` names a model credential file, which the desktop app sets and nothing else does. It answers a Chat Completions request using a stored Google or xAI OAuth grant. It does not use the session guard: the caller presents a separate local bearer taken from that file and compared in constant time, and the provider's own refresh token never leaves the server. The credential file is refused unless it is a regular file under 64KB with no group or other permission bits, and the upstream host, path and headers are fixed so a caller cannot redirect the request.

@@ -1,5 +1,5 @@
 /**
- * A computer each, as a `Sandbox` on Kubernetes.
+ * A computer per person, and per isolated Bot, as a `Sandbox` on Kubernetes.
  *
  * `kubernetes-sigs/agent-sandbox` defines a CRD for "isolated, stateful singleton workloads with
  * stable identity and persistent storage", aimed at agents that run untrusted code and drive
@@ -16,9 +16,15 @@
  */
 import { readFile } from "node:fs/promises";
 import { ComputerStillStartingError } from "./client";
+import {
+  type ComputerKey,
+  type ComputerSeat,
+  computerKeyText,
+} from "./computer-key";
 import type {
   ComputerLocation,
   ComputerProvider,
+  ComputerTarget,
   ComputerUpdate,
 } from "./provider";
 import type { ComputerStatus } from "./schema";
@@ -91,21 +97,41 @@ export function imagesOf(podTemplate: unknown): string {
 }
 
 /**
- * The pod template, cut for one computer: each container told which id it is for (`COMPUTER_BOT_ID`), as the supervisor
- * tells each container it starts.
+ * The pod template, cut for one computer: what the container is told about whose it is, as the supervisor tells each
+ * container it starts (supervisor/src/environment.ts).
  *
- * THE COMPUTER DECIDES WHETHER A PERSON'S BROWSER MAY RUN ON IT FROM THIS. A Sandbox is one computer for one id, but
- * the computer cannot see that from inside: without the id it reads as the one computer every Bot shares, and refuses
- * a person's browser there (agent-computer's `person-access.ts`). Given it, a person's computer runs their browser and
- * refuses everything else. For a Bot's it changes only which profile a request that names nobody falls back to, which
- * is the Bot's own. The template itself is left as it was, since every computer is cut from it.
+ * A COMPUTER OF ONE ID (an isolated Bot's, or a person's own browser) is told the id (`COMPUTER_BOT_ID`), and keeps
+ * its files at the root of its volume (`COMPUTER_SEPARATE_WORKSPACES=off`). The computer decides from the id whether a
+ * person's browser may run on it (agent-computer's `person-access.ts`): without it, it reads as a computer Bots share
+ * and refuses one. The root stays where it was because an isolated Bot keeps the Sandbox, and the volume, its Bot had
+ * before computers were per person, with its files at the root; moving the root under it would hide every one
+ * (agent-computer's `workspaces.ts`).
+ *
+ * A PERSON'S COMPUTER carries every Bot they use, so it names no Bot (anything it was given is taken out), is told whose
+ * it is (`COMPUTER_PERSON_ID`, so Record runs in its Bots' browsers), and gives each Bot a folder of its own
+ * (`COMPUTER_SEPARATE_WORKSPACES=on`), as each has a browser profile of its own.
+ *
+ * The template itself is left as it was, since every computer is cut from it.
  */
-export function podTemplateFor(podTemplate: unknown, botId: string): unknown {
+export function podTemplateFor(
+  podTemplate: unknown,
+  key: ComputerKey,
+): unknown {
   const template = podTemplate as
     | { spec?: { containers?: Record<string, unknown>[] } }
     | undefined;
   const containers = template?.spec?.containers;
   if (!template?.spec || !Array.isArray(containers)) return podTemplate;
+  const told =
+    key.kind === "bot"
+      ? [
+          { name: "COMPUTER_BOT_ID", value: key.botId },
+          { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+        ]
+      : [
+          { name: "COMPUTER_PERSON_ID", value: key.personId },
+          { name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" },
+        ];
   return {
     ...template,
     spec: {
@@ -113,13 +139,13 @@ export function podTemplateFor(podTemplate: unknown, botId: string): unknown {
       containers: containers.map((container) => {
         const env = Array.isArray(container.env)
           ? (container.env as { name?: unknown }[]).filter(
-              (variable) => variable.name !== "COMPUTER_BOT_ID",
+              (variable) =>
+                variable.name !== "COMPUTER_BOT_ID" &&
+                variable.name !== "COMPUTER_PERSON_ID" &&
+                variable.name !== "COMPUTER_SEPARATE_WORKSPACES",
             )
           : [];
-        return {
-          ...container,
-          env: [...env, { name: "COMPUTER_BOT_ID", value: botId }],
-        };
+        return { ...container, env: [...env, ...told] };
       }),
     },
   };
@@ -256,24 +282,45 @@ export async function inClusterConfig(): Promise<{
 }
 
 /**
- * A Kubernetes name for a Bot.
+ * A Kubernetes name for a computer: a person's, or an isolated Bot's.
  *
- * Bot ids are ours and may hold anything a person typed; a resource name may hold lowercase
- * alphanumerics and dashes, and is refused rather than truncated by the API server. Anything else
- * becomes a dash, and a short hash keeps two ids that differ only in punctuation from colliding on
- * one computer, which would be one Bot reading another's logins.
+ * Ids are ours and may hold anything; a resource name may hold lowercase alphanumerics and dashes,
+ * and is refused rather than truncated by the API server. Anything else becomes a dash, and a short
+ * hash keeps two ids that differ only in punctuation from colliding on one computer, which would be
+ * one person reading another's logins.
+ *
+ * An isolated Bot's name is exactly the one every Bot's computer had before computers were per
+ * person, so an isolated Bot keeps the Sandbox, and the logins, it already had. A person's starts
+ * `person-`, which no Bot's can.
  */
-export function sandboxNameFor(botId: string): string {
-  const slug = botId
+export function sandboxNameFor(key: ComputerKey | string): string {
+  const resolved: ComputerKey =
+    typeof key === "string" ? { kind: "bot", botId: key } : key;
+  const id = resolved.kind === "bot" ? resolved.botId : resolved.personId;
+  const slug = id
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "");
   let hash = 5381;
-  for (let index = 0; index < botId.length; index += 1) {
-    hash = ((hash << 5) + hash + botId.charCodeAt(index)) >>> 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = ((hash << 5) + hash + id.charCodeAt(index)) >>> 0;
   }
   const suffix = hash.toString(36);
-  return `bot-${slug.slice(0, 40) || "unnamed"}-${suffix}`;
+  const prefix = resolved.kind === "bot" ? "bot" : "person";
+  return `${prefix}-${slug.slice(0, 40) || "unnamed"}-${suffix}`;
+}
+
+/** Whose computer a Sandbox is, from the annotations it was created with. */
+function keyOfSandbox(sandbox: Sandbox): ComputerKey {
+  const annotations =
+    (sandbox.metadata as { annotations?: Record<string, string> })
+      ?.annotations ?? {};
+  const person = annotations["openbot.dev/person-id"];
+  if (person) return { kind: "person", personId: person };
+  return {
+    kind: "bot",
+    botId: annotations["openbot.dev/bot-id"] ?? sandbox.metadata?.name ?? "",
+  };
 }
 
 function conditionOf(sandbox: Sandbox, type: string): string | undefined {
@@ -295,8 +342,8 @@ function isSuspended(sandbox: Sandbox): boolean {
 export function createSandboxComputerProvider(
   options: SandboxProviderOptions,
 ): ComputerProvider & {
-  update(botId: string): Promise<ComputerUpdate>;
-  restarting(botId: string): Promise<void> | undefined;
+  update(key: ComputerKey): Promise<ComputerUpdate>;
+  restarting(key: ComputerKey): Promise<void> | undefined;
 } {
   const doFetch = options.fetchImpl ?? fetch;
   const resumeTimeoutMs = options.resumeTimeoutMs ?? 120_000;
@@ -304,7 +351,7 @@ export function createSandboxComputerProvider(
     resumeTimeoutMs,
     options.locateWaitMs ?? LOCATE_WAIT_MS,
   );
-  /** Restarts started by `update` and not yet finished, one per Bot. */
+  /** Restarts started by `update` and not yet finished, one per computer. */
   const lastRestart = new Map<string, Promise<void>>();
   const base = () =>
     `${options.apiServer}/apis/${GROUP}/${VERSION}/namespaces/${options.namespace}/sandboxes`;
@@ -346,42 +393,51 @@ export function createSandboxComputerProvider(
     return response.json();
   }
 
-  const read = (botId: string) =>
-    call(`/${sandboxNameFor(botId)}`) as Promise<Sandbox | undefined>;
+  const read = (key: ComputerKey) =>
+    call(`/${sandboxNameFor(key)}`) as Promise<Sandbox | undefined>;
 
-  /** The desired body for a Bot's computer. Created once, then only ever patched. */
-  function desired(botId: string): Record<string, unknown> {
+  /** The desired body for a computer. Created once, then only ever patched. */
+  function desired(key: ComputerKey): Record<string, unknown> {
     return {
       apiVersion: `${GROUP}/${VERSION}`,
       kind: "Sandbox",
       metadata: {
-        name: sandboxNameFor(botId),
+        name: sandboxNameFor(key),
         namespace: options.namespace,
         labels: {
           "app.kubernetes.io/managed-by": "openbot",
           "openbot.dev/component": "computer",
         },
-        // The Bot id as written, which the name above cannot always carry. The culler reads this
-        // rather than trying to reverse the slug.
-        annotations: { "openbot.dev/bot-id": botId },
+        // Whose computer, as written, which the name above cannot always carry. The listing and the
+        // culler read this rather than trying to reverse the slug.
+        annotations:
+          key.kind === "person"
+            ? {
+                "openbot.dev/person-id": key.personId,
+                "openbot.dev/computer": computerKeyText(key),
+              }
+            : {
+                "openbot.dev/bot-id": key.botId,
+                "openbot.dev/computer": computerKeyText(key),
+              },
       },
       spec: {
         operatingMode: "Running",
         // `podTemplate` is required and `volumeClaimTemplates` is what makes a suspend worth doing,
         // and both arrive together from the mounted template.
         ...options.template,
-        podTemplate: podTemplateFor(options.template.podTemplate, botId),
+        podTemplate: podTemplateFor(options.template.podTemplate, key),
       },
     };
   }
 
   async function waitForReady(
-    botId: string,
+    key: ComputerKey,
     budgetMs: number = resumeTimeoutMs,
   ): Promise<Sandbox> {
     const deadline = Date.now() + budgetMs;
     for (;;) {
-      const sandbox = await read(botId);
+      const sandbox = await read(key);
       if (sandbox && isReady(sandbox) && sandbox.status?.serviceFQDN) {
         return sandbox;
       }
@@ -395,7 +451,7 @@ export function createSandboxComputerProvider(
         console.warn(
           JSON.stringify({
             type: "computer-sandbox-still-starting",
-            botId,
+            computer: computerKeyText(key),
             waitedMs: budgetMs,
           }),
         );
@@ -428,17 +484,17 @@ export function createSandboxComputerProvider(
    * pair this with one.
    */
   async function replaceTemplate(
-    botId: string,
+    key: ComputerKey,
     operatingMode: "Running" | "Suspended",
   ): Promise<Sandbox | undefined> {
-    return (await call(`/${sandboxNameFor(botId)}`, {
+    return (await call(`/${sandboxNameFor(key)}`, {
       method: "PATCH",
       contentType: "application/json-patch+json",
       body: JSON.stringify([
         {
           op: "replace",
           path: "/spec/podTemplate",
-          value: podTemplateFor(options.template.podTemplate, botId),
+          value: podTemplateFor(options.template.podTemplate, key),
         },
         { op: "add", path: "/spec/operatingMode", value: operatingMode },
       ]),
@@ -453,12 +509,12 @@ export function createSandboxComputerProvider(
    * suspend could say "gone" about a pod that is still running.
    */
   async function waitForSuspended(
-    botId: string,
+    key: ComputerKey,
     generation: number | undefined,
   ): Promise<void> {
     const deadline = Date.now() + resumeTimeoutMs;
     for (;;) {
-      const sandbox = await read(botId);
+      const sandbox = await read(key);
       if (!sandbox) return;
       const suspended = sandbox.status?.conditions?.find(
         (condition) => condition.type === "Suspended",
@@ -472,7 +528,7 @@ export function createSandboxComputerProvider(
       }
       if (Date.now() >= deadline) {
         throw new SandboxError(
-          `The computer for ${botId} did not stop within ${Math.round(resumeTimeoutMs / 1000)}s to take its new image.`,
+          `The computer for ${computerKeyText(key)} did not stop within ${Math.round(resumeTimeoutMs / 1000)}s to take its new image.`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -481,15 +537,25 @@ export function createSandboxComputerProvider(
 
   return {
     name: "sandbox",
-    isolation: "per-bot",
+    isolation: "per-person",
 
-    async locate(botId: string): Promise<string> {
-      const existing = await read(botId);
+    /**
+     * The computer this seat is on, creating or waking it.
+     *
+     * A private Bot's profile from before computers were per person is NOT carried over here. Each
+     * Sandbox's volumes come from its own immutable `volumeClaimTemplates`, and a copy would need a
+     * pod that mounts the old Bot's claim and the person's at once while both are on one node. That
+     * is a migration job, not a request handler; the old Bot's Sandbox and its volume are left as
+     * they were (listed, and suspended when idle), so nothing is lost if it is ever wanted.
+     */
+    async locate(seat: ComputerSeat): Promise<string> {
+      const key = seat.key;
+      const existing = await read(key);
       if (!existing) {
         await call("", {
           method: "POST",
           contentType: "application/json",
-          body: JSON.stringify(desired(botId)),
+          body: JSON.stringify(desired(key)),
         });
       } else if (isSuspended(existing)) {
         /*
@@ -505,11 +571,11 @@ export function createSandboxComputerProvider(
          * without this runs the image it was first created with for ever.
          */
         if (isOutOfDate(existing)) {
-          await replaceTemplate(botId, "Running");
+          await replaceTemplate(key, "Running");
           console.info(
             JSON.stringify({
               type: "computer-sandbox-updated",
-              botId,
+              computer: computerKeyText(key),
               reason:
                 "it was woken, and its image differed from the current one",
               from: imagesOf(existing.spec?.podTemplate),
@@ -517,7 +583,7 @@ export function createSandboxComputerProvider(
             }),
           );
         } else {
-          await call(`/${sandboxNameFor(botId)}`, {
+          await call(`/${sandboxNameFor(key)}`, {
             method: "PATCH",
             contentType: "application/merge-patch+json",
             body: JSON.stringify({ spec: { operatingMode: "Running" } }),
@@ -527,19 +593,20 @@ export function createSandboxComputerProvider(
       // A computer that is running on an older image is left alone here. It may be in the middle of
       // a task, and restarting it under the Bot is the person's decision, which is `update`.
 
-      const ready = await waitForReady(botId, locateWaitMs);
+      const ready = await waitForReady(key, locateWaitMs);
       const fqdn = ready.status?.serviceFQDN;
       if (!fqdn) {
         throw new SandboxError(
-          `The computer for ${botId} is ready but reported no address, so it cannot be reached.`,
+          `The computer for ${computerKeyText(key)} is ready but reported no address, so it cannot be reached.`,
         );
       }
       return `http://${fqdn}:4100`;
     },
 
-    async status(botId: string): Promise<ComputerStatus> {
+    async status(seat: ComputerSeat): Promise<ComputerStatus> {
+      const botId = seat.botId;
       try {
-        const sandbox = await read(botId);
+        const sandbox = await read(seat.key);
         if (!sandbox) return { botId, state: "absent" };
         /*
          * A SUSPENDED COMPUTER IS DOWN AND FINE, and reading it any other way is how scale-to-zero
@@ -562,12 +629,12 @@ export function createSandboxComputerProvider(
       }
     },
 
-    async stop(botId: string): Promise<{ wasRunning: boolean }> {
-      const sandbox = await read(botId);
+    async stop(target: ComputerTarget): Promise<{ wasRunning: boolean }> {
+      const sandbox = await read(target.key);
       if (!sandbox || isSuspended(sandbox)) return { wasRunning: false };
       // Suspended, not deleted: the pod goes and the volumes stay, which is the difference between
-      // stopping a computer and wiping a Bot's logins.
-      await call(`/${sandboxNameFor(botId)}`, {
+      // stopping a computer and wiping its logins.
+      await call(`/${sandboxNameFor(target.key)}`, {
         method: "PATCH",
         contentType: "application/merge-patch+json",
         body: JSON.stringify({ spec: { operatingMode: "Suspended" } }),
@@ -575,11 +642,12 @@ export function createSandboxComputerProvider(
       return { wasRunning: true };
     },
 
-    async reset(botId: string): Promise<{ cleared: boolean }> {
-      const sandbox = await read(botId);
+    async reset(target: ComputerTarget): Promise<{ cleared: boolean }> {
+      const sandbox = await read(target.key);
       if (!sandbox) return { cleared: false };
-      // Deleted, which takes the volumes with it. This is the one that is meant to lose the logins.
-      await call(`/${sandboxNameFor(botId)}`, { method: "DELETE" });
+      // Deleted, which takes the volumes with it. This is the one that is meant to lose the logins,
+      // and on a person's computer it is every Bot's there.
+      await call(`/${sandboxNameFor(target.key)}`, { method: "DELETE" });
       return { cleared: true };
     },
 
@@ -596,8 +664,9 @@ export function createSandboxComputerProvider(
      * front of a request. If this process dies before the resume, the computer is suspended on the
      * new image, and the next action wakes it exactly as it wakes an idle one.
      */
-    async update(botId: string) {
-      const sandbox = await read(botId);
+    async update(key: ComputerKey) {
+      const id = computerKeyText(key);
+      const sandbox = await read(key);
       if (!sandbox) return { updated: false, wasRunning: false };
       const from = imagesOf(sandbox.spec?.podTemplate);
       const to = imagesOf(options.template.podTemplate);
@@ -605,54 +674,49 @@ export function createSandboxComputerProvider(
         return { updated: false, wasRunning: !isSuspended(sandbox), from, to };
       }
       if (isSuspended(sandbox)) {
-        await replaceTemplate(botId, "Suspended");
+        await replaceTemplate(key, "Suspended");
         return { updated: true, wasRunning: false, from, to };
       }
-      const patched = await replaceTemplate(botId, "Suspended");
+      const patched = await replaceTemplate(key, "Suspended");
       const restarted = (async () => {
-        await waitForSuspended(botId, patched?.metadata?.generation);
+        await waitForSuspended(key, patched?.metadata?.generation);
         // Reset while it was stopping: there is nothing left to bring back.
-        if (!(await read(botId))) return;
-        await call(`/${sandboxNameFor(botId)}`, {
+        if (!(await read(key))) return;
+        await call(`/${sandboxNameFor(key)}`, {
           method: "PATCH",
           contentType: "application/merge-patch+json",
           body: JSON.stringify({ spec: { operatingMode: "Running" } }),
         });
-        await waitForReady(botId);
+        await waitForReady(key);
       })();
-      lastRestart.set(botId, restarted);
+      lastRestart.set(id, restarted);
       restarted
         .catch((error: unknown) => {
           console.error(
             JSON.stringify({
               type: "computer-sandbox-update-resume-failed",
-              botId,
+              computer: id,
               reason: error instanceof Error ? error.message : String(error),
               note: "The computer is on its new image and suspended; the next action wakes it.",
             }),
           );
         })
         .finally(() => {
-          if (lastRestart.get(botId) === restarted) lastRestart.delete(botId);
+          if (lastRestart.get(id) === restarted) lastRestart.delete(id);
         });
       return { updated: true, wasRunning: true, from, to };
     },
 
     /** The restart an `update` started, for a test to wait on. Undefined once it has finished. */
-    restarting(botId: string): Promise<void> | undefined {
-      return lastRestart.get(botId);
+    restarting(key: ComputerKey): Promise<void> | undefined {
+      return lastRestart.get(computerKeyText(key));
     },
 
     async list(): Promise<ComputerLocation[]> {
       const body = (await call("")) as { items?: Sandbox[] } | undefined;
       return (body?.items ?? []).map((sandbox) => {
-        const botId =
-          (sandbox.metadata as { annotations?: Record<string, string> })
-            ?.annotations?.["openbot.dev/bot-id"] ??
-          sandbox.metadata?.name ??
-          "";
         return {
-          botId,
+          key: keyOfSandbox(sandbox),
           status:
             isSuspended(sandbox) || !isReady(sandbox) ? "stopped" : "running",
           updateAvailable: isOutOfDate(sandbox),
@@ -666,7 +730,7 @@ export function createSandboxComputerProvider(
       });
     },
 
-    async sessionOf(botId: string): Promise<string | undefined> {
+    async sessionOf(seat: ComputerSeat): Promise<string | undefined> {
       /*
        * Which run of this computer this is, and it has to change across a suspend and resume.
        *
@@ -689,7 +753,7 @@ export function createSandboxComputerProvider(
        *
        * Reading, never ensuring: this must not be the thing that wakes a computer up.
        */
-      const sandbox = await read(botId);
+      const sandbox = await read(seat.key);
       if (!sandbox || isSuspended(sandbox)) return undefined;
       const ready = sandbox.status?.conditions?.find(
         (condition) => condition.type === "Ready",

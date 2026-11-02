@@ -8,6 +8,8 @@ import {
   approvalTeamRules,
   approvalTeamSettings,
 } from "../db/schema/approvals";
+import { intelligenceChannelMappings } from "../db/schema/core";
+import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
 import {
   type ApprovalAction,
@@ -18,6 +20,7 @@ import {
   ApprovalRefusedError,
   type ApprovalStore,
   type ApprovalTeamSettings,
+  offersStandingRule,
 } from "./types";
 
 const TEAM = "team";
@@ -143,6 +146,10 @@ export function createApprovalStore(database: Database): ApprovalStore {
           throw new ApprovalRefusedError(
             "Only an action handed to you can be marked done by you.",
           );
+        if (decision === "allow_always" && !offersStandingRule(request.action))
+          throw new ApprovalRefusedError(
+            "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
+          );
         if (decision === "allow_always")
           await tx.insert(approvalRules).values({
             id: crypto.randomUUID(),
@@ -248,6 +255,33 @@ export function createApprovalStore(database: Database): ApprovalStore {
         .orderBy(desc(approvalRules.createdAt));
     },
     policy: createPolicyStore(database),
+    /*
+     * A check-in task's conversation, found by the thread an action names: the task's own turn, the
+     * turn an approval carries on, and the person replying there all run in that thread. Started from
+     * a check-in, so it is work the person did not write out themselves, and every step in it asks
+     * but a read of their own connected app (see `gate` in approvals/service.ts).
+     */
+    async asksEveryChange(owner, threadId) {
+      const [row] = await database
+        .select({ id: botTasks.id })
+        .from(botTasks)
+        .innerJoin(
+          intelligenceChannelMappings,
+          and(
+            eq(intelligenceChannelMappings.channelId, botTasks.channelId),
+            eq(intelligenceChannelMappings.userId, owner),
+          ),
+        )
+        .where(
+          and(
+            eq(botTasks.ownerUserId, owner),
+            eq(botTasks.origin, "check_in"),
+            eq(intelligenceChannelMappings.threadId, threadId),
+          ),
+        )
+        .limit(1);
+      return Boolean(row);
+    },
     async revoke(owner, id) {
       const rows = await database
         .update(approvalRules)

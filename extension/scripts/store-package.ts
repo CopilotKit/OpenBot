@@ -28,8 +28,8 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { type Zippable, zipSync } from "fflate";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
+import { type Zippable, zipSync } from "fflate";
 import { verifyDist } from "./verify-dist";
 
 export const CHROME_PACKAGE = "chrome-web-store.zip";

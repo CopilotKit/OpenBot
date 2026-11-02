@@ -39,6 +39,7 @@ import {
   withPersonBrowsers,
 } from "../src/browser/host";
 import { personBrowserId } from "../src/browser/person";
+import type { ComputerSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { withPolicyPushOnWake } from "../src/computer/policy-network";
 import {
@@ -277,7 +278,7 @@ function build(
           token: COMPUTER_TOKEN,
         }),
         name: "docker",
-        isolation: "per-bot",
+        isolation: "per-person",
       },
       config.browser?.url,
     ),
@@ -722,12 +723,15 @@ describe("the red dot follows any of the person's Recorders", () => {
     const started: string[] = [];
     const supervisor = {
       name: "docker",
-      isolation: "per-bot",
-      locate: async (botId: string) => {
+      isolation: "per-person",
+      locate: async ({ botId }: ComputerSeat) => {
         started.push(botId);
         return `http://127.0.0.1:${COMPUTER_PORT}`;
       },
-      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      status: async ({ botId }: ComputerSeat) => ({
+        botId,
+        state: "absent" as const,
+      }),
       stop: async () => ({ wasRunning: false }),
       reset: async () => ({ cleared: false }),
       list: async () => [],

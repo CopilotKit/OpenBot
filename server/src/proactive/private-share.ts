@@ -18,6 +18,7 @@
  * answers the model with the message.
  */
 import { createHash } from "node:crypto";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import {
   type ApprovalContinuation,
   type ApprovalStore,
@@ -25,7 +26,7 @@ import {
   approvalPreview,
   currentApprovalContext,
 } from "../approvals/types";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { cutAtCodeUnits } from "../channels/text";
 
 export const PRIVATE_SHARE_TOOL_REF = "openbot/share_private_information";
 export const PRIVATE_SHARE_EFFECT = "share_private";
@@ -57,6 +58,12 @@ export type PrivateShareInput = {
     | { kind: "shared_conversation"; sharedWithUserIds: readonly string[] };
   /** The run and tool call this send belongs to; defaults to the current approval context. */
   continuation?: ApprovalContinuation;
+  /**
+   * The caller puts this exact send, with what it sends, to the approval gate next. Only a connector
+   * call does (plugins/plugin-store/calls.ts). In a task's conversation that gate asks about every
+   * send, so this check leaves the asking to it rather than ask the person twice about one send.
+   */
+  gatedNext?: true;
 };
 
 export type PrivateShareVerdict =
@@ -93,7 +100,7 @@ export function sharesWithOthers(input: PrivateShareInput) {
 }
 
 export function createPrivateShareCheck(deps: {
-  approvals: Pick<ApprovalStore, "open" | "list" | "rules">;
+  approvals: Pick<ApprovalStore, "open" | "list" | "rules" | "asksEveryChange">;
   now?: () => Date;
 }) {
   const now = deps.now ?? (() => new Date());
@@ -136,6 +143,24 @@ export function createPrivateShareCheck(deps: {
         message:
           "Sharing private information with other people needs your permission, and this send is not part of a run that can ask. It was not sent.",
       };
+    /*
+     * ONE ASK FOR ONE SEND IN A TASK. A task started from a check-in asks before every send, with
+     * the send's own content on the card (`TASK_ASKS` in approvals/service.ts), so the person's
+     * Allow once there is their permission to share exactly that. Asking here as well put two cards
+     * in front of them for one reply, the first of them offering an "Always allow" a task never
+     * offers. Only for a caller that puts the send to that gate next; anything else is asked here.
+     */
+    if (
+      input.gatedNext &&
+      (await deps.approvals.asksEveryChange?.(
+        input.ownerUserId,
+        continuation.threadId,
+      )) === true
+    )
+      return {
+        status: "allowed",
+        reason: "The task asks before this send, with what it sends.",
+      };
     const contentDigest = createHash("sha256")
       .update(input.content)
       .digest("hex");
@@ -149,7 +174,7 @@ export function createPrivateShareCheck(deps: {
         audience: input.audience.label ?? scope,
         recipients: input.audience.recipientUserIds.length,
         contentDigest,
-        preview: approvalPreview(input.content.slice(0, 280)),
+        preview: approvalPreview(cutAtCodeUnits(input.content, 280)),
       },
       target: { kind: input.audience.kind, id: input.audience.id },
       continuation,

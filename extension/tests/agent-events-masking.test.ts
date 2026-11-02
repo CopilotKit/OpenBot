@@ -1,9 +1,10 @@
 // The agent events leave masked and cut to fit, on real traffic: a person who hands the agent a card number and a
 // password they typed earlier into a password field (so the recording holds its digest), a person who pastes a log far
 // over Intelligence's 16 KiB event limit, and OpenBot's own chat, whose every run starts with its whole tool list.
+
+import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
 import {
   EVENT_BUDGET_BYTES,
   normaliseSecret,

@@ -38,6 +38,12 @@ export type EnterpriseSettings = {
    * Skill opened while it was on reaches no other person's Bot (learning/runtime.ts).
    */
   skillSharing: boolean;
+  /**
+   * How many check-ins each Bot may run for one person in any 24 hours (Admin, Check-ins). Skipped
+   * check-ins do not count; one past it is skipped as `capped` before any model call. 24 is hourly,
+   * the most often a Bot checks on its own, so the default only stops Run now pressed all day.
+   */
+  proactiveDailyRuns: number;
 };
 
 export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
@@ -47,6 +53,7 @@ export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   modelAllowlist: { enabled: false, models: [] },
   mcpAllowlist: { enabled: false, servers: [] },
   skillSharing: false,
+  proactiveDailyRuns: 24,
 };
 
 const SETTING_KEYS = {
@@ -56,6 +63,7 @@ const SETTING_KEYS = {
   modelAllowlist: "model_allowlist",
   mcpAllowlist: "mcp_allowlist",
   skillSharing: "skill_sharing",
+  proactiveDailyRuns: "proactive_daily_runs",
 } as const satisfies Record<keyof EnterpriseSettings, string>;
 
 export type NetworkPolicyRow = {

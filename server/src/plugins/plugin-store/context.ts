@@ -1,6 +1,7 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { recordAuditEvent } from "../../audit";
+import { createAuditStore, recordAuditEvent } from "../../audit";
+import type { Database } from "../../db/client";
 import {
   type CredentialExecutor,
   CredentialUnusableError,
@@ -47,6 +48,7 @@ import {
   INVALID_GRANT,
   isUsableClient,
   type OAuthClient,
+  OAuthClientReadError,
   PluginInvariantError,
   type PluginKind,
   PluginRefusedError,
@@ -370,10 +372,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         );
 
   /**
-   * The one statement behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
-   * `markAuthorizationWithdrawn`, so the three verdicts cannot drift into three row shapes.
-   * `completed_at` is truncated to milliseconds for the reason `claimAuthorizationAttempt`
-   * truncates `created_at`.
+   * The shared transition behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
+   * `markAuthorizationWithdrawn`, so the verdicts cannot drift into three row shapes.
+   * An unreconciled transition and its safe audit record commit together; a failed audit leaves
+   * the attempt unsettled. `completed_at` is truncated to milliseconds for the reason
+   * `claimAuthorizationAttempt` truncates `created_at`.
    *
    * CONDITIONAL ON `completed_at IS NULL`, EXACTLY AS THE COMPLETION ABOVE IS, BECAUSE A SETTLED
    * ATTEMPT IS A RECORD AND NOT A DRAFT. Without that condition this UPDATE matched on
@@ -404,21 +407,56 @@ export function createStoreContext(options: PluginStoreOptions) {
     input: { actorId: string; authId: string },
     outcome: "failed" | "unreconciled" | "withdrawn",
   ) => {
-    const written = await database
-      .update(pendingAuthorizations)
-      .set({
-        completedAt: sql`date_trunc('milliseconds', now())`,
-        outcome,
-      })
-      .where(
-        and(
-          eq(pendingAuthorizations.actorId, input.actorId),
-          eq(pendingAuthorizations.authId, input.authId),
-          isNull(pendingAuthorizations.completedAt),
-        ),
-      )
-      .returning({ actorId: pendingAuthorizations.actorId });
-    return written.length > 0;
+    return await database.transaction(async (transaction) => {
+      const [attempt] = await transaction
+        .update(pendingAuthorizations)
+        .set({
+          completedAt: sql`date_trunc('milliseconds', now())`,
+          outcome,
+        })
+        .where(
+          and(
+            eq(pendingAuthorizations.actorId, input.actorId),
+            eq(pendingAuthorizations.authId, input.authId),
+            isNull(pendingAuthorizations.completedAt),
+          ),
+        )
+        .returning({
+          serverId: pendingAuthorizations.serverId,
+          action: pendingAuthorizations.action,
+          holder: pendingAuthorizations.holder,
+          createdAt: pendingAuthorizations.createdAt,
+        });
+      if (!attempt) return false;
+      if (outcome === "unreconciled") {
+        const [server] = await transaction
+          .select({ url: mcpServers.url })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, attempt.serverId))
+          .limit(1);
+        const toolkit = server
+          ? toolkitOfFor(brokerProvider, server.url)
+          : null;
+        await recordAuditEvent(
+          createAuditStore(transaction as unknown as Database),
+          {
+            eventType: "mcp.authorization_unreconciled",
+            targetType: "mcp_server",
+            targetId: toolkit ?? attempt.serverId,
+            payload: {
+              actor: input.actorId,
+              server: toolkit,
+              serverId: attempt.serverId,
+              action: attempt.action,
+              holder: attempt.holder,
+              attemptStartedAt: attempt.createdAt.toISOString(),
+              outcome,
+            },
+          },
+        );
+      }
+      return true;
+    });
   };
 
   /**
@@ -1260,6 +1298,40 @@ export function createStoreContext(options: PluginStoreOptions) {
   });
 
   /**
+   * Classify only client reads, never vendor registration or subsequent vault writes.
+   *
+   * The fault is logged by its name alone, because a vault or decryption message can quote the stored
+   * value. The error thrown in its place carries nothing of it, so this line is all an operator gets.
+   */
+  async function readClient(
+    serverId: string,
+    work: () => Promise<OAuthClient | null>,
+  ): Promise<OAuthClient | null> {
+    try {
+      return await work();
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "mcp-oauth-client-read-failed",
+          server: serverId,
+          error: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+      throw new OAuthClientReadError();
+    }
+  }
+
+  /** Parse errors can quote plaintext, so an invalid client is never rethrown with its secret. */
+  function clientFromStoredJson(plaintext: string): OAuthClient | null {
+    try {
+      const parsed: unknown = JSON.parse(plaintext);
+      return isUsableClient(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * One writer at a time for one server's OAuth client, across the whole deployment.
    *
    * Everything that stores a client reads "is there a live one" and then writes accordingly, and the
@@ -1304,35 +1376,29 @@ export function createStoreContext(options: PluginStoreOptions) {
     transaction: Transaction,
     serverId: string,
   ): Promise<OAuthClient | null> {
-    const [server] = await transaction
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
-    if (!server?.credentialId) return null;
+    return readClient(serverId, async () => {
+      const [server] = await transaction
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!server?.credentialId) return null;
 
-    const [held] = await transaction
-      .select({
-        encryptedValue: credentialRows.encryptedValue,
-        revokedAt: credentialRows.revokedAt,
-      })
-      .from(credentialRows)
-      .where(eq(credentialRows.id, server.credentialId))
-      .limit(1);
-    if (!held || held.revokedAt) return null;
+      const [held] = await transaction
+        .select({
+          encryptedValue: credentialRows.encryptedValue,
+          revokedAt: credentialRows.revokedAt,
+        })
+        .from(credentialRows)
+        .where(eq(credentialRows.id, server.credentialId))
+        .limit(1);
+      if (!held || held.revokedAt) return null;
 
-    try {
-      const parsed: unknown = JSON.parse(
-        await decryptSecret(encryptionKey, held.encryptedValue),
-      );
-      // A value that parsed and is not a client is unreadable in the same way and for the same
-      // caller — see {@link isUsableClient}. Null, because that is what this reader's caller acts
-      // on: it goes and registers one, which is the answer to holding none.
-      return isUsableClient(parsed) ? parsed : null;
-    } catch {
-      // Unreadable is the same as none: there is nothing to send anybody to consent with.
-      return null;
-    }
+      // A decryption fault does not mean the vendor forgot this client. Re-registering would replace
+      // the live client for every replica, including those that can still decrypt it.
+      const plaintext = await decryptSecret(encryptionKey, held.encryptedValue);
+      return clientFromStoredJson(plaintext);
+    });
   }
 
   /**
@@ -1453,29 +1519,29 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function storedOAuthClient(
     serverId: string,
   ): Promise<OAuthClient | null> {
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
-    if (!row?.credentialId) return null;
+    return readClient(serverId, async () => {
+      const [row] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!row?.credentialId) return null;
 
-    try {
-      const parsed: unknown = JSON.parse(
-        await decryptCredentialForUse(
+      let plaintext: string;
+      try {
+        plaintext = await decryptCredentialForUse(
           encryptionKey,
           credentials,
           row.credentialId,
-        ),
-      );
-      // A client that parsed and is not one is as unusable as the revoked or missing row the catch
-      // below answers for, and is the same none to every caller — see {@link isUsableClient}.
-      return isUsableClient(parsed) ? parsed : null;
-    } catch {
-      // A revoked, missing or unreadable client is the same as none for every caller: there is
-      // nothing to send anybody to consent with, and the answer is to obtain one again.
-      return null;
-    }
+        );
+      } catch (error) {
+        // Only a confirmed missing or revoked credential permits obtaining a replacement. A failed
+        // read or decryption must not turn a working deployment-wide registration into a new client.
+        if (error instanceof CredentialUnusableError) return null;
+        throw error;
+      }
+      return clientFromStoredJson(plaintext);
+    });
   }
 
   /**

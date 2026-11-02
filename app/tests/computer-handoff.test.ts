@@ -10,12 +10,12 @@ import type {
   ComputerControlState,
   HandoffStatus,
 } from "@openbot/shared/computer-control";
+import { releaseControl, takeControl } from "../src/lib/computers/control";
 import {
   awaitHandoff,
   runHelpRequest,
   runNavigation,
 } from "../src/lib/computers/handoff";
-import { releaseControl, takeControl } from "../src/lib/computers/control";
 
 let fetchSpy: Mock<typeof fetch>;
 beforeEach(() => {
@@ -172,7 +172,8 @@ test("manual takeover first creates a request and take/release name that ID", as
   expect(requests.map((r) => [r.path, r.body])).toEqual([
     [
       "/api/computers/bot-1/control/request",
-      { reason: "I want to take control of the browser." },
+      // A person's own take, said so, so its reason is never shown back to them as the Bot's.
+      { reason: "I want to take control of the browser.", source: "manual" },
     ],
     ["/api/computers/bot-1/control/take", { requestId: "request-1" }],
     ["/api/computers/bot-1/control/release", { requestId: "request-1" }],

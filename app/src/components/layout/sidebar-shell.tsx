@@ -17,6 +17,14 @@ import {
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_PREFIX,
 } from "@/lib/sidebar";
+import { cn } from "@/lib/utils";
+
+/**
+ * The sidebar's gutters: the header, content and footer already sit 8px in from the edge; every
+ * item inside them starts 10px further in, so the search icon, the avatars, the nav icons and the
+ * person's avatar share one left edge.
+ */
+const SIDEBAR_GUTTER = "[&_[data-sidebar=menu-button]]:px-2.5";
 
 /**
  * The frame the three shells — app, admin, settings — hang their sidebar in.
@@ -75,7 +83,7 @@ export function SidebarShell({
 
   return (
     <SidebarProvider
-      className={className}
+      className={cn(SIDEBAR_GUTTER, className)}
       data-resizing={resizing ? "" : undefined}
       onOpenChange={setOpen}
       open={open}

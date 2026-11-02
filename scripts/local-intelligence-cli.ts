@@ -10,8 +10,8 @@ import {
   resolve,
 } from "node:path";
 import {
-  cliEnvironment,
   type CliResult,
+  cliEnvironment,
 } from "../server/src/learning/ensure-container";
 
 /** Resolve only installed packages. Discovery must never contact a package registry. */

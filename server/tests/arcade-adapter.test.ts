@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import Arcade, { APIError } from "@arcadeai/arcadejs";
 import { callTool, useArcadeClient } from "../src/plugins/arcade";
-import { BrokerRefusalError } from "../src/plugins/broker";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
+import { BrokerRefusalError } from "../src/plugins/broker";
 
 /**
  * Same pattern as `composio-adapter.test.ts` ("the key becoming a vendor"): `new Arcade({ apiKey })`

@@ -2,9 +2,9 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
-import { intelligenceApiKey } from "../shared/intelligence-key";
 import {
   cliLoginPresent,
+  cmdLineSafe,
   containerMissing,
   ensureLearningContainer,
   json,
@@ -12,11 +12,13 @@ import {
   keyIntelligence,
   learningSetupInstructions,
   MANAGED_API,
+  npxCommand,
   object,
   type RunCli,
   runCli,
   verifiedContainer,
 } from "../server/src/learning/ensure-container";
+import { intelligenceApiKey } from "../shared/intelligence-key";
 import {
   intelligenceApiOrigin,
   type LearningConnection,
@@ -226,6 +228,12 @@ export async function setupLearning(
   if (typeof projectId !== "string" || !projectId.trim()) {
     throw new Error(
       "The selected project is invalid. Run npx --yes copilotkit@latest project select again.",
+    );
+  }
+  // Through cmd.exe, `runCli` refuses such an id without running anything; say so here instead.
+  if (npxCommand().shell && !cmdLineSafe([projectId])) {
+    throw new Error(
+      "The selected project id has characters that cannot be passed safely to the CopilotKit CLI on Windows. Run npx --yes copilotkit@latest project select again.",
     );
   }
   // No runtime key is available. Provision one for the saved project before assigning Learning.

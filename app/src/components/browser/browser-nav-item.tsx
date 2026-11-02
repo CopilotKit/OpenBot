@@ -33,12 +33,12 @@ import {
 } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
-import { elapsed, RecordingMark, useSecondsSince } from "./recording";
 import {
-  type ConnectProgress,
   ConnectHerePanel,
+  type ConnectProgress,
   RecordHerePanel,
 } from "./recorder-here-popover";
+import { elapsed, RecordingMark, useSecondsSince } from "./recording";
 
 const BUTTON_CLASS = "hover:bg-foreground/5 h-10";
 

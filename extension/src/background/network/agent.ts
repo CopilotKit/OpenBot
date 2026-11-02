@@ -3,7 +3,7 @@
 // then each Network.dataReceived carries its bytes), the AG-UI events its WebSockets receive, and CopilotKit's runtime
 // `info` call when its runtime answers it (the page runs CopilotKit). The request tracker
 // (debugger.ts) asks this which requests are runs: a run is never a step's save, nor a write a step waits for.
-import type { CaptureObservation } from "../agent/observation";
+
 import {
   createChannels,
   createHttpStream,
@@ -16,6 +16,7 @@ import {
   runChannel,
   streamFormat,
 } from "../../shared/agui";
+import type { CaptureObservation } from "../agent/observation";
 import type { Debuggee } from "./debugger";
 
 type Send = (

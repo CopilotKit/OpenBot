@@ -53,6 +53,7 @@ import {
   OPEN_BUDGET_MS,
   STATE_TIMEOUT_MS,
 } from "../src/browser/routes";
+import { botSeat, type ComputerSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { withPolicyPushOnWake } from "../src/computer/policy-network";
 import {
@@ -385,6 +386,15 @@ const computer = Bun.serve<{ bot: string }>({
       case "/browser/close":
         browsers.delete(id);
         return Response.json(closed);
+      case "/browser/clear":
+        // A POST with no body. As the computer clears it (agent-computer's browser-host.ts): the browser closed and its
+        // whole profile deleted, the Recorder's storage with it, so the connection the Recorder kept goes too. It stays
+        // closed: only OpenBot can hand the Recorder a connection again.
+        if (request.method !== "POST" || sent !== "")
+          return Response.json({ error: "Bad request." }, { status: 400 });
+        browsers.delete(id);
+        recorderKeeps.delete(id);
+        return Response.json(closed);
     }
     return Response.json({ error: "Not found." }, { status: 404 });
   },
@@ -539,7 +549,7 @@ function ownComputers(): ComputerProvider {
       token: COMPUTER_TOKEN,
     }),
     name: "docker",
-    isolation: "per-bot",
+    isolation: "per-person",
   };
 }
 
@@ -636,12 +646,15 @@ describe("opening a person's own browser", () => {
     const started: string[] = [];
     const supervisor = {
       name: "docker",
-      isolation: "per-bot",
-      locate: async (botId: string) => {
+      isolation: "per-person",
+      locate: async ({ botId }: ComputerSeat) => {
         started.push(botId);
         return `http://127.0.0.1:${COMPUTER_PORT}`;
       },
-      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      status: async ({ botId }: ComputerSeat) => ({
+        botId,
+        state: "absent" as const,
+      }),
       stop: async () => ({ wasRunning: false }),
       reset: async () => ({ cleared: false }),
       list: async () => [],
@@ -668,12 +681,15 @@ describe("opening a person's own browser", () => {
     const started: string[] = [];
     const bots = {
       name: "docker",
-      isolation: "per-bot",
-      locate: async (botId: string) => {
+      isolation: "per-person",
+      locate: async ({ botId }: ComputerSeat) => {
         started.push(botId);
         return `http://127.0.0.1:${COMPUTER_PORT}`;
       },
-      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      status: async ({ botId }: ComputerSeat) => ({
+        botId,
+        state: "absent" as const,
+      }),
       stop: async () => ({ wasRunning: false }),
       reset: async () => ({ cleared: false }),
       list: async () => [],
@@ -772,24 +788,31 @@ describe("opening a person's own browser", () => {
   test("OpenBot Desktop's host-side computer carries people's browsers, while Bots' computers stay where they are", async () => {
     const bots = {
       name: "docker",
-      isolation: "per-bot",
+      isolation: "per-person",
       locate: async () => "http://127.0.0.1:4300/bot-computer",
-      status: async (botId: string) => ({ botId, state: "absent" as const }),
+      status: async ({ botId }: ComputerSeat) => ({
+        botId,
+        state: "absent" as const,
+      }),
       stop: async () => ({ wasRunning: false }),
       reset: async () => ({ cleared: false }),
       list: async () => [],
     } satisfies ComputerProvider;
     const desktop = withPersonBrowsers(bots, "http://127.0.0.1:4101");
-    expect(await desktop.locate(personBrowserId(ada.id))).toBe(
+    expect(await desktop.locate(botSeat(personBrowserId(ada.id)))).toBe(
       "http://127.0.0.1:4101",
     );
-    expect(await desktop.status(personBrowserId(ada.id))).toMatchObject({
+    expect(
+      await desktop.status(botSeat(personBrowserId(ada.id))),
+    ).toMatchObject({
       state: "ready",
     });
-    expect(await desktop.locate("agent_7")).toBe(
+    expect(await desktop.locate(botSeat("agent_7"))).toBe(
       "http://127.0.0.1:4300/bot-computer",
     );
-    expect(await desktop.status("agent_7")).toMatchObject({ state: "absent" });
+    expect(await desktop.status(botSeat("agent_7"))).toMatchObject({
+      state: "absent",
+    });
     // Without OPENBOT_BROWSER_URL the same provider carries both.
     expect(withPersonBrowsers(bots, undefined)).toBe(bots);
     // There, a person's own desktop browser goes everywhere their own browser would.
@@ -977,7 +1000,11 @@ describe("opening a person's own browser", () => {
           event.eventType === "recorder.revoked" &&
           event.targetId === first.connectionId,
       )?.payload,
-    ).toEqual({ connectionId: first.connectionId, reason: "replaced" });
+    ).toEqual({
+      connectionId: first.connectionId,
+      via: "openbot-browser",
+      reason: "replaced",
+    });
   });
 
   test("a connection that no longer stands is not kept: the next open makes a new one", async () => {
@@ -1234,7 +1261,7 @@ describe("opening a person's own browser", () => {
               baseUrl: base,
               token: COMPUTER_TOKEN,
             }),
-            isolation: "per-bot",
+            isolation: "per-person",
           },
         },
       );
@@ -1334,7 +1361,7 @@ describe("opening a person's own browser", () => {
               baseUrl: base,
               token: COMPUTER_TOKEN,
             }),
-            isolation: "per-bot",
+            isolation: "per-person",
           },
         },
       );
@@ -1364,11 +1391,25 @@ describe("opening a person's own browser", () => {
           },
         });
         expect(asked.status).toBe(503);
+        // Named with a person too, as a seat on a computer people share is: still the person's browser, still refused.
+        const seated = await fetch(`${base}${path}`, {
+          headers: {
+            "x-openbot-computer-token": COMPUTER_TOKEN,
+            "x-openbot-bot-id": personBrowserId(ada.id),
+            "x-openbot-person-id": ada.id,
+          },
+        });
+        expect(seated.status).toBe(503);
       }
-      const stream = await fetch(
-        `${base}/stream?token=${COMPUTER_TOKEN}&bot=${personBrowserId(ada.id)}`,
-      );
-      expect(stream.status).toBe(503);
+      for (const query of [
+        `bot=${personBrowserId(ada.id)}`,
+        `bot=${personBrowserId(ada.id)}&person=${ada.id}`,
+      ]) {
+        const stream = await fetch(
+          `${base}/stream?token=${COMPUTER_TOKEN}&${query}`,
+        );
+        expect(stream.status).toBe(503);
+      }
       expect(await readdir(join(dir, "profiles"))).toEqual([]);
       // A Bot is served there as before.
       expect(
@@ -1509,6 +1550,113 @@ describe("opening a person's own browser", () => {
         })
       ).json(),
     ).toMatchObject({ user: { id: ben.id } });
+  });
+});
+
+describe("clearing a person's own browser", () => {
+  const clear = (as?: keyof typeof PEOPLE) =>
+    call(openbot, "/api/browser/clear", {
+      method: "POST",
+      ...(as ? { as } : {}),
+    });
+  const clearedRows = () =>
+    audits.filter((event) => event.eventType === "computer.browser_cleared");
+  const clears = (userId: string) =>
+    asked.filter(
+      (line) => line === `POST /browser/clear ${personBrowserId(userId)}`,
+    ).length;
+  /** The reason each `recorder.revoked` row gives for this connection. */
+  const revokedAs = (connectionId: string) =>
+    audits
+      .filter(
+        (event) =>
+          event.eventType === "recorder.revoked" &&
+          event.targetId === connectionId,
+      )
+      .map((event) => event.payload?.reason);
+
+  test("wipes the person's browser, says who did it on the trail, and opens it again fresh with its Recorder connected anew", async () => {
+    await open(openbot, "ada");
+    const before = handed(ada.id);
+    const rows = clearedRows().length;
+    const cleared = await clear("ada");
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      available: true,
+      computerId: personBrowserId(ada.id),
+      open: true,
+      recorder: { connected: true, userId: ada.id },
+    });
+    expect(clears(ada.id)).toBeGreaterThan(0);
+    // The connection the wiped Recorder held went with its storage: it was opened with a new one, which replaced it.
+    const after = handed(ada.id);
+    expect(after.connectionId).not.toBe(before.connectionId);
+    expect(
+      (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(before.token),
+        })
+      ).status,
+    ).toBe(401);
+    // Ended by the clear, whose wipe took its token, before the open made the new one.
+    expect(revokedAs(before.connectionId)).toEqual(["cleared"]);
+    expect(
+      await (
+        await call(openbot, "/api/recorder/me", {
+          headers: bearer(after.token),
+        })
+      ).json(),
+    ).toMatchObject({ user: { id: ada.id } });
+    // Who cleared which browser, as a computer reset is recorded.
+    expect(clearedRows().slice(rows)).toEqual([
+      expect.objectContaining({
+        targetType: "computer",
+        targetId: personBrowserId(ada.id),
+        actorUserId: ada.id,
+        payload: expect.objectContaining({ actor: ada.id }),
+      }),
+    ]);
+  });
+
+  test("a closed browser is cleared and left closed, its Recorder connection ended with it, and nobody signed out reaches it", async () => {
+    await open(openbot, "ben");
+    const held = handed(ben.id);
+    await call(openbot, "/api/browser/close", { method: "POST", as: "ben" });
+    // Closed, the browser keeps its connection in its profile, and OpenBot keeps it live for the next open.
+    expect(
+      (await call(openbot, "/api/recorder/me", { headers: bearer(held.token) }))
+        .status,
+    ).toBe(200);
+    const opensBefore = asked.filter((line) =>
+      line.startsWith("POST /browser/open "),
+    ).length;
+    const cleared = await clear("ben");
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({ open: false, tabs: [] });
+    expect(clears(ben.id)).toBeGreaterThan(0);
+    expect(
+      asked.filter((line) => line.startsWith("POST /browser/open ")).length,
+    ).toBe(opensBefore);
+    // The token went with the profile, so nothing stands for it here either: ended, and on the trail as the clear's.
+    expect(
+      (await call(openbot, "/api/recorder/me", { headers: bearer(held.token) }))
+        .status,
+    ).toBe(401);
+    expect(revokedAs(held.connectionId)).toEqual(["cleared"]);
+    expect(
+      audits.find(
+        (event) =>
+          event.eventType === "recorder.revoked" &&
+          event.targetId === held.connectionId,
+      ),
+    ).toMatchObject({
+      actorUserId: ben.id,
+      payload: { via: "openbot-browser", reason: "cleared" },
+    });
+
+    const unsigned = asked.length;
+    expect((await clear()).status).toBe(401);
+    expect(asked.slice(unsigned)).toEqual([]);
   });
 });
 
@@ -1735,6 +1883,8 @@ describe("a slow page, and a browser that cannot be reached", () => {
       ["/api/browser/navigate", CALL_BUDGET_MS],
       ["/api/browser/narration", CALL_BUDGET_MS],
       ["/api/browser/close", CALL_BUDGET_MS],
+      // A clear wipes the browser and opens it again.
+      ["/api/browser/clear", OPEN_BUDGET_MS],
     ] as const) {
       const seconds = browserRequestSeconds(path) ?? 0;
       expect(seconds * 1000).toBeGreaterThan(budget + STATE_TIMEOUT_MS);
@@ -1758,8 +1908,6 @@ describe("a slow page, and a browser that cannot be reached", () => {
       },
       agentProfileStore: { get: async () => null } as never,
       computerGateway: openbot.gateway,
-      demonstrationStore: {} as never,
-      demonstrationRecorder: {} as never,
       app: openbot.app,
     });
     const post = (path: string, json?: unknown) =>
@@ -1852,9 +2000,9 @@ describe("a slow page, and a browser that cannot be reached", () => {
       {
         provider: {
           name: "docker",
-          isolation: "per-bot",
+          isolation: "per-person",
           locate: async () => nowhere,
-          status: async (botId: string) => ({
+          status: async ({ botId }: ComputerSeat) => ({
             botId,
             state: "ready" as const,
           }),
@@ -1941,8 +2089,6 @@ describe("a browser that is open and not answering", () => {
       },
       agentProfileStore: { get: async () => null } as never,
       computerGateway: openbot.gateway,
-      demonstrationStore: {} as never,
-      demonstrationRecorder: {} as never,
       app: openbot.app,
     });
     try {
@@ -2093,12 +2239,12 @@ describe("Record after the OpenBot browser is disconnected", () => {
       {
         provider: {
           name: "docker",
-          isolation: "per-bot",
-          locate: async (botId: string) => {
+          isolation: "per-person",
+          locate: async ({ botId }: ComputerSeat) => {
             started.push(botId);
             return `http://127.0.0.1:${COMPUTER_PORT}`;
           },
-          status: async (botId: string) => ({
+          status: async ({ botId }: ComputerSeat) => ({
             botId,
             state: "absent" as const,
           }),
@@ -2128,9 +2274,9 @@ describe("Record after the OpenBot browser is disconnected", () => {
       {
         provider: {
           name: "docker",
-          isolation: "per-bot",
+          isolation: "per-person",
           locate: async () => `http://127.0.0.1:${NOTHING_PORT}`,
-          status: async (botId: string) => ({
+          status: async ({ botId }: ComputerSeat) => ({
             botId,
             state: "ready" as const,
           }),
@@ -2445,10 +2591,10 @@ describe("a person's browser where every Bot shares one computer", () => {
       as: "ben",
     });
     expect(control.status).toBeGreaterThanOrEqual(400);
-    await expect(shared.gateway.locate(computerId)).rejects.toThrow(
+    await expect(shared.gateway.locate(botSeat(computerId))).rejects.toThrow(
       SHARED_COMPUTER,
     );
-    expect(await shared.gateway.status(computerId)).toMatchObject({
+    expect(await shared.gateway.status(botSeat(computerId))).toMatchObject({
       state: "absent",
     });
 
@@ -2459,14 +2605,14 @@ describe("a person's browser where every Bot shares one computer", () => {
     ).toEqual([]);
     expect(await connections()).toBe(minted);
     // A Bot's computer there is reached as before.
-    expect(await shared.gateway.locate("agent_7")).toMatch(
+    expect(await shared.gateway.locate(botSeat("agent_7"))).toMatch(
       `http://127.0.0.1:${COMPUTER_PORT}`,
     );
   });
 
   test("a computer of each one's own, and OpenBot Desktop's host-side computer, still run it", () => {
     const shared = { isolation: "shared" } as const;
-    const own = { isolation: "per-bot" } as const;
+    const own = { isolation: "per-person" } as const;
     expect(personBrowserRefusal(shared, undefined)).toBe(SHARED_COMPUTER);
     expect(personBrowserRefusal(own, undefined)).toBeNull();
     expect(personBrowserRefusal(shared, "http://127.0.0.1:4101")).toBeNull();
@@ -2529,12 +2675,6 @@ describe("a person's browser on the computer routes and the live screen", () => 
       },
       agentProfileStore: { get: async () => null } as never,
       computerGateway: openbot.gateway,
-      demonstrationStore: {
-        active: async () => {
-          throw new Error("A person's browser is never a demonstration.");
-        },
-      } as never,
-      demonstrationRecorder: {} as never,
       app: openbot.app,
     });
     try {

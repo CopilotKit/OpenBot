@@ -3,6 +3,7 @@ import {
   type ExchangeResponse,
   exchangeRequestSchema,
   type LearningSpaceState,
+  RECORDER_ACTIVITY_STALE_MS,
   RECORDER_SIGNED_OUT,
   type RecorderConnection,
   type RecorderConnectionsResponse,
@@ -14,8 +15,8 @@ import { extensionIdFromOrigin } from "@openbot/shared/recorder-extension";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, DEPLOYMENT_INITIATOR } from "../audit";
-import { reasonWithoutStatement } from "../db/query-failure";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
+import { reasonWithoutStatement } from "../db/query-failure";
 import { recorderAudit, recorderConnected } from "./connected";
 import type {
   RecorderConnectionStore,
@@ -212,9 +213,22 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     return context.json(answer, 201);
   });
 
+  // Settings, Browsers, which asks again while it is open: each live connection, and whether its Recorder is recording
+  // now by its own latest report, which a recording sends every 30 s. Its last use cannot say so: a recording streams to
+  // the gateway, and reaches OpenBot only with those reports.
   routes.get("/connections", deps.requireUser, async (context) => {
+    const now = Date.now();
     const answer: RecorderConnectionsResponse = {
-      connections: await deps.connections.list(context.var.actor.id),
+      connections: (await deps.connections.reporting(context.var.actor.id)).map(
+        ({ activity, activityAt, ...connection }) => ({
+          ...connection,
+          recording:
+            activity !== null &&
+            activity.phase !== "idle" &&
+            activityAt !== null &&
+            now - activityAt.getTime() <= RECORDER_ACTIVITY_STALE_MS,
+        }),
+      ),
       extensionIds: deps.allowedExtensionIds(),
     };
     return context.json(answer);

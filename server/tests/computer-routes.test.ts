@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
+import type { ComputerSeat } from "../src/computer/computer-key";
+import { personSeat } from "../src/computer/computer-key";
 import {
   type ComputerGateway,
   ComputerStillStartingError,
@@ -12,17 +14,25 @@ describe("computer routes", () => {
   test("gets a screenshot through the governed computer gateway", async () => {
     const requestedBotIds: string[] = [];
     const gateway = {
-      status: async (botId: string) => ({ botId, state: "ready" }),
-      screenshot: async (botId: string) => {
-        requestedBotIds.push(botId);
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
+      status: async (seat: ComputerSeat) => ({
+        botId: seat.botId,
+        state: "ready",
+      }),
+      screenshot: async (seat: ComputerSeat) => {
+        requestedBotIds.push(seat.botId);
         return { image: "aGVsbG8=", mimeType: "image/png" as const };
       },
     } as unknown as ComputerGateway;
     const policyStore = {} as PolicyStore;
     const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
-      _context,
+      context,
       next,
-    ) => next();
+    ) => {
+      context.set("actor", { id: "user-1", email: "u@openbot.test" } as never);
+      await next();
+    };
     // Permissive: what this covers is the gateway seam, not who may act as the Bot. That question
     // has its own suite in bot-access.test.ts.
     const routes = createComputerRoutes(
@@ -62,7 +72,11 @@ describe("a computer that is not ready yet", () => {
       await next();
     };
     return createComputerRoutes(
-      gateway as ComputerGateway,
+      {
+        seatFor: async (botId: string, personId: string) =>
+          personSeat(personId, botId),
+        ...gateway,
+      } as ComputerGateway,
       {} as PolicyStore,
       requireUser,
       async () => true,
@@ -74,7 +88,7 @@ describe("a computer that is not ready yet", () => {
     async (state) => {
       let screenshots = 0;
       const routes = routesFor({
-        status: async (botId: string) => ({ botId, state }),
+        status: async (seat: ComputerSeat) => ({ botId: seat.botId, state }),
         screenshot: async () => {
           screenshots++;
           return { base64: "AAAA", width: 1, height: 1, capturedAt: "" };
@@ -91,8 +105,8 @@ describe("a computer that is not ready yet", () => {
 
   test("passes an unreachable computer's reason through, still as an answer", async () => {
     const routes = routesFor({
-      status: async (botId: string) => ({
-        botId,
+      status: async (seat: ComputerSeat) => ({
+        botId: seat.botId,
         state: "unreachable",
         reason: "The supervisor could not be reached.",
       }),
@@ -164,6 +178,8 @@ function asActor(
 function appFor(actor: AuthenticatedActor, computers: () => Promise<unknown>) {
   let listed = 0;
   const countingGateway = {
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
     async computers() {
       listed += 1;
       return computers();
@@ -186,7 +202,7 @@ function appFor(actor: AuthenticatedActor, computers: () => Promise<unknown>) {
 describe("computer fleet listing", () => {
   test("refuses a signed-in user the fleet, and does not ask the gateway", async () => {
     const { app, listed } = appFor(member, async () => ({
-      isolation: "per-bot",
+      isolation: "per-person",
       computers: [
         { botId: "private-coworker", running: true, startedAt: null },
       ],
@@ -205,7 +221,7 @@ describe("computer fleet listing", () => {
 
   test("lets an administrator see the fleet", async () => {
     const fleet = {
-      isolation: "per-bot" as const,
+      isolation: "per-person" as const,
       computers: [
         {
           botId: "private-coworker",
@@ -241,6 +257,8 @@ describe("human input", () => {
   function recordingGateway() {
     const calls: Array<{ botId: string; input: Record<string, unknown> }> = [];
     const gateway = {
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
       humanInput: async (botId: string, input: Record<string, unknown>) => {
         calls.push({ botId, input });
         return { ok: true };
