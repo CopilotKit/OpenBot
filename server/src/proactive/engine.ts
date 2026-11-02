@@ -54,6 +54,7 @@ import {
   type PriorItems,
   type ProactiveRead,
   type ProactiveStore,
+  STOPPED_BEFORE_FINISHING,
   unreachedError,
 } from "./store";
 import {
@@ -526,80 +527,111 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     const threadId = deps.mintThreadId();
     if (!(await deps.store.beginRun({ id: runId, setting, trigger, threadId })))
       return skip(setting, runId, trigger, "busy");
-    await deps.store.recordRun(setting.id, "running");
-    const prior = await deps.store.priorItems(
-      setting.ownerUserId,
-      setting.agentId,
-    );
-    const turn = { setting, reached: false };
-    running.set(runId, turn);
-    const instruction = researchInstruction(
-      setting,
-      checkInWindow(lastRead, now()),
-      contextOf(prior, setting.agentId),
-      trigger,
-      gate.apps.map((app) => app.title),
-    );
-    let thrown: unknown = null;
+    /*
+     * FROM HERE THE RUN IS IN THE LEDGER AS RUNNING, and every step until it is closed can fail on
+     * its own: a database call that drops its connection is enough. Left running, the row would make
+     * the next scheduled check-in skip as busy, Run now say "This Bot is checking in now", and the
+     * Bot's last status read running, until the lease sweep closed it ten minutes on. So whatever
+     * stops it, it is closed as failed here, and its status recorded, before the error goes on.
+     */
+    let closed = false;
+    let recorded = false;
+    let status: "succeeded" | "error" = "error";
+    let lastError: string | null = STOPPED_BEFORE_FINISHING;
     try {
-      await deps.runTurn({
-        ownerUserId: setting.ownerUserId,
-        routineId: `proactive:${setting.id}`,
-        agentId: setting.agentId,
-        // A fresh thread: an hourly check-in must not carry every earlier one, and their mail.
-        threadId,
-        instruction,
-        /*
-         * Its own message, as it is: a check-in is not a routine, and the runner puts a routine's
-         * frame ("one of your routines is firing right now, on its schedule") around any instruction
-         * that arrives without one. The instruction opens by saying what started it.
-         */
-        userMessage: {
-          id: `check-in:${runId}`,
-          role: "user",
-          content: instruction,
-        },
-        initiator: proactiveInitiator(runId),
-        runId,
-        signal,
+      await deps.store.recordRun(setting.id, "running");
+      const prior = await deps.store.priorItems(
+        setting.ownerUserId,
+        setting.agentId,
+      );
+      const turn = { setting, reached: false };
+      running.set(runId, turn);
+      const instruction = researchInstruction(
+        setting,
+        checkInWindow(lastRead, now()),
+        contextOf(prior, setting.agentId),
+        trigger,
+        gate.apps.map((app) => app.title),
+      );
+      let thrown: unknown = null;
+      try {
+        await deps.runTurn({
+          ownerUserId: setting.ownerUserId,
+          routineId: `proactive:${setting.id}`,
+          agentId: setting.agentId,
+          // A fresh thread: an hourly check-in must not carry every earlier one, and their mail.
+          threadId,
+          instruction,
+          /*
+           * Its own message, as it is: a check-in is not a routine, and the runner puts a routine's
+           * frame ("one of your routines is firing right now, on its schedule") around any instruction
+           * that arrives without one. The instruction opens by saying what started it.
+           */
+          userMessage: {
+            id: `check-in:${runId}`,
+            role: "user",
+            content: instruction,
+          },
+          initiator: proactiveInitiator(runId),
+          runId,
+          signal,
+        });
+      } catch (error) {
+        thrown = error;
+      } finally {
+        running.delete(runId);
+      }
+      // Metered once its turn was admitted and went to the model, whether or not it then finished.
+      if (turn.reached)
+        await recordHeadlessUsage({
+          ownerUserId: setting.ownerUserId,
+          agentId: setting.agentId,
+          threadId,
+          runId,
+        });
+      const [raised, reads] = await Promise.all([
+        deps.store.countSuggestions(runId),
+        deps.store.readsFor(runId),
+      ]);
+      const { outcome, error } = outcomeOf({
+        thrown,
+        raised,
+        reads: reads.length,
+        unreached: await unreached(reads, runId),
       });
-    } catch (error) {
-      thrown = error;
+      await deps.store.finishRun(runId, {
+        outcome,
+        itemsRaised: raised,
+        reads: reads.length,
+        error,
+      });
+      closed = true;
+      status = outcome === "failed" ? "error" : "succeeded";
+      lastError = error;
+      await deps.store.recordRun(setting.id, status, lastError);
+      recorded = true;
+      // Items recorded before a failure are still the person's, so they wait for a ping too.
+      if (raised > 0)
+        await tryPing(setting.ownerUserId).catch(
+          logged("proactive-ping-error"),
+        );
     } finally {
-      running.delete(runId);
+      if (!closed)
+        await deps.store
+          .finishRun(runId, {
+            outcome: "failed",
+            itemsRaised: await deps.store
+              .countSuggestions(runId)
+              .catch(() => 0),
+            reads: 0,
+            error: STOPPED_BEFORE_FINISHING,
+          })
+          .catch(logged("proactive-run-close-error"));
+      if (!recorded)
+        await deps.store
+          .recordRun(setting.id, status, lastError)
+          .catch(logged("proactive-run-close-error"));
     }
-    // Metered once its turn was admitted and went to the model, whether or not it then finished.
-    if (turn.reached)
-      await recordHeadlessUsage({
-        ownerUserId: setting.ownerUserId,
-        agentId: setting.agentId,
-        threadId,
-        runId,
-      });
-    const [raised, reads] = await Promise.all([
-      deps.store.countSuggestions(runId),
-      deps.store.readsFor(runId),
-    ]);
-    const { outcome, error } = outcomeOf({
-      thrown,
-      raised,
-      reads: reads.length,
-      unreached: await unreached(reads, runId),
-    });
-    await deps.store.finishRun(runId, {
-      outcome,
-      itemsRaised: raised,
-      reads: reads.length,
-      error,
-    });
-    await deps.store.recordRun(
-      setting.id,
-      outcome === "failed" ? "error" : "succeeded",
-      error,
-    );
-    // Items recorded before a failure are still the person's, so they wait for a ping too.
-    if (raised > 0)
-      await tryPing(setting.ownerUserId).catch(logged("proactive-ping-error"));
   }
 
   async function drain(

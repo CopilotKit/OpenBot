@@ -53,6 +53,7 @@ import type { CheckInApp } from "../src/proactive/scope";
 import {
   createProactiveStore,
   type ProactiveStore,
+  STOPPED_BEFORE_FINISHING,
 } from "../src/proactive/store";
 import {
   ProactiveRefusedError,
@@ -930,6 +931,51 @@ describe("the gates, before any model call", () => {
     });
     expect(runs[0]).toMatchObject({ outcome: "quiet" });
     expect(next.requests).toHaveLength(1);
+  });
+
+  test("a check-in whose own bookkeeping fails partway is closed as failed at once, so the next one runs rather than reading busy", async () => {
+    /*
+     * The real store, with one write that fails the way a dropped connection does: once, before the
+     * turn (reading what was raised before), then once after it (counting what this one raised).
+     */
+    const dropped = () => new Error("Connection terminated unexpectedly");
+    const failing = (method: "priorItems" | "countSuggestions") => {
+      let failed = false;
+      return {
+        ...store,
+        [method]: async (...args: never[]) => {
+          if (failed)
+            return (store[method] as (...a: never[]) => unknown)(...args);
+          failed = true;
+          throw dropped();
+        },
+      } as ProactiveStore;
+    };
+    for (const method of ["priorItems", "countSuggestions"] as const) {
+      await due(inbox);
+      const broken = replica({ store: failing(method) });
+      await expect(broken.engine.sweep()).rejects.toThrow(
+        "Connection terminated unexpectedly",
+      );
+      expect((await runsOf(inbox))[0]).toMatchObject({
+        outcome: "failed",
+        error: STOPPED_BEFORE_FINISHING,
+      });
+      const [setting] = await database
+        .select()
+        .from(proactiveSettings)
+        .where(eq(proactiveSettings.id, inbox.id));
+      expect(setting?.lastStatus).toBe("error");
+      // Not "This Bot is checking in now": Run now is free to ask for the next one.
+      await database
+        .update(proactiveRuns)
+        .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+        .where(eq(proactiveRuns.settingId, inbox.id));
+      expect(await broken.engine.runNow(owner, inbox.id)).toEqual({
+        queued: true,
+      });
+      await reset();
+    }
   });
 });
 
