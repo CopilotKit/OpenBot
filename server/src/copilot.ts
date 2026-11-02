@@ -77,6 +77,7 @@ import {
   selectTools,
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
+import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -1047,17 +1048,22 @@ async function buildAgent(
       ),
       {
         observe: observeModelConnection,
-        ...(loadAttachment
-          ? {
-              inline: (messages: AgentRunInput["messages"], threadId: string) =>
-                inlineAttachments(
+        /*
+         * The person's attached files, then the images a tool handed back. The second runs whether
+         * or not there is anything to load, because a tool's picture is not a stored attachment;
+         * see `tool-images.ts`.
+         */
+        inline: async (messages: AgentRunInput["messages"], threadId: string) =>
+          inlineToolImages(
+            loadAttachment
+              ? await inlineAttachments(
                   messages,
                   loadAttachment,
                   threadId,
                   markAttachmentsSent,
-                ),
-            }
-          : {}),
+                )
+              : messages,
+          ),
       },
     );
 
@@ -1436,9 +1442,12 @@ function remoteAgentWithStandingRole(
      *
      * ALONGSIDE THE SANITISER, NOT INSTEAD OF IT. One drops what the provider is going to refuse;
      * this puts in front of the model what the person actually attached.
+     *
+     * Then the images a tool handed back, for the same endpoint that cannot open a storage link
+     * either; see `tool-images.ts`.
      */
     return from(
-      loadAttachment
+      (loadAttachment
         ? inlineAttachments(
             history,
             loadAttachment,
@@ -1446,7 +1455,8 @@ function remoteAgentWithStandingRole(
             input.threadId,
             markAttachmentsSent,
           )
-        : Promise.resolve(history),
+        : Promise.resolve(history)
+      ).then((inlined) => inlineToolImages(inlined)),
     ).pipe(
       switchMap((messages) => {
         const prepared: RunAgentInput = {
