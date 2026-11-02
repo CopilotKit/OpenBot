@@ -13,6 +13,7 @@ const openbot: Skin = {
   id: "openbot",
   name: appConfig.brand.productName,
   description: "The standard look, with your conversations in a sidebar.",
+  botLook: "orb",
 };
 
 /** Keyed by every id in `SKIN_IDS`, so a skin cannot be listed without being registered. */
