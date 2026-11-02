@@ -1,3 +1,4 @@
+import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { approvalWords } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -6,7 +7,6 @@ import {
   type ApprovalDecision,
   approvalInboxOptions,
   decideApproval,
-  offersAlwaysAllow,
 } from "@/lib/approvals";
 
 /**
@@ -45,7 +45,7 @@ export function InlineApproval({
       ]
     : [
         ["allow_once", "Allow once"],
-        ...(offersAlwaysAllow(request)
+        ...(offersStandingRule(request.action)
           ? [
               ["allow_always", "Always allow here"] as [
                 ApprovalDecision,

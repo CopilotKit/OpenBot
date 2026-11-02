@@ -1,3 +1,4 @@
+import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { approvalWords } from "@openbot/shared/tool-name";
 import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -21,7 +22,6 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   decideApprovalMutationOptions,
-  offersAlwaysAllow,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
 
@@ -168,7 +168,7 @@ function RequestRow({
           >
             Allow once
           </Button>
-          {offersAlwaysAllow(request) ? (
+          {offersStandingRule(request.action) ? (
             <Button
               disabled={decision.isPending}
               onClick={() =>

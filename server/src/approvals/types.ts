@@ -235,15 +235,8 @@ export type ApprovalStore = {
   asksEveryChange?(ownerUserId: string, threadId: string): Promise<boolean>;
   policy?: ApprovalPolicyStore;
 };
-/**
- * Whether an approval may be answered with a standing rule ("Always allow here"). Not one a task
- * started from a check-in raised: those ask before every change whatever the person's rules say
- * (`TASK_ASKS` in service.ts), so a rule saved from one would be ignored the next time and only
- * mislead. Allow once and Deny stay.
- */
-export function offersStandingRule(action: Pick<ApprovalAction, "policy">) {
-  return action.policy?.source !== "task";
-}
+/** Whether an approval may be answered with "Always allow here". Shared with the browser. */
+export { offersStandingRule } from "@openbot/shared/standing-rule";
 export class ApprovalRefusedError extends Error {
   constructor(message: string) {
     super(message);
