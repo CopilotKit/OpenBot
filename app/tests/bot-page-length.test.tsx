@@ -11,6 +11,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import {
   activitySummary,
   BotActivityGlance,
+  BotActivityRow,
 } from "@/components/bot-profile/activity";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
@@ -102,7 +103,10 @@ test("the newest three suggestions show, and the rest open in place", async () =
   expect(view.queryByRole("button", { name: /more$/ })).toBeNull();
 });
 
-function glance(data: BotActivity) {
+function glance(
+  data: BotActivity,
+  Component: typeof BotActivityGlance = BotActivityGlance,
+) {
   global.fetch = (async (input: RequestInfo | URL) =>
     String(input).endsWith("/activity")
       ? Response.json({ activity: data })
@@ -112,7 +116,7 @@ function glance(data: BotActivity) {
         )) as typeof fetch;
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => <BotActivityGlance agentId="scout" />,
+      component: () => <Component agentId="scout" />,
     }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
@@ -148,13 +152,20 @@ test("running and scheduled work shows on the Bot's page, running first, three a
   expect(view.queryByText("Done 1")).toBeNull();
 });
 
-test("with nothing running or scheduled, the section is the one row to all activity", async () => {
-  const view = glance({
+test("with nothing running or scheduled, there is no Activity section, and For you holds the one row", async () => {
+  const idle = {
     inProgress: [],
     scheduled: [],
     completed: items(4, "Done"),
-  });
+  };
+  const section = glance(idle);
+  const row = glance(idle, BotActivityRow);
 
-  expect(await view.findByText("Nothing running or scheduled")).toBeTruthy();
-  expect(view.container.querySelectorAll("[data-slot=item]")).toHaveLength(1);
+  expect(await row.findByText("Nothing running or scheduled")).toBeTruthy();
+  const titles = [
+    ...row.container.querySelectorAll("[data-slot=item-title]"),
+  ].map((title) => title.textContent);
+  expect(titles).toEqual(["Activity"]);
+  expect(section.container.querySelector("[data-slot=item]")).toBeNull();
+  expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
 });
