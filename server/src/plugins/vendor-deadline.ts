@@ -13,13 +13,13 @@
  * The message names this deployment's own bound and the thrown object has no `cause`, deliberately:
  * a call that times out on the return leg is a call whose answer would have carried a LIVE provider
  * access token and a full profile, and the one thing certain about a half-read answer is that
- * nobody has narrowed it yet. So there is nothing here to attach, log or quote — which is the same
+ * nobody has narrowed it yet. So there is nothing here to attach, log or quote, which is the same
  * promise {@link brokerRefusal} makes about the vendor's own errors, kept by having no vendor
  * material to begin with.
  *
  * It is an ordinary `Error` to every reader of it: `brokerSentence` does not author it and
  * `vendorSentence` finds no nested body, so every route answers it with its OWN generic sentence and
- * a 502 — "we asked and got nothing back", which is exactly what happened.
+ * a 502: "we asked and got nothing back", which is exactly what happened.
  *
  * NOT EXPORTED, because nothing should be branching on it: every exit it can reach is already one
  * of its caller's own refusals, and a caller matching on the class would be re-deciding what those
@@ -50,7 +50,7 @@ const VENDOR_CALL_TIMEOUT_MS = 10_000;
  * is what lets the handler answer and the browser go; aborting is what stops this deployment from
  * holding a socket open against a vendor it has already given up on, and the seams that can carry
  * a signal take it (see {@link AuthorizationFlow}). A seam that cannot is still bounded by the
- * race — a timeout is a timeout to the person waiting either way — and its call is simply
+ * race (a timeout is a timeout to the person waiting either way), and its call is simply
  * abandoned rather than cancelled.
  *
  * THE TIMER IS CLEARED ON BOTH OUTCOMES. A pending timer on a call that answered in time would keep
@@ -75,8 +75,8 @@ export function withVendorDeadline<T>(
   /*
    * A CALL THAT THROWS BEFORE IT RETURNS A PROMISE IS A REJECTION, NOT AN ESCAPE. The deadline is
    * already armed by this line, so invoking `call` bare inside the race would let a synchronous
-   * throw — `brokerReturnUrl` refusing a scheme-less `OPENBOT_APP_URL` while the callback builds its
-   * argument is the one that happens — leave this function before the race and its `.finally`
+   * throw (`brokerReturnUrl` refusing a scheme-less `OPENBOT_APP_URL` while the callback builds its
+   * argument is the one that happens) leave this function before the race and its `.finally`
    * exist: the timer stays armed, aborts nothing anybody is waiting on and rejects `deadline` with
    * no one subscribed, and a caller's `.catch(...)` on the returned promise is skipped entirely.
    * Calling it inside an executor turns that throw into this promise's rejection, still
