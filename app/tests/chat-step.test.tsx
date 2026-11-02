@@ -293,7 +293,7 @@ test("a keystroke does not reach the status line, and a new step does not reach 
   const probe = (name: string) =>
     view.container.querySelector(`[data-probe='${name}']`)?.textContent;
   expect(probe("status")).toBe(THINKING);
-  expect(probe("orb")).toBe("thinking");
+  expect(probe("orb")).toBe("working");
 
   const atStart = { ...renders };
   act(() => report?.onTextChange("A correction"));

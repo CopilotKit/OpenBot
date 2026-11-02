@@ -30,6 +30,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { BotLookProvider } from "@/components/agents/bot-look";
 import { ConversationPresenceProvider } from "@/components/channels/conversation-presence";
 import { ComputerPaneTitle } from "@/components/computer/computer-panel";
 import { ComputerView } from "@/components/computer/computer-view";
@@ -146,11 +147,14 @@ describe("the pane's title", () => {
     client.setQueryData(["approvals"], inbox);
     return render(
       <QueryClientProvider client={client}>
-        <ConversationPresenceProvider channelId="c-1" threadId={THREAD}>
-          <h2>
-            <ComputerPaneTitle agentId="ana" name={name} />
-          </h2>
-        </ConversationPresenceProvider>
+        {/* Bots drawn as orbs, as in the default look. */}
+        <BotLookProvider value="orb">
+          <ConversationPresenceProvider channelId="c-1" threadId={THREAD}>
+            <h2>
+              <ComputerPaneTitle agentId="ana" name={name} />
+            </h2>
+          </ConversationPresenceProvider>
+        </BotLookProvider>
       </QueryClientProvider>,
     );
   }
@@ -159,8 +163,8 @@ describe("the pane's title", () => {
     const view = renderTitle("Ana");
     const heading = view.getByRole("heading");
     expect(heading.textContent).toBe("Ana's computer");
-    const orb = heading.querySelector("[data-palette]");
-    expect(orb).not.toBeNull();
+    const orb = heading.querySelector("[data-state]");
+    expect(orb?.querySelector("[role='img']")).not.toBeNull();
     // The conversation's orb: at rest while nothing is happening.
     expect(orb?.getAttribute("data-state")).toBe("idle");
   });

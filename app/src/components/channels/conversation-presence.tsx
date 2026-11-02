@@ -15,7 +15,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { BotOrbState } from "@/components/agents/orb/bot-orb";
+import type { BotOrbState } from "@/components/agents/bot-orb";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { channelListQueryOptions } from "@/lib/channels/queries";
@@ -47,7 +47,7 @@ import { cn } from "@/lib/utils";
  * this thread) is read here from the queries the app already keeps.
  */
 
-/** How long the orb holds "done": its smile springs up and settles away. */
+/** How long the orb holds "done" after an answer lands, before it rests again. */
 export const LANDING_MS = 2600;
 
 /** What the conversation last reported. */
@@ -280,8 +280,8 @@ function useUnownedBusy(
 /**
  * The Bot's orb state for what the conversation is doing. The Bot working outranks the person
  * typing, since a correction typed mid-answer waits for the turn to end; typing cuts a landing
- * short, and so does an approval waiting here, since the line then says "Needs you". Resting
- * outside a conversation route.
+ * short, and so does an approval waiting here, since the line then says "Needs you" and the orb
+ * waits on the person. Resting outside a conversation route.
  */
 export function useConversationOrb(): BotOrbState {
   const presence = useContext(StoreContext);
@@ -306,9 +306,9 @@ export function useConversationOrb(): BotOrbState {
     const timer = setTimeout(() => setLanded(answers), LANDING_MS);
     return () => clearTimeout(timer);
   }, [answers, present, landed]);
-  if (working || server.working) return "thinking";
+  if (working || server.working) return "working";
   if (drafting) return "listening";
-  if (server.waiting) return "idle";
+  if (server.waiting) return "waiting";
   return present && answers !== landed ? "done" : "idle";
 }
 

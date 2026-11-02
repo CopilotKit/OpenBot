@@ -37,7 +37,7 @@ export function ComputerViewPanel({
   );
 }
 
-/** Small enough for the pane's 48px header, so it blinks and watches and otherwise keeps still. */
+/** Small enough for the pane's 48px header. */
 const TITLE_ORB_SIZE = 28;
 
 /**

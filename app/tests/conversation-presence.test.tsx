@@ -246,7 +246,7 @@ describe("the header's orb and the line under the name", () => {
       <Chat busy messages={RUNNING} />,
     );
     expect(line()).toBe("Working · Searching the web");
-    expect(orb()).toBe("thinking");
+    expect(orb()).toBe("working");
 
     show(<Chat busy messages={ANSWERED} />);
     expect(line()).toBe(`Working · ${THINKING}`);
@@ -376,7 +376,8 @@ describe("the header's orb and the line under the name", () => {
     );
     show(<Chat messages={ANSWERED} />);
     expect(line()).toBe("Needs you");
-    expect(orb()).toBe("idle");
+    // The orb waits on the person instead.
+    expect(orb()).toBe("waiting");
   });
 
   test("say Needs you while an approval waits in this conversation, and only this one", () => {
@@ -444,7 +445,7 @@ describe("the header's orb and the line under the name", () => {
       { busy: true },
     );
     expect(line()).toBe("Working");
-    expect(orb()).toBe("thinking");
+    expect(orb()).toBe("working");
 
     await setBusy(false);
     expect(line()).toBe("");
@@ -529,7 +530,7 @@ describe("the header's orb and the line under the name", () => {
     const { show, line, orb } = renderConversation(
       <Chat busy messages={RUNNING} />,
     );
-    expect(orb()).toBe("thinking");
+    expect(orb()).toBe("working");
     show(null);
     expect(line()).toBe("");
     expect(orb()).toBe("idle");
