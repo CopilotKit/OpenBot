@@ -1,4 +1,4 @@
-import { IconDeviceMobile, IconSend } from "@tabler/icons-react";
+import { IconDeviceMobile, IconDevices, IconSend } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import {
@@ -44,7 +44,9 @@ export function NativeDevices() {
       ) : null}
       {reach.isPending || !reach.data ? null : reach.data.devices.length ===
         0 ? (
-        <PageEmpty>No devices yet.</PageEmpty>
+        <PageEmpty icon={IconDevices} title="No devices yet">
+          Phones and computers you sign in on show up here.
+        </PageEmpty>
       ) : (
         <PageRows>
           {reach.data.devices.map((device, index) => (
@@ -88,7 +90,9 @@ export function RecentDeliveries() {
       ) : null}
       {reach.isPending || !reach.data ? null : reach.data.deliveries.length ===
         0 ? (
-        <PageEmpty>No deliveries yet.</PageEmpty>
+        <PageEmpty icon={IconSend} title="No deliveries yet">
+          Notifications sent to your devices show up here.
+        </PageEmpty>
       ) : (
         <PageRows>
           {reach.data.deliveries.map((delivery, index) => (

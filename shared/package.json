@@ -11,7 +11,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.2",
+    "happy-dom": "^20.11.2",
     "typescript": "^5.9.3"
   }
 }

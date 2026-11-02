@@ -11,12 +11,12 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { useBrokeredAccount } from "../src/components/plugins/brokered-account-row";
-import type { PluginServer } from "../src/lib/plugins/queries";
-import { brokeredFor } from "../src/routes/_authed/_app/connections.$key";
 import {
   brokeredAccountsListedOn,
   sharedAccountsListedOn,
-} from "../src/routes/_authed/_app/connections.index";
+} from "../src/lib/plugins/listed";
+import type { PluginServer } from "../src/lib/plugins/queries";
+import { brokeredFor } from "../src/routes/_authed/_app/connections.$key";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);

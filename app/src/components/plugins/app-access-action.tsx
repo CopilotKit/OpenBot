@@ -1,13 +1,17 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import {
+  approveBotAppMutationOptions,
   cancelAppAccessRequestMutationOptions,
+  giveBotAppMutationOptions,
   requestAppAccessMutationOptions,
 } from "@/lib/app-access/mutations";
 import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -18,8 +22,9 @@ import { queryClient } from "@/query-client";
  * whether this person can use this app through this Bot, whose move it is if not, and the button
  * for that move — so both draw it from here, and a sentence corrected for one is corrected for both.
  *
- * WHO CAN FIX IT IS THE WHOLE SENTENCE. Seven states reduce to four answers: nothing to do, a step
- * that is yours (connect, reconnect), a step only an administrator can take (switch it on, finish
+ * WHO CAN FIX IT IS THE WHOLE SENTENCE. Eight states reduce to four answers: nothing to do, a step
+ * that is yours (connect, reconnect, or giving your own app to your own Bot), a step only an
+ * administrator can take (switch it on, finish
  * setting it up, grant it, connect or approve the team account), and on somebody else's Team Bot a
  * step only its owner can take (reconnect the account the Bot runs on). The copy names which,
  * because "Gmail is unavailable" sends somebody hunting through their own settings for a switch that
@@ -31,8 +36,11 @@ import { queryClient } from "@/query-client";
  * `AppAccessCard` — and that is the caller's decision, made where the refusal is in hand.
  */
 
-/** What the person is told about one app, in words that say whose move it is. */
-export function appAccessSentence(access: AppAccess): string {
+/**
+ * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
+ * for the one state that asks the person a question about it.
+ */
+export function appAccessSentence(access: AppAccess, bot?: string): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
   switch (access.state) {
@@ -56,6 +64,11 @@ export function appAccessSentence(access: AppAccess): string {
       return disabledSentence(access);
     case "not_granted":
       return `This Bot hasn't been given ${name}. Only an admin can give it.`;
+    case "owner_grantable": {
+      const yours = access.account === "personal" ? `your ${name}` : name;
+      const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
+      return access.needsConnect ? `${ask} Connect it first.` : ask;
+    }
   }
 }
 
@@ -92,7 +105,8 @@ function disabledSentence(access: AppAccess): string {
  *   that already has a row (which the connect route refuses until it is disconnected), go to the
  *   app's own page in Settings instead, where the form and Disconnect are.
  * - the three an administrator fixes — Request access, which files the request the server decides
- *   the kind of, and then Requested with a way to withdraw it.
+ *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
+ *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
  */
 export function AppAccessAction({
   agentId,
@@ -101,13 +115,244 @@ export function AppAccessAction({
   agentId: string;
   access: AppAccess;
 }) {
+  /*
+   * WHO IS LOOKING decides only which button is drawn, never what is allowed: the server answers
+   * the one press 403 for anybody else, and `SharedAppNotice` already reads the role the same way.
+   */
+  const me = useQuery(currentUserQueryOptions()).data;
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
   if (access.state === "reconnect" && access.accountHolder === "owner")
     return null;
   if (access.state === "not_connected" || access.state === "reconnect")
     return <ConnectAction access={access} />;
+  // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
+  if (access.state === "owner_grantable")
+    return <OwnerGiveAction access={access} agentId={agentId} />;
+  if (me?.role === "admin")
+    return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
+}
+
+/**
+ * The step only an administrator can take, offered to the administrator as the step itself.
+ *
+ * ONE PRESS WHERE ONE PRESS CAN DO IT. An app nobody switched on, or one this Bot was never given,
+ * is switched on and given here through the inbox's own approval (`approveBotAppMutationOptions`):
+ * the same checks, the read-only actions only, and the same trail. Anything that sends or writes is
+ * still chosen on the Bot's page.
+ *
+ * A LINK WHERE IT CANNOT. A broker with no key, a set-up somebody left unfinished and a team account
+ * nobody connected all need something only typed or consented to on the app's admin page. That page
+ * opens in a new tab so the conversation stays where it is, and the card reads the app again when
+ * this tab has the focus back.
+ */
+function AdminAction({
+  agentId,
+  access,
+}: {
+  agentId: string;
+  access: AppAccess;
+}) {
+  const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
+  const approve = useMutation(approveBotAppMutationOptions(queryClient));
+  const name = access.displayName;
+
+  const oneClick =
+    access.state === "not_granted" ||
+    (access.state === "disabled" &&
+      (access.unavailable === null || access.unavailable === "absent"));
+  if (oneClick) {
+    const disabled = access.state === "disabled";
+    const label = disabled
+      ? `Turn on and give it to ${bot}`
+      : `Give it to ${bot}`;
+    // The card names the app beside the button; on its own, the button has to.
+    const spoken = disabled
+      ? `Turn on ${name} and give it to ${bot}`
+      : `Give ${name} to ${bot}`;
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {approve.error ? (
+          <p className="text-destructive text-xs" role="alert">
+            {approve.error.message}
+          </p>
+        ) : null}
+        <Button
+          aria-label={approve.isPending ? undefined : spoken}
+          disabled={approve.isPending}
+          onClick={() =>
+            approve.mutate(
+              { agentId, app: access.key },
+              /*
+               * The grants a Bot is offered are read per conversation, so the turn after this has
+               * to be asked against a store that knows about them. See `ConnectAction`.
+               */
+              { onSuccess: () => void queryClient.invalidateQueries() },
+            )
+          }
+          size="sm"
+        >
+          {approve.isPending ? (disabled ? "Turning on…" : "Giving…") : label}
+        </Button>
+      </div>
+    );
+  }
+
+  const page =
+    access.state === "disabled" &&
+    access.unavailable === "composio_unconfigured"
+      ? access.provider === "arcade"
+        ? "arcade"
+        : "composio"
+      : access.key;
+  const [label, spoken] =
+    access.state !== "shared_not_connected"
+      ? ["Set it up", `Set up ${name}`]
+      : access.requestKind
+        ? ["Connect the team account", `Connect the team ${name} account`]
+        : ["Reconnect the team account", `Reconnect the team ${name} account`];
+  return (
+    <Button
+      render={
+        <Link
+          params={{ key: page }}
+          rel="noreferrer"
+          target="_blank"
+          to="/admin/plugins/$key"
+        />
+      }
+      aria-label={spoken}
+      size="sm"
+    >
+      {label}
+    </Button>
+  );
+}
+
+/**
+ * The Bot's owner giving it one of their own apps, as one press: Allow, or Connect and allow where
+ * the app runs on their own account and they have not connected it.
+ *
+ * CONNECT FIRST, THEN GIVE, ON THE SAME PRESS. The consent opens in a new tab the way `ConnectAction`
+ * opens it, and this tab watches the server until the account is there — `needsConnect` turning false
+ * — and then gives the app without a second press. Giving first would leave a Bot holding an app
+ * nobody had connected if the person closed the consent screen, and would swap this button for a
+ * Connect in the middle of the press.
+ *
+ * AN APP CONNECTED WITH A TYPED KEY is connected on its page in Settings, as `ConnectAction` sends it;
+ * coming back, the app reads connected and the button says Allow.
+ *
+ * AND THEN THE TASK CARRIES ON. Every query is read again once the app is given, so the card sees the
+ * app ready and carries the conversation on (`lib/copilot/carry-on.ts`).
+ */
+function OwnerGiveAction({
+  agentId,
+  access,
+}: {
+  agentId: string;
+  access: AppAccess;
+}) {
+  const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
+  const give = useMutation(giveBotAppMutationOptions(queryClient));
+  const tab = useConnectInNewTab();
+  const { waiting, stopWaiting } = tab;
+  const name = access.displayName;
+  /** Pressed while the account still had to be connected: give it as soon as it is. */
+  const pending = useRef(false);
+
+  const giveNow = () =>
+    give.mutate(
+      { agentId, app: access.key },
+      { onSuccess: () => void queryClient.invalidateQueries() },
+    );
+
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: appAccessKeys.all });
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the account appears, once per press.
+  useEffect(() => {
+    if (!pending.current || access.needsConnect) return;
+    pending.current = false;
+    stopWaiting();
+    giveNow();
+  }, [access.needsConnect]);
+
+  if (
+    access.needsConnect &&
+    (access.connect === "key" || access.connect === null || tab.needsKey)
+  )
+    return (
+      <Button
+        render={<Link params={{ key: access.key }} to="/connections/$key" />}
+        aria-label={`Connect ${name}`}
+        size="sm"
+        variant="outline"
+      >
+        Connect
+      </Button>
+    );
+
+  const error = give.error?.message ?? tab.error;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {error ? (
+        <p className="text-destructive text-xs" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {tab.blockedUrl ? (
+        <p className="text-xs" role="status">
+          This browser blocked the tab.{" "}
+          <a
+            className="underline underline-offset-2"
+            href={tab.blockedUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open {name}'s sign-in
+          </a>
+          .
+        </p>
+      ) : waiting ? (
+        <p className="text-muted-foreground text-xs" role="status">
+          Finish in the tab that opened.
+        </p>
+      ) : null}
+      <Button
+        aria-label={
+          give.isPending || waiting
+            ? undefined
+            : `Let ${bot} use ${name}${access.needsConnect ? " after you connect it" : ""}`
+        }
+        disabled={give.isPending || tab.pending}
+        onClick={() => {
+          give.reset();
+          if (access.needsConnect) {
+            pending.current = true;
+            stopWaiting();
+            tab.open(access.key);
+            return;
+          }
+          giveNow();
+        }}
+        size="sm"
+      >
+        {give.isPending
+          ? "Allowing…"
+          : waiting
+            ? `Waiting for ${name}…`
+            : access.needsConnect
+              ? "Connect and allow"
+              : "Allow"}
+      </Button>
+    </div>
+  );
 }
 
 /** The person's own account: connect it, or reconnect it. */

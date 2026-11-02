@@ -25,8 +25,8 @@ import {
 } from "@/components/plugins/brokered-account-row";
 import type { BrokerField } from "@/lib/plugins/mutations";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
-import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { BROKERED_PROBE_OUTCOMES } from "../../server/src/plugins/store";
 
 /**
@@ -179,6 +179,8 @@ function brokeredServer(authScheme: string): PluginServer {
     dynamicClient: false,
     accountMode: null,
     sharedVendorConnected: false,
+    ownerGrants: "any",
+    ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
   };
@@ -831,7 +833,7 @@ test("a deployment with no Composio key says the app is not available yet and of
 
   const view = renderAccountScreen(queryClient());
 
-  expect(await view.findByText(/isn't set up yet/)).toBeTruthy();
+  expect(await view.findByText("Not set up yet")).toBeTruthy();
   expect(view.queryByText(NAMES_THE_SETTING)).toBeNull();
   expect(view.queryByText("Connected")).toBeNull();
   expect(view.queryByRole("button", { name: "Disconnect" })).toBeNull();

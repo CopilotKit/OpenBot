@@ -104,6 +104,23 @@ describe("a key a person presses while they hold the wheel", () => {
     // A form field ignores a bare Enter or Backspace without this, which is why it is sent at all.
     const params = await dispatched(typed("down", "Enter", "Enter", 13));
     expect(params.windowsVirtualKeyCode).toBe(13);
-    expect(params.nativeVirtualKeyCode).toBe(13);
+  });
+
+  test("no key names a native key code, so none reaches the browser's own shortcuts", async () => {
+    // With one, Chrome passes a key the page did not take on to the browser, and on macOS reads the code as the Mac's
+    // own key number: ArrowLeft's 37 is the Mac's L, Home's 36 its Return. A person's ArrowLeft reached the page as an
+    // unnamed key, opened chrome://settings/help and left the browser spinning (screencast.ts says how it was measured,
+    // and screencast-keys-browser.test.ts drives it against Chromium itself).
+    for (const [key, code, keyCode] of [
+      ["ArrowLeft", "ArrowLeft", 37],
+      ["Home", "Home", 36],
+      ["Enter", "Enter", 13],
+      ["a", "KeyA", 65],
+    ] as const) {
+      for (const event of ["down", "up"] as const) {
+        const params = await dispatched(typed(event, key, code, keyCode));
+        expect(params).not.toHaveProperty("nativeVirtualKeyCode");
+      }
+    }
   });
 });

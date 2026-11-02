@@ -1,0 +1,261 @@
+{
+  "name": "suggestions",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"6ab2b425-570a-4fb3-80f6-183d23e1682a\",\"runId\":\"6780558d-6a23-44ab-ad27-d3c170ed373c\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"1b04fc84-05c4-41a5-868b-a89b178317a7\",\"role\":\"user\",\"content\":\"Name one river. One word only. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 69,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"6ab2b425-570a-4fb3-80f6-183d23e1682a\",\"runId\":\"6780558d-6a23-44ab-ad27-d3c170ed373c\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"6ab2b425-570a-4fb3-80f6-183d23e1682a\",\"runId\":\"6780558d-6a23-44ab-ad27-d3c170ed373c\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"1b04fc84-05c4-41a5-868b-a89b178317a7\",\"role\":\"user\",\"content\":\"Name one river. One word only. Call no tools.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1030,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb\",\"delta\":\"N\"}\n\n"
+        },
+        {
+          "at": 1032,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb\",\"delta\":\"ile\"}\n\n"
+        },
+        {
+          "at": 1231,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"6ab2b425-570a-4fb3-80f6-183d23e1682a\",\"runId\":\"6780558d-6a23-44ab-ad27-d3c170ed373c\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":245,\"outputTokens\":4,\"totalTokens\":249,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 1232,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 1234,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"6fb02984-d354-4fa2-9793-866430dd5d6d\",\"runId\":\"c056cbf5-28e9-4425-aa67-d1c8a16ad762\",\"protocolVersion\":\"1.0\",\"tools\":[{\"name\":\"copilotkitSuggest\",\"description\":\"Suggest what the user could say next\",\"parameters\":{\"type\":\"object\",\"properties\":{\"suggestions\":{\"type\":\"array\",\"description\":\"List of suggestions shown to the user as buttons.\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\",\"description\":\"The title of the suggestion. This is shown as a button and should be short.\"},\"message\":{\"type\":\"string\",\"description\":\"The message to send when the suggestion is clicked. This should be a clear, complete sentence and will be sent as an instruction to the AI.\"}},\"required\":[\"title\",\"message\"]}}},\"required\":[\"suggestions\"]}}],\"context\":[],\"forwardedProps\":{\"toolChoice\":{\"type\":\"function\",\"function\":{\"name\":\"copilotkitSuggest\"}}},\"state\":{},\"messages\":[{\"id\":\"1b04fc84-05c4-41a5-868b-a89b178317a7\",\"role\":\"user\",\"content\":\"Name one river. One word only. Call no tools.\"},{\"id\":\"msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb\",\"role\":\"assistant\",\"content\":\"Nile\"},{\"id\":\"6fb02984-d354-4fa2-9793-866430dd5d6d\",\"role\":\"user\",\"content\":\"Suggest what the user could say next. Provide clear, highly relevant suggestions by calling the `copilotkitSuggest` tool.\\nProvide at least 1 and at most 2 suggestions.\\nThe user has the following tools available: [].\\n Suggest what the person could ask next.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 1236,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"6fb02984-d354-4fa2-9793-866430dd5d6d\",\"runId\":\"c056cbf5-28e9-4425-aa67-d1c8a16ad762\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"6fb02984-d354-4fa2-9793-866430dd5d6d\",\"runId\":\"c056cbf5-28e9-4425-aa67-d1c8a16ad762\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"1b04fc84-05c4-41a5-868b-a89b178317a7\",\"role\":\"user\",\"content\":\"Name one river. One word only. Call no tools.\"},{\"id\":\"msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb\",\"role\":\"assistant\",\"content\":\"Nile\"},{\"id\":\"6fb02984-d354-4fa2-9793-866430dd5d6d\",\"role\":\"user\",\"content\":\"Suggest what the user could say next. Provide clear, highly relevant suggestions by calling the `copilotkitSuggest` tool.\\nProvide at least 1 and at most 2 suggestions.\\nThe user has the following tools available: [].\\n Suggest what the person could ask next.\"}],\"tools\":[{\"name\":\"copilotkitSuggest\",\"description\":\"Suggest what the user could say next\",\"parameters\":{\"type\":\"object\",\"properties\":{\"suggestions\":{\"type\":\"array\",\"description\":\"List of suggestions shown to the user as buttons.\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\",\"description\":\"The title of the suggestion. This is shown as a button and should be short.\"},\"message\":{\"type\":\"string\",\"description\":\"The message to send when the suggestion is clicked. This should be a clear, complete sentence and will be sent as an instruction to the AI.\"}},\"required\":[\"title\",\"message\"]}}},\"required\":[\"suggestions\"]}}],\"context\":[],\"forwardedProps\":{\"toolChoice\":{\"type\":\"function\",\"function\":{\"name\":\"copilotkitSuggest\"}}}}}\n\n"
+        },
+        {
+          "at": 1730,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"toolCallName\":\"copilotkitSuggest\",\"parentMessageId\":\"00193767-dc03-412f-bb02-994b29896f9a\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 1733,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"suggest\"}\n\n"
+        },
+        {
+          "at": 1736,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"ions\"}\n\n"
+        },
+        {
+          "at": 1740,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"\\\":[\"}\n\n"
+        },
+        {
+          "at": 1746,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 1765,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"title\"}\n\n"
+        },
+        {
+          "at": 1767,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 1771,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"Name\"}\n\n"
+        },
+        {
+          "at": 1774,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" a\"}\n\n"
+        },
+        {
+          "at": 1775,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" mountain\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\".\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 1792,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"message\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 1800,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"Name\"}\n\n"
+        },
+        {
+          "at": 1803,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" one\"}\n\n"
+        },
+        {
+          "at": 1809,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" mountain\"}\n\n"
+        },
+        {
+          "at": 1814,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 1818,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" One\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" word\"}\n\n"
+        },
+        {
+          "at": 1828,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" only\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\".\\\"\"}\n\n"
+        },
+        {
+          "at": 1849,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"},{\\\"\"}\n\n"
+        },
+        {
+          "at": 1852,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"title\"}\n\n"
+        },
+        {
+          "at": 1855,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 1860,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"Name\"}\n\n"
+        },
+        {
+          "at": 1864,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" a\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" country\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\".\\\",\\\"\"}\n\n"
+        },
+        {
+          "at": 1877,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"message\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 1883,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"Name\"}\n\n"
+        },
+        {
+          "at": 1887,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" one\"}\n\n"
+        },
+        {
+          "at": 1895,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" country\"}\n\n"
+        },
+        {
+          "at": 1898,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 1903,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" One\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" word\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\" only\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\".\\\"\"}\n\n"
+        },
+        {
+          "at": 1919,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"}\"}\n\n"
+        },
+        {
+          "at": 1931,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\",\"delta\":\"]}\"}\n\n"
+        },
+        {
+          "at": 1976,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_vzQelEvBOezalGA74Nx5cB17\"}\n\n"
+        },
+        {
+          "at": 2211,
+          "text": "data: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"tool-calls\"},\"threadId\":\"6fb02984-d354-4fa2-9793-866430dd5d6d\",\"runId\":\"c056cbf5-28e9-4425-aa67-d1c8a16ad762\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":403,\"outputTokens\":53,\"totalTokens\":456,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 2212,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "bb9d25db-0c67-4a21-96e7-80bd8e86150e",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539602276
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "1b04fc84-05c4-41a5-868b-a89b178317a7",
+            "runId": null,
+            "threadId": "6ab2b425-570a-4fb3-80f6-183d23e1682a",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 45,
+            "text": "Name one river. One word only. Call no tools.",
+            "seq": 2
+          },
+          "timestamp": 1792539602328
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "6780558d-6a23-44ab-ad27-d3c170ed373c",
+            "threadId": "6ab2b425-570a-4fb3-80f6-183d23e1682a",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792539602346
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_08e9c22f8bed4639006ad7fbd33a9887d0bb6610db4f70a3fb",
+            "runId": "6780558d-6a23-44ab-ad27-d3c170ed373c",
+            "threadId": "6ab2b425-570a-4fb3-80f6-183d23e1682a",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "Nile",
+            "seq": 4
+          },
+          "timestamp": 1792539603507
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "6780558d-6a23-44ab-ad27-d3c170ed373c",
+            "threadId": "6ab2b425-570a-4fb3-80f6-183d23e1682a",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792539603507
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

@@ -57,7 +57,7 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
   // `-psecret` for mysql and friends. Nothing separates them: a space means the password is asked for
   // at the prompt and the word after `-p` is the database, so only the attached form is redacted.
   [
-    /(\bmysql(?:dump)?\b(?:[^|;&\\\r\n]|\\[\s\S])*?(?:[ \t]|\\\r?\n)-p)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    /(\bmysql(?:dump)?\b(?:[^|;&\\\r\n]|\\[\s\S])*?(?:[ \t]|\\\r?\n)-p)("[^"]*"|'[^']*'|[^\s'"-]\S*)/g,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
   // `docker login -p secret`, where `-p` is the password rather than a port.

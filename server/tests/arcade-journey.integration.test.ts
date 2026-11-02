@@ -78,8 +78,8 @@ import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { removePeople, seedPeople } from "./support/people";
 import { testEnvironment } from "./support/environment";
+import { removePeople, seedPeople } from "./support/people";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 

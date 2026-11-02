@@ -1,7 +1,7 @@
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "bun:test";
 
 /**
  * Asked for by name, like the deployment journey at the repository root: it launches a real Chromium,

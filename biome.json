@@ -77,6 +77,37 @@
       }
     },
     {
+      "includes": ["extension/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../../server/**",
+                      "../../../server/**",
+                      "../../../../server/**",
+                      "drizzle-orm",
+                      "drizzle-orm/**",
+                      "hono",
+                      "hono/**",
+                      "@/routes/**",
+                      "@/lib/client",
+                      "@/query-client"
+                    ],
+                    "message": "The extension runs in the browser. It talks to OpenBot over HTTP only, and takes only OpenBot's UI primitives and layout parts from the app."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["toolkit/src/copilotkit/**"],
       "linter": {
         "rules": {

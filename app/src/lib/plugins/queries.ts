@@ -118,6 +118,14 @@ export type PluginServer = {
    * {@link accountMode} is not `"shared"`.
    */
   sharedVendorConnected: boolean;
+  /**
+   * Who may give this app to a Bot: any Bot's owner, for their own Bot (`any`), or only an admin
+   * (`admin`), with the default for its account filled in. Every person's own account defaults to
+   * `any`, as do the built-in Routines; everything else to `admin`.
+   */
+  ownerGrants: "any" | "admin";
+  /** What an admin chose, or null where the default is in force. */
+  ownerGrantsChosen: "any" | "admin" | null;
 };
 
 export type PluginSkill = {

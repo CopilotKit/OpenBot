@@ -293,7 +293,7 @@ about that cluster:
 | --- | --- |
 | `self-hosted-values.yaml` | Nothing turned on. If this file needs to grow, a default is wrong. |
 | `eks-values.yaml` | IRSA, Secrets Manager, ALB, zone spread, autoscaling. |
-| `eks-sandbox-values.yaml` | The same, with a computer each rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
+| `eks-sandbox-values.yaml` | The same, with a computer for each person rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
 | `gke-values.yaml` | Workload Identity, Secret Manager, Gateway API instead of an Ingress. |
 | `aks-values.yaml` | Workload identity, Key Vault, the AKS web app routing class. |
 
@@ -467,15 +467,16 @@ http(s). With `networkPolicy.enabled`, a collector inside the cluster has to be 
 
 ## Upgrading the server without the computers
 
-`computers.mode: shared` runs one browser for every Bot, and on that shape the transcript's kept
-screenshots need the computer image to be as new as the server's. A screenshot only says which page
-it is of on a computer built after that field was added, and on a shared browser a picture that
-cannot be told apart from another Bot's is refused rather than filed under the wrong turn. The
-conversation still names the page it opened; it just does not show it, and the server log says why
-each time.
+`computers.mode: shared` runs one computer for every person's Bots, and on that shape the
+transcript's kept screenshots need the computer image to be as new as the server's. A screenshot
+only says which page it is of on a computer built after that field was added, and on a shared
+computer a picture that cannot be told apart from another Bot's is refused rather than filed under
+the wrong turn. The conversation still names the page it opened; it just does not show it, and the
+server log says why each time.
 
-With `computers.mode: sandbox` or `external`, each Bot has a computer of its own, there is nobody to
-race with, and this does not arise.
+With `computers.mode: sandbox`, each person has a computer of their own, there is nobody to race
+with, and this does not arise. `external` is one computer somebody else runs, so it is the shared
+case.
 
 ## A computer for each Bot
 
@@ -483,12 +484,14 @@ race with, and this does not arise.
 
 | Mode | What it does | Needs |
 | --- | --- | --- |
-| `shared` | One browser for every Bot, run by this chart. | Nothing. |
-| `sandbox` | A computer each, suspended when idle and resumed with its logins intact. | The `agent-sandbox` controller in the cluster. |
-| `external` | Neither; `computers.url` points at one somebody else runs. | Nothing. |
+| `shared` | One computer for every person's Bots, run by this chart. | Nothing. |
+| `sandbox` | A computer per person (and one per isolated Bot), suspended when idle and resumed with its logins intact. | The `agent-sandbox` controller in the cluster. |
+| `external` | Neither; `computers.url` points at one computer somebody else runs, which every person's Bots share. | Nothing. |
 
-`shared` is what a first install should use. Sessions, files and logins are shared between Bots in
-that mode, which is stated on the fleet page rather than hidden.
+`shared` is what a first install should use. Each person keeps their own browser profile and folder
+for each Bot on it, so logins are not shared between people or Bots. What it cannot keep apart is a
+command: every Bot's shell runs in the one container and can read another's files, which is stated
+on the fleet page rather than hidden. `sandbox` gives each person a computer of their own.
 
 `sandbox` uses `kubernetes-sigs/agent-sandbox`, whose `Sandbox` CRD is built for exactly this
 workload: an isolated, stateful, singleton pod with a stable identity and persistent storage.

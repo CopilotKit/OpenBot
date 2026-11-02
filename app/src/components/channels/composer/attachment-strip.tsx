@@ -143,9 +143,9 @@ export function AttachmentStrip({
                 /*
                  * ON THE SIZE LINE, NOT UNDER IT, AND THAT IS A LAYOUT CONSTRAINT RATHER THAN A
                  * PREFERENCE. The tile's height is fixed so that a file and a thumbnail read as
-                 * one row. A third line does not fit: measured in Chromium at this repository's
-                 * 15px root, the two in-flow children need 63.75px inside a 58px box. Something
-                 * has to give, and the only choices are the icon shrinking to 13px or the text
+                 * one row. A third line does not fit: with three lines the two in-flow children
+                 * need 65px (a 20px icon and three 15px lines) inside a 62px box. Something
+                 * has to give, and the only choices are the icon shrinking to 17px or the text
                  * spilling past the border. Folding the warning onto this line keeps two.
                  *
                  * `truncate` is the guarantee, not the wording: `formatBytes` is unbounded, so a

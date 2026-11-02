@@ -5,6 +5,7 @@ import {
   accountOf,
   appAccessState,
   connectOf,
+  ownerGrantsOf,
   REQUEST_KIND_FOR,
   unavailableReason,
 } from "../src/plugins/app-access";
@@ -27,6 +28,8 @@ const composio = (overrides: Partial<AppAccessFacts> = {}): AppAccessFacts => ({
   catalogueAuth: null,
   hasCredential: false,
   granted: true,
+  ownerGrants: null,
+  mayGiveOwn: false,
   personal: null,
   shared: null,
   sharedAdmitted: null,
@@ -51,6 +54,8 @@ const catalogue = (
   catalogueAuth: auth,
   hasCredential: true,
   granted: true,
+  ownerGrants: null,
+  mayGiveOwn: false,
   personal: null,
   shared: null,
   sharedAdmitted: null,
@@ -192,5 +197,59 @@ test("only the three states an administrator can fix file a request", () => {
     shared_not_approved: null,
     disabled: "enable",
     not_granted: "grant",
+    // The Bot's owner gives it the app themselves; there is nobody to ask.
+    owner_grantable: null,
+  });
+});
+
+describe("who may give an app to a Bot", () => {
+  const routines = catalogueEntry("routines");
+  if (!routines) throw new Error("The Routines entry is missing.");
+
+  test("owners decide by default where the app runs on the asker's own account, and for Routines", () => {
+    expect(ownerGrantsOf(composio())).toBe("any");
+    expect(ownerGrantsOf(catalogue(drive.auth))).toBe("any");
+    expect(ownerGrantsOf(catalogue(routines.auth))).toBe("any");
+  });
+
+  test("an admin decides by default for a team account, a deployment token and no account", () => {
+    expect(ownerGrantsOf(composio({ accountMode: "shared" }))).toBe("admin");
+    expect(
+      ownerGrantsOf(composio({ authScheme: "NO_AUTH", accountMode: null })),
+    ).toBe("admin");
+    expect(ownerGrantsOf(catalogue(parallel.auth))).toBe("admin");
+    expect(ownerGrantsOf({ ...catalogue(null), provider: "custom" })).toBe(
+      "admin",
+    );
+  });
+
+  test("what an administrator chose wins over the default, either way", () => {
+    expect(ownerGrantsOf(composio({ ownerGrants: "admin" }))).toBe("admin");
+    expect(
+      ownerGrantsOf(composio({ accountMode: "shared", ownerGrants: "any" })),
+    ).toBe("any");
+  });
+
+  test("an app the Bot does not hold is the owner's to give only where both say so", () => {
+    const notHeld = { granted: false };
+    expect(appAccessState(composio({ ...notHeld, mayGiveOwn: true }))).toBe(
+      "owner_grantable",
+    );
+    // Not their Bot, or the feature switched off for them.
+    expect(appAccessState(composio({ ...notHeld, mayGiveOwn: false }))).toBe(
+      "not_granted",
+    );
+    // Their Bot, and an app an administrator keeps for themselves.
+    expect(
+      appAccessState(
+        composio({ ...notHeld, mayGiveOwn: true, ownerGrants: "admin" }),
+      ),
+    ).toBe("not_granted");
+    // Switched off is still switched off: an owner never turns an app on.
+    expect(
+      appAccessState(
+        composio({ ...notHeld, mayGiveOwn: true, present: false }),
+      ),
+    ).toBe("disabled");
   });
 });

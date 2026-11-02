@@ -31,6 +31,7 @@ pub fn is_secret(key: &str) -> bool {
         key,
         // Somebody's own credentials, pasted or signed in for.
         "INTELLIGENCE_API_KEY"
+            | "CPK_INTELLIGENCE_API_KEY"
             | "OPENAI_API_KEY"
             | "ANTHROPIC_API_KEY"
             | "CLAUDE_CODE_OAUTH_TOKEN"
@@ -765,9 +766,24 @@ fn remove_secret_file(path: &Path) -> Result<(), Problem> {
     }
 }
 
+/// Whether a secret is stored, read from the file's presence alone and creating nothing. Reading one on Windows starts
+/// PowerShell, too slow for a check that only asks whether there is one (the Recorder host's ping).
+pub fn stored(root: &Path, name: &str) -> bool {
+    let extension = if cfg!(target_os = "windows") {
+        "dpapi"
+    } else {
+        "secret"
+    };
+    root.join(VAULT_DIR)
+        .join(format!("{name}.{extension}"))
+        .is_file()
+}
+
+const VAULT_DIR: &str = ".secrets";
+
 /// Where the platforms that keep a file keep it. Created owner-only, not merely written so.
 pub(crate) fn vault_dir(root: &Path) -> Result<PathBuf, Problem> {
-    let dir = root.join(".secrets");
+    let dir = root.join(VAULT_DIR);
     let prepare = || -> std::io::Result<()> {
         match require_credential_directory(&dir) {
             Ok(()) => Ok(()),
@@ -1451,6 +1467,7 @@ mod tests {
     fn every_credential_is_named_and_nothing_else_is() {
         for key in [
             "INTELLIGENCE_API_KEY",
+            "CPK_INTELLIGENCE_API_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",

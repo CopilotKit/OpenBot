@@ -1,8 +1,8 @@
+import { RESEARCH_ROLES } from "@openbot/shared/research";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
-import { RESEARCH_ROLES } from "@openbot/shared/research";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { handoffInitiator, PERSON_INITIATOR } from "../src/audit";
 import {
   mintRunAssertion,
   readOrigin,
   readRunAssertion,
 } from "../src/agents/callback-token";
 import { delegatedWork } from "../src/agents/handoff-tool";
+import { handoffInitiator, PERSON_INITIATOR } from "../src/audit";
 
 const KEY = `${"A".repeat(43)}=`;
 

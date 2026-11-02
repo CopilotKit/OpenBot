@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
-import type { AuditInitiator } from "../audit";
 import {
   type ApprovalContinuation,
   currentApprovalContext,
   withApprovalContext,
 } from "@openbot/toolkit/continuation";
+import type { AuditInitiator } from "../audit";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
 export type ApprovalDecision =
@@ -223,6 +223,23 @@ export class ApprovalRefusedError extends Error {
     this.name = "ApprovalRefusedError";
   }
 }
+/**
+ * The policy wants to ask, and the call arrived with no conversation to ask in.
+ *
+ * A browser sends a Bot's look at a page (a navigation, a snapshot) straight to the computer; only its
+ * changes travel through the approval route that carries the conversation. A rule can still ask about
+ * a look. Marked apart from other refusals so the computer routes can say so, and the browser can send
+ * the same call again through that route, where the person is asked, instead of handing the Bot a
+ * refusal it can only apologise for.
+ */
+export class ApprovalNeedsConversationError extends ApprovalRefusedError {
+  constructor() {
+    super(
+      "This action needs your approval, but it was not started from a conversation that can ask you. Nothing was done. Ask for it in a chat with this Bot, or change your rules in Settings → Approvals.",
+    );
+    this.name = "ApprovalNeedsConversationError";
+  }
+}
 export class ApprovalNotFoundError extends Error {
   constructor() {
     super("This approval could not be found.");
@@ -304,9 +321,7 @@ export function approvalAction(candidate: ApprovalCandidate): ApprovalAction {
     !continuation.threadId ||
     !continuation.toolCallId
   )
-    throw new ApprovalRefusedError(
-      "This action needs your approval, but it was not started from a conversation that can ask you. Nothing was done. Ask for it in a chat with this Bot, or change your rules in Settings → Approvals.",
-    );
+    throw new ApprovalNeedsConversationError();
   if (
     ![
       candidate.actorId,

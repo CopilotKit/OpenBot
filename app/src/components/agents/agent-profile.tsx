@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentQueryOptions } from "@/lib/agents/queries";
 
@@ -46,7 +47,14 @@ function ProfileSkeleton() {
  * It used to duplicate that dialog's whole surface (edit form, tokens, grants, delete), which made
  * two places to maintain and a sidebar that scrolled past the conversation it sat beside.
  */
-export function AgentProfile({ agentId }: { agentId: string }) {
+export function AgentProfile({
+  agentId,
+  footer,
+}: {
+  agentId: string;
+  /** What the panel offers about the conversation rather than the Bot, below a separator. */
+  footer?: ReactNode;
+}) {
   /** The full dialog, opened over the chat rather than navigating away from it. */
   const navigate = useNavigate();
   const agent = useQuery(agentQueryOptions(agentId));
@@ -76,9 +84,11 @@ export function AgentProfile({ agentId }: { agentId: string }) {
           <h1 className="w-full text-balance text-2xl font-semibold leading-tight tracking-tight">
             {profile.name}
           </h1>
-          <p className="w-full text-balance text-sm text-muted-foreground">
-            {profile.title}
-          </p>
+          {profile.title && (
+            <p className="w-full text-balance text-sm text-muted-foreground">
+              {profile.title}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap justify-center gap-1.5">
@@ -115,6 +125,12 @@ export function AgentProfile({ agentId }: { agentId: string }) {
           Open {profile.name}
         </Button>
       </div>
+      {footer ? (
+        <>
+          <Separator />
+          {footer}
+        </>
+      ) : null}
     </div>
   );
 }

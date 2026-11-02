@@ -11,6 +11,8 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConnectAppCard } from "@/components/channels/connect-app-card";
+import { carryOnMessage } from "@/lib/copilot/carry-on";
+import { ConversationProvider } from "@/lib/copilot/conversation";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -61,6 +63,8 @@ function mounted(
     answers?: "url" | "fields" | "failure" | "connected";
     /** False stands in for a browser that refused the tab, which answers null. */
     popupsAllowed?: boolean;
+    /** Drawn inside a conversation, as the latest thing in it: what the card sends is kept here. */
+    asked?: string[];
   } = {},
 ) {
   const { connections = [], answers = "url", popupsAllowed = true } = options;
@@ -122,17 +126,30 @@ function mounted(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // One card, one tool call, however often the route draws it.
+  const toolCallId = `call_${Math.random().toString(36).slice(2)}`;
   const root = createRootRoute({ component: Outlet });
   const card = createRoute({
     getParentRoute: () => root,
     path: "/",
-    component: () => (
-      <ConnectAppCard
-        message="You have not connected your Notion account. Connect it and ask again."
-        serverId="srv_notion"
-        title="Notion"
-      />
-    ),
+    component: () => {
+      const drawn = (
+        <ConnectAppCard
+          message="You have not connected your Notion account. Connect it and ask again."
+          place={{ toolCallId, latest: true }}
+          serverId="srv_notion"
+          title="Notion"
+        />
+      );
+      const { asked } = options;
+      return asked ? (
+        <ConversationProvider ask={(text) => asked.push(text)}>
+          {drawn}
+        </ConversationProvider>
+      ) : (
+        drawn
+      );
+    },
   });
   // The destination the card links to for an app connected with a typed key.
   const settings = createRoute({
@@ -298,4 +315,17 @@ test("does not read a Shared app's deployment account as this person's", async (
     expect(card.view.getByRole("button", { name: /^Connect$/ })).toBeTruthy(),
   );
   expect(card.view.queryByText(/Notion is connected/)).toBeNull();
+});
+
+test("once connected in front of the person, the conversation carries on by itself, once", async () => {
+  const asked: string[] = [];
+  const card = mounted({ answers: "connected", asked });
+  await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+
+  press(card);
+
+  await waitFor(() => expect(asked).toEqual([carryOnMessage("Notion")]));
+  expect(card.view.getByText("Notion is connected.")).toBeTruthy();
+  await settleReactWork();
+  expect(asked).toHaveLength(1);
 });

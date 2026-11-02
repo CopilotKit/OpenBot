@@ -51,6 +51,25 @@ const {
 } = baseEnvironment;
 
 describe("deployment configuration", () => {
+  test.each([undefined, "", "stale-legacy-key"])(
+    "uses the CLI runtime key with legacy value %s",
+    (legacy) => {
+      const config = loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_API_KEY: legacy,
+        CPK_INTELLIGENCE_API_KEY: "  cpk-current-project  ",
+      });
+      expect(config.runtime.intelligence.apiKey).toBe("cpk-current-project");
+    },
+  );
+
+  test("an empty CLI key preserves legacy-only deployments", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, CPK_INTELLIGENCE_API_KEY: "  " }).runtime
+        .intelligence.apiKey,
+    ).toBe("tenant-api-key");
+  });
+
   test("organization authority disables the standalone actor without requiring local provider secrets", () => {
     const config = loadConfig({
       ...withoutSignIn,
@@ -113,7 +132,7 @@ describe("deployment configuration", () => {
     delete environment[name];
 
     expect(() => loadConfig(environment)).toThrow(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+      `CopilotKit Intelligence is required and is not configured. Missing: ${name === "INTELLIGENCE_API_KEY" ? "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)" : name}`,
     );
   });
 
@@ -132,6 +151,38 @@ describe("deployment configuration", () => {
     expect(config.runtime.intelligence.apiKey).toBe(
       baseEnvironment.INTELLIGENCE_API_KEY,
     );
+  });
+
+  // The browser opens the gateway itself, at the address `/info` gives it. A server in a container
+  // reaches local Intelligence somewhere the browser on the host cannot, so it may name both.
+  test("keeps the browser's gateway address apart from the server's, when one is given", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+    });
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.gatewayWsUrl).toBe(
+      "ws://host.docker.internal:14401",
+    );
+    expect(config.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "ws://localhost:14401",
+    );
+
+    const without = loadConfig(baseEnvironment);
+    if (without.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(without.runtime.intelligence.browserGatewayWsUrl).toBeUndefined();
+
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "not a url",
+      }),
+    ).toThrow("INTELLIGENCE_BROWSER_GATEWAY_WS_URL must be a valid URL");
   });
 
   test("still forwards a licence token when a deployment sets one", () => {

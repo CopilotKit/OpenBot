@@ -48,7 +48,6 @@ export async function initializeDevActorUser(
       target: users.id,
       set: {
         email: DEV_ACTOR.email,
-        name,
         updatedAt: new Date(),
       },
     });

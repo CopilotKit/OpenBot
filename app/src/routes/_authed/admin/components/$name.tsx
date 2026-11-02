@@ -309,7 +309,7 @@ function ComponentDetail({
       </div>
 
       <PageSection
-        description="What this component is for, and which Bots can answer with it."
+        description="Describe this component and choose which Bots can display it."
         title="Configuration"
       >
         <PageRows>

@@ -1,0 +1,548 @@
+{
+  "name": "two-runs",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"6231e72d-6539-481a-9a91-9e25e3672111\",\"runId\":\"3d3db537-abcf-4287-9904-2326e2f0be78\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"4f0d40e5-0046-41da-b714-581857d09139\",\"role\":\"user\",\"content\":\"Name one planet. One word only. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 96,
+          "text": "{\"threadId\":\"6231e72d-6539-481a-9a91-9e25e3672111\",\"runId\":\"3d3db537-abcf-4287-9904-2326e2f0be78\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:6231e72d-6539-481a-9a91-9e25e3672111\"}}"
+        }
+      ],
+      "end": {
+        "at": 96,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 950,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"6231e72d-6539-481a-9a91-9e25e3672111\",\"runId\":\"c418130f-5e4c-467b-9f06-834545018abb\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"4f0d40e5-0046-41da-b714-581857d09139\",\"role\":\"user\",\"content\":\"Name one planet. One word only. Call no tools.\"},{\"id\":\"msg_07bfedc5a9f7d6e9006ad7f738714887d08dc4798185fb6926\",\"role\":\"assistant\",\"content\":\"Mars\",\"metadata\":{\"cpki_event_id\":\"6700e4f4-5642-43bc-ba40-89ab2e2a3e6a\",\"cpki_event_seq\":4,\"cpki_ingested\":\"01a15b9d-b56a-7ab1-89bd-f74854326321\"}},{\"id\":\"13cd312f-4078-4140-b316-b9904423f2f3\",\"role\":\"user\",\"content\":\"Name another one. One word only. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 996,
+          "text": "{\"threadId\":\"6231e72d-6539-481a-9a91-9e25e3672111\",\"runId\":\"c418130f-5e4c-467b-9f06-834545018abb\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:6231e72d-6539-481a-9a91-9e25e3672111\"}}"
+        }
+      ],
+      "end": {
+        "at": 996,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 99,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "3d3db537-abcf-4287-9904-2326e2f0be78"
+      }
+    },
+    {
+      "at": 154,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Name one planet. One word only. Call no tools.",
+              "id": "4f0d40e5-0046-41da-b714-581857d09139",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+          "state": {},
+          "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "a62fba14-7c71-4aa4-8f05-dbf0dca939e6",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-b227-7d7a-a5c6-ae06e6c63cd2"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "run_id": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 158,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "replay_complete"
+    },
+    {
+      "at": 792,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_07bfedc5a9f7d6e9006ad7f738714887d08dc4798185fb6926",
+        "metadata": {
+          "cpki_event_id": "251cec03-6707-46a0-ad2a-a257c7e365a3",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-b4d7-7b51-b5c4-acb1e85532dc"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "run_id": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 794,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "Mars",
+        "messageId": "msg_07bfedc5a9f7d6e9006ad7f738714887d08dc4798185fb6926",
+        "metadata": {
+          "cpki_event_id": "93594c98-a4f5-421a-afd3-e4b1e8f69b2b",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-b4d7-7313-8777-ae8a6ed2920b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "run_id": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 940,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_07bfedc5a9f7d6e9006ad7f738714887d08dc4798185fb6926",
+        "metadata": {
+          "cpki_event_id": "6700e4f4-5642-43bc-ba40-89ab2e2a3e6a",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-b56a-7ab1-89bd-f74854326321"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "run_id": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 942,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "a9727081-9cf8-4842-9a9c-157d2064357a",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-b56a-77a5-a4e8-fefe93854783",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "run_id": "3d3db537-abcf-4287-9904-2326e2f0be78",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 210,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 3,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 213
+          }
+        ]
+      }
+    },
+    {
+      "at": 945,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "phx_leave"
+    },
+    {
+      "at": 998,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb"
+      }
+    },
+    {
+      "at": 1053,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Name another one. One word only. Call no tools.",
+              "id": "13cd312f-4078-4140-b316-b9904423f2f3",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+          "state": {},
+          "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "56663453-d2ec-4e61-ac7d-593eae747835",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-b5aa-7d64-a300-d15408c2e88d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 1054,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "replay_complete"
+    },
+    {
+      "at": 2033,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_05271f8f77892f38006ad7f739b82487d0ad182a6185a27b5c",
+        "metadata": {
+          "cpki_event_id": "9f4985c8-2dae-4f66-ae9f-20c189c6cc87",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-b9b2-763f-b21c-a840e6c05b9d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 2034,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "Ven",
+        "messageId": "msg_05271f8f77892f38006ad7f739b82487d0ad182a6185a27b5c",
+        "metadata": {
+          "cpki_event_id": "4e845d9e-e3b8-4da6-9846-6637e957413a",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-b9b2-78fb-b260-9d31274fe13a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2034,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "us",
+        "messageId": "msg_05271f8f77892f38006ad7f739b82487d0ad182a6185a27b5c",
+        "metadata": {
+          "cpki_event_id": "fbc4f42d-b0db-4244-9c51-6c0fb83a2046",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-b9b2-731e-bc84-4b23b1e5a658"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2192,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_05271f8f77892f38006ad7f739b82487d0ad182a6185a27b5c",
+        "metadata": {
+          "cpki_event_id": "ab9d6ae7-6ef9-41eb-972f-1f85784835a6",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-ba50-7d37-97ae-013deab6f8ee"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 2192,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "26234b95-3d55-4d88-bd0a-b12ede7fe335",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15b9d-ba50-7dfe-97bd-9fc02859195d",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+        "run_id": "c418130f-5e4c-467b-9f06-834545018abb",
+        "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "thread_id": "6231e72d-6539-481a-9a91-9e25e3672111",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 231,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 4,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 235
+          }
+        ]
+      }
+    },
+    {
+      "at": 2193,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:6231e72d-6539-481a-9a91-9e25e3672111",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "aff0b1ce-cf84-483a-9b11-463760dd337c",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538423756
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "4f0d40e5-0046-41da-b714-581857d09139",
+            "runId": null,
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 46,
+            "text": "Name one planet. One word only. Call no tools.",
+            "seq": 2
+          },
+          "timestamp": 1792538423807
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792538423912
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_07bfedc5a9f7d6e9006ad7f738714887d08dc4798185fb6926",
+            "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "Mars",
+            "seq": 4
+          },
+          "timestamp": 1792538424695
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792538424700
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "13cd312f-4078-4140-b316-b9904423f2f3",
+            "runId": "3d3db537-abcf-4287-9904-2326e2f0be78",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 47,
+            "text": "Name another one. One word only. Call no tools.",
+            "seq": 6
+          },
+          "timestamp": 1792538424701
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "seq": 7
+          },
+          "timestamp": 1792538424807
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "aff0b1ce-cf84-483a-9b11-463760dd337c",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_05271f8f77892f38006ad7f739b82487d0ad182a6185a27b5c",
+            "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 5,
+            "text": "Venus",
+            "seq": 8
+          },
+          "timestamp": 1792538425946
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "c418130f-5e4c-467b-9f06-834545018abb",
+            "threadId": "6231e72d-6539-481a-9a91-9e25e3672111",
+            "agentId": "default",
+            "seq": 9
+          },
+          "timestamp": 1792538425947
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

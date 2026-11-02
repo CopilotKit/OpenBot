@@ -1,3 +1,8 @@
+import type {
+  LearningAutoAssignState,
+  LearningSettings,
+  LearningTarget,
+} from "@openbot/shared/learning";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useId, useState } from "react";
@@ -14,11 +19,6 @@ import {
   learningSettingsQueryOptions,
   saveLearningSettings,
 } from "@/lib/learning/queries";
-import type {
-  LearningAutoAssignState,
-  LearningSettings,
-  LearningTarget,
-} from "@openbot/shared/learning";
 
 export const Route = createFileRoute("/_authed/admin/learning")({
   component: LearningPage,

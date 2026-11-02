@@ -298,14 +298,10 @@ describe("the test network guard lets the suite reach what the suite owns", () =
 describe("the test network guard judges a socket by the address it reaches", () => {
   /** A `lookup` that answers one address, in both shapes the runtime asks for (Bun asks `all`). */
   function answering(address: string): net.LookupFunction {
-    return ((
-      _host: string,
-      options: { all?: boolean } | undefined,
-      callback: (...args: unknown[]) => void,
-    ) =>
-      options?.all
+    return (_host, options, callback) =>
+      options.all
         ? callback(null, [{ address, family: 4 }])
-        : callback(null, address, 4)) as unknown as net.LookupFunction;
+        : callback(null, address, 4);
   }
 
   /** Settles on connect, on a short wait (an unroutable address may hang), or rejects on error. */

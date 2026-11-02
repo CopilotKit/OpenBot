@@ -16,6 +16,7 @@ import {
   runCli,
   verifiedContainer,
 } from "../server/src/learning/ensure-container";
+import { intelligenceApiKey } from "../shared/intelligence-key";
 import {
   intelligenceApiOrigin,
   type LearningConnection,
@@ -136,7 +137,10 @@ export async function setupLearning(
   const effective = (name: string) =>
     (environment[name] || values[name] || "").trim();
   if (effective(CONTAINER)) return "preserved";
-  const existingKey = effective("INTELLIGENCE_API_KEY");
+  const existingKey = intelligenceApiKey({
+    CPK_INTELLIGENCE_API_KEY: effective("CPK_INTELLIGENCE_API_KEY"),
+    INTELLIGENCE_API_KEY: effective("INTELLIGENCE_API_KEY"),
+  });
   if (existingKey) {
     /*
      * The key cannot create containers, and it is never replaced here. Creation goes through a
@@ -224,8 +228,7 @@ export async function setupLearning(
       "The selected project is invalid. Run npx --yes copilotkit@latest project select again.",
     );
   }
-  // A saved record alone does not prove a stale CPK key belongs to it. Re-provision here.
-  // CLI project select removes INTELLIGENCE_API_KEY, hence the precondition above.
+  // No runtime key is available. Provision one for the saved project before assigning Learning.
   const provision = await run(
     ["project", "select", "--project", projectId, "--json"],
     directory,
@@ -282,11 +285,7 @@ export async function setupLearning(
       "The CLI did not write a runtime key. Run project select and this helper again.",
     );
   }
-  const content = upsert(
-    upsert(current, "INTELLIGENCE_API_KEY", key),
-    CONTAINER,
-    "openbot",
-  );
+  const content = upsert(current, CONTAINER, "openbot");
   await saveEnvironment(envPath, content);
   return "configured";
 }

@@ -273,10 +273,13 @@ export function RoutinesList({
           Couldn't load your routines. Reload the page.
         </p>
       ) : rows.length === 0 ? (
-        <PageEmpty>
+        <PageEmpty
+          icon={IconClock}
+          title={agentId ? "No routines for this Bot yet" : "No routines yet"}
+        >
           {agentId
-            ? 'No routines for this Bot yet. Ask it something like "every weekday at 9, send me…" and it shows up here.'
-            : 'No routines yet. Ask a Bot something like "every weekday at 9, send me…" and it shows up here.'}
+            ? 'Ask it something like "every weekday at 9, send me…" and it shows up here.'
+            : 'Ask a Bot something like "every weekday at 9, send me…" and it shows up here.'}
         </PageEmpty>
       ) : (
         <PageRows>

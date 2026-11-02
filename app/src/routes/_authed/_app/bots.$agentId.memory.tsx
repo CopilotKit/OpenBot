@@ -12,7 +12,7 @@ function MemoryPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="The apps this Bot learns from, and the research it does for you in the background."
+      description="Choose which apps this Bot learns from and manage its background research."
       title="Memory"
     >
       {(agent) => (

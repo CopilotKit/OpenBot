@@ -136,35 +136,48 @@ export async function retireIdentityLinks(
 }
 
 /**
- * Everything a removed person had connected, retired in full whichever half fails.
+ * Everything a removed person had connected, retired in full whichever part fails.
  *
- * Both halves always run: the plugin half rethrows on purpose (a broker refusal), and stopping there
+ * Every part always runs: the plugin half rethrows on purpose (a broker refusal), and stopping there
  * left every linked account's token live, with a retry hitting the same refusal first. The failure
- * is still thrown afterwards — the first one alone, or an AggregateError of both whose message
- * names both causes (callers log `String(error)`, which shows the message and not `.errors`) — so
- * the caller's error handling sees it. On success, the count is both halves together.
+ * is still thrown afterwards (the first one alone, or an AggregateError of them all whose message
+ * names every cause, since callers log `String(error)`, which shows the message and not `.errors`), so
+ * the caller's error handling sees it. On success, the count is the accounts retired; the person's
+ * Recorder connections, which end with their sign-in (recorder/sign-out.ts), are not accounts and are
+ * not counted.
  */
 export async function retireOwnedAccounts(retirers: {
   plugins: () => Promise<{ retired: number }>;
   identities: () => Promise<number>;
+  /** The person's browsers' Recorders, signed out with them. Absent where there is no Recorder. */
+  recorders?: () => Promise<void>;
 }): Promise<{ retired: number }> {
-  const failures: unknown[] = [];
+  const failures: Array<{ part: string; error: unknown }> = [];
   let retired = 0;
   try {
     retired += (await retirers.plugins()).retired;
   } catch (error) {
-    failures.push(error);
+    failures.push({ part: "plugins", error });
   }
   try {
     retired += await retirers.identities();
   } catch (error) {
-    failures.push(error);
+    failures.push({ part: "linked accounts", error });
   }
-  if (failures.length === 1) throw failures[0];
+  if (retirers.recorders) {
+    try {
+      await retirers.recorders();
+    } catch (error) {
+      failures.push({ part: "Recorder connections", error });
+    }
+  }
+  if (failures.length === 1) throw failures[0]?.error;
   if (failures.length > 1)
     throw new AggregateError(
-      failures,
-      `Retiring a removed person's accounts failed in both halves: plugins: ${messageOf(failures[0])}; linked accounts: ${messageOf(failures[1])}`,
+      failures.map((failure) => failure.error),
+      `Retiring a removed person's accounts failed in ${failures.length} parts: ${failures
+        .map((failure) => `${failure.part}: ${messageOf(failure.error)}`)
+        .join("; ")}`,
     );
   return { retired };
 }

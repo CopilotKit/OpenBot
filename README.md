@@ -4,15 +4,16 @@
 
 **The AI assistant your company can actually own.** Same shape as ChatGPT, Claude or Grok, with one difference that matters: it runs on your infrastructure and you can change anything about it. Any agent stack, through AG-UI.
 
-Each coworker gets a computer of its own: a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
+Each coworker gets a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
 
 [**Talk to an engineer**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**Have us build it with you**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**copilotkit.ai/openbot**](https://copilotkit.ai/openbot) · [**Quick start**](#quick-start) · [**Docs**](docs/README.md)
 
 [![CI](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml)
 [![security](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-![Alpha](https://img.shields.io/badge/status-alpha-orange.svg)
+![Beta](https://img.shields.io/badge/status-beta-yellow.svg)
 
+[![GitHub Trending: #5 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
 [![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
 
 </div>
@@ -31,7 +32,7 @@ your own machine.
 
 > **A template, not a product.** OpenBot is meant to be cloned and made your own. There is no hosted version to sign up for, and nothing here is published as a package to depend on: every workspace in this repository is private. You take the repository, replace the example tenant package under `examples/` with your own coworkers, channels and skills, and run it. Everything below describes a starting point, not a finished thing somebody operates for you.
 
-> **Alpha, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
+> **Beta, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
 
 > **Runs on your machine.** Everything below is written for a laptop. `.env.example` carries `OPENBOT_SINGLE_USER=true`, which admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client first. [Sign-in](#sign-in) turns that off, and is required before anybody else can reach the deployment.
 
@@ -64,7 +65,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 ## Requirements
 
 - Docker, for PostgreSQL and the shipped Bots.
-- [Bun](https://bun.sh) 1.3+, for the app and API server.
+- [Bun](https://bun.sh) 1.4+, for the app, the API server and the tests (some tests fail on 1.3).
 - A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
 
@@ -98,7 +99,12 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    For fresh self-hosted setup, set `INTELLIGENCE_API_URL` to that deployment's
    HTTPS API origin (or `http://localhost` for a local one) and run the helper
    without the two `npx` commands. It opens an isolated Chrome or Edge window for
-   your usual sign-in and project choice; install either browser first. It writes
+   your usual sign-in and project choice; install either browser first. For CLI-managed
+   local evaluation installs, it discovers the matching dashboard with the newest installed or
+   cached CopilotKit CLI and uses that dashboard for login and session requests. Discovery
+   runs offline with Bun, without downloading the CLI or requiring `npx` on your PATH.
+   If no CLI is available, manually hosted deployments use their API origin for sign-in. Complete the local auth
+   approval shown in the browser when prompted. The runtime API URL stays unchanged. It writes
    the API URL, the key and the container, not `INTELLIGENCE_GATEWAY_WS_URL`, so
    set that one to the same deployment yourself. Once `openbot` exists, the server assigns it
    as the default by itself unless [Admin → Automatic Learning](docs/automatic-learning.md)
@@ -138,13 +144,10 @@ not a production installation. Run its
 `npx copilotkit@latest local connect` from the OpenBot root, where `.env` is.
 
 That command writes `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
-`CPK_INTELLIGENCE_API_KEY` to `.env`. OpenBot reads the first two as they are, but takes its project
-key only from `INTELLIGENCE_API_KEY` and refuses to start without it, so copy the `cpk-...` value
-across before `bash scripts/start.sh`:
-
-```sh
-INTELLIGENCE_API_KEY=cpk-...   # the value of CPK_INTELLIGENCE_API_KEY
-```
+`CPK_INTELLIGENCE_API_KEY` to `.env`. OpenBot reads those settings directly; no key
+copying or renaming is needed. `INTELLIGENCE_API_KEY` remains supported for older
+configurations. When both are set, the non-empty CLI key takes precedence so
+reconnecting uses the new project's key.
 
 To give the Bots a Learning container on that stack, see
 [Automatic Learning](docs/automatic-learning.md).
@@ -217,11 +220,11 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 
 ## Features
 
-- **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
+- **A computer per person**: the supervisor gives each person their own container, with a folder and browser profile for each of their Bots. Tick Isolated on a Bot to give it a container of its own. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
 - **A shell, not just a browser**: a Bot can run a command in its workspace, install what it needs, and process a file it saved. Through the same gate as everything else, so a rule can refuse a shell outright or refuse particular commands, and the command is on the record either way. The command inherits PATH, locale, terminal and proxy variables, not the rest of the deployment's environment.
 - **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
 - **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `command`, `file.*`, `mcp.*` and `initiator.*` (what started the run, so a rule can refuse a scheduled routine what it would allow a person). Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
-- **Watch what it is doing**: the screen shows what a Bot is looking at, and the Activity tab beside it shows what it ran, read and saved, with the output. A command line in the transcript opens to the same thing. A saved file shows its path and size, never its contents.
+- **Watch what it is doing**: the screen shows what a Bot is looking at, and the Activity list under it shows what it ran, read and saved in this conversation, with the output. A command line in the transcript opens to the same thing. A saved file shows its path and size, never its contents.
 - **Take the wheel**: a Bot that hits a login wall or a 2FA prompt asks for help. Control is handed over in the same panel and recorded as `computer.help_requested`, `computer.control_taken` and `computer.control_released`. While a person is driving, Bot actions are refused rather than queued.
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
@@ -292,7 +295,7 @@ Settings worth knowing:
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` falls back to a fixed dev value. |
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` falls back to a fixed dev value. |
 | `AGENT_TOOL_TOKEN`                   | Secret a Bot presents to call a granted tool back. `start.sh` sets one. Without it no Bot may call tools. |
-| `COMPUTER_SUPERVISOR_URL`            | Gives each Bot a computer of its own instead of one shared computer.      |
+| `COMPUTER_SUPERVISOR_URL`            | Gives each person a computer of their own instead of one shared computer. |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run computers under gVisor, where the host has it.      |
 | `COMPUTER_SANDBOX`                   | Set to `on` for Chromium's own sandbox, where the host permits it.        |
 | `EMBEDDED_POSTGRES`                  | Set to `on` for a database inside the deployment container.               |
@@ -314,7 +317,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
 | `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
-| `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per Bot.                                                        |
+| `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |
 | PostgreSQL with pgvector | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |

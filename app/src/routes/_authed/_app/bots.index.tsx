@@ -32,7 +32,7 @@ function BotsPage() {
           New Bot
         </Button>
       }
-      description="Your Bots and the ones shared with you. See what each is doing and what it needs from you."
+      description="Manage your Bots and access those shared with you."
       title="Bots"
     >
       <BotRoster />

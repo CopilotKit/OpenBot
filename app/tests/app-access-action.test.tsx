@@ -28,7 +28,7 @@ import { settleReactWork } from "./settle-react-work";
 /**
  * The one piece the Bot page and the chat card both draw an app's state with.
  *
- * Each of the seven states must say whose move it is and offer exactly that move — and nothing for a
+ * Each of the eight states must say whose move it is and offer exactly that move — and nothing for a
  * state that needs none, or a move that is somebody else's: an administrator's, or on somebody else's
  * Team Bot its owner's. The two moves that write are asserted against the request they send: the
  * browser names a Bot and an app and never a kind, which is the server's to decide.
@@ -56,6 +56,7 @@ type Sent = { method: string; url: string; body: unknown };
 function mounted(
   access: AppAccess,
   answer?: { status: number; body: unknown },
+  options: { admin?: boolean } = {},
 ) {
   const sent: Sent[] = [];
   const opened: string[] = [];
@@ -79,6 +80,10 @@ function mounted(
       url,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
+    if (options.admin && url === "/api/me")
+      return Response.json({ user: { id: "usr_admin", role: "admin" } });
+    if (options.admin && url === "/api/agents/expenses")
+      return Response.json({ agent: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
     if (url.endsWith("/connect?returnTo=settings"))
@@ -112,8 +117,13 @@ function mounted(
     path: "/connections/$key",
     component: () => null,
   });
+  const admin = createRoute({
+    getParentRoute: () => root,
+    path: "/admin/plugins/$key",
+    component: () => null,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([page, settings]),
+    routeTree: root.addChildren([page, settings, admin]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   const view = render(
@@ -441,4 +451,136 @@ test("the focus follows the press: Request access hands it to Withdraw, and With
   expect(document.activeElement).toBe(
     await view.findByRole("button", { name: "Request access to Gmail" }),
   );
+});
+
+test.each([
+  [
+    "disabled",
+    "Turn on and give it to Expenses",
+    "Turn on Gmail and give it to Expenses",
+  ],
+  ["not_granted", "Give it to Expenses", "Give Gmail to Expenses"],
+] as const)(
+  "an admin looking at %s gets the fix itself, in one press, never a request to themselves",
+  async (state, label, spoken) => {
+    const { view, sent } = mounted(
+      appAccess({
+        state,
+        unavailable: state === "disabled" ? "absent" : null,
+        requestKind: state === "disabled" ? "enable" : "grant",
+      }),
+      undefined,
+      { admin: true },
+    );
+    const button = await view.findByRole("button", { name: spoken });
+    expect(button.textContent).toBe(label);
+    expect(
+      view.queryByRole("button", { name: "Request access to Gmail" }),
+    ).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(sent.find((call) => call.method === "POST")).toStrictEqual({
+        method: "POST",
+        url: "/api/plugins/for/expenses/apps/composio-gmail/approve",
+        body: undefined,
+      }),
+    );
+  },
+);
+
+test("an admin's press that cannot be carried out says what is missing", async () => {
+  const { view } = mounted(
+    appAccess({ state: "not_granted", requestKind: "grant" }),
+    { status: 409, body: { error: "Gmail has no tools to give yet." } },
+    { admin: true },
+  );
+  fireEvent.click(
+    await view.findByRole("button", { name: "Give Gmail to Expenses" }),
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Gmail has no tools to give yet.",
+  );
+});
+
+test.each([
+  [
+    { state: "shared_not_connected", requestKind: "connect_shared" },
+    "Connect the team Gmail account",
+    "/admin/plugins/composio-gmail",
+  ],
+  [
+    { state: "disabled", unavailable: "token_missing", requestKind: "enable" },
+    "Set up Gmail",
+    "/admin/plugins/composio-gmail",
+  ],
+  [
+    {
+      state: "disabled",
+      unavailable: "composio_unconfigured",
+      requestKind: "enable",
+    },
+    "Set up Gmail",
+    "/admin/plugins/composio",
+  ],
+] as const)(
+  "an admin gets the page that fixes what one press cannot, in a new tab",
+  async (overrides, name, href) => {
+    const { view } = mounted(appAccess(overrides), undefined, { admin: true });
+    const link = await view.findByRole("button", { name });
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.getAttribute("target")).toBe("_blank");
+  },
+);
+
+test("an owner is asked about their own app, by the Bot's name where the caller has it", () => {
+  const owners = appAccess({ state: "owner_grantable", granted: false });
+  expect(appAccessSentence(owners)).toBe("Let this Bot use your Gmail?");
+  expect(appAccessSentence(owners, "Research Bot")).toBe(
+    "Let Research Bot use your Gmail?",
+  );
+  expect(
+    appAccessSentence({ ...owners, needsConnect: true }, "Research Bot"),
+  ).toBe("Let Research Bot use your Gmail? Connect it first.");
+  // An app on nobody's own account is not "your" anything.
+  expect(
+    appAccessSentence(
+      { ...owners, displayName: "Routines", account: "deployment" },
+      "Research Bot",
+    ),
+  ).toBe("Let Research Bot use Routines?");
+});
+
+test("an owner's Allow gives the app in one press, naming the Bot and the app and nothing else", async () => {
+  const { view, sent } = mounted(
+    appAccess({ state: "owner_grantable", granted: false }),
+  );
+  fireEvent.click(await view.findByRole("button", { name: /^Let .* Gmail$/ }));
+  await waitFor(() =>
+    expect(sent.filter((call) => call.method === "POST")).toStrictEqual([
+      {
+        method: "POST",
+        url: "/api/plugins/for/expenses/apps/composio-gmail/give",
+        body: undefined,
+      },
+    ]),
+  );
+});
+
+test("Connect and allow opens the person's consent first, and gives the app once it is connected", async () => {
+  const waiting = appAccess({
+    state: "owner_grantable",
+    granted: false,
+    needsConnect: true,
+  });
+  const { view, sent, opened, swap } = mounted(waiting);
+  fireEvent.click(
+    await view.findByRole("button", { name: /after you connect it$/ }),
+  );
+  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  const gives = () =>
+    sent.filter((call) => call.url.endsWith("/apps/composio-gmail/give"));
+  expect(gives()).toEqual([]);
+  // The server's next answer: connected now, and still not given.
+  swap({ ...waiting, needsConnect: false });
+  await waitFor(() => expect(gives()).toHaveLength(1));
 });

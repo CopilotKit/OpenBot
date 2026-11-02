@@ -131,6 +131,8 @@ function server(overrides: Partial<PluginServer> & { id: string }) {
     dynamicClient: false,
     accountMode: null,
     sharedVendorConnected: false,
+    ownerGrants: "admin",
+    ownerGrantsChosen: null,
     // Not brokered unless a case says otherwise, which is what a null means here.
     authScheme: null,
     tools: [],

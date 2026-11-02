@@ -6,6 +6,7 @@ import {
   IconKey,
   IconNetwork,
   IconPlug,
+  IconShare,
   IconShieldLock,
   IconTerminal2,
   IconToggleRight,
@@ -123,7 +124,7 @@ function EnterprisePage() {
 
   return (
     <PageShell
-      description="What members can use, how Bot computers reach the network, and what is recorded. Every change shows in Audit."
+      description="Manage member permissions, network access for Bot computers, and recording settings. All changes appear in Audit."
       title="Enterprise controls"
     >
       {failure ? (
@@ -301,7 +302,38 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description="Where Bot computers can connect. Changes reach running computers within seconds, without a restart. A group policy replaces the organization's unless it is locked."
+        description="Each person's recordings teach Skills in their own Learning space, and those Skills reach the Bots that person uses. A shared Skill puts its person's recorded and narrated text in front of everybody's Bots."
+        title="Learning"
+      >
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconShare />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Skill sharing</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {settings.skillSharing
+                  ? "People may open their Skills to every Bot in Settings, Learning."
+                  : "Off. Each person's Skills reach only the Bots they use, even Skills they opened before."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Skill sharing"
+                checked={settings.skillSharing}
+                disabled={saving}
+                onCheckedChange={(checked) =>
+                  onSetting("skillSharing", checked)
+                }
+              />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
+
+      <PageSection
+        description="Control where Bot computers can connect. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
         title="Network"
       >
         <PageRows>
@@ -589,7 +621,7 @@ function EnterpriseSections({
         />
       ) : null}
       <ListDialog
-        description="One model per line, as provider/model, for example openai/gpt-5.6-terra."
+        description="Enter one model per line as provider/model, for example openai/gpt-5.6-terra."
         initial={settings.modelAllowlist.models}
         onClose={() => setModelsOpen(false)}
         onSave={(models) =>
@@ -618,7 +650,11 @@ function ModelUsage() {
       </p>
     );
   if (usage.data.summary.length === 0)
-    return <PageEmpty>No Bot runs in the last 30 days.</PageEmpty>;
+    return (
+      <PageEmpty icon={IconChartBar} title="No recent runs">
+        No Bot runs in the last 30 days.
+      </PageEmpty>
+    );
   return (
     <PageRows>
       {usage.data.summary.map((row, index) => (
@@ -659,7 +695,7 @@ function RecordedActions() {
       </p>
     );
   if (actions.data.length === 0)
-    return <PageEmpty>No commands recorded yet.</PageEmpty>;
+    return <PageEmpty icon={IconTerminal2} title="No commands recorded yet" />;
   return (
     <PageRows>
       {actions.data.map((action, index) => (

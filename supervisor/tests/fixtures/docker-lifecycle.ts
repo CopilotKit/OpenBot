@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import type Docker from "dockerode";
-import { namesFor, NAMESPACE } from "../../src/names";
+import { legacyNamesFor, NAMESPACE, namesFor } from "../../src/names";
 
 // Launched by docker.integration.test.ts in a fresh process: names.ts reads its namespace once.
 const namespace = NAMESPACE;
@@ -39,9 +39,28 @@ const OTHER = `openbot-supervisor-fixture:${namespace}-two`;
 const fixtureImages: string[] = [];
 
 const BOT = "supervisortestbot";
-const result = namesFor(BOT);
+const result = namesFor("bot", BOT);
 if (!result.ok) throw new Error(result.reason);
 const names = result.names;
+
+/** People and a Bot from before one computer per person, for the cases that need them. */
+function named(kind: "person" | "bot", id: string) {
+  const found = namesFor(kind, id);
+  if (!found.ok) throw new Error(found.reason);
+  return found.names;
+}
+const ADA = named("person", "ada");
+const BO = named("person", "bo");
+const LEGACY_BOT = "notesbot";
+const legacyFound = legacyNamesFor(LEGACY_BOT);
+if (!legacyFound.ok) throw new Error(legacyFound.reason);
+const LEGACY = legacyFound.names;
+/** What every computer of this supervisor's carried before kinds existed. */
+const LEGACY_LABELS = {
+  "openbot.supervisor": "true",
+  "openbot.namespace": namespace,
+  "openbot.bot-id": LEGACY_BOT,
+};
 
 function isMissing(error: unknown): boolean {
   return (
@@ -137,6 +156,7 @@ let completedCases = 0;
 afterAll(async () => {
   await remove(names.container);
   await removeVolumes();
+  await removeNamespace();
   for (const image of fixtureImages) {
     const info = await withDocker().docker.getImage(image).inspect();
     if (info.Config.Labels?.["openbot.test-fixture"] !== namespace)
@@ -178,14 +198,73 @@ async function plant(labels: Record<string, string>, health?: boolean) {
 const OURS = {
   "openbot.supervisor": "true",
   "openbot.namespace": namespace,
+  "openbot.computer-kind": "bot",
   "openbot.bot-id": BOT,
 };
+
+/**
+ * Everything this run made in its own namespace, which is unique to it: people's computers, a Bot's
+ * old computer and volume, and any copy helper left behind.
+ */
+async function removeNamespace() {
+  const docker = withDocker().docker;
+  const containers = await docker.listContainers({
+    all: true,
+    filters: { label: [`openbot.namespace=${namespace}`] },
+  });
+  for (const container of containers) {
+    await docker
+      .getContainer(container.Id)
+      .remove({ force: true })
+      .catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+  }
+  const { Volumes } = await docker.listVolumes({
+    filters: { label: [`openbot.namespace=${namespace}`] },
+  });
+  for (const volume of Volumes ?? []) {
+    await docker
+      .getVolume(volume.Name)
+      .remove()
+      .catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+  }
+}
 
 afterEach(async () => {
   await remove(names.container);
   await removeVolumes();
+  await removeNamespace();
+  supervisor.forgetCarryOvers();
   completedCases += 1;
 });
+
+/** Run a shell line in the fixture image with these volumes mounted, and return what it printed. */
+async function inVolumes(binds: string[], script: string): Promise<string> {
+  const docker = withDocker().docker;
+  const container = await docker.createContainer({
+    Image: IMAGE,
+    Labels: {
+      "openbot.test-fixture": namespace,
+      "openbot.namespace": namespace,
+    },
+    Entrypoint: ["sh", "-c"],
+    Cmd: [script],
+    Tty: true,
+    HostConfig: { Binds: binds },
+  });
+  try {
+    await container.start();
+    await container.wait();
+    return (await container.logs({ stdout: true, stderr: true }))
+      .toString()
+      .trim();
+  } finally {
+    await container.remove({ force: true });
+  }
+}
 
 describe("a name held by somebody else", () => {
   test("is refused rather than adopted, and never started", async () => {
@@ -386,4 +465,183 @@ describe("a computer built from an older image", () => {
     expect(second).not.toBeNull();
     expect(after.Id).toBe(before.Id);
   }, 180_000);
+});
+
+describe("one computer per person", () => {
+  test("a person's computer is named and labelled for that person", async () => {
+    const state = await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+    expect(state).toMatchObject({ kind: "person", id: "ada" });
+    const info = await withDocker()
+      .docker.getContainer(ADA.container)
+      .inspect();
+    expect(info.Config.Labels).toMatchObject({
+      "openbot.computer-kind": "person",
+      "openbot.person-id": "ada",
+    });
+    const listed = await withDocker().supervisor.listOwned();
+    expect(listed).toContainEqual(
+      expect.objectContaining({
+        kind: "person",
+        id: "ada",
+        container: ADA.container,
+      }),
+    );
+  }, 90_000);
+
+  test("an old computer under a name today's scheme also derives is refused, not adopted", async () => {
+    /*
+     * The old computer of a Bot called `bot-supervisortestbot` was named exactly what an isolated Bot
+     * called `supervisortestbot` is named now. Ours by owner and namespace, but not this computer:
+     * adopting it would hand one Bot another's logins.
+     */
+    await plant(
+      { ...OURS, "openbot.computer-kind": "", "openbot.bot-id": `bot-${BOT}` },
+      true,
+    );
+    await expect(
+      withDocker().supervisor.ensure(names, { image: IMAGE, environment: [] }),
+    ).rejects.toBeInstanceOf(withDocker().supervisor.NameHeldError);
+  }, 90_000);
+});
+
+describe("a private Bot's login, carried over to its owner", () => {
+  async function oldProfile(contents: string) {
+    await withDocker()
+      .docker.createVolume({
+        Name: LEGACY.profileVolume,
+        Labels: LEGACY_LABELS,
+      })
+      .catch(() => undefined);
+    await inVolumes(
+      [`${LEGACY.profileVolume}:/v`],
+      `mkdir -p /v/Default && printf %s '${contents}' > /v/Default/Cookies`,
+    );
+  }
+  const cookiesIn = (person: typeof ADA) =>
+    inVolumes(
+      [`${person.profileVolume}:/p`],
+      `cat /p/${LEGACY_BOT}/Default/Cookies 2>/dev/null || echo none`,
+    );
+
+  test("is copied into the owner's computer under that Bot, once, and the old volume kept", async () => {
+    await oldProfile("ada-login");
+    await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+
+    expect(
+      await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+        image: IMAGE,
+      }),
+    ).toBe("copied");
+    expect(await cookiesIn(ADA)).toBe("ada-login");
+
+    // Run again from a fresh process's memory, after the old profile changed: the marker in the
+    // owner's volume says it was done, so nothing is copied over what the owner has now.
+    withDocker().supervisor.forgetCarryOvers();
+    await oldProfile("stale");
+    expect(
+      await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+        image: IMAGE,
+      }),
+    ).toBe("done");
+    expect(await cookiesIn(ADA)).toBe("ada-login");
+
+    // The old volume is left exactly where it was.
+    const kept = await withDocker()
+      .docker.getVolume(LEGACY.profileVolume)
+      .inspect();
+    expect(kept.Name).toBe(LEGACY.profileVolume);
+  }, 180_000);
+
+  test("brings the Bot's old files into its folder on the owner's computer, once", async () => {
+    await oldProfile("ada-login");
+    await withDocker()
+      .docker.createVolume({
+        Name: LEGACY.workspaceVolume,
+        Labels: LEGACY_LABELS,
+      })
+      .catch(() => undefined);
+    await inVolumes(
+      [`${LEGACY.workspaceVolume}:/v`],
+      "mkdir -p /v/reports && printf %s 'march totals' > /v/reports/march.txt",
+    );
+    withDocker().supervisor.forgetCarryOvers();
+    await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+    await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+      image: IMAGE,
+    });
+    // Where the Bot's shell and file tools start on its person's computer (agent-computer's workspaces.ts).
+    const filesIn = () =>
+      inVolumes(
+        [`${ADA.workspaceVolume}:/w`],
+        `cat /w/computers/${LEGACY_BOT}/reports/march.txt 2>/dev/null || echo none`,
+      );
+    expect(await filesIn()).toBe("march totals");
+
+    // Once: a later change to the old volume is not copied over what the Bot has now.
+    withDocker().supervisor.forgetCarryOvers();
+    await inVolumes(
+      [`${LEGACY.workspaceVolume}:/v`],
+      "printf %s stale > /v/reports/march.txt",
+    );
+    await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+      image: IMAGE,
+    });
+    expect(await filesIn()).toBe("march totals");
+    expect(
+      (await withDocker().docker.getVolume(LEGACY.workspaceVolume).inspect())
+        .Name,
+    ).toBe(LEGACY.workspaceVolume);
+  }, 180_000);
+
+  test("never overwrites a profile the owner's computer already has for that Bot", async () => {
+    await oldProfile("old-login");
+    await withDocker().supervisor.ensure(BO, { image: IMAGE, environment: [] });
+    await inVolumes(
+      [`${BO.profileVolume}:/p`],
+      `mkdir -p /p/${LEGACY_BOT}/Default && printf %s newer > /p/${LEGACY_BOT}/Default/Cookies`,
+    );
+
+    expect(
+      await withDocker().supervisor.carryOverProfile(BO, LEGACY_BOT, {
+        image: IMAGE,
+      }),
+    ).toBe("kept");
+    expect(await cookiesIn(BO)).toBe("newer");
+  }, 180_000);
+
+  test("the old computer is stopped when the supervisor starts, and its volume kept", async () => {
+    await oldProfile("x");
+    await withDocker().docker.createContainer({
+      name: LEGACY.container,
+      Image: IMAGE,
+      Labels: { ...LEGACY_LABELS, "openbot.test-fixture": namespace },
+      HostConfig: { Binds: [`${LEGACY.profileVolume}:/profiles`] },
+    });
+    await withDocker().docker.getContainer(LEGACY.container).start();
+
+    const stopped = await withDocker().supervisor.retireLegacyComputers();
+    expect(stopped).toContain(LEGACY.container);
+    const info = await withDocker()
+      .docker.getContainer(LEGACY.container)
+      .inspect();
+    expect(info.State.Running).toBe(false);
+    // Not listed as one of today's computers either.
+    const listed = await withDocker().supervisor.listOwned();
+    expect(listed.map((computer) => computer.container)).not.toContain(
+      LEGACY.container,
+    );
+    expect(
+      (await withDocker().docker.getVolume(LEGACY.profileVolume).inspect())
+        .Name,
+    ).toBe(LEGACY.profileVolume);
+  }, 120_000);
 });

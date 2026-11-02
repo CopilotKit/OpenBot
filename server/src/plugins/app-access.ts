@@ -25,7 +25,7 @@ import type { CatalogueEntry } from "./catalogue";
  */
 
 /**
- * The seven things a person can be told about one app on one Bot.
+ * The eight things a person can be told about one app on one Bot.
  *
  * `ready` — usable now, as far as this deployment knows.
  * `not_connected` — enabled and held, and this app is used under each person's own account, which
@@ -40,6 +40,9 @@ import type { CatalogueEntry } from "./catalogue";
  * `disabled` — switched off at the deployment: no row, the broker not configured, or an app that
  * still needs something only an administrator can supply.
  * `not_granted` — enabled, and this Bot holds none of its tools. Only an administrator can grant.
+ * `owner_grantable` — enabled, this Bot holds none of its tools, and the person looking owns the Bot
+ * and may give it the app themselves, because the app's rule ({@link ownerGrantsOf}) lets owners
+ * decide. Theirs to do, so nothing is filed.
  */
 export const APP_ACCESS_STATES = [
   "ready",
@@ -49,6 +52,7 @@ export const APP_ACCESS_STATES = [
   "shared_not_approved",
   "disabled",
   "not_granted",
+  "owner_grantable",
 ] as const;
 
 export type AppAccessState = (typeof APP_ACCESS_STATES)[number];
@@ -74,7 +78,14 @@ export const REQUEST_KIND_FOR: Record<
   shared_not_approved: null,
   disabled: "enable",
   not_granted: "grant",
+  owner_grantable: null,
 };
+
+/**
+ * Who may give an app to a Bot: the Bot's owner, for their own Bot (`any`), or only an
+ * administrator (`admin`). See `mcp_servers.owner_grants`.
+ */
+export type OwnerGrants = "any" | "admin";
 
 /** Whose account the app's calls land in. */
 export type AppAccount =
@@ -136,6 +147,19 @@ export type AppAccess = {
   asksFirst: boolean;
   /** Whether this Bot holds any of the app's tools. */
   granted: boolean;
+  /** Who may give the app to a Bot, with the default for its account filled in. */
+  ownerGrants: OwnerGrants;
+  /**
+   * Whether every grant this Bot holds on the app was made by the Bot's owner, and so may be taken
+   * back by them too. False where the Bot holds nothing, or where an administrator gave any of it.
+   */
+  givenByOwner: boolean;
+  /**
+   * Whether giving the app to the Bot (`owner_grantable`) has to start with connecting the person's
+   * own account, because the app runs on it and they have none, or one the vendor refused. False in
+   * every other state.
+   */
+  needsConnect: boolean;
   /**
    * When the account this app runs in for this person was connected — their own, or the team's for
    * a Shared app — and null where none is, or where no account is involved.
@@ -174,6 +198,14 @@ export type AppAccessFacts = {
   /** Whether the row holds a credential: the OAuth client, or the deployment's token. */
   hasCredential: boolean;
   granted: boolean;
+  /** The app's `owner_grants` column, null where an administrator never chose. */
+  ownerGrants: OwnerGrants | null;
+  /**
+   * Whether the person asking may give their own apps to this Bot: they own it (a Bot with no owner
+   * — a package's public Bot — is nobody's to give to), and no administrator has switched the
+   * feature off for them. Whether THIS app may be given is {@link ownerGrantsOf}'s answer, not this.
+   */
+  mayGiveOwn: boolean;
   /** This person's own connection, or null where they have none. */
   personal: { usable: boolean } | null;
   /** The deployment's account at a Shared app, or null where none is connected. */
@@ -185,8 +217,14 @@ export type AppAccessFacts = {
   sharedAdmitted: boolean | null;
 };
 
+/** The facts that say whose account an app runs on, and so what its owner rule defaults to. */
+type AccountFacts = Pick<
+  AppAccessFacts,
+  "provider" | "authScheme" | "accountMode" | "catalogueAuth"
+>;
+
 /** Whose account, from the same facts `accessFor` resolves a call with. */
-export function accountOf(facts: AppAccessFacts): AppAccount {
+export function accountOf(facts: AccountFacts): AppAccount {
   if (brokeredProvenance(facts.provider)) {
     if (schemeKind(facts.authScheme) === "none") return "deployment";
     return facts.accountMode === "shared" ? "shared" : "personal";
@@ -196,6 +234,26 @@ export function accountOf(facts: AppAccessFacts): AppAccount {
       ? "personal"
       : "deployment";
   return "deployment";
+}
+
+/**
+ * Who may give this app to a Bot: what an administrator chose, or the default for its account.
+ *
+ * OWNERS DECIDE BY DEFAULT ONLY WHERE THE APP RUNS ON THE ASKER'S OWN ACCOUNT. A Bot given somebody's
+ * Gmail by its owner reads, for anybody else who talks to it, that person's own Gmail and nothing
+ * more — so letting the owner decide hands nobody anything they did not already have. The built-in
+ * Routines have no account at all and run as whoever scheduled them, the same shape, and "every
+ * morning…" has to work on a Bot made five minutes ago. Everything else reaches one account that is
+ * not the asker's — the deployment's token, a Shared team account, a server that needs no credential
+ * and so answers everybody alike — and giving a Bot that is an administrator's decision until an
+ * administrator says otherwise.
+ */
+export function ownerGrantsOf(
+  facts: AccountFacts & { ownerGrants: OwnerGrants | null },
+): OwnerGrants {
+  if (facts.ownerGrants) return facts.ownerGrants;
+  if (facts.catalogueAuth?.kind === "builtin") return "any";
+  return accountOf(facts) === "personal" ? "any" : "admin";
 }
 
 export function connectOf(facts: AppAccessFacts): AppConnect {
@@ -256,7 +314,10 @@ export function unavailableReason(facts: AppAccessFacts): Unavailable | null {
  */
 export function appAccessState(facts: AppAccessFacts): AppAccessState {
   if (unavailableReason(facts) !== null) return "disabled";
-  if (!facts.granted) return "not_granted";
+  if (!facts.granted)
+    return facts.mayGiveOwn && ownerGrantsOf(facts) === "any"
+      ? "owner_grantable"
+      : "not_granted";
   const account = accountOf(facts);
   if (account === "deployment") return "ready";
   if (account === "shared") {

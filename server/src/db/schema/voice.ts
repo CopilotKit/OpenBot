@@ -1,3 +1,4 @@
+import type { VoiceTranscriptEntry } from "@openbot/shared/voice-session";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -7,7 +8,6 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { VoiceTranscriptEntry } from "@openbot/shared/voice-session";
 import { channels, users } from "./core";
 import { jsonb } from "./json";
 

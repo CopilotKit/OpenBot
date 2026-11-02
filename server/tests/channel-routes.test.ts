@@ -86,6 +86,10 @@ function fakeStore(
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
     },
+    // A read beside the one the route was asked for, so it is not a call worth asserting on.
+    async workIn() {
+      return new Map();
+    },
   };
 
   return Object.assign(base, overrides, { calls });
@@ -155,6 +159,82 @@ describe("channel input parser", () => {
         active: false,
       }),
     ).toEqual({ ok: true, value: { agentIds: ["agent-1", "agent-2"] } });
+  });
+});
+
+/*
+ * What a conversation is waiting on comes back with the read, so a reload shows it. It used to live
+ * on the socket and nowhere else, and a refresh in the middle of a hop forgot it.
+ */
+describe("what a channel is waiting on", () => {
+  const since = new Date("2026-10-26T09:00:00.000Z");
+  const waiting = new Map([
+    [
+      "channel-1",
+      [
+        {
+          kind: "handoff" as const,
+          key: "hop-1",
+          botId: "ana",
+          botName: "Ana",
+          since,
+        },
+      ],
+    ],
+  ]);
+
+  test("the channel read carries the list", async () => {
+    const store = fakeStore({ workIn: async () => waiting });
+
+    const fetched = await appFor(store).request(
+      "http://openbot.test/channel-1",
+    );
+
+    expect(await json(fetched)).toEqual({
+      channel: {
+        ...channel(),
+        work: [
+          {
+            kind: "handoff",
+            key: "hop-1",
+            botId: "ana",
+            botName: "Ana",
+            since: since.toISOString(),
+          },
+        ],
+      },
+    });
+  });
+
+  test("the roster carries it too, and lights only the rows that have some", async () => {
+    const summary = (id: string) => ({
+      ...channel({ id }),
+      summary: null,
+      lastMessage: null,
+      lastMessageAgentId: null,
+      createdAt: since,
+      pinned: false,
+      lastReadAt: null,
+    });
+    const store = fakeStore({
+      list: async () => ({
+        channels: [summary("channel-1"), summary("channel-2")],
+        nextCursor: null,
+      }),
+      workIn: async () => waiting,
+    });
+
+    const response = await appFor(store).request("http://openbot.test/");
+    const body = (await response.json()) as {
+      channels: Array<{ id: string; busy?: boolean; work: unknown[] }>;
+    };
+
+    expect(body.channels[0]).toMatchObject({ id: "channel-1", busy: true });
+    expect(body.channels[0]?.work).toHaveLength(1);
+    // Absent rather than false: a person's own run in another tab is not on any row this reads.
+    expect(body.channels[1]).toBeDefined();
+    expect(body.channels[1]).not.toHaveProperty("busy");
+    expect(body.channels[1]?.work).toEqual([]);
   });
 });
 
@@ -282,7 +362,9 @@ describe("channel routes", () => {
       },
     });
     expect(fetched.status).toBe(200);
-    expect(await json(fetched)).toEqual({ channel: channel() });
+    expect(await json(fetched)).toEqual({
+      channel: { ...channel(), work: [] },
+    });
   });
 
   /**
@@ -307,7 +389,11 @@ describe("channel routes", () => {
 
     expect(fetched.status).toBe(200);
     expect(await json(fetched)).toEqual({
-      channel: { ...channel(), lastMessageAt: spokenAt.toISOString() },
+      channel: {
+        ...channel(),
+        lastMessageAt: spokenAt.toISOString(),
+        work: [],
+      },
     });
   });
 

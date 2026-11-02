@@ -54,29 +54,29 @@ const SECTIONS: {
 }[] = [
   {
     title: "What Bots can reach",
-    description: "What a Bot can touch outside OpenBot, and the limits on it.",
+    description: "Control what Bots can access outside OpenBot.",
     items: [
       {
         title: "Credentials",
-        description: "Keys and tokens for this deployment.",
+        description: "Manage this deployment’s keys and tokens.",
         icon: IconKey,
         linkOptions: { to: "/admin/credentials" },
       },
       {
         title: "Boundaries",
-        description: "Things no Bot may ever do.",
+        description: "Define actions that no Bot may take.",
         icon: IconShieldCheck,
         linkOptions: { to: "/admin/boundaries" },
       },
       {
         title: "Approvals",
-        description: "What members' Bots must ask before they act.",
+        description: "Choose which actions require approval for members’ Bots.",
         icon: IconChecks,
         linkOptions: { to: "/admin/approvals" },
       },
       {
         title: "Computers",
-        description: "The machines Bots run tools on.",
+        description: "Manage the computers that run Bot tools.",
         icon: IconDeviceDesktop,
         linkOptions: { to: "/admin/computers" },
       },
@@ -84,18 +84,18 @@ const SECTIONS: {
   },
   {
     title: "What Bots can do",
-    description: "Apps, skills and interface pieces every Bot can use.",
+    description:
+      "Configure the apps, skills, and UI components available to Bots.",
     items: [
       {
         title: "Plugins",
-        description:
-          "The services OpenBot can reach, and which Bots can use them.",
+        description: "Connect services and choose which Bots can use them.",
         icon: IconPuzzle,
         linkOptions: { to: "/admin/plugins" },
       },
       {
         title: "Skills",
-        description: "Named instructions anybody can run with /.",
+        description: "Create reusable instructions people can run with /.",
         icon: IconFileText,
         linkOptions: { to: "/admin/skills" },
       },
@@ -108,7 +108,8 @@ const SECTIONS: {
       },
       {
         title: "UI components",
-        description: "Custom pieces a Bot can draw in a conversation.",
+        description:
+          "Manage custom components that Bots can display in conversations.",
         icon: IconLayoutGrid,
         linkOptions: { to: "/admin/components" },
       },
@@ -126,22 +127,21 @@ const SECTIONS: {
     items: [
       {
         title: "People",
-        description:
-          "Everybody who has signed in, who the admins are, and whose access was removed.",
+        description: "Review members, manage admin roles, and remove access.",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
       },
       {
         title: "Enterprise controls",
         description:
-          "Roles and groups, required SSO, SCIM, network policy, MCP and model allowlists, Action Recording.",
+          "Configure roles, groups, SSO, SCIM, Skill sharing, network policies, allowlists, and Action Recording.",
         icon: IconShieldCheck,
         linkOptions: { to: "/admin/enterprise" },
       },
       {
         title: "Identity providers",
         description:
-          "Your company's SAML or OpenID Connect provider, matched by email domain.",
+          "Configure your company’s sign-in provider for each email domain.",
         icon: IconBuildingBank,
         linkOptions: { to: "/admin/identity-providers" },
       },
@@ -153,7 +153,7 @@ const SECTIONS: {
     items: [
       {
         title: "Audit",
-        description: "Every action taken in OpenBot, and who took it.",
+        description: "Review actions taken in OpenBot and who took them.",
         icon: IconListDetails,
         linkOptions: { to: "/admin/audit" },
       },
@@ -164,7 +164,7 @@ const SECTIONS: {
 function RouteComponent() {
   return (
     <PageShell
-      description="Settings for everybody in this deployment. A change here affects every person and every Bot."
+      description="Manage settings that apply to everyone and every Bot in this deployment."
       title="Admin"
     >
       {SECTIONS.map((section) => (
@@ -184,8 +184,8 @@ function RouteComponent() {
                   render={(props) => <Link {...item.linkOptions} {...props} />}
                   size="sm"
                 >
-                  <ItemMedia>
-                    <item.icon className="size-4 text-muted-foreground" />
+                  <ItemMedia variant="icon">
+                    <item.icon />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{item.title}</ItemTitle>
