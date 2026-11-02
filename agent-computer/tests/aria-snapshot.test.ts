@@ -376,3 +376,93 @@ describe("parseAriaSnapshot, dropdowns", () => {
     expect(elements[0]?.options).toHaveLength(50);
   });
 });
+
+describe("where a link goes", () => {
+  /** Captured from `ariaSnapshot({ mode: "ai" })` in the computer image, on a page at an ERP-like address. */
+  const LINKS = `- generic [active] [ref=e1]:
+  - link "PO 102" [ref=e2] [cursor=pointer]:
+    - /url: /purchase-orders/DEMO-PO-102
+  - link "Material documents" [ref=e3] [cursor=pointer]:
+    - /url: material-documents?po=DEMO-PO-102
+  - link "Hash" [ref=e4] [cursor=pointer]:
+    - /url: "#"
+  - link "JS" [ref=e5] [cursor=pointer]:
+    - /url: javascript:void(0)
+  - text: No href
+  - link "Div link" [ref=e6]
+  - link "Ext" [ref=e7] [cursor=pointer]:
+    - /url: https://other.test/a
+  - button "Submit for approval" [ref=e9]
+  - iframe [ref=e10]:
+    - link "Inner" [ref=f1e2] [cursor=pointer]:
+      - /url: inner`;
+  const BASE = "http://erp/invoices/DEMO-INV-002";
+  const urlOf = (ref: string) =>
+    parseAriaSnapshot(LINKS, BASE).elements.find(
+      (element) => element.ref === ref,
+    )?.url;
+
+  test("a link's address is resolved against the document's base, as the browser would", () => {
+    expect(urlOf("e2")).toBe("http://erp/purchase-orders/DEMO-PO-102");
+    expect(urlOf("e3")).toBe(
+      "http://erp/invoices/material-documents?po=DEMO-PO-102",
+    );
+    expect(urlOf("e7")).toBe("https://other.test/a");
+    // Kept as the browser has them; which of these are opened rather than clicked is the server's call.
+    expect(urlOf("e4")).toBe("http://erp/invoices/DEMO-INV-002#");
+    expect(urlOf("e5")).toBe("javascript:void(0)");
+  });
+
+  test("a link with no address, a button and a framed link carry none", () => {
+    expect(urlOf("e6")).toBeUndefined();
+    expect(urlOf("e9")).toBeUndefined();
+    // A frame's link resolves against the frame and navigates the frame: opening it here would differ.
+    expect(urlOf("f1e2")).toBeUndefined();
+  });
+
+  test("a frame-counter prefix on a top-page ref is not a frame", () => {
+    // Captured from a Bot's computer: a link on the page itself, with ref `f9e182`. Playwright's
+    // prefix is its frame counter, which is not zero for every top page.
+    const { elements } = parseAriaSnapshot(
+      `- generic [ref=f9e1]:
+  - link "DEMO-GR-50001" [ref=f9e182] [cursor=pointer]:
+    - /url: /material-documents/DEMO-GR-50001
+  - iframe [ref=f9e190]:
+    - link "Inner" [ref=f10e2] [cursor=pointer]:
+      - /url: inner`,
+      "http://erp/purchase-orders/DEMO-PO-101",
+    );
+    expect(elements.find((element) => element.ref === "f9e182")?.url).toBe(
+      "http://erp/material-documents/DEMO-GR-50001",
+    );
+    expect(
+      elements.find((element) => element.ref === "f10e2")?.url,
+    ).toBeUndefined();
+  });
+
+  test("without a base, no link carries an address", () => {
+    const { elements } = parseAriaSnapshot(LINKS);
+    expect(elements.some((element) => "url" in element)).toBe(false);
+  });
+
+  test("the address does not change what else the element reports", () => {
+    const { elements } = parseAriaSnapshot(LINKS, BASE);
+    expect(elements.find((element) => element.ref === "e2")).toEqual({
+      ref: "e2",
+      role: "link",
+      name: "PO 102",
+      url: "http://erp/purchase-orders/DEMO-PO-102",
+    });
+    // `/url` is the link's child, not an element of its own.
+    expect(elements.map((element) => element.ref)).toEqual([
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+      "e9",
+      "f1e2",
+    ]);
+  });
+});

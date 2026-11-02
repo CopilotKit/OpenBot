@@ -27,6 +27,45 @@ type NativeRun = {
 };
 const nativeRuns = new AsyncLocalStorage<NativeRun>();
 
+/**
+ * The run a built-in Bot's tools belong to, held by the agent that runs them.
+ *
+ * THE SCOPE DOES NOT SURVIVE THE MODEL'S STREAM ON BUN. The AI SDK runs a step's tools when the
+ * provider's stream ends, from the provider's `flush`, and Bun calls a stream's `flush` with no
+ * async context when the end of a fetched body arrives on its own, after the last event: the way a
+ * real provider closes its connection a moment after it has finished. So every native tool call in a
+ * real conversation ran with no run in scope, and so with no approval context: the gate had no
+ * conversation to ask in, and a send to other people was refused outright as "not part of a run
+ * that can ask". A fake model that closes its body with its last event keeps the scope, which is how
+ * this went unseen.
+ *
+ * SO THE RUN IS CARRIED BY THE TOOL, NOT LOOKED UP. An agent holds one of these, wraps each of its
+ * tools with {@link withinNativeRun}, and hands it to {@link nativeApprovalRun}, which puts the run
+ * in it when the run starts. A tool then re-enters exactly that run, however the call reached it.
+ * An agent runs one run at a time (a built-in agent refuses a second while one is open), so the run
+ * a tool finds is the one that called it by construction. Looking the run up by the call's id
+ * instead matched across every person's open runs, and call ids are not unique: two runs numbering
+ * their calls alike could fail a call, or ask in another person's conversation.
+ */
+export type NativeRunScope = { run?: NativeRun };
+export const nativeRunScope = (): NativeRunScope => ({});
+
+/** A tool's execute, re-entering the run its agent is in when it is called. */
+export function withinNativeRun<A extends unknown[], R>(
+  scope: NativeRunScope,
+  execute: (...args: A) => R,
+): (...args: A) => R {
+  return (...args) => {
+    const run = scope.run;
+    // Only the agent's own run calls its tools, so a call with none has no conversation to ask in.
+    if (!run)
+      throw new Error(
+        "This tool call is not part of a conversation, so it was not run.",
+      );
+    return nativeRuns.run(run, () => execute(...args));
+  };
+}
+
 export async function executeNativeApprovalTool<T>(
   name: string,
   args: unknown,
@@ -83,6 +122,9 @@ class NativeStream extends AbstractAgent {
   }
 }
 class NativeApprovalMiddleware extends Middleware {
+  constructor(private readonly scope?: NativeRunScope) {
+    super();
+  }
   run(input: RunAgentInput, next: AbstractAgent) {
     return new Observable<BaseEvent>((subscriber) => {
       let subscription: Subscription | undefined;
@@ -152,6 +194,8 @@ class NativeApprovalMiddleware extends Middleware {
           subscription?.unsubscribe();
         },
       };
+      // Kept after the run ends: a call still arriving belongs to it, and finds it waiting or done.
+      if (this.scope) this.scope.run = run;
       subscription = nativeRuns.run(run, () =>
         this.runNextWithState(input, next).subscribe({
           next({ event, messages, state }) {
@@ -189,8 +233,10 @@ class NativeApprovalMiddleware extends Middleware {
 export function nativeApprovalRun(
   input: RunAgentInput,
   source: () => Observable<BaseEvent>,
+  /** Where this run is put for the agent's tools to find. See {@link NativeRunScope}. */
+  scope?: NativeRunScope,
 ) {
-  return new NativeApprovalMiddleware().run(
+  return new NativeApprovalMiddleware(scope).run(
     input,
     new NativeStream(source, input),
   );

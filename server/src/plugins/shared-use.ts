@@ -136,13 +136,21 @@ export function exposureOf(bot: BotFacts): SharedUseApproval {
   ) {
     return { audience: "team", outsideInput, members: [] };
   }
-  const members: ApprovalMember[] = [
+  const named: ApprovalMember[] = [
     ...(bot.publication?.members ?? []),
     ...bot.assignments.map((group) => ({
       kind: "group" as const,
       value: group,
     })),
   ];
+  // A group can be both published to and assigned, and is still one member of the proposal. Matched
+  // on (kind, value) exactly, so a person and a group with the same value stay two.
+  const members = named.filter(
+    (member, index) =>
+      named.findIndex(
+        (other) => other.kind === member.kind && other.value === member.value,
+      ) === index,
+  );
   if (members.length > 0) return { audience: "people", outsideInput, members };
   return { audience: "owner", outsideInput, members: [] };
 }

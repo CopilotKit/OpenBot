@@ -135,6 +135,11 @@ export type SnapshotElement = {
   checked?: boolean;
   /** A native dropdown's choices, by label. A Bot chooses one by typing it into the dropdown. */
   options?: string[];
+  /**
+   * Where a link goes, absolute, resolved by the browser against the page's base. Present only for a
+   * link on the top page that has an address; a click on such a link opens it (see `ActionResult`).
+   */
+  url?: string;
 };
 
 export type SnapshotResult = {
@@ -192,6 +197,15 @@ export type ActionResult = {
   /** Where the page ended up, which is how a Bot notices that its click navigated. */
   url: string;
   elapsedMs: number;
+  /**
+   * For a click on a link to another page: the address that was opened instead of clicking.
+   *
+   * Following a link is opening its address, so it is done as one: the same navigation, policy and
+   * audit row as `computer_navigate`, with the link still named, and no script on the page runs.
+   */
+  opened?: string;
+  /** Set when the page a followed link opened is asking for a person, exactly as a navigation is. */
+  challenge?: BrowserChallenge;
 };
 
 /** Absent path means the whole workspace. */

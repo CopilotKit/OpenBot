@@ -9,6 +9,7 @@ import {
   type LoadInstructions,
   type LoadToolsForBot,
   type MarkAttachmentsSent,
+  onOpenBotRunner,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
@@ -17,6 +18,7 @@ import {
 import type { AcquireLearnedSkills } from "../learning/runtime";
 import type { LoadPersonalMemory } from "../memory/tools";
 import { NameContextMiddleware } from "../people/name-context";
+import { isProactiveInitiator } from "../proactive/initiator";
 import type { AgentActor } from "./profile-types";
 
 export type AgentResolutionContext = {
@@ -105,8 +107,19 @@ export function createActorAgentResolver(
     const acquireForActor: AcquireLearnedSkills | undefined = acquire
       ? (agentId, signal) => acquire(agentId, signal, actor.id)
       : undefined;
+    /*
+     * A CHECK-IN RUNS EVERY BOT ON OPENBOT'S OWN RUNNER, and offers it everything it may read.
+     *
+     * A Bot on another framework is built as OpenBot would build it (`onOpenBotRunner`), so its own
+     * endpoint, and any tool that endpoint holds out of OpenBot's sight, is never called while nobody
+     * is watching. And its tools are not narrowed by skill: narrowing picks tools from the latest
+     * message, which for a check-in is OpenBot's own instruction, and its reads are already only what
+     * the person connected (`proactive/scope.ts`), so a narrowing could only drop an app.
+     */
+    const checkIn = isProactiveInitiator(context?.initiator);
+    const runnable = checkIn ? registered.map(onOpenBotRunner) : registered;
     return resolveRuntimeAgents(
-      () => Promise.resolve(registered),
+      () => Promise.resolve(runnable),
       deps.model,
       deps.resolveModelApiKey,
       deps.stallGuard,
@@ -114,7 +127,7 @@ export function createActorAgentResolver(
       deps.signRunForActor?.(actor.id, context?.initiator, context?.depth),
       deps.computerGuidance,
       deps.loadVendors,
-      deps.selectionForActor?.(actor.id),
+      checkIn ? undefined : deps.selectionForActor?.(actor.id),
       deps.agentFetch,
       deps.handoffForActor?.(actor.id, context?.initiator, context?.depth),
       onlyAgentId,
@@ -127,7 +140,7 @@ export function createActorAgentResolver(
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {
-        for (const registeredAgent of registered) {
+        for (const registeredAgent of runnable) {
           if (registeredAgent.type !== "built_in") continue;
           agents[registeredAgent.id]?.use(
             new NameContextMiddleware(() => loadName(actor.id)),

@@ -20,7 +20,7 @@ import {
   humanise,
   ownToolLabel,
   readToolName,
-} from "@/lib/plugins/tool-name";
+} from "@openbot/shared/tool-name";
 import {
   asText,
   forDisplay,

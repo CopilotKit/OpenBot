@@ -59,6 +59,21 @@ export function createApprovalRoutes(
   routes.get("/", async (context) =>
     context.json(await service.inbox(context.var.actor.id)),
   );
+  /*
+   * Whether this conversation asks before every step: a task's, started from a check-in. The browser
+   * asks before it sends a Bot's look at a page straight to the computer, since a look sent that way
+   * carries no conversation for the gate to ask in. Answered by the rule the gate itself applies
+   * (`asksEveryChange`), for the asker's own conversations only: anybody else's reads as no.
+   */
+  routes.get("/threads/:threadId", async (context) =>
+    context.json({
+      asksEveryStep:
+        (await service.store.asksEveryChange?.(
+          context.var.actor.id,
+          context.req.param("threadId"),
+        )) === true,
+    }),
+  );
   routes.post("/computer/:botId", async (context) => {
     try {
       return context.json({

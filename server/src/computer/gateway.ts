@@ -618,6 +618,24 @@ export function createComputerGateway(
   }
 
   /**
+   * The link this click would follow, when it is one to open rather than click.
+   *
+   * Read from the snapshot this server holds, never from the caller. Only a lookup: whether the ref
+   * is still current for this run of the computer is `govern`'s to decide, and it refuses a stale one
+   * on the navigation exactly as it would on the click.
+   */
+  async function linkToFollow(
+    seat: ComputerSeat,
+    input: ClickInput,
+  ): Promise<{ url: string; element: SnapshotElement } | undefined> {
+    const stored = await snapshots.load(seatText(seat));
+    if (!stored || stored.snapshotId !== input.snapshotId) return undefined;
+    const element = stored.elements.get(input.ref);
+    const url = element ? followableLink(element, stored.url) : undefined;
+    return element && url ? { url, element } : undefined;
+  }
+
+  /**
    * Decide, record, then act.
    *
    * The audit row is written before the action runs, not after it succeeds. An allowed action that
@@ -1309,12 +1327,65 @@ export function createComputerGateway(
       ).then((result) => withUntrustedNotice(result, "web page", PAGE_FIELDS));
     },
 
-    click(
+    async click(
       seat: ComputerSeat,
       actor: ActionActor,
       input: ClickInput,
       signal?: AbortSignal,
-    ) {
+    ): Promise<ActionResult> {
+      /*
+       * FOLLOWING A LINK IS OPENING ITS ADDRESS, SO IT IS DONE AS ONE.
+       *
+       * A click is a change: it can submit a form or run whatever the page attached to it, so it is
+       * judged as one, built-in safety requirements included. A link with an address to another page
+       * does what typing that address does, which is already a read. Judging the two differently
+       * meant a Bot reading an ordering system was handed back to the person for clicking "PO 102" on
+       * a page at `/purchase-orders/...`, while typing the same address went straight through.
+       *
+       * So the address is opened, not clicked: the same navigation, policy, approval and audit as
+       * `computer_navigate`, and the page's own scripts never see a click, so a link that only looks
+       * like one (`href="#"` with a handler, `javascript:`) is clicked and judged as a click instead.
+       * The ref and snapshot go with it, so the element is still resolved, still refused when stale,
+       * and still in front of every rule: a deny written about this link's name refuses this too.
+       */
+      const follow = await linkToFollow(seat, input);
+      if (follow) {
+        const opened = await govern(
+          "computer_navigate",
+          seat,
+          actor,
+          {
+            ref: input.ref,
+            snapshotId: input.snapshotId,
+            targetUrl: follow.url,
+            ...(signal ? { signal } : {}),
+          },
+          // The signal and the citation travel with it: Stop still lands (as it does on a click,
+          // including one pressed while the action waits for approval), and the computer checks the
+          // ref against the live page as `/click` does, so a link from a snapshot the browser has
+          // since left is refused as stale rather than opened.
+          async (address) =>
+            transport.navigate(
+              address ?? (await locate(seat)),
+              addressOf(seat),
+              follow.url,
+              undefined,
+              {
+                ...(signal ? { signal } : {}),
+                citation: { ref: input.ref, snapshotId: input.snapshotId },
+              },
+            ),
+        );
+        return {
+          action: "click",
+          ref: input.ref,
+          element: { role: follow.element.role, name: follow.element.name },
+          opened: follow.url,
+          url: opened.url,
+          elapsedMs: opened.elapsedMs,
+          ...(opened.challenge ? { challenge: opened.challenge } : {}),
+        };
+      }
       return govern(
         "computer_click",
         seat,
@@ -1769,6 +1840,38 @@ const SNAPSHOT_FIELDS = ["title", "elements"] as const;
 
 /** A two-step login can take two page loads and a wait for a code field; this outlasts the computer's own waits. */
 const SIGN_IN_BACKSTOP_MS = 75_000;
+
+/**
+ * The address to open for a click on this element, or undefined to click it.
+ *
+ * A link, with an `http(s)` address, to a different document from the one it is on. Everything else
+ * is clicked: a button, a link with no address, `javascript:` and `mailto:`, and a link to a spot on
+ * this same page (`#`, `#details`), which loads nothing and is where a page's own script usually acts.
+ */
+export function followableLink(
+  element: Pick<SnapshotElement, "role" | "url">,
+  pageUrl: string,
+): string | undefined {
+  if (element.role !== "link" || !element.url) return undefined;
+  let destination: URL;
+  try {
+    destination = new URL(element.url);
+  } catch {
+    return undefined;
+  }
+  if (destination.protocol !== "http:" && destination.protocol !== "https:")
+    return undefined;
+  try {
+    const page = new URL(pageUrl);
+    page.hash = "";
+    const target = new URL(destination.href);
+    target.hash = "";
+    if (target.href === page.href) return undefined;
+  } catch {
+    // A page with no readable address: nothing to be the same document as.
+  }
+  return destination.href;
+}
 
 /**
  * The host a rule can match on, or empty.

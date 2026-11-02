@@ -293,6 +293,10 @@ export function turnMessages(input: {
   continuation?: Parameters<TurnRunner>[0]["continuation"];
 }): { messages: Message[]; persistedInputMessages: Message[] } {
   const { seeded, historicIds, turn, continuation } = input;
+  /*
+   * A turn whose message the thread already holds is a retry of it, which a failed run that got as
+   * far as persisting its input leaves behind: the message is there once, never sent twice.
+   */
   const messages: Message[] = continuation
     ? sanitizeSeededHistory([
         ...continuation.snapshot.messages,
@@ -303,7 +307,9 @@ export function turnMessages(input: {
           ...continuation.result,
         },
       ])
-    : [...seeded, turn];
+    : seeded.some((message) => message.id === turn.id)
+      ? seeded
+      : [...seeded, turn];
   return {
     messages,
     persistedInputMessages: messages.filter(
@@ -501,6 +507,19 @@ export function settle(evidence: TurnEvidence): TurnOutcome {
 }
 
 /**
+ * A turn that finished and said nothing. A failure for a turn somebody is waiting to read, which is
+ * every turn but one: a check-in that read what it was asked to and found nothing new often ends
+ * without a closing line, and for it silence is the answer. Its own class so that caller can tell
+ * this apart by type; everyone else meets it as the error it always was, word for word.
+ */
+export class EmptyTurnError extends Error {
+  constructor() {
+    super("The turn finished without saying anything.");
+    this.name = "EmptyTurnError";
+  }
+}
+
+/**
  * The outcome as the caller receives it: a reply, or the error that names what happened.
  *
  * For a lost lock and a deadline, `stopped` is awaited first — the reference's own order
@@ -530,7 +549,7 @@ async function conclude(
         "The turn stopped to ask a question, and a routine has nobody to ask.",
       );
     case "empty":
-      throw new Error("The turn finished without saying anything.");
+      throw new EmptyTurnError();
     case "completed":
       return outcome.components.length > 0
         ? { replyText: outcome.replyText, components: outcome.components }

@@ -39,7 +39,8 @@ export const botLifecycle = pgTable(
 );
 
 /**
- * Where one kind of update goes for one person: progress, a decision, or a question.
+ * Where one kind of update goes for one person: progress, a decision, a question, or a ping that
+ * something their Bots' check-ins found needs them (`attention`).
  *
  * A missing row is the default (every transport the person has set up). An empty list means only
  * the web, which always shows everything.
@@ -50,7 +51,9 @@ export const updateRoutingPreferences = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    kind: text("kind").$type<"progress" | "decision" | "question">().notNull(),
+    kind: text("kind")
+      .$type<"progress" | "decision" | "question" | "attention">()
+      .notNull(),
     transports: text("transports")
       .array()
       .$type<("slack" | "teams" | "sms" | "push")[]>()
