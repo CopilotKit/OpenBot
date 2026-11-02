@@ -211,7 +211,10 @@ export function createEntra(options: {
 
     let user = await owner(claims);
     if (user) {
-      if (!(await admits(user.email))) return null;
+      if (!(await admits(user.email))) {
+        forget(user.id);
+        return null;
+      }
     } else {
       /*
        * Somebody OpenBot has not seen before, signed in by Better Auth's own Microsoft provider from
@@ -416,7 +419,32 @@ export function createEntra(options: {
     });
   }
 
+  /** Every token held for this person: the one their app sent, and every one Entra issued them. */
+  function forget(userId: string): void {
+    inbound.delete(userId);
+    for (const key of issued.keys())
+      if (key.startsWith(`${userId}\n`)) issued.delete(key);
+  }
+
   async function tokenFor(userId: string, scope: string): Promise<string> {
+    /*
+     * The rules every sign-in is held to, asked again before any token goes out, held or new.
+     *
+     * A request arriving with a token is asked them in `sessionFrom`, but a routine or a check-in
+     * arrives with none: it runs as its owner, and nothing on that path asks whether an admin has
+     * since removed them. Without this, somebody removed kept reaching the system as themselves,
+     * on a token held here until it expired and then on fresh ones minted from their stored sign-in,
+     * for as long as Entra still honoured it. Removal in OpenBot has to mean OpenBot stops acting as
+     * them, whatever Entra thinks of the person.
+     */
+    const person = await (await context()).internalAdapter.findUserById(userId);
+    if (!person || !(await admits(person.email))) {
+      forget(userId);
+      throw new EntraTokenRefusedError(
+        "not-admitted",
+        "This person may no longer use OpenBot.",
+      );
+    }
     return await reused(`${userId}\n${scope}`, async () => {
       const assertion = await assertionFor(userId);
       /*

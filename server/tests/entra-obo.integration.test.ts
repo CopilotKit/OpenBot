@@ -13,6 +13,7 @@ import {
   SignJWT,
 } from "jose";
 import { createApp } from "../src/app";
+import { createPeopleStore } from "../src/people/store";
 import { createAuditStore } from "../src/audit";
 import { createAuth } from "../src/auth";
 import { createEntra, withEntraBearer } from "../src/auth/entra";
@@ -26,6 +27,7 @@ import {
   auditEvents,
   credentials,
   mcpServers,
+  revokedAccess,
   sessions,
   users,
 } from "../src/db/schema";
@@ -368,12 +370,15 @@ const betterAuth = createAuth(config, database, undefined, auditStore, {
   vouchesForMicrosoftToken: (token) =>
     instances.some((instance) => instance.vouches(token)),
 });
+/** The admin's Users page, as index.ts wires it: who is removed is read from here. */
+const people = createPeopleStore(database, authConfig.initialAdminEmails);
 const newEntra = (settings = microsoft) => {
   const instance = createEntra({
     microsoft: settings,
     authConfig,
     auth: betterAuth,
     database,
+    isRevoked: (address) => people.isRevoked(address),
   });
   instances.push(instance);
   return instance;
@@ -581,6 +586,9 @@ afterAll(async () => {
     .delete(credentials)
     .where(inArray(credentials.id, [DEPLOYMENT_CREDENTIAL]));
   await database.delete(users).where(like(users.email, `%-${tag}@obo.test`));
+  await database
+    .delete(revokedAccess)
+    .where(like(revokedAccess.email, `%-${tag}@obo.test`));
   await database.$client.end({ timeout: 5 });
 });
 
@@ -876,6 +884,24 @@ describe("a routine reaches the system as its person, with nobody in the browser
     expect(await backgroundCall(newEntra(), ivyId)).toBe(
       `${REFUSAL_MARKER} HR uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`,
     );
+  });
+
+  test("somebody an admin removed stops reaching the system, on a token already held for them or a new one", async () => {
+    const jo = person("jo");
+    const joId = await signedInWithMicrosoft(jo);
+    const tokens = newEntra();
+    // Reached once, so a token for HR is held for them, and their stored sign-in still works.
+    expect(await backgroundCall(tokens, joId)).toContain(`You are ${jo.upn}.`);
+
+    await people.revoke(joId, ADMIN);
+    const asked = entra.requests.length;
+    const calls = reached.length;
+    expect(await backgroundCall(tokens, joId)).toBe(
+      `${REFUSAL_MARKER} You no longer have access to OpenBot, so HR wasn't used.`,
+    );
+    // Neither the held token nor Entra was asked: nothing reached the system as them.
+    expect(entra.requests.length).toBe(asked);
+    expect(reached.length).toBe(calls);
   });
 
   test("an expired Microsoft sign-in is told to sign in again", async () => {

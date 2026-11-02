@@ -64,6 +64,8 @@ import {
 /** What a person is told when Entra will not issue a token for them, in words they can act on. */
 function entraRefusal(reason: EntraRefusal, title: string): string {
   switch (reason) {
+    case "not-admitted":
+      return `You no longer have access to OpenBot, so ${title} wasn't used.`;
     case "no-sign-in":
       return `${title} uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`;
     case "sign-in-expired":
@@ -513,7 +515,9 @@ export function createStoreContext(options: PluginStoreOptions) {
    *
    * A `person-entra` server is the exception, by design: the token Entra issues for a person is kept
    * in memory until a few minutes before it expires (`auth/entra.ts`), because Entra's own guidance
-   * is to reuse a token for its lifetime, and access there is withdrawn in Entra rather than here.
+   * is to reuse a token for its lifetime. Removing the person here still stops it at once: every
+   * token is handed out only after the sign-in rules are asked again, and a refusal drops what is
+   * held for them.
    */
   async function connectionTokenFor(
     row: {

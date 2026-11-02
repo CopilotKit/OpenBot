@@ -10,9 +10,12 @@
  * the on-behalf-of exchange). `no-api-consent`: the same code one step earlier, from the refresh
  * grant for OpenBot's own API, so what is missing is consent to OpenBot's API and not to the system.
  * `no-api`: OpenBot's app registration exposes no API, so there is no token to OpenBot to exchange
- * (`AADSTS500011`). `refused`: anything else, which the operator's log line names.
+ * (`AADSTS500011`). `not-admitted`: OpenBot itself no longer lets the person in (an admin removed
+ * them, or the SSO or domain rules changed), so nothing is asked of Entra at all. `refused`:
+ * anything else, which the operator's log line names.
  */
 export type EntraRefusal =
+  | "not-admitted"
   | "no-sign-in"
   | "sign-in-expired"
   | "no-consent"
