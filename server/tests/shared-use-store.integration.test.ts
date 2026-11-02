@@ -318,7 +318,9 @@ describe("approval members", () => {
       .values({ agentId: bot, groupName: "platform", assignedBy: id("owner") });
     await call("newhire");
     const [pending] = await store.pendingFor(bot);
-    expect(pending?.proposed.members).toHaveLength(2);
+    expect(pending?.proposed.members).toEqual([
+      { kind: "group", value: "platform" },
+    ]);
     await store.decide({
       id: pending!.id,
       by: id("admin"),
