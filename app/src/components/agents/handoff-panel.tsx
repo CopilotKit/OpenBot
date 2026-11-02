@@ -1,4 +1,4 @@
-import { IconArrowsExchange, IconLock, IconRobot } from "@tabler/icons-react";
+import { IconArrowsExchange, IconBolt, IconLock } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
@@ -102,7 +102,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
       ) : null}
 
       {grantable && total === 0 ? (
-        <PageEmpty icon={IconRobot} title="No other Bots yet">
+        <PageEmpty icon={IconBolt} title="No other Bots yet">
           When there are more, you can let this Bot ask them here.
         </PageEmpty>
       ) : null}
