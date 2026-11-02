@@ -9,6 +9,7 @@ import {
 import {
   ActionRefusedError,
   createComputerGateway,
+  hostOf,
   WorkspaceNotFoundError,
   WorkspaceRefusedError,
   WorkspaceTooLargeError,
@@ -646,6 +647,41 @@ describe("the computer gateway", () => {
 
     await gateway.navigate(botSeat("bot-1"), ACTOR, "https://example.com/");
     expect(calls).toEqual(["navigate"]);
+  });
+
+  test("a host rule is not evaded by writing the destination with a root dot", async () => {
+    // `intranet.example.com.` is the same name to DNS, to Chromium and to the computer's own network
+    // filter. A rule about the host has to see the same name, or one trailing dot walks past it.
+    const { gateway, calls } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['page.host == "intranet.example.com"'],
+    });
+
+    await expect(
+      gateway.navigate(
+        botSeat("bot-1"),
+        ACTOR,
+        "https://intranet.example.com./hr",
+      ),
+    ).rejects.toThrow(ActionRefusedError);
+    await expect(
+      gateway.navigate(
+        botSeat("bot-1"),
+        ACTOR,
+        "https://INTRANET.example.com../hr",
+      ),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(calls).toEqual([]);
+  });
+
+  test("the host a rule sees keeps its port and drops the root dot", () => {
+    expect(hostOf("https://intranet.example.com./hr")).toBe(
+      "intranet.example.com",
+    );
+    expect(hostOf("http://erp.internal.:8080/")).toBe("erp.internal:8080");
+    expect(hostOf("https://example.com/")).toBe("example.com");
+    expect(hostOf("http://[::1]:3000/")).toBe("[::1]:3000");
+    expect(hostOf("not a url")).toBe("");
   });
 
   /*
