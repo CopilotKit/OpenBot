@@ -62,6 +62,39 @@ type Session = {
 
 type Minted = { token: string; expiresAt: number; refreshToken?: string };
 
+/** How often a store of held tokens drops the ones that have expired. */
+const SWEEP_EVERY_MS = 60_000;
+
+type Held = { token: string; expiresAt: number };
+
+/**
+ * Tokens held by key until they expire.
+ *
+ * A plain Map here was only ever overwritten, so it held a row for every person and system the
+ * process had seen since it started. Each write now drops the expired ones first, at most once a
+ * minute, so what is held is bounded by who used OpenBot within one token's lifetime (60 to 90
+ * minutes, as Entra issues them) by design. `now` is the clock, a parameter so the rule can be
+ * pinned without waiting an hour.
+ */
+export function heldTokens(now: () => number = Date.now) {
+  const held = new Map<string, Held>();
+  let sweptAt = now();
+  return {
+    get: (key: string): Held | undefined => held.get(key),
+    set(key: string, value: Held): void {
+      const at = now();
+      if (at - sweptAt >= SWEEP_EVERY_MS) {
+        sweptAt = at;
+        for (const [stale, { expiresAt }] of held)
+          if (expiresAt <= at) held.delete(stale);
+      }
+      held.set(key, value);
+    },
+    delete: (key: string): boolean => held.delete(key),
+    keys: (): IterableIterator<string> => held.keys(),
+  };
+}
+
 /** `api://hr-api/.default` gives `api://hr-api`: the resource a scope names, and its tokens' audience. */
 function resourceOf(scope: string): string {
   const slash = scope.lastIndexOf("/");
@@ -104,9 +137,9 @@ export function createEntra(options: {
   );
 
   /** The tokens people's apps sent, by person, kept so their run's calls can be exchanged on them. */
-  const inbound = new Map<string, { token: string; expiresAt: number }>();
+  const inbound = heldTokens();
   /** Tokens Entra issued, by person and scope, until shortly before they expire. */
-  const issued = new Map<string, { token: string; expiresAt: number }>();
+  const issued = heldTokens();
   /** One request to Entra at a time per person and scope, so a burst of calls shares one token. */
   const pending = new Map<string, Promise<string>>();
   /** Tokens verified here and being signed in with right now; see `vouchesForMicrosoftToken`. */
