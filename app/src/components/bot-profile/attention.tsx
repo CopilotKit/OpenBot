@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { NeedsYouCount } from "@/components/layout/needs-you-count";
 import {
   type BotAttention,
   botAttentionQueryOptions,
@@ -77,17 +78,7 @@ export function BotsNavBadge() {
   useAttentionNotifications(attention.data);
   const bots = attention.data ?? [];
   const waiting = bots.reduce((total, bot) => total + needsInput(bot), 0);
-  if (waiting > 0) {
-    return (
-      <span
-        aria-label={`${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`}
-        className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums"
-        role="img"
-      >
-        {waiting}
-      </span>
-    );
-  }
+  if (waiting > 0) return <NeedsYouCount className="ml-auto" count={waiting} />;
   if (bots.some((bot) => bot.unread > 0)) {
     return (
       <span

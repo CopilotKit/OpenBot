@@ -38,6 +38,7 @@ import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
+  conversationsOnly,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
@@ -207,8 +208,6 @@ function BotsSection({
                   className={cn(
                     navItem,
                     "min-h-[42px] gap-[9px] px-2.5 py-1.5 text-[12px] text-(--opendots-dot-ink) hover:bg-(--opendots-hover)",
-                    // The row's only drawing is the avatar, which keeps its own size.
-                    "[&_svg]:size-full",
                     active &&
                       "bg-(--opendots-active) hover:bg-(--opendots-active)",
                   )}
@@ -376,7 +375,9 @@ function RecentChats({
   const [searching, setSearching] = useState(false);
   const [search, setSearch] = useState("");
   const scrollRoot = useRef<HTMLDivElement>(null);
-  const visible = pinnedFirst(matchingChannels(channels.data, search));
+  const visible = pinnedFirst(
+    matchingChannels(conversationsOnly(channels.data), search),
+  );
   const nameOf = (id: string) =>
     agents.data?.find((agent) => agent.id === id)?.name;
   const closeSearch = () => {
@@ -618,7 +619,7 @@ export function OpenDotsSidebar({
         <span>New chat</span>
       </Link>
       <BotsSection
-        channels={channels.data}
+        channels={channels.data && conversationsOnly(channels.data)}
         onNavigate={onNavigate}
         place={place}
       />

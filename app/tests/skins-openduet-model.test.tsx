@@ -7,27 +7,38 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import { WaitingForYou } from "@/components/approvals/waiting";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { TaskList } from "@/components/tasks/task-list";
 import type { ApprovalInboxData } from "@/lib/approvals";
+import { needsYouCount } from "@/lib/tasks/groups";
+import type { TaskRecord } from "@/lib/tasks/queries";
+import { queryClient } from "@/query-client";
 import {
   columnFor,
   conversationPath,
   isSkinScreen,
   tabForPath,
 } from "@/skins/openduet/places";
-import { waitingCount } from "@/skins/openduet/tasks-model";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * The rules OpenDuet's frame runs on. Which paths are tabs decides whether a screen has a tab bar
  * or a back disc; which column a path gets decides whether a page keeps OpenBot's width; and the
- * Tasks badge has to count exactly the rows OpenBot's own Needs input list draws.
+ * Tasks badge has to count exactly the rows OpenBot's own Tasks lists under Needs you.
  */
 
 beforeAll(() => GlobalRegistrator.register());
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  queryClient.clear();
+});
 const originalFetch = global.fetch;
 afterEach(() => {
   global.fetch = originalFetch;
@@ -51,9 +62,14 @@ describe("which tab a path is", () => {
       expect(tabForPath(path)).toBe("chat");
   });
 
-  test("the skin's Tasks screen is Tasks", () => {
-    expect(tabForPath("/s/tasks")).toBe("tasks");
-    expect(isSkinScreen("/s/tasks")).toBe(true);
+  test("OpenBot's Tasks, and every task opened from it, is the Tasks tab", () => {
+    for (const path of ["/tasks", "/tasks/", "/tasks/t-1"]) {
+      expect(tabForPath(path)).toBe("tasks");
+      // OpenBot's own page, which owns its scrollers: not one of the skin's screens.
+      expect(isSkinScreen(path)).toBe(false);
+    }
+    expect(tabForPath("/s/tasks")).toBeNull();
+    expect(tabForPath("/taskstuff")).toBeNull();
   });
 
   test("every other page opens over the app, with no tab", () => {
@@ -88,7 +104,8 @@ describe("how wide the column is", () => {
   test("Chat and Tasks are a phone's width", () => {
     expect(columnFor("/")).toBe("phone");
     expect(columnFor("/channel/c-1")).toBe("phone");
-    expect(columnFor("/s/tasks")).toBe("phone");
+    expect(columnFor("/tasks")).toBe("phone");
+    expect(columnFor("/tasks/t-1")).toBe("phone");
   });
 
   test("a conversation with its computer or its Bot's details open has room for OpenBot's pane", () => {
@@ -110,45 +127,71 @@ describe("how wide the column is", () => {
   });
 });
 
-const request = (
+const task = (
   id: string,
-  status: string,
-): ApprovalInboxData["requests"][number] => ({
+  status: TaskRecord["status"],
+  threadId = `${id}-thread`,
+): TaskRecord => ({
   id,
+  botId: "b-1",
+  channelId: `${id}-channel`,
+  threadId,
+  title: `Task ${id}`,
+  why: null,
+  origin: "asked",
+  suggestionId: null,
+  sourceApp: null,
+  sourceLink: null,
   status,
+  failure: null,
+  failedAt: null,
+  next: null,
+  queuedReplies: [],
+  answeredQuestionIds: [],
+  resolvedAt: null,
   createdAt: "2026-10-27T10:00:00.000Z",
-  action: {
-    botId: "b-1",
-    toolRef: "computer_run_command",
-    effect: "write",
-    scope: "workspace",
-    threadId: "t-1",
-    args: { command: "echo hello" },
-    target: null,
-  },
+  updatedAt: "2026-10-27T10:00:00.000Z",
 });
 
 /*
- * Found in review: Tasks drew approvals with its own copy of OpenBot's list. It now draws OpenBot's
- * `WaitingForYou`, and the only thing the skin still works out is the badge's number. This renders
- * OpenBot's list against the same inbox and holds the two to the same count, so a change to what
- * the list shows fails here rather than leaving a badge that disagrees with the screen.
+ * The Tasks tab used to count every approval and question OpenBot's waiting list drew. Tasks is
+ * OpenBot's own now, and the tab counts what it lists under Needs you: the tasks waiting on the
+ * person, an approval in a task's own conversation included, and nothing outside any task. This
+ * renders OpenBot's list against the same tasks and inbox and holds the two to the same number, so
+ * a change to what the list shows fails here rather than leaving a badge that disagrees with it.
  */
-test("the Tasks badge counts exactly what OpenBot's Needs input list draws", async () => {
+test("the Tasks badge counts exactly what OpenBot's Tasks lists under Needs you", async () => {
+  const tasks = [
+    task("ask", "needs_input"),
+    task("held", "working"),
+    task("run", "working"),
+    task("read", "ready_for_review"),
+  ];
   const inbox: ApprovalInboxData = {
     enabled: true,
-    requests: [
-      request("waiting", "pending"),
-      request("allowed", "allowed"),
-      request("denied", "denied"),
-    ],
     rules: [],
     teamRules: [],
+    requests: [
+      {
+        id: "in-task",
+        status: "pending",
+        createdAt: "2026-10-27T10:00:00.000Z",
+        action: {
+          botId: "b-1",
+          toolRef: "computer_run_command",
+          effect: "write",
+          scope: "workspace",
+          threadId: "held-thread",
+          args: { command: "echo hello" },
+          target: null,
+        },
+      },
+    ],
     questions: [
       {
-        id: "q-1",
+        id: "loose",
         botId: "b-1",
-        threadId: "t-1",
+        threadId: "chat-thread",
         question: "Which kiln?",
         createdAt: "2026-10-27T10:00:00.000Z",
       },
@@ -156,25 +199,31 @@ test("the Tasks badge counts exactly what OpenBot's Needs input list draws", asy
   };
   global.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input).split("?")[0];
+    if (path === "/api/tasks") return Response.json({ tasks });
     if (path === "/api/approvals") return Response.json(inbox);
     if (path === "/api/agents")
       return Response.json({ agents: [{ id: "b-1", name: "Ops Bot" }] });
+    if (path === "/api/channels")
+      return Response.json({ channels: [], nextCursor: null });
+    if (path === "/api/proactive/suggestions")
+      return Response.json({ suggestions: [] });
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => <TaskList /> }),
+    history: createMemoryHistory({ initialEntries: ["/tasks"] }),
+  });
   const view = render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
-      <WaitingForYou />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
+  const needs = await view.findByRole("region", { name: /^Needs you/ });
   await waitFor(() =>
-    expect(view.container.querySelectorAll('[data-slot="item"]').length).toBe(
-      waitingCount(inbox),
+    expect(within(needs).getAllByRole("link").length).toBe(
+      needsYouCount(tasks, inbox),
     ),
   );
-  expect(waitingCount(inbox)).toBe(2);
-  expect(waitingCount(undefined)).toBe(0);
+  expect(needsYouCount(tasks, inbox)).toBe(2);
+  expect(needsYouCount(undefined, undefined)).toBe(0);
 });

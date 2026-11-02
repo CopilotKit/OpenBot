@@ -26,10 +26,12 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { taskKeys } from "@/lib/tasks/queries";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -184,12 +186,39 @@ function renderSidebar() {
     refetchInterval: false,
   });
   queryClient.setQueryData(botLifecycleKeys.attention, []);
+  // The roster polls the approvals inbox for its needs dots; answered here for the same reason.
+  queryClient.setQueryDefaults(["approvals"], {
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: false,
+  });
+  queryClient.setQueryData(["approvals"], {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
+  });
   // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
   queryClient.setQueryData(browserKeys.state, {
     available: false,
     computerId: "",
     open: false,
     tabs: [],
+  });
+  // So does the Tasks entry's count, from the tasks and the approval inbox.
+  for (const queryKey of [taskKeys.list(), approvalInboxOptions().queryKey]) {
+    queryClient.setQueryDefaults(queryKey, {
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchInterval: false,
+    });
+  }
+  queryClient.setQueryData(taskKeys.list(), []);
+  queryClient.setQueryData(approvalInboxOptions().queryKey, {
+    enabled: true,
+    requests: [],
+    rules: [],
+    teamRules: [],
+    questions: [],
   });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
@@ -225,7 +254,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
   const view = renderSidebar();
   const agent = await view.findByText("Recent conversation");
   const thread = view.getByText("New conversation");
-  expect(thread.className).toContain("text-[0.9rem]");
+  expect(thread.className).toContain("type-sub");
   act(() =>
     clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
       messageListEmphasis: "agent",
@@ -234,7 +263,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
       skin: "openbot",
     }),
   );
-  await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));
+  await waitFor(() => expect(agent.className).toContain("type-sub"));
   expect(thread.className).toContain("text-muted-foreground");
 });
 
@@ -313,7 +342,9 @@ test("search loads older history explicitly and includes new matches", async () 
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  const search = view.getByRole("textbox", { name: "Search conversations" });
+  const search = view.getByRole("textbox", {
+    name: "Search conversations and tasks",
+  });
   await user.type(search, "Archived");
   expect(
     await view.findByText("No loaded conversations match your search"),

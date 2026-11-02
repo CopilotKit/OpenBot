@@ -73,6 +73,10 @@ test("the badge adds up what waits on the person across every Bot", async () => 
   const { view } = draw();
   const badge = await view.findByText("3");
   expect(badge.getAttribute("aria-label")).toBe("3 things need you");
+  // In the needs colour, as every other "needs you" mark is.
+  expect(badge.className).toContain("bg-status-needs-soft");
+  expect(badge.className).toContain("text-status-needs");
+  expect(badge.className).not.toContain("bg-primary");
 });
 
 test("with only unread messages the badge is a dot, not a number", async () => {

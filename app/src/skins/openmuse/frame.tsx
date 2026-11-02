@@ -10,7 +10,12 @@ import {
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
@@ -53,6 +58,25 @@ const TABS: { id: MuseTab; label: string; icon: MuseIcon }[] = [
   { id: "apps", label: "Apps", icon: IconTriangleSquareCircle },
 ];
 
+const WIDE = "(min-width: 900px)";
+
+/**
+ * Whether the window is wide enough for the header's larger face, kept current as it is resized.
+ * The face is drawn on a canvas at a size in px, so the header picks the size here rather than in
+ * its classes.
+ */
+function useWide(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(WIDE);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(WIDE).matches,
+    () => false,
+  );
+}
+
 /**
  * OpenMuse's shell around every OpenBot page: one centred column, the agent at the top, a bell for
  * what waits on you, and a floating pill of five tabs. The page itself is OpenBot's, untouched —
@@ -89,6 +113,8 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   const userId = user.data?.id;
   const chosenId = useChosenBotId(userId);
   const [sheet, setSheet] = useState<MuseSheetKind | null>(null);
+  // The centre face, in px: 44 on a phone, 52 from 900px wide, where the header grows.
+  const face = useWide() ? 52 : 44;
 
   /*
    * The Bot this screen is about, when it is about one: the Bot of a one-to-one conversation, the Bot
@@ -156,7 +182,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                 aria-label={
                   bot ? `${bot.name}, ${status}. Switch Bot` : "Choose a Bot"
                 }
-                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
+                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none"
                 onClick={() => setSheet("bots")}
                 type="button"
               >
@@ -164,15 +190,15 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                  * The Bot's own OpenBot avatar, the one its page and the Bots roster draw. With no Bot
                  * yet, the deployment's own mark stands in.
                  */}
-                <span className="mt-1 mb-1 flex size-11 items-center justify-center min-[900px]:size-[52px] [&>[role=img]]:size-full! [&_svg]:size-full">
+                <span className="mt-1 mb-1 flex">
                   {bot ? (
                     <AbstractAvatar
                       name={bot.name}
                       seed={bot.avatarSeed}
-                      size={52}
+                      size={face}
                     />
                   ) : (
-                    <AgentOrb size="100%" />
+                    <AgentOrb size={`${face}px`} />
                   )}
                 </span>
                 <span className="flex max-w-full items-center gap-1 font-semibold text-[16px] text-foreground tracking-[-0.4px]">
@@ -229,7 +255,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
               {TABS.map((item) => {
                 const active = item.id === tab;
                 const className = cn(
-                  "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+                  "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none",
                   active
                     ? "bg-[var(--openmuse-tab-active)]"
                     : "hover:bg-[var(--openmuse-tab-hover)]",

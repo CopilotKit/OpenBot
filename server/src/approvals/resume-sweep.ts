@@ -13,6 +13,7 @@ import {
   routineRuns,
 } from "../db/schema";
 import type { DeliveryScope } from "../delivery/types";
+import { APPROVAL_RESUME_KIND, TASK_ORDER } from "../proactive/engine";
 import type { ResponsibilityStore } from "../responsibilities/types";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import type { ApprovalResumeDependencies, ApprovalService } from "./service";
@@ -55,10 +56,12 @@ export function createApprovalResumeTick(deps: {
   return async () => {
     try {
       const [item] = await approvalQueue.claim({
-        kind: "approval.resume",
+        kind: APPROVAL_RESUME_KIND,
         owner: approvalOwner,
         leaseMs: 15 * 60_000,
         limit: 1,
+        // Allow once in a task's conversation carries its turn on there, in the task's order.
+        serialBy: TASK_ORDER,
       });
       if (!item) return;
       // Set once the item is understood, so its last failed try can still tell the Bot.

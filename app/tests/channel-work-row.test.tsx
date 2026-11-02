@@ -56,7 +56,7 @@ test("says who was asked, with their avatar and no clock", () => {
   // The avatar is decoration beside a label that already names the Bot, so it is announced once.
   const avatar = row.querySelector("[aria-hidden='true'] [role='img']");
   expect(avatar?.getAttribute("aria-label")).toBe("Ana");
-  expect(row.querySelector("svg")).not.toBeNull();
+  expect(row.querySelector("canvas")).not.toBeNull();
 });
 
 test("prefers the name and avatar the person knows the Bot by", () => {

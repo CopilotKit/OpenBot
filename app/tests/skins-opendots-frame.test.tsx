@@ -19,7 +19,6 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { appConfig } from "@/lib/generated/application-config";
 import { NAVIGATION, navigationFor } from "@/lib/navigation";
 import { queryClient } from "@/query-client";
@@ -595,9 +594,13 @@ describe("OpenDots screens", () => {
  * deployment's own name from `brand.yaml`, and every Bot wears OpenBot's own avatar.
  */
 describe("OpenDots skin wears the deployment's brand", () => {
-  /** What the drawing of one avatar looks like, without the ids React gives each instance. */
-  const drawing = (root: Element | null) =>
-    (root?.querySelector("svg")?.outerHTML ?? "").replace(/_r_[\w]+_/g, "");
+  /*
+   * The seed one avatar's orb is drawn from, which decides everything about its look. Its colour
+   * alone would not do: eight colours go round, so a Bot's seed and its id share one an eighth of
+   * the time.
+   */
+  const drawnFrom = (root: Element | null) =>
+    root?.querySelector("[data-seed]")?.getAttribute("data-seed");
 
   test("the frame names the product from brand.yaml and never says OpenDots or Dots", async () => {
     const { view } = draw("/channel/new?agent=ada");
@@ -636,23 +639,14 @@ describe("OpenDots skin wears the deployment's brand", () => {
     await view.findByRole("heading", { name: "Ada" });
     const persona = view.container.querySelector("[data-opendots-persona]");
     for (const bot of bots) {
-      const reference = render(
-        <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={30} />,
-      );
       const row = within(list).getByText(bot.name).closest("a");
       expect(
         row?.querySelector(`[role="img"][aria-label="${bot.name}"]`),
       ).toBeTruthy();
-      expect(drawing(row)).toBe(drawing(reference.container));
       // Drawn from the seed, not the id: the id would be a different Bot's face.
-      const fromId = render(
-        <AbstractAvatar name={bot.name} seed={bot.id} size={30} />,
-      );
-      expect(drawing(row)).not.toBe(drawing(fromId.container));
-      reference.unmount();
-      fromId.unmount();
+      expect(drawnFrom(row)).toBe(bot.avatarSeed);
+      expect(drawnFrom(row)).not.toBe(bot.id);
     }
-    const ada = render(<AbstractAvatar name="Ada" seed="seed-ada" size={64} />);
-    expect(drawing(persona)).toBe(drawing(ada.container));
+    expect(drawnFrom(persona)).toBe("seed-ada");
   });
 });

@@ -37,6 +37,7 @@ import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
+  conversationsOnly,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { useNavigationItems } from "@/lib/navigation";
@@ -104,7 +105,7 @@ export function MenuSheet({
   const manageId = useId();
   const scrollRoot = useRef<HTMLDivElement>(null);
   const close = () => onOpenChange(false);
-  const conversations = pinnedFirst(channels.data ?? []);
+  const conversations = pinnedFirst(conversationsOnly(channels.data));
   // OpenBot's one navigation list, for this person: Settings on its own, the rest under Manage.
   const navigation = useNavigationItems();
   const settings = navigation.find((item) => item.id === "settings");

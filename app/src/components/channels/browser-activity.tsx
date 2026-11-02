@@ -1,16 +1,11 @@
+import {
+  BROWSER_STEP_DONE as labels,
+  BROWSER_STEP_PLAIN as plainLabels,
+} from "@/lib/computers/step-names";
+import { toolResultHeldBack } from "@/lib/plugins/tool-result";
 import type { VisibleChatItem } from "./chat-messages";
 
 type BrowserStep = Extract<VisibleChatItem, { kind: "tool" }>;
-
-const labels: Record<string, string> = {
-  computer_navigate: "Opened page",
-  computer_read: "Read page",
-  computer_snapshot: "Inspected page",
-  computer_click: "Clicked on page",
-  computer_type: "Filled in field",
-  computer_key: "Pressed key",
-  computer_scroll: "Scrolled page",
-};
 
 /** Whether a tool call is one of the browser steps a tool group draws with its page link. */
 export function isBrowserStep(item: BrowserStep): boolean {
@@ -49,6 +44,7 @@ export function browserStepDetails(step: BrowserStep) {
     step.result?.startsWith("Error:") === true;
   return {
     label: labels[step.toolCall.function.name],
+    plain: plainLabels[step.toolCall.function.name],
     href: url?.href,
     title:
       navigation && typeof result.title === "string" && result.title.trim()
@@ -59,4 +55,42 @@ export function browserStepDetails(step: BrowserStep) {
     visited: navigation && result.ok === true,
     pending: step.result === undefined,
   };
+}
+
+/**
+ * How a browser step came out, from its result alone.
+ *
+ * ONE READING FOR BOTH PLACES A STEP IS SHOWN. The conversation's tool line (`stepDetails`) and the
+ * computer pane's step log (`step-log.tsx`) both read a step here, so a click the person declined
+ * never reads as done in one of them and declined in the other.
+ *
+ * A step the person held back is read before any of the browser's own fields, with
+ * `toolResultHeldBack`: declined on its card, or not asked again because the same request was still
+ * waiting (`alreadyWaiting`). The server says either in words for the model, sometimes inside the
+ * browser's JSON, and it would otherwise read as a step that worked or one that failed. `pending` is
+ * a step with no result yet, or only the note that it went to its approval card. Whether that is
+ * running, waiting for the person or cut off is for the caller to say, from the turn and the
+ * approvals inbox, and so is whether a request `alreadyWaiting` repeated is still waiting.
+ */
+export type BrowserOutcome =
+  | "pending"
+  | "declined"
+  | "alreadyWaiting"
+  | "stopped"
+  | "blocked"
+  | "notYet"
+  | "failed"
+  | "done";
+
+export function browserOutcome(step: BrowserStep): BrowserOutcome {
+  if (step.result === undefined) return "pending";
+  const result = objectOf(step.result);
+  if (result.waiting === true) return "pending";
+  const heldBack = toolResultHeldBack(step.result);
+  if (heldBack) return heldBack;
+  // Cut off, like a call that never got its result: nothing went wrong with the page.
+  if (result.stopped === true) return "stopped";
+  if (result.refused === true) return "blocked";
+  if (result.ok === false && result.starting === true) return "notYet";
+  return browserStepDetails(step).failed ? "failed" : "done";
 }

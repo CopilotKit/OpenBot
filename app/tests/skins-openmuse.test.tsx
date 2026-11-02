@@ -743,6 +743,66 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
     expect(readable()).not.toMatch(/openmuse/i);
     expect(capybaras()).toEqual([]);
   });
+
+  /*
+   * The face is a canvas drawn at a size in px, so no class can rescale it afterwards: one drawn
+   * bigger than its slot is clipped and sits off centre. The slot is 44px on a phone and 52px from
+   * 900px wide.
+   */
+  test.each([
+    [390, "44px"],
+    [1024, "52px"],
+  ])(
+    "%ipx wide, the centre face and the orb in it are drawn at %s",
+    async (width, size) => {
+      const viewport = (
+        window as unknown as {
+          happyDOM: {
+            setViewport: (size: { width: number; height: number }) => void;
+          };
+        }
+      ).happyDOM;
+      viewport.setViewport({ width, height: 844 });
+      const drawnAt = (orb: HTMLElement | null) => [
+        orb?.style.width,
+        orb?.style.height,
+      ];
+      try {
+        serve();
+        renderAt("/connections");
+        const centre = await page().findByRole("button", {
+          name: /Switch Bot$/,
+        });
+        const face = within(centre).getByRole("img", { name: "Muse" });
+        expect(drawnAt(face)).toEqual([size, size]);
+        expect(drawnAt(face.querySelector("[data-palette]"))).toEqual([
+          size,
+          size,
+        ]);
+        cleanup();
+
+        // With no Bot yet, the deployment's own mark fills the same slot.
+        const real = globalThis.fetch;
+        globalThis.fetch = Object.assign(
+          (input: RequestInfo | URL, init?: RequestInit) =>
+            String(input) === "/api/agents"
+              ? Promise.resolve(Response.json({ agents: [] }))
+              : real(input, init),
+          { preconnect: originalFetch.preconnect },
+        );
+        renderAt("/s/activity");
+        const empty = await page().findByRole("button", {
+          name: "Choose a Bot",
+        });
+        expect(drawnAt(empty.querySelector(".agent-orb"))).toEqual([
+          size,
+          size,
+        ]);
+      } finally {
+        viewport.setViewport({ width: 1024, height: 768 });
+      }
+    },
+  );
 });
 
 describe("every OpenBot surface stays reachable", () => {
@@ -856,7 +916,15 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     serve();
     renderAt("/s/activity");
     // OpenBot's Needs you section, with OpenBot's own approval and its details always shown.
-    expect(await page().findByText("Muse wants to open url")).toBeTruthy();
+    expect(await page().findByText("Open url")).toBeTruthy();
+    // Which Bot asks, and where.
+    expect(
+      page().getByText(
+        (_, node) =>
+          node?.tagName === "P" &&
+          node.textContent === "Muse · https://example.com",
+      ),
+    ).toBeTruthy();
     expect(page().getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
@@ -920,7 +988,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
       await page().findByRole("button", { name: "Needs you, 1 waiting" }),
     );
     const sheet = within(await page().findByRole("dialog"));
-    expect(await sheet.findByText("Muse wants to open url")).toBeTruthy();
+    expect(await sheet.findByText("Open url")).toBeTruthy();
     // What it will send is always on screen, as in OpenBot.
     expect(sheet.getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     expect(sheet.queryByText(/send email/)).toBeNull();

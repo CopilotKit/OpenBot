@@ -2,12 +2,14 @@ import {
   type Icon,
   IconBolt,
   IconBox,
+  IconListCheck,
   IconPlug,
   IconSettings,
   IconShieldLock,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useNeedsYouCount } from "@/lib/tasks/use-task";
 
 /**
  * Where a person can go in OpenBot, in one list.
@@ -17,7 +19,11 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
  * missing from that skin, with nothing failing to say so.
  *
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
- * `account` ones in the menu under the person's name. A skin may group them its own way.
+ * `account` ones in the menu under the person's name. A skin may group them its own way. The sidebar
+ * draws each section in the order of this list, so a new destination goes where it is written.
+ *
+ * Tasks comes first: it is the work under way and what waits on the person, which is what they come
+ * back for. Its count is the tasks that need them.
  *
  * Bots, Capabilities and Connections are each somebody's own, which is why they sit beside each
  * other and not inside Admin. Capabilities are your skills and what your Bots remember about you;
@@ -25,16 +31,35 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
  * a tab, so it stays lit on both of its tabs.
  */
 export type NavigationItem = {
-  id: "bots" | "capabilities" | "connections" | "admin" | "settings";
+  id: "tasks" | "bots" | "capabilities" | "connections" | "admin" | "settings";
   label: string;
-  to: "/bots" | "/capabilities" | "/connections" | "/admin" | "/settings";
+  to:
+    | "/tasks"
+    | "/bots"
+    | "/capabilities"
+    | "/connections"
+    | "/admin"
+    | "/settings";
   icon: Icon;
   section: "primary" | "account";
   /** Admin routes are guarded on the server; the entry is hidden from people who cannot open them. */
   adminOnly?: boolean;
+  /**
+   * How many things wait on the person there, drawn beside the entry; nothing is drawn for zero. A
+   * count is live and this list is not, so `useNavigationItems` sets it from whatever query counts
+   * them, and an entry and its count are added in this file together.
+   */
+  badge?: number;
 };
 
 export const NAVIGATION: readonly NavigationItem[] = [
+  {
+    id: "tasks",
+    label: "Tasks",
+    to: "/tasks",
+    icon: IconListCheck,
+    section: "primary",
+  },
   {
     id: "bots",
     label: "Bots",
@@ -80,8 +105,14 @@ export function navigationFor(
   return NAVIGATION.filter((item) => !item.adminOnly || role === "admin");
 }
 
-/** `navigationFor` the signed-in person. */
+/**
+ * `navigationFor` the signed-in person. OpenBot's sidebar draws this, so an entry's `badge` is set
+ * here: Tasks counts the tasks that need the person, as its Needs you group lists them.
+ */
 export function useNavigationItems(): readonly NavigationItem[] {
   const { data: user } = useQuery(currentUserQueryOptions());
-  return navigationFor(user?.role);
+  const needsYou = useNeedsYouCount();
+  return navigationFor(user?.role).map((item) =>
+    item.id === "tasks" && needsYou > 0 ? { ...item, badge: needsYou } : item,
+  );
 }

@@ -1,0 +1,404 @@
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconChevronRight,
+  IconCircleCheck,
+  IconMail,
+  IconShieldCheck,
+  IconTerminal2,
+  IconWorld,
+  IconX,
+} from "@tabler/icons-react";
+import { Link, useRouter } from "@tanstack/react-router";
+import { Fragment, type ReactNode, useEffect, useId, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  type ApprovalView,
+  alwaysAllowIsBroad,
+  alwaysAllowReach,
+  approvalOutcome,
+  approvalPlace,
+  clockTime,
+  decisionReceipt,
+  describeApproval,
+  type OutcomeTone,
+  policyReason,
+} from "@/lib/approval-view";
+import type { ApprovalDecision, ApprovalRequest } from "@/lib/approvals";
+import { cn } from "@/lib/utils";
+
+const KIND_ICON = {
+  mail: IconMail,
+  browser: IconWorld,
+  command: IconTerminal2,
+  other: IconShieldCheck,
+} as const;
+
+const PILL_TONES: Record<OutcomeTone, string> = {
+  done: "bg-status-done-soft text-status-done",
+  working: "bg-status-working-soft text-status-working",
+  needs: "bg-status-needs-soft text-status-needs",
+  problem: "bg-status-problem-soft text-status-problem",
+  neutral: "bg-muted text-muted-foreground",
+};
+
+/** Decline and Allow once: half the card wide each, a finger's height tall. */
+const CHOICE =
+  "h-(--target) min-w-0 flex-1 basis-28 rounded-full px-4 type-sub font-semibold";
+
+/**
+ * One action a Bot wants to take, and the person's answer to it: what it is, where, who it goes to
+ * and what it says, then Decline and Allow once. "Always allow here" is a quiet button under the
+ * two, because it saves a rule for this Bot, this action and this place rather than answering only
+ * this request; the line under it says how far that rule reaches. A hand-off is the person's to do,
+ * so it asks "I did it myself" or "Don't do it".
+ *
+ * Once decided the card folds: the title, a pill saying how it ended (Allowed, Sent, Done,
+ * Declined, Didn't work), and a line saying who decided and when. While it waits, everything the
+ * request carries is one tap away under Details.
+ *
+ * `frame="card"` draws it as a card of its own, for a conversation. `frame="row"` leaves the frame
+ * to the list it sits in, a row of a page's `PageRows` card.
+ */
+export function ApprovalCard({
+  request,
+  botName,
+  busy = false,
+  error,
+  onDecide,
+  frame = "card",
+  ran = false,
+  className,
+}: {
+  request: ApprovalRequest;
+  /** Named where the card is shown away from the Bot's own conversation. */
+  botName?: string;
+  busy?: boolean;
+  error?: string | null;
+  onDecide?: (choice: ApprovalDecision) => void;
+  frame?: "card" | "row";
+  /**
+   * The step it held has run and worked, as the conversation saw it. The inbox can still say the
+   * request is allowed and running after that, and the card then reads Done.
+   */
+  ran?: boolean;
+  className?: string;
+}) {
+  const view = describeApproval(request);
+  const waiting = request.status === "pending";
+  const handOff = request.action.policy?.behaviour === "hand_off";
+  const outcome = approvalOutcome(request, ran);
+  const receipt = waiting ? null : decisionReceipt(request);
+  const place = approvalPlace(request);
+  const caption = [botName, view.app].filter(Boolean).join(" · ");
+  const Icon = KIND_ICON[view.kind];
+  const reachId = useId();
+  const titleId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
+  const titleRef = useRef<HTMLParagraphElement>(null);
+  /*
+   * Decided on this card, so the buttons the person pressed fold away under their focus. Focus then
+   * goes to the folded card's title, not to the page, so a keyboard or a screen reader stays where
+   * the person was. Moved only from the card itself or from nowhere, never from somewhere else.
+   */
+  const decidedHere = useRef(false);
+  useEffect(() => {
+    if (waiting || !decidedHere.current) return;
+    decidedHere.current = false;
+    const active = document.activeElement;
+    if (
+      !active ||
+      active === document.body ||
+      sectionRef.current?.contains(active)
+    )
+      titleRef.current?.focus();
+  }, [waiting]);
+  const decide = (choice: ApprovalDecision) => {
+    decidedHere.current = true;
+    onDecide?.(choice);
+  };
+  const broad = alwaysAllowIsBroad(request);
+
+  return (
+    <section
+      ref={sectionRef}
+      // Named by its title while it waits, so it is a region a screen reader can jump to and two
+      // waiting cards tell apart; folded, it is not.
+      aria-labelledby={waiting ? titleId : undefined}
+      // The header's "Needs you" finds a waiting card by this, and moves focus to it.
+      data-approval-waiting={waiting ? "" : undefined}
+      tabIndex={waiting ? -1 : undefined}
+      className={cn(
+        "w-full min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        frame === "card" &&
+          "max-w-xl overflow-hidden rounded-xl bg-card text-card-foreground shadow-(--shadow-raised)",
+        className,
+      )}
+    >
+      <div className="flex min-h-14 items-center gap-3 px-4 py-2.5">
+        <span
+          aria-hidden
+          className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"
+        >
+          <Icon className="size-4" stroke={1.9} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p
+            className="type-body rounded-sm font-semibold outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring"
+            id={titleId}
+            ref={titleRef}
+            tabIndex={-1}
+          >
+            {handOff && waiting ? `This needs you: ${view.title}` : view.title}
+          </p>
+          {caption || place ? (
+            <p className="type-caption text-muted-foreground">
+              {caption}
+              {caption && place ? " · " : null}
+              {/* Shown whole, however long: the person is deciding about this exact place. */}
+              {place ? (
+                <span className="[overflow-wrap:anywhere]">{place}</span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+        {outcome ? (
+          <span
+            className={cn(
+              "type-caption inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2.5 font-medium",
+              PILL_TONES[outcome.tone],
+            )}
+          >
+            {outcome.tone === "done" ? (
+              <IconCheck aria-hidden className="size-3.5" stroke={2.6} />
+            ) : null}
+            {outcome.label}
+          </span>
+        ) : null}
+      </div>
+      {waiting ? (
+        <ApprovalContent handOff={handOff} request={request} view={view} />
+      ) : null}
+      {error ? (
+        <p className="type-caption px-4 pb-2 text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {waiting && onDecide ? (
+        <div className={cn("px-4 pt-1 pb-3", frame === "row" && "max-w-md")}>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              className={cn(CHOICE, "bg-transparent dark:bg-transparent")}
+              disabled={busy}
+              onClick={() => decide("deny")}
+              variant="outline"
+            >
+              {handOff ? "Don't do it" : "Decline"}
+            </Button>
+            <Button
+              className={CHOICE}
+              disabled={busy}
+              onClick={() => decide(handOff ? "handled" : "allow_once")}
+            >
+              {handOff ? "I did it myself" : "Allow once"}
+            </Button>
+          </div>
+          {handOff ? null : (
+            <>
+              <Button
+                aria-describedby={reachId}
+                className="mx-auto mt-1 flex h-(--target) rounded-full px-3 type-sub text-muted-foreground hover:text-foreground"
+                disabled={busy}
+                onClick={() => decide("allow_always")}
+                variant="ghost"
+              >
+                Always allow here
+              </Button>
+              {/* A reach past one site or folder reads as a caution, in the needs colour. */}
+              <p
+                className={cn(
+                  "type-caption text-balance text-center",
+                  broad ? "text-status-needs" : "text-muted-foreground",
+                )}
+                id={reachId}
+              >
+                {broad ? (
+                  <IconAlertTriangle
+                    aria-hidden
+                    className="mr-1 inline size-3.5 -translate-y-px"
+                    stroke={2}
+                  />
+                ) : null}
+                {alwaysAllowReach(request)}
+              </p>
+              <RulesLine botId={request.action.botId} />
+            </>
+          )}
+        </div>
+      ) : null}
+      {receipt ? (
+        <DecidedLine
+          at={request.decidedAt ?? null}
+          declined={request.decision === "deny"}
+        >
+          {receipt}
+        </DecidedLine>
+      ) : null}
+      {request.decision === "allow_always" && receipt ? (
+        <RulesLine
+          botId={request.action.botId}
+          className="px-4 pb-3 text-left"
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/** The fields, the body, why the Bot asked, and everything else it would send. */
+function ApprovalContent({
+  request,
+  view,
+  handOff,
+}: {
+  request: ApprovalRequest;
+  view: ApprovalView;
+  handOff: boolean;
+}) {
+  const detailsId = useId();
+  const reason = policyReason(request);
+  const { args, target } = request.action;
+  // What it acts on travels beside the arguments: the page and the element a browser step presses.
+  const details =
+    target && typeof target === "object" && Object.keys(target).length > 0
+      ? { args, target }
+      : args;
+  return (
+    <>
+      {view.fields.map((field) => (
+        <Fragment key={field.label}>
+          <Hairline />
+          <div className="flex min-h-11 items-baseline gap-3 px-4 py-2.5">
+            <span className="type-caption min-w-16 max-w-[45%] shrink-0 font-medium text-muted-foreground">
+              {field.label}
+            </span>
+            <span className="type-sub min-w-0 font-medium [overflow-wrap:anywhere]">
+              {field.value}
+            </span>
+          </div>
+        </Fragment>
+      ))}
+      {view.body ? (
+        <>
+          <Hairline />
+          {/* Whole, not clipped: this is what the person is agreeing to send or type. */}
+          <p className="type-sub whitespace-pre-wrap px-4 py-3 [overflow-wrap:anywhere]">
+            {view.body}
+          </p>
+        </>
+      ) : null}
+      {reason ? (
+        <p className="type-caption px-4 pt-2 text-muted-foreground">
+          {handOff ? "Handed to you: " : ""}
+          {reason}
+        </p>
+      ) : null}
+      {/* Open by itself when the face above leaves out something the request would send. */}
+      <details className="group px-4" open={view.unshown > 0 || undefined}>
+        <summary
+          aria-controls={detailsId}
+          className="type-caption inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+        >
+          Details
+          <IconChevronRight
+            aria-hidden
+            className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+            stroke={2.2}
+          />
+        </summary>
+        <pre
+          className="mb-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 font-mono text-muted-foreground text-xs outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring"
+          id={detailsId}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: A long request scrolls, and a keyboard needs focus to scroll it.
+          tabIndex={0}
+        >
+          {JSON.stringify(details, null, 2)}
+        </pre>
+      </details>
+    </>
+  );
+}
+
+/**
+ * Where a rule "Always allow here" saves can be taken back: the Bot's Approval rules page. Drawn
+ * only inside the app's router, since a card drawn on its own has nowhere to send anybody.
+ */
+function RulesLine({
+  botId,
+  className,
+}: {
+  botId: string;
+  className?: string;
+}) {
+  const router = useRouter({ warn: false });
+  if (!router) return null;
+  return (
+    <p
+      className={cn(
+        "type-caption text-center text-muted-foreground",
+        className,
+      )}
+    >
+      You can remove this rule in{" "}
+      <Link
+        className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        params={{ agentId: botId }}
+        to="/bots/$agentId/approvals"
+      >
+        Approval rules
+      </Link>
+      .
+    </p>
+  );
+}
+
+/** The line between a card's parts, short of its edges like the rows of a list. */
+function Hairline() {
+  return <div aria-hidden className="mx-4 h-px bg-border" />;
+}
+
+/** Who decided and when, under a decided card. */
+function DecidedLine({
+  children,
+  at,
+  declined,
+}: {
+  children: ReactNode;
+  at: string | null;
+  declined: boolean;
+}) {
+  const Mark = declined ? IconX : IconCircleCheck;
+  return (
+    <>
+      <Hairline />
+      <div className="flex min-h-12 items-center gap-2 px-4 py-2">
+        <Mark
+          aria-hidden
+          className={cn(
+            "size-5 shrink-0",
+            declined ? "text-muted-foreground" : "text-status-done",
+          )}
+          stroke={2.2}
+        />
+        <span className="type-sub font-medium">{children}</span>
+        {at ? (
+          <time
+            className="type-caption ml-auto shrink-0 text-muted-foreground"
+            dateTime={at}
+          >
+            {clockTime(at)}
+          </time>
+        ) : null}
+      </div>
+    </>
+  );
+}

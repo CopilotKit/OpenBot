@@ -17,6 +17,10 @@
  * and one entry here. A hop whose answer is on its way back is the same entry too: the relay is
  * keyed `relay:<hop key>`, so it is folded into the hop it carries the answer for, and the timer a
  * person is watching does not restart when the answer turns around.
+ *
+ * A TASK'S TURN IS THE SAME. A task works in a conversation of its own, its turn run by the server
+ * with no browser streaming it (tasks/store.ts). While that turn holds its lease on the queue, the
+ * conversation is working on it, and the row says so for as long as the lease does.
  */
 import { TURN_LIMITS } from "@openbot/toolkit/limits";
 import {
@@ -35,7 +39,8 @@ import {
 import { alias } from "drizzle-orm/pg-core";
 import { HANDOFF_KIND } from "../agents/handoff";
 import type { Database } from "../db/client";
-import { agents, routineRuns, routines, workItems } from "../db/schema";
+import { agents, routineRuns, routines, tasks, workItems } from "../db/schema";
+import { PROACTIVE_TASK_KIND } from "../proactive/engine";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
 /** Something a conversation is waiting on. */
@@ -61,6 +66,18 @@ export type ChannelWork =
       /** The Bot the routine runs as. */
       botId: string;
       botName: string | null;
+      since: Date;
+    }
+  | {
+      /** A task's own turn, running in the task's conversation. */
+      kind: "task";
+      /** The turn's work item. A reply and a Try again are turns of their own. */
+      key: string;
+      taskId: string;
+      /** The task's Bot. */
+      botId: string;
+      botName: string | null;
+      /** When the turn was taken onto the queue. */
       since: Date;
     };
 
@@ -247,6 +264,47 @@ export async function workIn(
       botId: run.botId,
       botName: run.botName ?? null,
       since: run.startedAt,
+    });
+  }
+
+  /*
+   * A task's turn while it runs: unfinished, and its lease live. Queued and not yet claimed, or let
+   * go after a throw and due its retry, nothing is running in the conversation, and the task's own
+   * status says what it is waiting for. Only the person's own task, in their own thread.
+   */
+  const turns = await database
+    .select({
+      key: workItems.key,
+      taskId: tasks.id,
+      channelId: tasks.channelId,
+      ownerUserId: tasks.ownerUserId,
+      botId: tasks.botId,
+      botName: agents.name,
+      since: workItems.createdAt,
+    })
+    .from(workItems)
+    .innerJoin(tasks, eq(tasks.id, sql`${workItems.payload}->>'taskId'`))
+    .leftJoin(agents, eq(agents.id, tasks.botId))
+    .where(
+      and(
+        eq(workItems.kind, PROACTIVE_TASK_KIND),
+        isNull(workItems.finishedAt),
+        gt(workItems.leaseUntil, sql`now()`),
+        inArray(
+          tasks.channelId,
+          channels.map((channel) => channel.id),
+        ),
+      ),
+    );
+  for (const turn of turns) {
+    if (ownerByChannel.get(turn.channelId) !== turn.ownerUserId) continue;
+    add(turn.channelId, {
+      kind: "task",
+      key: turn.key,
+      taskId: turn.taskId,
+      botId: turn.botId,
+      botName: turn.botName ?? null,
+      since: turn.since,
     });
   }
 

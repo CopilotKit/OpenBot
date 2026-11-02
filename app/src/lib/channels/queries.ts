@@ -33,6 +33,12 @@ export type AgentChannel = {
    * Kept so an older event arriving late does not put back a list that has moved on.
    */
   workAt?: string;
+  /**
+   * The task this conversation belongs to, or null for an ordinary conversation. A task's
+   * conversation is listed under Tasks, never among the person's conversations, and opens as the
+   * task. Absent from a server that predates tasks, which reads as null.
+   */
+  taskId?: string | null;
 };
 
 /**
@@ -62,6 +68,18 @@ export type ChannelWork =
       botName: string | null;
       /** ISO-8601. */
       since: string;
+    }
+  | {
+      /** A task's own turn, running in the task's conversation (server/src/tasks/). */
+      kind: "task";
+      /** The turn's work item. A reply and a Try again are turns of their own. */
+      key: string;
+      taskId: string;
+      /** The task's Bot. */
+      botId: string;
+      botName: string | null;
+      /** ISO-8601, when the turn was taken onto the queue. */
+      since: string;
     };
 
 /** A channel plus what the roster renders about it. */
@@ -86,6 +104,17 @@ export type ChannelSummary = AgentChannel & {
    */
   busy?: boolean;
 };
+
+/**
+ * The person's conversations, without the ones tasks keep for themselves. Every list a person picks
+ * a conversation from reads through this, so a task's conversation never shows up as somewhere to
+ * talk in or deliver to.
+ */
+export function conversationsOnly(
+  channels: readonly ChannelSummary[] | undefined,
+): ChannelSummary[] {
+  return (channels ?? []).filter((channel) => channel.taskId == null);
+}
 
 export const channelKeys = {
   all: ["channels"] as const,
