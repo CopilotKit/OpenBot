@@ -111,3 +111,7 @@ describe("brokered_connections", () => {
     expect(row?.exists).toBe(true);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

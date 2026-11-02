@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { startPolicyListener } from "../src/computer/policy-listener";
 import {
@@ -219,4 +219,8 @@ describe("the announcement itself", () => {
     ).resolves.toBeUndefined();
     expect(store.get().deny).toEqual([RULE]);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });
