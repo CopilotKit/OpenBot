@@ -20,6 +20,7 @@ import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
 import type { AccountMode } from "../shared-accounts";
 import { transportFor } from "../transport";
+import { withVendorDeadline } from "../vendor-deadline";
 import type { StoreContext } from "./context";
 import {
   effectiveUrl,
@@ -588,6 +589,11 @@ export function callMethods(context: StoreContext) {
        * account itself, and the row ends only where it answers that nothing is held for the app.
        * An answer that cannot be had keeps the row: a row cleared on a guess is a connection every
        * screen then calls missing, and the next call that works says otherwise.
+       *
+       * AND IT IS ASKED UNDER THE VENDOR DEADLINE. This runs inside the Bot's tool call and only
+       * chooses which words the card says, so a broker that never answers the question must not
+       * hold the run: past {@link withVendorDeadline}'s bound the answer is one that cannot be had,
+       * the row stays and the card offers Reconnect.
        */
       const toolkit = access.toolkit;
       const gone =
@@ -597,8 +603,8 @@ export function callMethods(context: StoreContext) {
           toolkit !== null &&
           toolkit !== undefined &&
           reachedVendorAs !== undefined &&
-          (await broker
-            .isConnected({
+          (await withVendorDeadline(() =>
+            broker.isConnected({
               account:
                 gatedMode === "shared"
                   ? { holder: "deployment", vendorUserId: reachedVendorAs }
@@ -608,8 +614,8 @@ export function callMethods(context: StoreContext) {
                       vendorUserId: reachedVendorAs,
                     },
               toolkit,
-            })
-            .catch(() => true)) === false);
+            }),
+          ).catch(() => true)) === false);
       /*
        * THE ACCOUNT IS GONE AT THE VENDOR, AND THE PERSON CAN PUT IT BACK FROM WHERE THEY ARE. The
        * only way here: every other answer returned inside the block and every throw left the catch.

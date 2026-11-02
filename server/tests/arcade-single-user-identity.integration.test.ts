@@ -242,6 +242,9 @@ function arcadeProject() {
   const confirmed: string[] = [];
   /** Anything asked of this engine that it does not serve. */
   const unexpected: string[] = [];
+  /** Routes that accept a request and say nothing until the test lets them, as a hung vendor does. */
+  const stalled = new Set<string>();
+  const hung: (() => void)[] = [];
   let next = 0;
 
   const held = (userId: string) =>
@@ -308,6 +311,9 @@ function arcadeProject() {
   async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const route = `${request.method} ${url.pathname}`;
+    if (stalled.has(route)) {
+      await new Promise<void>((resolve) => hung.push(resolve));
+    }
     const body =
       request.method === "POST"
         ? ((await request.json()) as Record<string, unknown>)
@@ -462,6 +468,15 @@ function arcadeProject() {
 
   return {
     handle,
+    /** `route` stops answering until {@link release}. */
+    stall(route: string) {
+      stalled.add(route);
+    },
+    /** Every stalled route answers again, and each request it was holding is answered. */
+    release() {
+      stalled.clear();
+      for (const resolve of hung.splice(0)) resolve();
+    },
     /** Arcade's listing changed: what every later `/v1/tools` request answers with. */
     publish(items: typeof CATALOGUE) {
       catalogue = items;
@@ -1247,6 +1262,37 @@ describe("Reconnect where Arcade already holds everything the app asks for", () 
       .from(brokeredConnections);
     expect(after?.connectedAt).toEqual(before?.connectedAt);
   });
+});
+
+describe("a Bot's call Arcade refuses while its connection listing does not answer", () => {
+  test("still shows the Reconnect card inside the vendor deadline, and keeps the record", async () => {
+    const deployment = await newDeployment();
+    await authorizeAction(deployment, READ, "me@example.test");
+    const approved = await rowsIn(deployment.database);
+
+    // Asked whether the account still holds anything for Gmail, Arcade never answers.
+    project.stall("GET /v1/admin/user_connections");
+    const started = Date.now();
+    const refused = await deployment.call(SEND).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    const waited = Date.now() - started;
+    project.release();
+
+    // The card the refusal carries, not a run held open on Arcade.
+    expect(waited).toBeLessThan(15_000);
+    expect(refused).toBeInstanceOf(PluginRefusedError);
+    expect(readConnectPrompt((refused as Error).message)).toMatchObject({
+      reason: "reconnect",
+      message:
+        "Your Gmail account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.",
+    });
+    // An answer that could not be had keeps the record, so the approved action still runs.
+    expect(await rowsIn(deployment.database)).toEqual(approved);
+    expect((await deployment.call(READ)).text).toContain("me@example.test");
+    expect(project.unexpected).toEqual([]);
+  }, 30_000);
 });
 
 describe("a Bot's call on an Arcade grant that is gone", () => {
