@@ -133,6 +133,32 @@ export function namesFor(kind: unknown, id: unknown): NameResult {
   };
 }
 
+/**
+ * The longest name one DNS label carries, and so the longest container name Docker's network DNS
+ * answers for. A longer one is registered but never resolves.
+ */
+const MAX_DNS_LABEL = 63;
+
+/**
+ * The name the server reaches a computer by on a shared network.
+ *
+ * Its container name when DNS can carry it. An isolated Bot's is `<namespace>-computer-bot-agent_`
+ * and a uuid, which is exactly 63 characters with the default namespace, so any longer namespace (and
+ * any long person id) derives a name Docker's DNS will not answer for: the computer starts, is healthy,
+ * and the server's every request to it fails with ENOTFOUND. Then the container's short id, which
+ * Docker also registers on every user-defined network and is always twelve characters.
+ *
+ * The short id changes when the container is replaced, which is fine: the server is handed the address
+ * on every ensure, and an old address then reaches nothing rather than a different computer.
+ */
+export function networkHostFor(
+  container: string,
+  shortId: string | undefined,
+): string {
+  if (container.length <= MAX_DNS_LABEL || !shortId) return container;
+  return shortId;
+}
+
 /** What a Bot's computer was called before computers were one per person. */
 export type LegacyNames = {
   botId: string;
