@@ -200,7 +200,7 @@ export function standingRoleMessage(
  * The guidance {@link standingRoleMessage} ends with, which every Bot OpenBot runs itself is given
  * anyway (see {@link builtInAgentConfiguration}): left off a role run here so it is not said twice.
  */
-const STANDING_GUIDANCE = `\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`;
+const STANDING_GUIDANCE = `\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`;
 
 /**
  * A Bot as OpenBot's own runner builds it, whatever it runs on elsewhere: what a check-in runs.
