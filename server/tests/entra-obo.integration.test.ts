@@ -82,6 +82,8 @@ type Directory = {
   refreshTokens: Map<string, { oid: string; upn: string; expired?: boolean }>;
   /** Whether OpenBot's app registration exposes an API, so a token to it can be issued at all. */
   apiExposed: boolean;
+  /** Whether an admin consented to OpenBot's own API, so its refresh grant may ask for it. */
+  apiConsented: boolean;
   /** The systems an admin has granted OpenBot access to. */
   consented: Set<string>;
   /** Every grant the token endpoint was asked for, in order. */
@@ -91,6 +93,7 @@ type Directory = {
 const entra: Directory = {
   refreshTokens: new Map(),
   apiExposed: true,
+  apiConsented: true,
   consented: new Set([HR_SCOPE]),
   requests: [],
 };
@@ -208,6 +211,16 @@ async function tokenEndpoint(request: Request): Promise<Response> {
         "invalid_resource",
         500011,
         `The resource principal named api://${CLIENT_ID} was not found in the tenant named ${TENANT}.`,
+      );
+    }
+    // As Entra answers a refresh grant for a resource nobody consented to.
+    if (scope === `api://${CLIENT_ID}/.default` && !entra.apiConsented) {
+      return refusal(
+        400,
+        "invalid_grant",
+        65001,
+        `The user or administrator has not consented to use the application with ID '${CLIENT_ID}' named 'OpenBot'. Send an interactive authorization request for this user and resource.`,
+        { suberror: "consent_required" },
       );
     }
     // Entra rotates: the new refresh token replaces the one it was shown.
@@ -866,6 +879,19 @@ describe("a routine reaches the system as its person, with nobody in the browser
     expect(await backgroundCall(newEntra(), fayId, PAYROLL)).toBe(
       `${REFUSAL_MARKER} An admin hasn't given OpenBot access to Payroll in Microsoft Entra. Ask an admin to grant it.`,
     );
+  });
+
+  test("missing consent to OpenBot's own API names OpenBot's API, not the system", async () => {
+    const hal = person("hal");
+    const halId = await signedInWithMicrosoft(hal);
+    entra.apiConsented = false;
+    try {
+      expect(await backgroundCall(newEntra(), halId)).toBe(
+        `${REFUSAL_MARKER} OpenBot doesn't have consent for its own API in Microsoft Entra, so it can't reach HR as you. Ask an admin to grant it.`,
+      );
+    } finally {
+      entra.apiConsented = true;
+    }
   });
 
   test("an app registration that exposes no API says so", async () => {

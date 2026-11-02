@@ -70,6 +70,8 @@ function entraRefusal(reason: EntraRefusal, title: string): string {
       return `Your Microsoft sign-in has expired, so ${title} wasn't used. Sign in with Microsoft again and ask again.`;
     case "no-consent":
       return `An admin hasn't given OpenBot access to ${title} in Microsoft Entra. Ask an admin to grant it.`;
+    case "no-api-consent":
+      return `OpenBot doesn't have consent for its own API in Microsoft Entra, so it can't reach ${title} as you. Ask an admin to grant it.`;
     case "no-api":
       return `OpenBot isn't set up in Microsoft Entra to reach ${title} as you. Ask an admin to expose OpenBot's API there.`;
     case "refused":

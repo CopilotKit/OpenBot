@@ -464,7 +464,8 @@ on-behalf-of exchange (`requested_token_use=on_behalf_of`) with that scope. The 
 is the person's token to OpenBot's own API: the one their app sent, or, for work nobody is watching
 (routines, check-ins), one OpenBot gets from their stored Microsoft sign-in. Tokens are reused until
 a few minutes before they expire. A person who has not signed in with Microsoft, whose sign-in has
-expired, or whose admin has not granted OpenBot access to the system is told so in those words.
+expired, or whose admin has not granted OpenBot access to the system or to OpenBot's own API is told
+so in those words.
 Marking a server this way needs Microsoft sign-in configured. Adding the same server again without
 `entraScope` keeps the mark; send `"entraScope": null` to reach it on a token again. The server's
 page under Plugins shows the mark and its scope.
@@ -489,7 +490,9 @@ In Entra, on OpenBot's app registration:
 
 1. **Expose an API** (an Application ID URI such as `api://<client id>` and a delegated scope such
    as `access_as_user`), and set `requestedAccessTokenVersion` to `2` in the manifest so its tokens
-   name the directory's v2.0 issuer.
+   name the directory's v2.0 issuer. Then add that scope to the registration's own API permissions
+   (under My APIs) and grant admin consent: OpenBot asks Entra for a token to its own API from each
+   person's stored sign-in, and without the consent Entra refuses with `AADSTS65001`.
 2. **Add a delegated API permission for each company system** to OpenBot's app registration, and
    grant admin consent.
 3. **Let the company's apps request tokens for OpenBot's API**: add them as authorized client

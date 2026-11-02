@@ -293,15 +293,25 @@ export function createEntra(options: {
           suberror: typeof body?.suberror === "string" ? body.suberror : null,
         }),
       );
-      const reason: EntraRefusal =
-        codes.includes(65001) || body?.suberror === "consent_required"
-          ? "no-consent"
-          : step === "sign-in" &&
-              (codes.includes(500011) || error === "invalid_resource")
-            ? "no-api"
-            : error === "invalid_grant" || error === "interaction_required"
-              ? "sign-in-expired"
-              : "refused";
+      /*
+       * Missing consent is answered the same way at both steps, and means a different thing at
+       * each. At the on-behalf-of step it is the system's: nobody granted OpenBot access to it. At
+       * the sign-in step, the refresh grant for OpenBot's own API, it is OpenBot's API itself, and
+       * telling the person an admin never granted access to the system would send that admin to
+       * the wrong place.
+       */
+      const consent =
+        codes.includes(65001) || body?.suberror === "consent_required";
+      const reason: EntraRefusal = consent
+        ? step === "sign-in"
+          ? "no-api-consent"
+          : "no-consent"
+        : step === "sign-in" &&
+            (codes.includes(500011) || error === "invalid_resource")
+          ? "no-api"
+          : error === "invalid_grant" || error === "interaction_required"
+            ? "sign-in-expired"
+            : "refused";
       throw new EntraTokenRefusedError(
         reason,
         `Microsoft would not issue the token (${response.status}${error ? `, ${error}` : ""}).`,
