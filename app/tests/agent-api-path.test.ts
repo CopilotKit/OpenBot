@@ -53,6 +53,7 @@ function boundary(id: string, refusal?: "unauthenticated" | "forbidden") {
     endpoint: null,
     hasAuth: false,
     hasCallbackToken: false,
+    isolated: false,
   };
   const record = (operation: string, receivedId: string, value?: unknown) => {
     expect(receivedId).toBe(id);

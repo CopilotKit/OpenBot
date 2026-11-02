@@ -61,7 +61,7 @@ beforeAll(async () => {
   else process.env.COMPUTER_BROWSER_MODE = "headed";
   process.env.PORT = String(port);
   // No API server pushes this computer a network policy, so it browses before one arrives, as in
-  // demonstration-live.test.ts. The page is served over http because `/navigate` refuses data: URLs.
+  // person-browser-computer.test.ts. The page is served over http because `/navigate` refuses data: URLs.
   process.env.EGRESS_POLICY_REQUIRED = "0";
   site = Bun.serve({
     hostname: "127.0.0.1",

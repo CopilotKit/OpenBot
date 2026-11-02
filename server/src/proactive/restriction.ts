@@ -15,8 +15,9 @@
  * FAIL CLOSED. Anything not positively classified as a read is refused: an unknown ref, a catalogue
  * that could not be read, a tool with no recorded effect.
  */
-import type { AuditInitiator } from "../audit";
+
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import type { AuditInitiator } from "../audit";
 import { REFUSAL_MARKER } from "../plugins/tools";
 
 export const PROACTIVE_INITIATOR_PREFIX = "proactive:";

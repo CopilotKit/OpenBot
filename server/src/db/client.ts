@@ -1,5 +1,5 @@
-import { SQL } from "bun";
 import { readFileSync } from "node:fs";
+import { SQL } from "bun";
 import { drizzle } from "drizzle-orm/bun-sql";
 import * as schema from "./schema";
 

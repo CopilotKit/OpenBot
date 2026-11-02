@@ -140,7 +140,7 @@ function NewRulePage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Something no Bot may do. It applies to every Bot from its next action."
+      description="Define an action that no Bot may take. This boundary applies to every Bot’s next action."
       title="Add rule"
     >
       <PageSection title="Start from">

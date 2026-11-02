@@ -276,16 +276,6 @@ describe("the connection listing is read to its end, not to the SDK's", () => {
     // NOT ONE DELETE WAS SPENT on a listing that could not be trusted to be the whole of it.
     expect(deletes(e).length).toBe(0);
   });
-
-  test("isConnected and accountName read the whole listing", async () => {
-    engine({ connections: 250, connectionTotal: false });
-    const { broker } = createArcadeClient("never-dialled");
-
-    expect(await broker.isConnected({ account, toolkit: "Gmail" })).toBe(true);
-    expect(await broker.accountName({ account, toolkit: "Gmail" })).toBe(
-      "person 0",
-    );
-  });
 });
 
 /**

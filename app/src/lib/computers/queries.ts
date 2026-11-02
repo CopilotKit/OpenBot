@@ -1,9 +1,21 @@
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 
-/** One Bot's computer, as Admin sees it. */
+/**
+ * One computer as Admin sees it: a person's, or an isolated Bot's.
+ *
+ * On a deployment with one shared computer, each entry is one person's seat on one Bot there, and
+ * names both.
+ */
 export type ComputerProfile = {
-  botId: string;
+  /** Whose computer, as `person:<id>` or `bot:<id>`. What the stop, reset and update calls name. */
+  computer: string;
+  kind: "person" | "bot";
+  personId?: string;
+  /** The person's name and address, where the deployment knows them. */
+  person?: { name: string | null; email: string };
+  /** The isolated Bot, or the Bot of one seat on the shared computer. */
+  botId?: string;
   running: boolean;
   startedAt: string | null;
   /** Absent when the provider does not report egress at all, which is not the same as none. */
@@ -12,8 +24,8 @@ export type ComputerProfile = {
   updateAvailable?: boolean;
 };
 
-/** Whether each Bot has a browser profile of its own, or they share one. */
-export type ComputerIsolation = "per-bot" | "shared";
+/** One computer per person (and per isolated Bot), or one computer every person's Bots share. */
+export type ComputerIsolation = "per-person" | "shared";
 
 /** What the list endpoint answers: the computers, and how they are separated. */
 export type ComputerFleet = {

@@ -5,13 +5,43 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{deployment, engine::Address, harness::HarnessChoice, problem::Problem, stack};
+use crate::{
+    deployment,
+    engine::{Address, Engine},
+    harness::HarnessChoice,
+    local_browser,
+    problem::Problem,
+    stack,
+};
 
 pub const REQUIRED: &str = "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
 pub const FILE: &str = ".openbot-prepared.json";
 const DEPENDENCIES: &str = ".openbot-dependencies.json";
 const LAUNCH: &str = ".openbot-launched.json";
-const PACKAGES: [&str; 6] = ["", "server", "app", "worker", "shared", "toolkit"];
+/// The engine this installation was set up on. Never invalidated with the preparation record: a
+/// new release is prepared again on the same engine, where its database already is.
+pub const ENGINE: &str = ".openbot-engine.json";
+const PACKAGES: [&str; 7] = [
+    "",
+    "server",
+    "app",
+    "worker",
+    "shared",
+    "toolkit",
+    "extension",
+];
+/// Packages a release has only since #784 (`shared` as a package, `toolkit`) and #858 (`extension`).
+/// v0.2.0, still the latest release when this desktop was built, has `shared` as plain source and no
+/// `toolkit` or `extension`; requiring their manifests failed every new install with
+/// "shared/package.json: No such file or directory".
+const LATER_PACKAGES: [&str; 3] = ["shared", "toolkit", "extension"];
+
+/// The packages this release actually has: every one in `PACKAGES`, less a later one it predates.
+fn packages(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
+    PACKAGES.into_iter().filter(move |package| {
+        !LATER_PACKAGES.contains(package) || root.join(package).join("package.json").is_file()
+    })
+}
 
 #[derive(Serialize, Deserialize)]
 struct Dependencies {
@@ -74,6 +104,28 @@ pub fn installation(root: &Path) -> Option<Launch> {
     })
 }
 
+#[derive(Serialize, Deserialize)]
+struct SavedEngine {
+    engine: Engine,
+}
+
+/// The engine this installation was set up on, or `None` when it saved none (a new installation,
+/// or one from before this record existed).
+///
+/// Every later install and start uses this engine and never the other one. The installation's
+/// images and its database are in the engine it was set up on, so moving to the other one, say
+/// because Docker happens to be answering, starts OpenBot with an empty database.
+pub fn saved_engine(root: &Path) -> Option<Engine> {
+    let record: SavedEngine =
+        serde_json::from_slice(&std::fs::read(root.join(ENGINE)).ok()?).ok()?;
+    Some(record.engine)
+}
+
+/// Save the engine this installation runs on. Called once, when it has none saved.
+pub fn save_engine(root: &Path, engine: Engine) -> Result<(), Problem> {
+    write_record(root, ENGINE, &SavedEngine { engine })
+}
+
 pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
     let root = std::fs::canonicalize(root).map_err(|e| {
         Problem::with(
@@ -120,24 +172,47 @@ fn hash_files(root: &Path, files: impl IntoIterator<Item = PathBuf>) -> Result<S
     Ok(format!("{:x}", hash.finalize()))
 }
 
+/// Packages installed apart from the root workspace, each from its own lockfile.
+fn separate_packages(root: &Path) -> Vec<&'static str> {
+    stack::dependency_directories(root)
+        .into_iter()
+        .filter(|directory| !directory.is_empty())
+        .collect()
+}
+
 fn dependency_fingerprint(root: &Path) -> Result<String, Problem> {
     hash_files(
         root,
         std::iter::once(PathBuf::from("bun.lock"))
-            .chain(PACKAGES.map(|path| Path::new(path).join("package.json"))),
+            .chain(packages(root).map(|path| Path::new(path).join("package.json")))
+            .chain(separate_packages(root).into_iter().flat_map(|package| {
+                [
+                    Path::new(package).join("bun.lock"),
+                    Path::new(package).join("package.json"),
+                ]
+            })),
     )
 }
 
+/// The built Recorder's manifest, in a release whose person's browser loads it.
+fn recorder_manifest() -> PathBuf {
+    Path::new(local_browser::RECORDER_DIST).join("manifest.json")
+}
+
 fn fingerprint(root: &Path) -> Result<String, Problem> {
-    hash_files(
-        root,
-        [
-            PathBuf::from(".openbot-deployment"),
-            PathBuf::from("container-images.json"),
-            PathBuf::from("docker-compose.yml"),
-            PathBuf::from(DEPENDENCIES),
-        ],
-    )
+    let mut files = vec![
+        PathBuf::from(".openbot-deployment"),
+        PathBuf::from("container-images.json"),
+        PathBuf::from("docker-compose.yml"),
+        PathBuf::from(DEPENDENCIES),
+    ];
+    // A release with the person's browser is installed only with its Recorder in place, so one that
+    // has gone missing sends Start back to Installation rather than starting a browser with no
+    // Recorder to load.
+    if local_browser::in_release(root) {
+        files.push(recorder_manifest());
+    }
+    hash_files(root, files)
 }
 
 fn write_record(root: &Path, name: &str, value: &impl Serialize) -> Result<(), Problem> {
@@ -165,7 +240,7 @@ pub fn invalidate(root: &Path) -> Result<(), Problem> {
 /// Record resolved package manifests, not just the existence of a partial node_modules directory.
 fn package_files(root: &Path) -> Result<Vec<PathBuf>, Problem> {
     let mut files = BTreeSet::new();
-    for package in PACKAGES {
+    for package in packages(root).chain(separate_packages(root)) {
         let directory = root.join(package);
         let manifest: serde_json::Value = serde_json::from_slice(
             &std::fs::read(directory.join("package.json")).map_err(|e| required(e.to_string()))?,
@@ -214,6 +289,101 @@ pub fn install_dependencies_if_needed(
     stack::install_dependencies(root, &bun)?;
     record_dependencies(root, &bun)?;
     Ok(bun)
+}
+
+/// The published image the Recorder is copied out of: the computer's, which carries the built
+/// Recorder at [`IMAGE_RECORDER`] for every person's browser it opens (`agent-computer/Dockerfile`).
+pub const RECORDER_IMAGE: &str = "agent-computer";
+
+/// Where the computer image keeps the built Recorder.
+pub const IMAGE_RECORDER: &str = "/recorder";
+
+/// Put the Recorder into the deployment, for the person's browser to load.
+///
+/// PREBUILT, NEVER BUILT HERE. The release's own computer image carries the Recorder its CI built
+/// from the same tag (`agent-computer/Dockerfile` builds it and keeps only `extension/dist`), and
+/// installation has just pulled that image, digest-pinned from the release's manifest. So the
+/// Recorder is copied out of it: what every hosted person's browser loads, byte for byte, and
+/// nothing is compiled on the person's machine. It used to be three Vite builds run here with the
+/// installation's Bun: a build tool run on every person's machine at install, and a Recorder that
+/// could differ from the hosted one.
+///
+/// Copied out of a container that is created and never started (`create --pull=never`, so a
+/// missing image is an error rather than a download nobody asked for), into a folder beside the
+/// old copy, which replaces it only once the new one is whole. Every installation copies it again,
+/// since an upgrade lays new source over the old one.
+pub fn place_recorder(root: &Path, address: &Address) -> Result<(), Problem> {
+    if !local_browser::in_release(root) {
+        return Ok(());
+    }
+    let image = deployment::reference(root, RECORDER_IMAGE).map_err(|detail| {
+        Problem::with(
+            "OpenBot could not set up the Recorder for its browser. Try again.",
+            detail,
+        )
+    })?;
+    place_recorder_with(root, &image, &mut |args| {
+        address.command().args(args).output()
+    })
+}
+
+/// [`place_recorder`], with the engine command it runs given, so a test can stand in for it.
+pub fn place_recorder_with(
+    root: &Path,
+    image: &str,
+    engine: &mut dyn FnMut(&[&str]) -> std::io::Result<std::process::Output>,
+) -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot could not set up the Recorder for its browser. Try again.",
+            detail,
+        )
+    };
+    let run = |engine: &mut dyn FnMut(&[&str]) -> std::io::Result<std::process::Output>,
+               args: &[&str]|
+     -> Result<String, Problem> {
+        let output = engine(args)
+            .map_err(|error| failed(format!("could not run the engine's {}: {error}", args[0])))?;
+        if !output.status.success() {
+            return Err(failed(format!(
+                "the engine's {} failed: {}",
+                args[0],
+                crate::quiet::said(&output.stderr)
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+    let target = root.join(local_browser::RECORDER_DIST);
+    let fresh = target.with_extension("new");
+    let _ = std::fs::remove_dir_all(&fresh);
+    std::fs::create_dir_all(&fresh)
+        .map_err(|error| failed(format!("{}: {error}", fresh.display())))?;
+    let container = run(engine, &["create", "--pull=never", image])?;
+    let copied = run(
+        engine,
+        &[
+            "cp",
+            &format!("{container}:{IMAGE_RECORDER}/."),
+            &fresh.to_string_lossy(),
+        ],
+    );
+    // Never left behind, whatever the copy did. It never ran, so there is nothing to stop.
+    let removed = run(engine, &["rm", "--force", &container]);
+    copied?;
+    removed?;
+    if !fresh.join("manifest.json").is_file() {
+        let _ = std::fs::remove_dir_all(&fresh);
+        return Err(failed(format!(
+            "{image} has no Recorder at {IMAGE_RECORDER}"
+        )));
+    }
+    match std::fs::remove_dir_all(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(failed(format!("{}: {error}", target.display()))),
+    }
+    std::fs::rename(&fresh, &target)
+        .map_err(|error| failed(format!("{}: {error}", target.display())))
 }
 
 pub fn dependencies_ready(root: &Path) -> Result<PathBuf, Problem> {
@@ -354,6 +524,53 @@ pub fn image_settings(
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_saved_engine_outlives_a_new_preparation() {
+        let root = crate::test_support::temp_root("preparation-saved-engine");
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(saved_engine(&root), None, "nothing saved yet");
+        save_engine(&root, Engine::Podman).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Podman));
+        // A new release is prepared again on the engine its database is in.
+        invalidate(&root).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Podman));
+        save_engine(&root, Engine::Docker).unwrap();
+        assert_eq!(saved_engine(&root), Some(Engine::Docker));
+        std::fs::write(root.join(ENGINE), "not json").unwrap();
+        assert_eq!(
+            saved_engine(&root),
+            None,
+            "an unreadable record is no record"
+        );
+    }
+
+    #[test]
+    fn a_release_from_before_the_toolkit_needs_no_shared_or_toolkit_manifest() {
+        let root = crate::test_support::temp_root("preparation-v020-layout");
+        for package in ["", "server", "app", "worker"] {
+            std::fs::create_dir_all(root.join(package)).unwrap();
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        // v0.2.0: `shared` is source with no manifest, and there is no `toolkit` or `extension`.
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        assert_eq!(
+            packages(&root).collect::<Vec<_>>(),
+            ["", "server", "app", "worker"]
+        );
+        std::fs::write(root.join("bun.lock"), "lock").unwrap();
+        assert!(dependency_fingerprint(&root).is_ok());
+        assert!(package_files(&root).is_ok());
+        // A release that has them is held to them.
+        for package in LATER_PACKAGES {
+            std::fs::create_dir_all(root.join(package)).unwrap();
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        assert_eq!(packages(&root).count(), PACKAGES.len());
+        // The packages every release has stay required.
+        std::fs::remove_file(root.join("server").join("package.json")).unwrap();
+        assert!(dependency_fingerprint(&root).is_err());
+    }
+
     struct Fixture {
         root: PathBuf,
         bun: PathBuf,
@@ -394,7 +611,8 @@ fn main() {
     let previous = std::fs::read_to_string("installs").unwrap_or_default();
     writeln!(std::fs::OpenOptions::new().create(true).append(true).open("installs").unwrap(), "install").unwrap();
     std::fs::create_dir_all("node_modules/synthetic-package").unwrap();
-    if previous.is_empty() { std::process::exit(71); }
+    let separate = std::env::current_dir().unwrap().ends_with("agent-computer");
+    if previous.is_empty() && !separate { std::process::exit(71); }
     std::fs::write("node_modules/synthetic-package/package.json", "{}").unwrap();
 }
 "#).unwrap();
@@ -551,5 +769,290 @@ fn main() {
             Some(f.root.clone()),
             "repair must not forget the last successful folder"
         );
+    }
+
+    /// A release with the person's browser: its computer's packages are installed from their own
+    /// lockfile, and it is not installed until its Recorder is in place. One that goes missing
+    /// afterwards sends Start back to Installation, which puts it there again.
+    #[test]
+    fn a_release_with_the_browser_is_installed_only_with_its_recorder_in_place() {
+        let f = Fixture::new();
+        std::fs::create_dir_all(f.root.join("shared")).unwrap();
+        std::fs::write(f.root.join(local_browser::CONTRACT), "export {};\n").unwrap();
+        std::fs::create_dir_all(f.root.join("agent-computer")).unwrap();
+        std::fs::write(
+            f.root.join("agent-computer/package.json"),
+            r#"{"dependencies":{"synthetic-package":"1"}}"#,
+        )
+        .unwrap();
+        std::fs::write(f.root.join("agent-computer/bun.lock"), "synthetic-lock").unwrap();
+
+        let install = || install_dependencies_if_needed(&f.root, || Ok(f.bun.clone()));
+        assert!(install().is_err(), "the fixture's first root install fails");
+        install().unwrap();
+        assert!(f
+            .root
+            .join("agent-computer/node_modules/synthetic-package/package.json")
+            .is_file());
+
+        let images = || vec!["synthetic-image".to_string()];
+        let unbuilt = complete_with(&f.root, None, images(), |_| Ok(()))
+            .expect_err("no Recorder, no installation");
+        assert!(unbuilt.said.contains("Finish installing"), "{unbuilt:?}");
+
+        let image = ComputerImage::with_recorder();
+        place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
+        complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
+        require_with(&f.root, None, |_| Ok(())).unwrap();
+
+        std::fs::remove_dir_all(f.root.join(local_browser::RECORDER_DIST)).unwrap();
+        let gone = require_with(&f.root, None, |_| Ok(()))
+            .expect_err("Start must not run a browser with no Recorder to load");
+        assert!(gone.said.contains("Finish installing"), "{gone:?}");
+
+        // A changed lockfile for the computer is a changed installation, as the root's is.
+        place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
+        complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
+        std::fs::write(f.root.join("agent-computer/bun.lock"), "changed-lock").unwrap();
+        assert!(require_with(&f.root, None, |_| Ok(())).is_err());
+    }
+
+    /// Releases before the browser have no Recorder to put in place and no computer to install for.
+    #[test]
+    fn an_older_release_places_nothing_and_installs_only_its_workspace() {
+        let f = Fixture::new();
+        // `place_recorder` asks nothing of the engine or the manifest for a release without the browser.
+        let address = Address::new(crate::engine::Engine::Docker, None);
+        place_recorder(&f.root, &address).unwrap();
+        assert!(!f.root.join(local_browser::RECORDER_DIST).exists());
+        assert_eq!(stack::dependency_directories(&f.root), [""]);
+    }
+
+    /// The release's computer image, digest-pinned, as the manifest names it.
+    const COMPUTER: &str = "ghcr.io/copilotkit/openbot-agent-computer@sha256:0123";
+
+    /// A process's result, as the engine's command line leaves it.
+    fn exited(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        #[cfg(unix)]
+        let status = std::process::ExitStatus::from_raw(code << 8);
+        #[cfg(windows)]
+        let status = std::process::ExitStatus::from_raw(code as u32);
+        std::process::Output {
+            status,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    /// The engine with the release's computer image pulled, answering `create`, `cp` and `rm` as
+    /// Docker's and Podman's command lines do: `create` prints the new container's id, `cp` of
+    /// `<id>:/recorder/.` copies the folder's contents into the destination, and `rm` of a
+    /// container that does not exist fails. Every command is written down.
+    struct ComputerImage {
+        recorder: Option<PathBuf>,
+        fail_copy: bool,
+        ran: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>>,
+    }
+
+    impl ComputerImage {
+        fn with_recorder() -> Self {
+            let recorder = crate::test_support::temp_root("image-recorder");
+            std::fs::create_dir_all(recorder.join("background")).unwrap();
+            std::fs::write(
+                recorder.join("manifest.json"),
+                r#"{"name":"OpenBot Recorder"}"#,
+            )
+            .unwrap();
+            std::fs::write(recorder.join("background/index.js"), "prebuilt();").unwrap();
+            Self {
+                recorder: Some(recorder),
+                fail_copy: false,
+                ran: Default::default(),
+            }
+        }
+
+        fn failing_copy(mut self) -> Self {
+            self.fail_copy = true;
+            self
+        }
+
+        fn engine(&self) -> impl FnMut(&[&str]) -> std::io::Result<std::process::Output> + '_ {
+            let mut created: Option<String> = None;
+            move |args: &[&str]| {
+                self.ran
+                    .borrow_mut()
+                    .push(args.iter().map(|arg| arg.to_string()).collect());
+                Ok(match args {
+                    ["create", "--pull=never", image] if *image == COMPUTER => {
+                        created = Some("c0ffee".into());
+                        exited(0, "c0ffee\n", "")
+                    }
+                    ["create", ..] => exited(125, "", "Error: No such image"),
+                    ["cp", from, to]
+                        if Some(format!("{}:/recorder/.", "c0ffee")) == Some(from.to_string())
+                            && created.is_some() =>
+                    {
+                        if self.fail_copy {
+                            return Ok(exited(1, "", "Error: copy failed"));
+                        }
+                        match &self.recorder {
+                            Some(recorder) => copy_tree(recorder, Path::new(to)),
+                            None => {
+                                return Ok(exited(
+                                    1,
+                                    "",
+                                    "Error: Could not find the file /recorder in container c0ffee",
+                                ))
+                            }
+                        }
+                        exited(0, "", "")
+                    }
+                    ["rm", "--force", id] if created.as_deref() == Some(*id) => {
+                        created = None;
+                        exited(0, "c0ffee\n", "")
+                    }
+                    _ => exited(1, "", "unexpected engine command"),
+                })
+            }
+        }
+    }
+
+    impl Drop for ComputerImage {
+        fn drop(&mut self) {
+            if let Some(recorder) = &self.recorder {
+                let _ = std::fs::remove_dir_all(recorder);
+            }
+        }
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    /// The Recorder used to be built with `bun run build` on the person's machine during
+    /// installation. It is copied out of the release's computer image instead, prebuilt,
+    /// replacing whatever an earlier installation left, and the container it came out of is gone.
+    #[test]
+    fn the_recorder_comes_prebuilt_out_of_the_releases_computer_image() {
+        let f = Fixture::new();
+        let dist = f.root.join(local_browser::RECORDER_DIST);
+        // An earlier installation's copy, with a file the new one no longer has.
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("stale.js"), "old").unwrap();
+        let image = ComputerImage::with_recorder();
+        place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dist.join("background/index.js")).unwrap(),
+            "prebuilt();"
+        );
+        assert!(dist.join("manifest.json").is_file());
+        assert!(!dist.join("stale.js").exists());
+        assert!(!dist.with_extension("new").exists());
+        let fresh = dist.with_extension("new").to_string_lossy().into_owned();
+        assert_eq!(
+            *image.ran.borrow(),
+            [
+                vec!["create", "--pull=never", COMPUTER],
+                vec!["cp", "c0ffee:/recorder/.", fresh.as_str()],
+                vec!["rm", "--force", "c0ffee"],
+            ]
+        );
+    }
+
+    /// The copy through the real engine's command line, out of a real image that keeps a Recorder
+    /// at `/recorder` as the computer image does, and the container it made gone afterwards.
+    ///
+    /// ```sh
+    /// OPENBOT_LIVE_RECORDER_IMAGE=<image> cargo test --lib live_the_recorder -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "creates a container from an image on this machine's Docker engine"]
+    fn live_the_recorder_is_copied_out_of_a_real_image() {
+        let image = std::env::var("OPENBOT_LIVE_RECORDER_IMAGE").unwrap();
+        let f = Fixture::new();
+        let address = Address::new(crate::engine::Engine::Docker, None);
+        let before = address
+            .command()
+            .args(["ps", "--all", "--quiet"])
+            .output()
+            .unwrap()
+            .stdout;
+        place_recorder_with(&f.root, &image, &mut |args| {
+            address.command().args(args).output()
+        })
+        .unwrap();
+        assert!(f
+            .root
+            .join(local_browser::RECORDER_DIST)
+            .join("manifest.json")
+            .is_file());
+        let after = address
+            .command()
+            .args(["ps", "--all", "--quiet"])
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(before, after, "the container it copied from is gone");
+    }
+
+    /// An image with no Recorder in it, or a copy that fails, leaves the earlier copy as it was and
+    /// no container behind, and says so.
+    #[test]
+    fn an_image_without_the_recorder_leaves_the_last_one_and_no_container() {
+        let f = Fixture::new();
+        let dist = f.root.join(local_browser::RECORDER_DIST);
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("manifest.json"), "earlier").unwrap();
+        for image in [
+            ComputerImage {
+                recorder: None,
+                fail_copy: false,
+                ran: Default::default(),
+            },
+            ComputerImage::with_recorder().failing_copy(),
+        ] {
+            let problem = place_recorder_with(&f.root, COMPUTER, &mut image.engine())
+                .expect_err("no Recorder, no installation");
+            assert!(problem.said.contains("Recorder"), "{problem:?}");
+            assert_eq!(
+                image.ran.borrow().last().unwrap(),
+                &vec!["rm", "--force", "c0ffee"]
+            );
+            assert_eq!(
+                std::fs::read_to_string(dist.join("manifest.json")).unwrap(),
+                "earlier"
+            );
+        }
+        // A missing image is never pulled: it is an error.
+        let image = ComputerImage::with_recorder();
+        let problem = place_recorder_with(&f.root, "some-other-image", &mut image.engine())
+            .expect_err("only the release's image");
+        assert!(problem.detail.unwrap().contains("No such image"));
+    }
+
+    #[test]
+    fn every_root_workspace_is_fingerprinted() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../package.json")).unwrap();
+        for workspace in manifest["workspaces"].as_array().unwrap() {
+            let workspace = workspace.as_str().unwrap();
+            assert!(
+                PACKAGES.contains(&workspace),
+                "{workspace} is a root workspace whose dependencies are not fingerprinted"
+            );
+        }
     }
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import fixture from "./fixtures/arcade-catalogue.json";
 import { listTools, useArcadeClient } from "../src/plugins/arcade";
+import fixture from "./fixtures/arcade-catalogue.json";
 
 afterEach(() => useArcadeClient(null));
 

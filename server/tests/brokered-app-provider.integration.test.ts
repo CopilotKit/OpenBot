@@ -10,9 +10,8 @@ import { eq, like, or } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { brokeredConnections, mcpServers } from "../src/db/schema";
-import type { BrokerConnection } from "../src/plugins/broker";
 import type { BrokerProvider } from "../src/plugins/access";
-import type { ComposioBroker } from "../src/plugins/broker";
+import type { BrokerConnection, ComposioBroker } from "../src/plugins/broker";
 import {
   CustomServerRefusedError,
   createPluginStore,

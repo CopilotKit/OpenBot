@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { PERSON_INITIATOR } from "../audit";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { PERSON_INITIATOR } from "../audit";
 import {
   decideAction,
   effectiveHostCommandPolicy,

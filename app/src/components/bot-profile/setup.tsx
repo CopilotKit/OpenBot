@@ -1,5 +1,6 @@
 import {
   IconChevronRight,
+  IconDeviceDesktop,
   IconEye,
   IconId,
   IconPlugConnected,
@@ -7,7 +8,7 @@ import {
   IconTag,
   IconTextCaption,
 } from "@tabler/icons-react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import type { ZodType } from "zod";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
@@ -38,15 +39,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   type AgentFormValues,
   agentFormSchema,
   profileUpdateInput,
 } from "@/lib/agents/form";
+import {
+  ISOLATED_MAKING_PUBLIC,
+  ISOLATED_PUBLIC_SHARES_LOGINS,
+  ISOLATION_GONE,
+  ISOLATION_NOT_ALLOWED,
+  ISOLATION_UNAVAILABLE,
+  ISOLATION_WITHDRAWN,
+  isolatedExplained,
+} from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
-import type { AgentProfile } from "@/lib/agents/queries";
+import {
+  type AgentProfile,
+  agentCapabilitiesQueryOptions,
+} from "@/lib/agents/queries";
 import { isComposing } from "@/lib/composing";
+import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { queryClient } from "@/query-client";
 
 type TextField = "name" | "title" | "roleDescription";
@@ -115,6 +130,11 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
             agent={agent}
             onSave={(visibility) => save({ visibility })}
           />
+          <Separator />
+          <IsolatedRow
+            agent={agent}
+            onSave={(isolated) => save({ isolated })}
+          />
           {agent.systemOwned ? (
             <>
               <Separator />
@@ -168,8 +188,12 @@ function VisibilityRow({
         <ItemDescription>
           {error ??
             (agent.visibility === "private"
-              ? "Only you can see it and start conversations with it."
-              : "Everyone on OpenBot can find and use it.")}
+              ? agent.isolationActive
+                ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
+                : "Only you can see it and start conversations with it."
+              : agent.isolationActive
+                ? `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
+                : "Everyone on OpenBot can find and use it.")}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -212,6 +236,104 @@ function VisibilityRow({
       </ItemActions>
     </Item>
   );
+}
+
+/**
+ * Whether it has a computer of its own: a switch that writes when flipped, like Visibility's choice.
+ *
+ * The switch shows what the owner asked for. What is actually happening is the description, decided
+ * by the server: a Bot whose owner lost "Isolated Bots" keeps its tick, runs on their shared computer,
+ * and says so here, so that an administrator giving the switch back restores it without anybody
+ * touching the Bot.
+ *
+ * Turning it off is never refused, so the switch stays live for an isolated Bot even where it could
+ * not be turned back on. Turning it on is offered only where the deployment can make the computer
+ * and the person holds the switch; anywhere else the row says which of the two is missing.
+ */
+function IsolatedRow({
+  agent,
+  onSave,
+}: {
+  agent: AgentProfile;
+  onSave: (isolated: boolean) => Promise<unknown>;
+}) {
+  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
+  const { data: mine } = useQuery(myCapabilitiesQueryOptions());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const available = capabilities?.isolationAvailable ?? false;
+  const allowed = mine?.capabilities.isolatedComputers !== false;
+  const isPublic = agent.visibility === "public";
+  // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.
+  const editable =
+    agent.canManage &&
+    !agent.systemOwned &&
+    (agent.isolated || (available && allowed));
+
+  const summary = agent.systemOwned
+    ? "Comes with OpenBot, so it runs on the computer of whoever is using it."
+    : agent.isolated
+      ? agent.isolationActive
+        ? isolatedExplained(isPublic)
+        : agent.isolationOffReason === "admin"
+          ? ISOLATION_WITHDRAWN
+          : agent.isolationOffReason === "deployment"
+            ? ISOLATION_GONE
+            : sharedSummary(isPublic)
+      : !available
+        ? ISOLATION_UNAVAILABLE
+        : !allowed && agent.canManage
+          ? ISOLATION_NOT_ALLOWED
+          : sharedSummary(isPublic);
+
+  return (
+    <Item size="sm">
+      <ItemMedia variant="icon">
+        <IconDeviceDesktop />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle id={`isolated-${agent.id}`}>Isolated</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {error ?? summary}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {agent.canManage && !agent.systemOwned ? (
+          <Switch
+            aria-labelledby={`isolated-${agent.id}`}
+            checked={agent.isolated}
+            disabled={saving || !editable}
+            onCheckedChange={async (next) => {
+              setError(null);
+              setSaving(true);
+              try {
+                await onSave(next);
+              } catch (failure) {
+                setError(
+                  failure instanceof Error
+                    ? failure.message
+                    : "Couldn't save. Try again.",
+                );
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+        ) : (
+          <span className="text-muted-foreground text-sm">
+            {agent.isolated ? "On" : "Off"}
+          </span>
+        )}
+      </ItemActions>
+    </Item>
+  );
+}
+
+/** Where a Bot without a computer of its own runs: on the computer of whoever is using it. */
+function sharedSummary(isPublic: boolean): string {
+  return isPublic
+    ? "Runs on the computer of whoever is using it."
+    : "Runs on your computer, alongside your other Bots.";
 }
 
 /**

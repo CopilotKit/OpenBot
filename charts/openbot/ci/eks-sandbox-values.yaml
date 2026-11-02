@@ -1,4 +1,4 @@
-# EKS, with a computer each rather than one shared browser.
+# EKS, with a computer for each person rather than one shared browser.
 #
 # Needs the agent-sandbox controller installed; CI renders it with --api-versions instead.
 #
@@ -79,7 +79,7 @@ server:
           app.kubernetes.io/component: server
 
 computers:
-  # A computer each, which is the mode the rest of this chart exists for and the one nothing rendered
+  # A computer for each person, which is the mode the rest of this chart exists for and the one nothing rendered
   # until now. `shared` and `sandbox` produce different Deployments, different RBAC and a different
   # pod template, so a target that only ever renders one of them checks half the chart.
   mode: sandbox

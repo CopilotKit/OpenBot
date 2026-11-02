@@ -20,6 +20,7 @@ import {
   buildAgents,
   builtInAgentConfiguration,
   createRequestAgents,
+  generativeUiMiddlewares,
   type LoadInstructions,
   registeredAgentFromRow,
   resolveRuntimeAgents,
@@ -2668,5 +2669,21 @@ describe("where an attachment reaches the model, and where it deliberately does 
       (messages[4] as { content?: { source?: unknown }[] }).content?.[0]
         ?.source,
     ).toMatchObject({ type: "data" });
+  });
+});
+
+describe("generativeUiMiddlewares", () => {
+  test("a deployment that opted out refuses render_ui whatever the browser sends", () => {
+    // Omitted, the runtime would apply it to any run that carries a catalog.
+    expect(generativeUiMiddlewares(false).generativeUI).toBe(false);
+  });
+
+  test("a deployment that opted in applies render_ui to every run", () => {
+    expect(generativeUiMiddlewares(true).generativeUI).toBe(true);
+  });
+
+  test("the A2UI 0.9 middleware is off either way", () => {
+    expect(generativeUiMiddlewares(true).a2ui).toEqual({ enabled: false });
+    expect(generativeUiMiddlewares(false).a2ui).toEqual({ enabled: false });
   });
 });

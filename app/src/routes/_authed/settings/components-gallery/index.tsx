@@ -29,7 +29,7 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What a Bot can draw in a conversation. An admin chooses which ones each Bot can use."
+      description="Browse components that Bots can display in conversations. An admin controls which components each Bot can use."
       title="Components gallery"
     >
       {components.isPending ? null : components.error ? (

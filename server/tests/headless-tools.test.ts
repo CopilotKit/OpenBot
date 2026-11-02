@@ -6,17 +6,18 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
+import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { Observable } from "rxjs";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput } from "../src/audit";
+import { botSeat } from "../src/computer/computer-key";
 import {
   ComputerStillStartingError,
   createComputerGateway,
 } from "../src/computer/gateway";
 import * as headless from "../src/computer/headless-tools";
-import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
-import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 const definition = {
   name: "computer_snapshot",
@@ -286,9 +287,9 @@ function computerHarness(deny: string[] = []) {
   const gateway = createComputerGateway({
     provider: {
       name: "test",
-      isolation: "per-bot",
+      isolation: "per-person",
       locate: async () => "http://computer:4100",
-      status: async (botId) => ({ botId, state: "ready" }),
+      status: async (seat) => ({ botId: seat.botId, state: "ready" }),
       list: async () => [],
       stop: async () => ({ wasRunning: true }),
       reset: async () => ({ cleared: true }),
@@ -377,7 +378,7 @@ test("scheduled computer actions carry the owner and routine into both policy an
     initiator: { kind: "routine" as const, id: "routine" },
   };
   await expect(
-    gateway.runCommand("bot", actor, { command: "pwd" }),
+    gateway.runCommand(botSeat("bot"), actor, { command: "pwd" }),
   ).rejects.toThrow();
   expect(received.some((call) => call.path === "/exec")).toBe(false);
   expect(audit).toContainEqual(
@@ -402,12 +403,12 @@ test("a computer still starting answers 'not performed, try again' rather than t
   const gateway = createComputerGateway({
     provider: {
       name: "test",
-      isolation: "per-bot",
+      isolation: "per-person",
       locate: async () => {
         locates++;
         throw new ComputerStillStartingError();
       },
-      status: async (botId) => ({ botId, state: "starting" }),
+      status: async (seat) => ({ botId: seat.botId, state: "starting" }),
       list: async () => [],
       stop: async () => ({ wasRunning: false }),
       reset: async () => ({ cleared: false }),
@@ -424,7 +425,7 @@ test("a computer still starting answers 'not performed, try again' rather than t
   });
   const tools = headless.createHeadlessComputerTools({
     gateway,
-    botId: "bot",
+    seat: botSeat("bot"),
     actor: { id: "owner", userId: "owner" },
   });
   const invoke = (name: string, args: unknown) => {
@@ -463,7 +464,7 @@ test("the headless computer adapter executes shipped browser, command, and file 
   const { gateway, received, audit } = computerHarness();
   const tools = headless.createHeadlessComputerTools({
     gateway,
-    botId: "bot",
+    seat: botSeat("bot"),
     actor: {
       id: "owner",
       userId: "owner",
@@ -539,7 +540,7 @@ test("an unattended remote computer run snapshots, clicks, runs commands and sav
   const { run, persisted } = turnHarness(remote.agent, async () =>
     headless.createHeadlessComputerTools({
       gateway,
-      botId: "bot",
+      seat: botSeat("bot"),
       actor: {
         id: "owner",
         userId: "owner",
@@ -695,7 +696,7 @@ test("human help creates a durable suspension, persists the waiting event, and r
   const { run, persisted, lockCalls } = turnHarness(remote.agent, async () =>
     headless.createHeadlessComputerTools({
       gateway,
-      botId: "bot",
+      seat: botSeat("bot"),
       actor: {
         id: "owner",
         userId: "owner",

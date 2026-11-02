@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { z } from "zod";
 import { GALLERY as ACTIVITY } from "../../app/src/components/gallery/activity";
 import { GALLERY as CARDS } from "../../app/src/components/gallery/cards";
@@ -9,7 +10,6 @@ import { GALLERY as DECISIONS } from "../../app/src/components/gallery/decisions
 import { GALLERY as FORM } from "../../app/src/components/gallery/form";
 import { GALLERY as QUOTE } from "../../app/src/components/gallery/quote";
 import { GALLERY as TABLE } from "../../app/src/components/gallery/table";
-import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { type AuditEventInput, type AuditStore, auditSink } from "../src/audit";
 import {
   createHeadlessComponentTools,

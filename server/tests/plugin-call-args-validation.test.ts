@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import type { AppVariables } from "../src/auth/guards";
 import type { BotAccessCheck } from "../src/agents/profile-policy";
+import type { AppVariables } from "../src/auth/guards";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { PluginStore } from "../src/plugins/store";
 

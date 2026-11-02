@@ -105,7 +105,7 @@ function IdentityProvidersPage() {
           Add a provider
         </Button>
       }
-      description="Your company's own SAML or OpenID Connect provider. People sign in with their email, and its domain picks the provider."
+      description="Configure your company’s SAML or OpenID Connect provider. Email domains determine which provider people use to sign in."
       title="Identity providers"
     >
       <PageSection

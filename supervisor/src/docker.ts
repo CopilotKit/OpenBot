@@ -2,11 +2,16 @@ import Docker from "dockerode";
 import { type ContainerHealth, healthOf } from "./health";
 import {
   BOT_LABEL,
+  type ComputerKind,
   type ComputerNames,
   DEFAULT_NAMESPACE,
+  isComputerKind,
+  KIND_LABEL,
+  legacyNamesFor,
   NAMESPACE,
   NAMESPACE_LABEL,
   OWNER_LABEL,
+  PERSON_LABEL,
 } from "./names";
 
 /**
@@ -17,7 +22,7 @@ import {
  * There is no passthrough. There is no generic "run this Docker call" here,
  * because the whole reason the API server does not hold the socket is that the socket is unrestricted
  * root on the host, a supervisor that forwarded arbitrary calls would hand that straight back
- * through a politer door. Four verbs, expressed in Bots, and nothing else.
+ * through a politer door. Four verbs, expressed in whose computer it is, and nothing else.
  *
  * Every write is scoped by ownership. Containers are created carrying `openbot.supervisor`, and
  * stop, reset and inspect refuse anything without it. A container whose name happens to match but
@@ -85,7 +90,9 @@ function pause(ms: number): Promise<void> {
 }
 
 export type ComputerState = {
-  botId: string;
+  /** Whose computer: a person's, or an isolated Bot's. */
+  kind: ComputerKind;
+  id: string;
   container: string;
   status: string;
   /** When this computer started, so a surface can say how long it has been up. */
@@ -113,7 +120,7 @@ export type ComputerState = {
 export class NameHeldError extends Error {
   constructor(container: string) {
     super(
-      `A container named ${container} already exists and does not belong to this deployment. Remove it or rename it; it will not be adopted.`,
+      `${container} already exists and does not belong to this computer. Remove it or rename it; it will not be adopted.`,
     );
     this.name = "NameHeldError";
   }
@@ -187,9 +194,38 @@ function ours(labels: Record<string, string> | undefined): boolean {
 function labelsFor(names: ComputerNames): Record<string, string> {
   return {
     [OWNER_LABEL]: "true",
-    [BOT_LABEL]: names.botId,
     [NAMESPACE_LABEL]: NAMESPACE,
+    [KIND_LABEL]: names.kind,
+    [names.kind === "bot" ? BOT_LABEL : PERSON_LABEL]: names.id,
   };
+}
+
+/** Whose computer a labelled thing says it is, when it is one of today's. */
+function whoseLabels(
+  labels: Record<string, string> | undefined,
+): { kind: ComputerKind; id: string } | undefined {
+  const kind = labels?.[KIND_LABEL];
+  if (!isComputerKind(kind)) return undefined;
+  const id = labels?.[kind === "bot" ? BOT_LABEL : PERSON_LABEL];
+  return id ? { kind, id } : undefined;
+}
+
+/**
+ * Whether a labelled thing is this computer, not merely something of ours with the same name.
+ *
+ * NAMES ALONE DO NOT SAY. A computer from before one per person was `<ns>-computer-<bot>`, so a Bot
+ * whose id began `bot-` or `person-` had a name today's scheme can also derive for somebody else:
+ * the old computer of a Bot called `bot-1` is named exactly what an isolated Bot called `1` would be.
+ * Adopting it would hand one Bot's logins to another. The kind and id labels are what tell them
+ * apart, and an old computer has no kind label at all.
+ */
+function isThisComputer(
+  labels: Record<string, string> | undefined,
+  names: ComputerNames,
+): boolean {
+  if (!ours(labels)) return false;
+  const whose = whoseLabels(labels);
+  return whose?.kind === names.kind && whose.id === names.id;
 }
 
 /** Every computer this supervisor owns, and only those. */
@@ -200,9 +236,13 @@ export async function listOwned(): Promise<ComputerState[]> {
         all: true,
         filters: { label: [`${OWNER_LABEL}=true`] },
       })
-    ).filter((container) => ours(container.Labels));
+    ).filter(
+      // Today's computers only. One from before one per person is reached by nothing any more and
+      // is stopped when the supervisor starts (see `retireLegacyComputers`).
+      (container) => ours(container.Labels) && whoseLabels(container.Labels),
+    );
     return containers.map((container) => ({
-      botId: container.Labels?.[BOT_LABEL] ?? "unknown",
+      ...(whoseLabels(container.Labels) as { kind: ComputerKind; id: string }),
       container: (container.Names?.[0] ?? "").replace(/^\//, ""),
       status: container.State,
       ...(healthOf(container.Status)
@@ -232,7 +272,7 @@ async function inspectOwned(names: ComputerNames): Promise<{
 } | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
-    if (!ours(info.Config?.Labels)) return null;
+    if (!isThisComputer(info.Config?.Labels, names)) return null;
     const published =
       info.NetworkSettings?.Ports?.[COMPUTER_PORT]?.[0]?.HostPort;
     const port = parseHostPort(published);
@@ -522,9 +562,21 @@ export async function ensure(
             Labels: labelsFor(names),
           });
         } catch (error) {
-          // Already exists is success for a restarted supervisor.
+          // Already exists is success for a restarted supervisor, when it is this computer's.
           if (statusOf(error) !== 409) {
             throw new DockerUnavailableError(String(error));
+          }
+          /*
+           * But only then. A volume of the same name made for somebody else (an old computer whose
+           * Bot id spells this name, see `isThisComputer`) would be mounted here, and its logins
+           * would become this computer's. Refused, like a container that is not ours.
+           */
+          const held = await docker
+            .getVolume(volume)
+            .inspect()
+            .catch(() => null);
+          if (!held || !isThisComputer(held.Labels ?? undefined, names)) {
+            throw new NameHeldError(volume);
           }
         }
       }
@@ -595,7 +647,8 @@ export async function ensure(
     await waitUntilAnswering(names.container, options.readyTimeoutMs);
 
     return {
-      botId: names.botId,
+      kind: names.kind,
+      id: names.id,
       container: names.container,
       status: settled?.status ?? "unknown",
       ...(settled?.startedAt ? { startedAt: settled.startedAt } : {}),
@@ -611,11 +664,11 @@ export async function ensure(
   }
 
   throw new DockerUnavailableError(
-    `The computer for ${names.botId} was removed while it was being started.`,
+    `The computer for ${names.kind} ${names.id} was removed while it was being started.`,
   );
 }
 
-/** Stop this Bot's computer. Its storage is untouched, so its logins survive. */
+/** Stop this computer. Its storage is untouched, so its logins survive. */
 export async function stop(names: ComputerNames): Promise<boolean> {
   if (!(await inspectOwned(names))) return false;
   try {
@@ -631,10 +684,10 @@ export async function stop(names: ComputerNames): Promise<boolean> {
 }
 
 /**
- * Throw this Bot's computer away so the next request builds a clean one.
+ * Throw this computer away so the next request builds a clean one.
  *
- * The profile goes with it. The workspace is left alone: files a Bot was asked to produce are work,
- * not browser state.
+ * The profile goes with it, which on a person's computer is every Bot's logins there. The workspace
+ * is left alone: files a Bot was asked to produce are work, not browser state.
  */
 export async function reset(names: ComputerNames): Promise<boolean> {
   if (!(await inspectOwned(names))) return false;
@@ -659,4 +712,265 @@ export async function reset(names: ComputerNames): Promise<boolean> {
     }
   }
   return true;
+}
+
+/**
+ * Stop every computer from before computers were one per person.
+ *
+ * Each Bot had its own container then, named for the Bot alone. Nothing reaches one any more: a
+ * Bot runs on its person's computer, or on a computer of its own under today's names. Left running,
+ * every one of them would go on holding a browser and its memory for ever, restarted with the
+ * daemon by its restart policy, which is the opposite of what moving to one computer per person is
+ * for. Stopped, not removed, and their volumes untouched: a private Bot's old profile is still read
+ * from its volume to give it to its owner (see {@link carryOverProfile}), and nothing here is
+ * destroyed that somebody might want back.
+ */
+export async function retireLegacyComputers(): Promise<string[]> {
+  let running: Docker.ContainerInfo[];
+  try {
+    running = await docker.listContainers({
+      filters: { label: [`${OWNER_LABEL}=true`], status: ["running"] },
+    });
+  } catch (error) {
+    throw new DockerUnavailableError(String(error));
+  }
+  const stopped: string[] = [];
+  for (const container of running) {
+    if (!ours(container.Labels) || whoseLabels(container.Labels)) continue;
+    try {
+      await docker.getContainer(container.Id).stop({ t: 30 });
+      stopped.push((container.Names?.[0] ?? container.Id).replace(/^\//, ""));
+    } catch (error) {
+      const status = statusOf(error);
+      if (status !== 304 && status !== 404) {
+        throw new DockerUnavailableError(String(error));
+      }
+    }
+  }
+  return stopped;
+}
+
+/**
+ * What giving a private Bot's old profile to its owner did.
+ *
+ * `copied` it now; `kept` the owner's computer already had a profile for that Bot, which wins;
+ * `done` an earlier run did it; `absent` there was no old profile of ours to give.
+ */
+export type CarryOverOutcome = "copied" | "kept" | "done" | "absent";
+
+/**
+ * The copy, run inside a throwaway container that mounts both volumes.
+ *
+ * That is Docker's own documented way to back up, restore or migrate a volume: a container with the
+ * volume mounted, doing the copy itself, because a volume lives outside every image and `docker cp`
+ * cannot reach it. Both volumes are mounted rather than tarred through a host directory, so nothing
+ * of a person's logins or files ever lands on the host's disk.
+ *
+ * Once, recorded in the destination: a marker under `.openbot-carried-over/` says it was done, and
+ * what the owner already has for that Bot is never overwritten. Staged under a dot-name and moved
+ * into place, so the computer never sees half of it; a dot-name is not a seat it lists.
+ *
+ * `ROOT` is where the owner's volume is mounted (`/profiles`, `/workspace`) and `DEST` the Bot's
+ * place in it: its profile is `<bot>`, its folder `computers/<bot>` (agent-computer's
+ * `workspaceDirectoryFor`).
+ *
+ * The exit code is the outcome, so nothing depends on parsing a log stream.
+ */
+const CARRY_OVER_SCRIPT = `set -eu
+marks="$ROOT/.openbot-carried-over"
+dest="$ROOT/$DEST"
+if [ -e "$marks/$BOT" ]; then exit 11; fi
+mkdir -p "$marks"
+if [ -e "$dest" ]; then touch "$marks/$BOT"; exit 10; fi
+staging="$ROOT/.openbot-carrying-$BOT"
+rm -rf "$staging"
+mkdir "$staging"
+cp -a /carry-from/. "$staging"/
+mkdir -p "$(dirname "$dest")"
+mv "$staging" "$dest"
+touch "$marks/$BOT"
+exit 0`;
+
+/** Carry-overs started in this process, so two requests for one never copy at once. */
+const carrying = new Map<string, Promise<CarryOverOutcome>>();
+
+/**
+ * Forget what this process remembers about carry-overs, as a restarted supervisor would.
+ *
+ * For a test of the marker the copy leaves in the owner's volume, which is the record that outlives
+ * this process and the one that keeps the copy to once.
+ */
+export function forgetCarryOvers(): void {
+  carrying.clear();
+}
+
+/** One old volume copied into the owner's, by {@link CARRY_OVER_SCRIPT}, in a container that can do nothing else. */
+async function copyVolume(input: {
+  botId: string;
+  from: string;
+  to: string;
+  root: "/profiles" | "/workspace";
+  dest: string;
+  image: string;
+  runtime?: string;
+}): Promise<Exclude<CarryOverOutcome, "absent">> {
+  let helper: Docker.Container;
+  try {
+    helper = await docker.createContainer({
+      Image: input.image,
+      Labels: {
+        [OWNER_LABEL]: "true",
+        [NAMESPACE_LABEL]: NAMESPACE,
+        "openbot.carry-over": input.botId,
+      },
+      Entrypoint: ["sh", "-c"],
+      Cmd: [CARRY_OVER_SCRIPT],
+      // A plain id checked by the caller, and fixed paths, handed over as data, never spliced into the script.
+      Env: [`BOT=${input.botId}`, `ROOT=${input.root}`, `DEST=${input.dest}`],
+      NetworkDisabled: true,
+      HostConfig: {
+        Binds: [`${input.from}:/carry-from:ro`, `${input.to}:${input.root}`],
+        NetworkMode: "none",
+        SecurityOpt: ["no-new-privileges:true"],
+        // Only what copying files with their owners and modes takes, and nothing else.
+        CapDrop: ["ALL"],
+        CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER"],
+        ...(input.runtime ? { Runtime: input.runtime } : {}),
+      },
+    });
+  } catch (error) {
+    throw new DockerUnavailableError(String(error));
+  }
+  try {
+    await helper.start();
+    const { StatusCode } = (await helper.wait()) as { StatusCode: number };
+    const outcome =
+      StatusCode === 0
+        ? "copied"
+        : StatusCode === 10
+          ? "kept"
+          : StatusCode === 11
+            ? "done"
+            : undefined;
+    if (!outcome) {
+      throw new Error(
+        `Copying ${input.from} into ${input.to} failed (exit ${StatusCode}).`,
+      );
+    }
+    return outcome;
+  } finally {
+    await helper.remove({ force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Give a private Bot's profile, and its files, from before one computer per person to its owner's computer.
+ *
+ * The server asks for it only for a private Bot, on its owner's computer: that profile and those files had exactly
+ * one user. A public Bot's had no single owner, so its users sign in again once and nothing is asked.
+ *
+ * The old volumes are copied, not moved, and left exactly where they were; the old container is stopped
+ * first, if it is still running, so Chromium has flushed what it holds and nothing writes to the
+ * profile while it is read. The new computer is already running when this is asked, which is safe
+ * because the Bot's folder in it does not exist until the copy lands: the server waits for this
+ * before it sends that Bot anything.
+ *
+ * Remembered for the life of the process once it succeeds, so the common case costs nothing; a
+ * failure is not remembered, so the next request tries again.
+ */
+export async function carryOverProfile(
+  person: ComputerNames,
+  botId: string,
+  options: { image: string; runtime?: string },
+): Promise<CarryOverOutcome> {
+  if (person.kind !== "person") return "absent";
+  const legacy = legacyNamesFor(botId);
+  if (!legacy.ok) throw new Error(legacy.reason);
+  const key = `${person.container}/${botId}`;
+  const known = carrying.get(key);
+  if (known) return known;
+
+  const attempt = (async (): Promise<CarryOverOutcome> => {
+    const isLegacyOf = (labels: Record<string, string> | undefined) =>
+      ours(labels) && !whoseLabels(labels) && labels?.[BOT_LABEL] === botId;
+
+    const volume = await docker
+      .getVolume(legacy.names.profileVolume)
+      .inspect()
+      .catch((error: unknown) => {
+        if (statusOf(error) === 404) return null;
+        throw new DockerUnavailableError(String(error));
+      });
+    // Not there, or not ours to read: nothing is copied out of a volume this supervisor did not make.
+    if (!volume || !isLegacyOf(volume.Labels ?? undefined)) return "absent";
+
+    const old = await docker
+      .getContainer(legacy.names.container)
+      .inspect()
+      .catch(() => null);
+    if (old && isLegacyOf(old.Config?.Labels) && old.State?.Running) {
+      await docker
+        .getContainer(legacy.names.container)
+        .stop({ t: 30 })
+        .catch((error: unknown) => {
+          const status = statusOf(error);
+          if (status !== 304 && status !== 404) {
+            throw new DockerUnavailableError(String(error));
+          }
+        });
+    }
+
+    const profile = await copyVolume({
+      botId,
+      from: legacy.names.profileVolume,
+      to: person.profileVolume,
+      root: "/profiles",
+      dest: botId,
+      ...options,
+    });
+    /*
+     * Its files too, into its folder on the owner's computer, the same way and once. An old Bot with no workspace
+     * volume of ours had nothing saved there, which is not a failure.
+     */
+    const files = await docker
+      .getVolume(legacy.names.workspaceVolume)
+      .inspect()
+      .catch((error: unknown) => {
+        if (statusOf(error) === 404) return null;
+        throw new DockerUnavailableError(String(error));
+      });
+    const filesOutcome =
+      files && isLegacyOf(files.Labels ?? undefined)
+        ? await copyVolume({
+            botId,
+            from: legacy.names.workspaceVolume,
+            to: person.workspaceVolume,
+            root: "/workspace",
+            dest: `computers/${botId}`,
+            ...options,
+          })
+        : "absent";
+    console.info(
+      JSON.stringify({
+        type: "computer-profile-carried-over",
+        bot: botId,
+        person: person.id,
+        from: legacy.names.profileVolume,
+        to: `${person.profileVolume}:/profiles/${botId}`,
+        outcome: profile,
+        files: {
+          from: legacy.names.workspaceVolume,
+          to: `${person.workspaceVolume}:/workspace/computers/${botId}`,
+          outcome: filesOutcome,
+        },
+        note: "The old volumes are left in place.",
+      }),
+    );
+    return profile;
+  })();
+  carrying.set(key, attempt);
+  attempt.catch(() => {
+    if (carrying.get(key) === attempt) carrying.delete(key);
+  });
+  return attempt;
 }

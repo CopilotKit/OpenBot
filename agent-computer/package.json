@@ -12,7 +12,8 @@
     "playwright": "1.62.1",
     "spiffe": "^0.5.1",
     "web-bot-auth": "0.2.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

@@ -38,8 +38,7 @@
 //
 // KEYED BY QUOTED EXPRESSION, NEVER BY `path:line`. A line-keyed list goes red when someone rewraps
 // a comment three functions above the guarded code, and people learn to re-baseline it without
-// reading (`assertion-shape.test.ts`'s ALLOW list collided in three consecutive waves for exactly
-// this reason; `sole-definition.test.ts`, keyed by path and quoted expression, never has). An entry
+// reading. An entry
 // names the expression itself. When the expression appears more than once in its file, `anchor`
 // names a second quoted expression that occurs EXACTLY ONCE, and the mutated expression is its first
 // occurrence after the anchor, within {@link ANCHOR_WINDOW} characters — so deleting the guarded

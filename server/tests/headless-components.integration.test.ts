@@ -7,23 +7,24 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
+import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { GALLERY } from "../../app/src/components/gallery/charts";
-import { NOT_SHOWN } from "@openbot/shared/component-markers";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { type AuditEventInput, type AuditStore, auditSink } from "../src/audit";
 import {
   createHeadlessComponentTools,
   headlessComponentCatalog,
 } from "../src/components/headless";
 import { createComponentStore } from "../src/components/store";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
 import { agents, componentExclusions, components } from "../src/db/schema";
-import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * An unattended routine turn that browses a page and answers with a chart, against the real
@@ -169,9 +170,9 @@ function harness(agent: AbstractAgent, botId: string) {
   const gateway = createComputerGateway({
     provider: {
       name: "test",
-      isolation: "per-bot",
+      isolation: "per-person",
       locate: async () => "http://computer:4100",
-      status: async (id) => ({ botId: id, state: "ready" }),
+      status: async (seat) => ({ botId: seat.botId, state: "ready" }),
       list: async () => [],
       stop: async () => ({ wasRunning: true }),
       reset: async () => ({ cleared: true }),
@@ -223,7 +224,7 @@ function harness(agent: AbstractAgent, botId: string) {
     toolsForTurn: async ({ ownerUserId, initiator }) =>
       createHeadlessComputerTools({
         gateway,
-        botId,
+        seat: botSeat(botId),
         actor: { id: ownerUserId, userId: ownerUserId, initiator },
       }),
     components: headlessComponentCatalog({

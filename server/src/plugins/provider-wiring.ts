@@ -1,11 +1,11 @@
+import { BROKERED_PROFILE, type BrokerProvider } from "./access";
 import type { ArcadeActions } from "./arcade";
-import type { ComposioActions } from "./composio";
 import {
-  providerDecision,
   type ConnectedAppBroker,
   type ProviderDecision,
+  providerDecision,
 } from "./broker";
-import { BROKERED_PROFILE, type BrokerProvider } from "./access";
+import type { ComposioActions } from "./composio";
 
 /**
  * The entrypoint's provider decision, with the vendor constructors passed in so this file imports

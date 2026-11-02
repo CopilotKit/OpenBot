@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { GalleryFrame } from "./frame";
 import { seriesColour } from "./palette";
+import { byPosition } from "./positions";
 
 const point = z.object({
   label: z
@@ -102,8 +103,8 @@ function Sources({ basis, sources, asOf: when }: Provenance) {
         <>
           {unchecked ? " · " : null}
           {"Sources: "}
-          {named.map((entry, index) => (
-            <span key={`${entry.title}|${entry.url ?? ""}`}>
+          {byPosition(named).map(({ item: entry, key }, index) => (
+            <span key={key}>
               {index > 0 ? ", " : null}
               {entry.url ? (
                 <a
@@ -134,7 +135,16 @@ function Sources({ basis, sources, asOf: when }: Provenance) {
 /** Charts share a height so several in one answer do not stagger down the page. */
 const HEIGHT = 180;
 
-function formatNumber(value: number): string {
+/**
+ * A value that has arrived. While a chart streams, a point can be there before its number is, and
+ * dividing by it drew a bar `NaN%` tall that collapsed and then popped in.
+ */
+function isValue(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatNumber(value: unknown): string {
+  if (!isValue(value)) return "";
   if (Math.abs(value) >= 1000) {
     return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
@@ -153,8 +163,8 @@ function Empty() {
 function Legend({ items }: { items: { label: string; colour: string }[] }) {
   return (
     <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-      {items.map((item) => (
-        <li className="flex items-center gap-1.5 text-xs" key={item.label}>
+      {byPosition(items).map(({ item, key }) => (
+        <li className="flex items-center gap-1.5 text-xs" key={key}>
           <span
             className="size-2 shrink-0 rounded-[3px]"
             style={{ background: item.colour }}
@@ -180,7 +190,10 @@ export function BarChartCard({
   ...origin
 }: Partial<z.infer<typeof BarChartProps>>) {
   const points = given ?? [];
-  const max = Math.max(...points.map((entry) => entry.value ?? 0), 0);
+  const max = Math.max(
+    ...points.map((entry) => (isValue(entry.value) ? entry.value : 0)),
+    0,
+  );
   return (
     <GalleryFrame caption={caption} title={title}>
       {points.length === 0 ? (
@@ -188,10 +201,10 @@ export function BarChartCard({
       ) : (
         // Columns stretch to full row height so percentage bar heights use the chart area.
         <div className="flex items-stretch gap-2" style={{ height: HEIGHT }}>
-          {points.map((entry, index) => (
+          {byPosition(points).map(({ item: entry, key }, index) => (
             <div
               className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
-              key={entry.label}
+              key={key}
             >
               <span className="text-xs tabular-nums text-muted-foreground">
                 {formatNumber(entry.value)}
@@ -200,14 +213,17 @@ export function BarChartCard({
                   their natural height and only the bar itself scales. */}
               <div className="flex w-full flex-1 items-end">
                 <div
-                  className="w-full rounded-t-md transition-[height]"
+                  className={`w-full rounded-t-md transition-[height] ${isValue(entry.value) ? "" : "bg-muted"}`}
                   style={{
                     // Normalize to the largest bar so similar values still show their differences.
+                    // A bar whose number has not arrived holds the floor in a muted tone.
                     height:
-                      max > 0
+                      max > 0 && isValue(entry.value)
                         ? `${Math.max((entry.value / max) * 100, 2)}%`
                         : "2%",
-                    background: seriesColour(index),
+                    ...(isValue(entry.value)
+                      ? { background: seriesColour(index) }
+                      : {}),
                   }}
                 />
               </div>
@@ -241,11 +257,17 @@ export function PieChartCard({
   const stroke = 28;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const total = points.reduce((sum, entry) => sum + (entry.value || 0), 0);
+  const total = points.reduce(
+    (sum, entry) => sum + (isValue(entry.value) ? entry.value : 0),
+    0,
+  );
 
   let travelled = 0;
   const slices = points.map((entry, index) => {
-    const arc = total > 0 ? (entry.value / total) * circumference : 0;
+    const arc =
+      total > 0 && isValue(entry.value)
+        ? (entry.value / total) * circumference
+        : 0;
     const slice = {
       ...entry,
       arc,
@@ -270,12 +292,12 @@ export function PieChartCard({
             viewBox={`0 0 ${size} ${size}`}
             width={size}
           >
-            {slices.map((slice) => (
+            {byPosition(slices).map(({ item: slice, key }) => (
               <circle
                 cx={size / 2}
                 cy={size / 2}
                 fill="none"
-                key={slice.label}
+                key={key}
                 r={radius}
                 stroke={slice.colour}
                 strokeDasharray={`${slice.arc} ${circumference - slice.arc}`}
@@ -285,15 +307,17 @@ export function PieChartCard({
             ))}
           </svg>
           <ul className="min-w-0 flex-1 space-y-1.5">
-            {slices.map((slice) => (
-              <li className="flex items-center gap-2 text-sm" key={slice.label}>
+            {byPosition(slices).map(({ item: slice, key }) => (
+              <li className="flex items-center gap-2 text-sm" key={key}>
                 <span
                   className="size-2.5 shrink-0 rounded-[3px]"
                   style={{ background: slice.colour }}
                 />
                 <span className="min-w-0 flex-1 truncate">{slice.label}</span>
                 <span className="tabular-nums text-muted-foreground">
-                  {Math.round((slice.value / total) * 100)}%
+                  {isValue(slice.value)
+                    ? `${Math.round((slice.value / total) * 100)}%`
+                    : ""}
                 </span>
               </li>
             ))}
@@ -370,13 +394,13 @@ function Plot({
             y2={pad.top + fraction * (height - pad.top - pad.bottom)}
           />
         ))}
-        {series.map((line, index) => {
+        {byPosition(series).map(({ item: line, key }, index) => {
           const points = line.values.map(
             (value, i) => `${xAt(i)},${yAt(value)}`,
           );
           const colour = seriesColour(index);
           return (
-            <g key={line.name}>
+            <g key={key}>
               {filled ? (
                 <polygon
                   fill={colour}
@@ -397,8 +421,8 @@ function Plot({
         })}
       </svg>
       <div className="flex justify-between">
-        {labels.map((label) => (
-          <span className="truncate text-xs text-muted-foreground" key={label}>
+        {byPosition(labels).map(({ item: label, key }) => (
+          <span className="truncate text-xs text-muted-foreground" key={key}>
             {label}
           </span>
         ))}
@@ -482,13 +506,13 @@ export function ProgressChartCard({
         <Empty />
       ) : (
         <ul className="space-y-3">
-          {points.map((entry, index) => {
+          {byPosition(points).map(({ item: entry, key }, index) => {
             const share =
-              entry.target > 0
+              isValue(entry.value) && isValue(entry.target) && entry.target > 0
                 ? Math.min((entry.value / entry.target) * 100, 100)
                 : 0;
             return (
-              <li key={entry.label}>
+              <li key={key}>
                 <div className="flex items-baseline justify-between gap-4 text-sm">
                   <span className="min-w-0 truncate">{entry.label}</span>
                   <span className="tabular-nums text-muted-foreground">

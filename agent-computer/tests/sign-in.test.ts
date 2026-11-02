@@ -105,7 +105,8 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${server.port}`;
   if (!asked) return;
   const { chromium } = await import("playwright");
-  browser = await chromium.launch();
+  // A named channel, as the computer launches: the image has no headless shell for a bare launch.
+  browser = await chromium.launch({ channel: "chromium" });
 });
 
 afterAll(async () => {

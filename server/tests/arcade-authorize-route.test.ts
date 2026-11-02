@@ -7,8 +7,8 @@ import {
   expect,
   test,
 } from "bun:test";
-import { APIConnectionError, APIError } from "@arcadeai/arcadejs";
 import { randomUUID } from "node:crypto";
+import { APIConnectionError, APIError } from "@arcadeai/arcadejs";
 import { eq, inArray, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";

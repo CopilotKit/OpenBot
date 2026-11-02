@@ -72,6 +72,8 @@ export type SnapshotStore = {
    * previous session's first snapshot would match the row a reset left behind, and the policy would
    * decide against an element from a page that no longer exists. The generation check only tells
    * snapshots apart within one session, so the row has to go when the session does.
+   *
+   * Given a computer (`person:<id>`) it takes every seat filed under it (`person:<id>/<bot>`).
    */
   clear: (computerId: string) => Promise<void>;
 };
@@ -145,7 +147,12 @@ export function createSnapshotStore(database?: Database): SnapshotStore {
     clear: async (computerId) => {
       await database
         .delete(computerSnapshot)
-        .where(eq(computerSnapshot.computerId, computerId));
+        .where(
+          or(
+            eq(computerSnapshot.computerId, computerId),
+            sql`starts_with(${computerSnapshot.computerId}, ${`${computerId}/`})`,
+          ),
+        );
     },
 
     load: async (computerId) => {
@@ -193,7 +200,10 @@ export function createInMemorySnapshotStore(): SnapshotStore {
     },
     load: async (computerId) => snapshots.get(computerId),
     clear: async (computerId) => {
-      snapshots.delete(computerId);
+      for (const held of [...snapshots.keys()]) {
+        if (held === computerId || held.startsWith(`${computerId}/`))
+          snapshots.delete(held);
+      }
     },
   };
 }

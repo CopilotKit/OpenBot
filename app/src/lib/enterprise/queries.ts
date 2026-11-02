@@ -11,7 +11,8 @@ export type CapabilityKey =
   | "passwordManager"
   | "slackTeams"
   | "teamBots"
-  | "ownerApps";
+  | "ownerApps"
+  | "isolatedComputers";
 
 /** One switch as the server stored it at each scope. `null` means no row: the scope inherits. */
 export type CapabilitySetting = {
@@ -49,6 +50,8 @@ export type EnterpriseSettings = {
   inactiveComputerDays: number;
   modelAllowlist: { enabled: boolean; models: string[] };
   mcpAllowlist: { enabled: boolean; servers: string[] };
+  /** People may open the Skills learned from their recordings to every Bot. Off by default. */
+  skillSharing: boolean;
 };
 
 export type EnterpriseOverview = {

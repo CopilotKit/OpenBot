@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { ComputerView } from "@/components/computer/computer-view";
 import { LiveScreen } from "@/components/computer/live-screen";
 

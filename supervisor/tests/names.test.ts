@@ -2,11 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   BOT_LABEL,
   DEFAULT_NAMESPACE,
+  KIND_LABEL,
+  legacyNamesFor,
   NAMESPACE,
   NAMESPACE_LABEL,
-  namesFor,
+  namesFor as namesOf,
   OWNER_LABEL,
+  PERSON_LABEL,
 } from "../src/names";
+
+/** An isolated Bot's computer, which is what every id named before one computer per person. */
+const namesFor = (id: unknown) => namesOf("bot", id);
 
 /**
  * What a Bot id may be.
@@ -21,10 +27,11 @@ describe("the ids a supervisor will accept", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.names).toEqual({
-      botId: "agent_2aaf8f2f-0e53-4bb2",
-      container: `${NAMESPACE}-computer-agent_2aaf8f2f-0e53-4bb2`,
-      profileVolume: `${NAMESPACE}-profile-agent_2aaf8f2f-0e53-4bb2`,
-      workspaceVolume: `${NAMESPACE}-workspace-agent_2aaf8f2f-0e53-4bb2`,
+      kind: "bot",
+      id: "agent_2aaf8f2f-0e53-4bb2",
+      container: `${NAMESPACE}-computer-bot-agent_2aaf8f2f-0e53-4bb2`,
+      profileVolume: `${NAMESPACE}-profile-bot-agent_2aaf8f2f-0e53-4bb2`,
+      workspaceVolume: `${NAMESPACE}-workspace-bot-agent_2aaf8f2f-0e53-4bb2`,
     });
   });
 
@@ -34,7 +41,7 @@ describe("the ids a supervisor will accept", () => {
     const result = namesFor("sales");
     expect(result.ok).toBe(true);
     if (result.ok)
-      expect(result.names.container).toBe(`${NAMESPACE}-computer-sales`);
+      expect(result.names.container).toBe(`${NAMESPACE}-computer-bot-sales`);
   });
 
   test("a slash is refused, because it would escape into another path segment", () => {
@@ -88,11 +95,74 @@ describe("the ids a supervisor will accept", () => {
     expect(OWNER_LABEL).toBe("openbot.supervisor");
     expect(BOT_LABEL).toBe("openbot.bot-id");
     expect(NAMESPACE_LABEL).toBe("openbot.namespace");
+    expect(KIND_LABEL).toBe("openbot.computer-kind");
+    expect(PERSON_LABEL).toBe("openbot.person-id");
   });
 
   test("the default namespace is the one existing deployments already use", () => {
     // Containers created before the namespace existed carry no namespace label and are read as this
     // one, so changing it would orphan every computer a running deployment already owns.
     expect(DEFAULT_NAMESPACE).toBe("openbot");
+  });
+});
+
+/**
+ * One computer per person, and one per isolated Bot.
+ *
+ * The kind is in every name, so a person and a Bot never derive the same container or volumes
+ * whatever their ids are: a person whose id happened to equal a Bot's would otherwise be handed that
+ * Bot's logins, or the reverse.
+ */
+describe("whose computer a name is", () => {
+  test("a person's computer and volumes are named for the person", () => {
+    const result = namesOf("person", "u-ada");
+    expect(result.ok && result.names).toEqual({
+      kind: "person",
+      id: "u-ada",
+      container: `${NAMESPACE}-computer-person-u-ada`,
+      profileVolume: `${NAMESPACE}-profile-person-u-ada`,
+      workspaceVolume: `${NAMESPACE}-workspace-person-u-ada`,
+    });
+  });
+
+  test("two people get two computers", () => {
+    const ada = namesOf("person", "ada");
+    const bo = namesOf("person", "bo");
+    expect(ada.ok && bo.ok).toBe(true);
+    if (!ada.ok || !bo.ok) return;
+    expect(ada.names.container).not.toBe(bo.names.container);
+    expect(ada.names.profileVolume).not.toBe(bo.names.profileVolume);
+  });
+
+  test("a person and a Bot with the same id get different computers", () => {
+    const person = namesOf("person", "same");
+    const bot = namesOf("bot", "same");
+    expect(person.ok && bot.ok).toBe(true);
+    if (!person.ok || !bot.ok) return;
+    expect(person.names.container).not.toBe(bot.names.container);
+    expect(person.names.profileVolume).not.toBe(bot.names.profileVolume);
+  });
+
+  test("a person id is held to the same rules as a Bot id", () => {
+    for (const id of ["../postgres", "ada/../x", "ada.b", "", "a".repeat(65)]) {
+      expect(namesOf("person", id).ok).toBe(false);
+    }
+  });
+
+  test("only a person or a bot owns a computer", () => {
+    for (const kind of ["team", "", "person/../bot", null, 1]) {
+      expect(namesOf(kind, "ada").ok).toBe(false);
+    }
+  });
+
+  test("the names a Bot's computer had before are still derivable, to find its old profile and files", () => {
+    const legacy = legacyNamesFor("notes-bot");
+    expect(legacy.ok && legacy.names).toEqual({
+      botId: "notes-bot",
+      container: `${NAMESPACE}-computer-notes-bot`,
+      profileVolume: `${NAMESPACE}-profile-notes-bot`,
+      workspaceVolume: `${NAMESPACE}-workspace-notes-bot`,
+    });
+    expect(legacyNamesFor("../x").ok).toBe(false);
   });
 });

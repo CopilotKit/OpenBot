@@ -16,6 +16,7 @@ import {
 } from "../copilot";
 import type { AcquireLearnedSkills } from "../learning/runtime";
 import type { LoadPersonalMemory } from "../memory/tools";
+import { NameContextMiddleware } from "../people/name-context";
 import type { AgentActor } from "./profile-types";
 
 export type AgentResolutionContext = {
@@ -37,6 +38,7 @@ export type ActorAgentResolver = {
 };
 
 export type ActorAgentResolverDependencies = {
+  loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
   resolveModelApiKey: () => Promise<string | null>;
@@ -93,8 +95,17 @@ export function createActorAgentResolver(
      */
     onlyAgentId?: string,
     context?: AgentResolutionContext,
-  ) =>
-    resolveRuntimeAgents(
+  ) => {
+    /*
+     * Learned Skills for this person's run: the Bot's own, plus the person's own Learning space and every Skill another
+     * person opened (learning/runtime.ts). Bound here, where the person is known, so every path that builds a Bot for
+     * them (a turn, a hop, a routine, a remote Bot) asks for the same set.
+     */
+    const acquire = deps.acquireLearnedSkills;
+    const acquireForActor: AcquireLearnedSkills | undefined = acquire
+      ? (agentId, signal) => acquire(agentId, signal, actor.id)
+      : undefined;
+    return resolveRuntimeAgents(
       () => Promise.resolve(registered),
       deps.model,
       deps.resolveModelApiKey,
@@ -111,9 +122,21 @@ export function createActorAgentResolver(
       context?.initiator,
       deps.loadAttachmentForActor?.(actor.id),
       deps.markAttachmentsSentForActor?.(actor.id),
-      deps.acquireLearnedSkills,
+      acquireForActor,
       deps.loadPersonalMemoryForActor?.(actor.id),
-    );
+    ).then((agents) => {
+      const loadName = deps.loadNameForActor;
+      if (loadName) {
+        for (const registeredAgent of registered) {
+          if (registeredAgent.type !== "built_in") continue;
+          agents[registeredAgent.id]?.use(
+            new NameContextMiddleware(() => loadName(actor.id)),
+          );
+        }
+      }
+      return agents;
+    });
+  };
 
   const resolveAgentsForActor = async (actor: AgentActor) =>
     resolveRegisteredAgents(actor, await deps.loadAgents(actor));

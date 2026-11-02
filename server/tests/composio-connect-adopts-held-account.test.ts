@@ -9,8 +9,8 @@ import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
 import {
-  type ComposioVendor,
   buildComposioClient,
+  type ComposioVendor,
 } from "../src/plugins/composio-adapter";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
@@ -306,8 +306,7 @@ describe("Connect, where Composio already holds this person's account and OpenBo
     // The row confirm writes for a consent app the vendor says yes for: this person's own. The
     // store records `connected_by` only for a deployment account, whose connector is not its holder.
     // The two ids are equal because production writes them equal for a person (`personAccount`);
-    // this expects the row the store wrote, so the collapse is recorded in
-    // `fixture-identity-distinct.test.ts` rather than separated.
+    // this expects that production equality rather than independent fixture identities.
     const rows = await rowsFor(toolkit);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({

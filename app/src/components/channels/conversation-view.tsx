@@ -438,7 +438,10 @@ export function ConversationView({
           working={working}
         />
       </div>
-      <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">
+      <div
+        className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
+        data-slot="composer-column"
+      >
         {notice}
         <Composer
           agents={agents}
