@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
  * The frame every onboarding step sits in: one DOM, laid out two ways by CSS.
  *
  * FROM `lg` UP, TWO PANES. On the left, one line with the product's name and where somebody is
- * ("Step 5 of 9"), then the step's heading and sentence, then Back and Continue. On the right,
- * filling the rest of the screen, the step's picture.
+ * ("Step 5 of 9"), then the step's heading and sentence, and Back and Continue at the pane's foot.
+ * On the right, filling the rest of the screen, the step's picture.
  *
  * THE STEP COMES FIRST, AND THE LIST IS ON DEMAND. The whole list of steps used to sit above the
  * heading, nine rows that pushed every step's words 300 to 640 px down a laptop's screen. Where
@@ -38,8 +38,9 @@ import { cn } from "@/lib/utils";
  * sits where its layout's reading order puts it, so the keyboard meets it where the eye does.
  *
  * AN OPTIONAL STEP HAS A SECOND BUTTON. "Not now" goes beside the primary (under it on a phone, the
- * same size and shape, outlined), and its place is kept when it goes (`reserveSecondary`), so the
- * primary does not move mid-step. A footnote, where a step has one, sits just above the buttons.
+ * same size and shape, outlined). On a phone its place is kept on every step, with a button or
+ * without, so the primary sits at the same height on all of them and does not move mid-step when
+ * Not now goes. A footnote, where a step has one, sits just above the buttons.
  */
 export function OnboardingFrame({
   titles,
@@ -49,7 +50,6 @@ export function OnboardingFrame({
   onPick,
   primary,
   secondary,
-  reserveSecondary = false,
   footnote,
   notice,
   intro,
@@ -77,8 +77,6 @@ export function OnboardingFrame({
   };
   /** A way past the step, such as Not now or Skip intro. */
   secondary?: { label: string; onClick: () => void };
-  /** Keep the second button's place while it has none, so the primary doesn't move. */
-  reserveSecondary?: boolean;
   /** A line about the step, just above the buttons. */
   footnote?: ReactNode;
   /** Said just above the buttons, such as a save that failed. */
@@ -162,9 +160,11 @@ export function OnboardingFrame({
 
       {/*
        * On a phone, a step taller than the screen scrolls under the buttons rather than being cut
-       * at them: the fade above says there is more. On a desktop the buttons follow the sentence.
+       * at them: the fade above says there is more. On a desktop the buttons sit at the foot of the
+       * left pane, in the row that takes the rest of the screen. Following the sentence, they moved
+       * with every step's length, so Continue was somewhere else each time it was pressed.
        */}
-      <footer className="sticky bottom-0 col-start-1 row-start-5 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:row-start-3 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
+      <footer className="sticky bottom-0 col-start-1 row-start-5 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:row-start-4 lg:self-end lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
         <div className="mx-auto flex w-full max-w-md flex-col gap-3 lg:mx-0">
           {notice}
           {footnote ? (
@@ -238,13 +238,13 @@ export function OnboardingFrame({
               >
                 {secondary.label}
               </button>
-            ) : reserveSecondary ? (
+            ) : (
               <div
                 aria-hidden
                 className="h-[52px] lg:hidden"
                 data-onboarding-secondary-slot=""
               />
-            ) : null}
+            )}
           </div>
         </div>
       </footer>

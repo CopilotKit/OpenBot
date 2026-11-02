@@ -261,7 +261,6 @@ export function OnboardingWizard({
             },
           }}
           reached={reachedAt}
-          reserveSecondary={step?.optional === true}
           secondary={
             step?.secondary
               ? {

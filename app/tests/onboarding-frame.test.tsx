@@ -347,6 +347,33 @@ test("an optional step keeps Not now's place when it goes, so the primary doesn'
   expect(slot?.getAttribute("aria-hidden")).toBe("true");
 });
 
+test("every step keeps the second button's place, so the primary sits at one height on a phone", () => {
+  const view = draw({
+    initialStepId: "apps",
+    steps: [
+      OPTIONAL[0] as OnboardingStep,
+      plain("apps", "Check your setup"),
+      OPTIONAL[2] as OnboardingStep,
+    ],
+  });
+
+  expect(footerButtons(view)).toHaveLength(1);
+  expect(
+    footer(view).querySelector("[data-onboarding-secondary-slot]"),
+  ).not.toBeNull();
+});
+
+test("on a desktop the buttons sit at the foot of the left pane, not after the sentence", () => {
+  const view = draw({
+    initialStepId: "apps",
+    steps: [OPTIONAL[0] as OnboardingStep, plain("apps", "Check your setup")],
+  });
+
+  const classes = footer(view).className.split(" ");
+  expect(classes).toContain("lg:row-start-4");
+  expect(classes).toContain("lg:self-end");
+});
+
 test("a waiting primary shows a spinner, says it is busy, and can't be pressed again", () => {
   const view = draw({
     initialStepId: "apps",
