@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
@@ -107,6 +107,19 @@ async function setUp() {
   const agentId = await createAgent(owner);
   const channel = await createChannel(owner, [agentId]);
   return { owner, agentId, channel };
+}
+
+async function waitForDatabaseLock(name: string) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const rows = await database.execute(
+      sql`select wait_event_type from pg_stat_activity where application_name = ${name} and datname = current_database()`,
+    );
+    if (rows.some((row) => row.wait_event_type === "Lock")) return;
+  }
+  throw new Error(
+    `The database did not report the expected lock wait for ${name}`,
+  );
 }
 
 /**
@@ -237,6 +250,82 @@ describe("what the schedule has to be", () => {
  * talked into creating a hundred. It counts what is switched ON, so switching one off makes room.
  */
 describe("how many a person may have switched on", () => {
+  test("an enable queued behind a pause rechecks the cap after another create takes the slot", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const input = {
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Summarise receipts.",
+      cron: DAILY,
+    };
+    const target = await store.create(input);
+    for (let index = 1; index < MAX_ENABLED_ROUTINES; index += 1)
+      await store.create(input);
+    const blocker = createDatabase(databaseUrl, { max: 1 });
+    const pausing = createDatabase(databaseUrl, { max: 1 });
+    const creating = createDatabase(databaseUrl, { max: 1 });
+    const enabling = createDatabase(databaseUrl, { max: 1 });
+    const names = ["pausing", "creating", "enabling"].map(
+      (name) => `${name}_${randomUUID()}`,
+    );
+    await pausing.execute(
+      sql`select set_config('application_name', ${names[0]!}, false)`,
+    );
+    await creating.execute(
+      sql`select set_config('application_name', ${names[1]!}, false)`,
+    );
+    await enabling.execute(
+      sql`select set_config('application_name', ${names[2]!}, false)`,
+    );
+    const locked = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const gate = blocker.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`routine-cap-${owner.id}`}))`,
+      );
+      locked.resolve();
+      await release.promise;
+    });
+    void gate.catch(locked.reject);
+    const operations: Promise<unknown>[] = [];
+
+    try {
+      await locked.promise;
+      operations.push(
+        createRoutineStore(pausing).setEnabled(owner.id, target.id, false),
+      );
+      await waitForDatabaseLock(names[0]!);
+      operations.push(createRoutineStore(creating).create(input));
+      await waitForDatabaseLock(names[1]!);
+      operations.push(
+        createRoutineStore(enabling).setEnabled(owner.id, target.id, true),
+      );
+      await waitForDatabaseLock(names[2]!);
+      release.resolve();
+      await gate;
+      const outcomes = await Promise.allSettled(operations);
+      expect(
+        (await store.listFor(owner.id)).filter((routine) => routine.enabled),
+      ).toHaveLength(MAX_ENABLED_ROUTINES);
+      expect(outcomes[0]?.status).toBe("fulfilled");
+      expect(outcomes[1]?.status).toBe("fulfilled");
+      const enabled = outcomes[2];
+      expect(enabled?.status).toBe("rejected");
+      if (enabled?.status === "rejected")
+        expect(enabled.reason).toBeInstanceOf(RoutineRefusedError);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([gate, ...operations]);
+      await Promise.all([
+        blocker.$client.end(),
+        pausing.$client.end(),
+        creating.$client.end(),
+        enabling.$client.end(),
+      ]);
+    }
+  }, 15000);
+
   test("refuses the one past the cap, and accepts it once another is off", async () => {
     const { owner, agentId, channel } = await setUp();
     const created: string[] = [];
@@ -597,6 +686,80 @@ describe("reading a person's routines", () => {
 });
 
 describe("changing a routine", () => {
+  test("queued cron and timezone edits derive one coherent next firing", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const routine = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Summarise receipts.",
+      cron: DAILY,
+      timezone: "UTC",
+    });
+    const blocker = createDatabase(databaseUrl, { max: 1 });
+    const changingCron = createDatabase(databaseUrl, { max: 1 });
+    const changingZone = createDatabase(databaseUrl, { max: 1 });
+    const cronName = `cron_${randomUUID()}`;
+    const zoneName = `zone_${randomUUID()}`;
+    await changingCron.execute(
+      sql`select set_config('application_name', ${cronName}, false)`,
+    );
+    await changingZone.execute(
+      sql`select set_config('application_name', ${zoneName}, false)`,
+    );
+    const locked = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const gate = blocker.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`routine-cap-${owner.id}`}))`,
+      );
+      locked.resolve();
+      await release.promise;
+    });
+    void gate.catch(locked.reject);
+    const operations: Promise<unknown>[] = [];
+    try {
+      await locked.promise;
+      const cron = createRoutineStore(changingCron).update(
+        owner.id,
+        routine.id,
+        { cron: "0 17 * * *", channelId: channel.id },
+      );
+      operations.push(cron);
+      await waitForDatabaseLock(cronName);
+      const zone = createRoutineStore(changingZone).update(
+        owner.id,
+        routine.id,
+        { timezone: "America/New_York" },
+      );
+      operations.push(zone);
+      await waitForDatabaseLock(zoneName);
+      release.resolve();
+      await gate;
+      await cron;
+      const result = await zone;
+      expect(result.cron).toBe("0 17 * * *");
+      expect(result.timezone).toBe("America/New_York");
+      expect(result.channelId).toBe(channel.id);
+      // The stored clock must mean 17:00 in its stored zone, independently checked with Intl.
+      expect(
+        new Intl.DateTimeFormat("en", {
+          timeZone: result.timezone,
+          hour: "2-digit",
+          hourCycle: "h23",
+        }).format(result.nextRunAt),
+      ).toBe("17");
+    } finally {
+      release.resolve();
+      await Promise.allSettled([gate, ...operations]);
+      await Promise.all([
+        blocker.$client.end(),
+        changingCron.$client.end(),
+        changingZone.$client.end(),
+      ]);
+    }
+  }, 15000);
+
   test("recomputes the next run when the cron changes", async () => {
     const { owner, agentId, channel } = await setUp();
     const routine = await store.create({
