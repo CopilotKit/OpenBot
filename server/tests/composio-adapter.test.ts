@@ -1977,6 +1977,54 @@ describe("the config each kind of app is enabled with", () => {
     ]);
   });
 
+  test("a server-to-server app's config carries the deployment's own client", async () => {
+    const created: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: {
+          list: configsOf("shopify", []),
+          create: async (...call: unknown[]) => {
+            created.push(call);
+            return CREATED;
+          },
+        },
+      }),
+    );
+
+    process.env.COMPOSIO_SHOPIFY_CLIENT_ID = "deployment-client-id";
+    process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET = "deployment-client-secret";
+    try {
+      await broker.ensureAuthConfig({
+        toolkit: "shopify",
+        name: "Shopify",
+        connection: { kind: "fields", authScheme: "S2S_OAUTH2" },
+      });
+    } finally {
+      delete process.env.COMPOSIO_SHOPIFY_CLIENT_ID;
+      delete process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET;
+    }
+
+    /*
+     * THE ONE CONFIG THAT CARRIES A SECRET, AND IT IS NOBODY'S ACCOUNT. A client-credentials grant
+     * is exchanged by Composio for the token at connect time, so the client belongs on the config,
+     * and it is the one whoever runs this deployment registered.
+     */
+    expect(created).toEqual([
+      [
+        "shopify",
+        {
+          type: "use_custom_auth",
+          authScheme: "S2S_OAUTH2",
+          name: "Shopify (OpenBot)",
+          credentials: {
+            client_id: "deployment-client-id",
+            client_secret: "deployment-client-secret",
+          },
+        },
+      ],
+    ]);
+  });
+
   test("a no-auth app gets no config at all, because Composio refuses one", async () => {
     let listed = false;
     const { broker } = buildComposioClient(
@@ -8322,6 +8370,54 @@ describe("connecting one person with the secret they typed", () => {
             // The word this deployment sets, whatever arrived beside it under the same name.
             val: { generic_api_key: TYPED_SECRET, status: "ACTIVE" },
           },
+        },
+      },
+    ]);
+  });
+
+  test("a server-to-server connection is sent with no status, so Composio exchanges the client itself", async () => {
+    /*
+     * `ACTIVE` CLAIMS THE TOKEN IS ALREADY HERE. For `S2S_OAUTH2` it is not, and Composio refuses
+     * that request for the missing `access_token`; left without a status, Composio performs the
+     * client-credentials exchange itself. A value arriving as `status` is still not sent.
+     */
+    const asked: unknown[] = [];
+    const shopifyConfig = {
+      id: "ac_shopify",
+      name: "Shopify (OpenBot)",
+      status: "ENABLED",
+    };
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: { list: configsOf("shopify", [shopifyConfig]) },
+        connectedAccounts: {
+          create: async (body: unknown) => {
+            asked.push(body);
+            return { id: "ca_new", status: "ACTIVE" };
+          },
+        },
+      }),
+    );
+
+    expect(
+      await broker.connectWithFields({
+        account: {
+          holder: "person",
+          userId: "user_1",
+          vendorUserId: VENDOR_USER,
+        },
+        toolkit: "shopify",
+        authScheme: "S2S_OAUTH2",
+        values: { subdomain: "acme-dev", status: "ACTIVE" },
+      }),
+    ).toEqual({ accountId: "ca_new" });
+
+    expect(asked).toEqual([
+      {
+        auth_config: { id: shopifyConfig.id },
+        connection: {
+          user_id: VENDOR_USER,
+          state: { authScheme: "S2S_OAUTH2", val: { subdomain: "acme-dev" } },
         },
       },
     ]);

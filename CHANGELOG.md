@@ -78,6 +78,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
 
+### Shopify and other Composio apps on a server-to-server grant can be connected
+
+Composio publishes some apps, Shopify among them, with only `OAUTH2` and `S2S_OAUTH2` and nothing
+it manages, so they were hidden from the picker and refused at enable. Set
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` (for Shopify,
+`COMPOSIO_SHOPIFY_CLIENT_ID` and `COMPOSIO_SHOPIFY_CLIENT_SECRET`) to the OAuth client you
+registered with the vendor, and the app can be enabled and connected: Composio exchanges that client
+for the token, and the connect form asks only for what the connection needs, such as the store
+subdomain. Unset, nothing changes.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.

@@ -406,6 +406,18 @@ broker was adopted to avoid. One app in thirteen was connectable before this cha
 what is left out now, and they are named here so that an operator who goes looking for a Slack-like
 app and does not find it knows which question they are asking.
 
+**A server-to-server grant is the one exception, and it is set in the environment, not on a page.**
+Some of these apps also publish `S2S_OAUTH2`, a client-credentials grant: Composio exchanges a client
+id and secret for the token itself, with no consent screen and no redirect. Shopify is one, and
+publishes nothing Composio manages. Set `COMPOSIO_<SLUG>_CLIENT_ID` and
+`COMPOSIO_<SLUG>_CLIENT_SECRET` (for Shopify, `COMPOSIO_SHOPIFY_CLIENT_ID` and
+`COMPOSIO_SHOPIFY_CLIENT_SECRET`; a dash in the slug becomes an underscore) and the app is offered
+like a key app: enabling it creates its authorization config with that client, and connecting asks
+only for the fields Composio publishes for the connection, such as Shopify's store subdomain. Both
+variables or neither: one alone is no client, and the app stays hidden. An app that also accepts a
+plain key still asks for the key. Where the variables are missing, the refusal for such an app names
+them.
+
 ## Shared apps
 
 An app is Personal or Shared, never both. Personal is what every app was before: each person connects

@@ -11,6 +11,10 @@ import {
   textOf,
   VENDOR_SHAPE_REMEDY,
 } from "../composio-vendor";
+import {
+  DEPLOYMENT_CLIENT_SCHEME,
+  deploymentClientOf,
+} from "../deployment-clients";
 import type { ClientContext } from "./context";
 import { CONFIG_SUFFIX, copyOf, DIRECTORY_TTL_MS } from "./model";
 
@@ -192,6 +196,13 @@ export function directoryMethods(context: ClientContext) {
        * at connect time. A key app needs none HERE because the key is one person's: it belongs to
        * each connection made against this config, which is per-deployment, and a key written onto
        * it would be one person's secret shared by everybody the app is enabled for.
+       *
+       * EXCEPT A SERVER-TO-SERVER GRANT, WHOSE CREDENTIAL IS THE DEPLOYMENT'S AND NOT A PERSON'S.
+       * `S2S_OAUTH2` is a client-credentials grant: Composio exchanges a client id and secret for
+       * the token itself, so the client belongs on the config, and it is the one registered by
+       * whoever runs this deployment (`deployment-clients.ts`). {@link connectionOf} offers the
+       * scheme only while that client is held, so the empty fallback below is not a path an
+       * enable takes; it keeps the type honest rather than inventing a refusal for it.
        */
       const options =
         connection.kind === "consent"
@@ -209,7 +220,11 @@ export function directoryMethods(context: ClientContext) {
                * any request, which reads as a refusal to enable rather than as the secret-free
                * config this branch is for.
                */
-              credentials: {},
+              credentials:
+                connection.kind === "fields" &&
+                connection.authScheme === DEPLOYMENT_CLIENT_SCHEME
+                  ? (deploymentClientOf(toolkit) ?? {})
+                  : {},
             } as const);
 
       const created = await askVendor(
