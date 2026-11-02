@@ -1,6 +1,5 @@
 import { IconArrowRight } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import Avatar from "boring-avatars";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import type { AgentProfile } from "@/lib/agents/queries";
@@ -10,21 +9,23 @@ export function AgentCard({
   appearance = "compact",
 }: {
   agent: AgentProfile;
-  appearance?: "compact" | "artwork";
+  appearance?: "compact" | "row";
 }) {
-  if (appearance === "artwork") {
+  if (appearance === "row") {
     return (
-      <div className="relative h-[180px] w-[144px] overflow-hidden rounded-2xl bg-foreground/10">
-        <div
-          aria-hidden="true"
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-        >
-          <Avatar name={agent.avatarSeed} size={250} />
+      /*
+       * The avatar beside the name rather than above it: a tall card left most of its height empty
+       * between the two, and a row reads the name and what the Bot is for in one glance.
+       */
+      <div className="flex h-16 min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-3 transition-colors hover:border-ring dark:border-transparent">
+        <div aria-hidden="true" className="flex shrink-0">
+          <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={32} />
         </div>
-        <div className="absolute top-0 left-0 h-full w-full bg-background/40 dark:bg-background/50" />
-        <div className="absolute top-0 left-0 flex h-full w-full flex-col justify-end gap-2 p-3">
-          <span className="line-clamp-1 text-sm font-medium">{agent.name}</span>
-          <span className="line-clamp-3 text-xs text-foreground dark:text-foreground/80">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium" title={agent.name}>
+            {agent.name}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">
             {agent.roleDescription}
           </span>
         </div>

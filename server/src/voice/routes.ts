@@ -36,7 +36,12 @@ export function createVoiceRoutes(
   app.get("/config", (context) => {
     context.header("Cache-Control", "no-store");
     if (!provider || !channels || !profiles)
-      return context.json({ error: "Live voice is not configured." }, 503);
+      return context.json(
+        {
+          error: "Voice calls aren't set up yet. Ask an admin to turn them on.",
+        },
+        503,
+      );
     return context.json({ transport: provider.transport });
   });
   app.post(
@@ -48,7 +53,13 @@ export function createVoiceRoutes(
         return context.json({ error: "Invalid voice request." }, 403);
       }
       if (!provider || !channels || !profiles)
-        return context.json({ error: "Live voice is not configured." }, 503);
+        return context.json(
+          {
+            error:
+              "Voice calls aren't set up yet. Ask an admin to turn them on.",
+          },
+          503,
+        );
       const userId = context.var.actor.id;
       const now = Date.now();
       for (const [id, attempt] of attempts) {
@@ -64,7 +75,7 @@ export function createVoiceRoutes(
         context.header("Retry-After", "60");
         return context.json(
           {
-            error: "Too many voice connection attempts. Please retry shortly.",
+            error: "Too many call attempts. Try again in a moment.",
           },
           429,
         );
@@ -110,7 +121,13 @@ export function createVoiceRoutes(
         );
       }
       if (!provider || !channels || !profiles)
-        return context.json({ error: "Live voice is not configured." }, 503);
+        return context.json(
+          {
+            error:
+              "Voice calls aren't set up yet. Ask an admin to turn them on.",
+          },
+          503,
+        );
       const offer = "sdp" in body ? body.sdp : undefined;
       if (
         (provider.transport === "webrtc" || offer !== undefined) &&
@@ -126,20 +143,21 @@ export function createVoiceRoutes(
         channel = await channels.get(context.var.actor, body.channelId);
       } catch {
         return context.json(
-          { error: "The channel could not be loaded. Please retry." },
+          { error: "Couldn't load this conversation. Try again." },
           503,
         );
       }
-      if (!channel) return context.json({ error: "Channel not found." }, 404);
+      if (!channel)
+        return context.json({ error: "Couldn't find that conversation." }, 404);
       if (!channel.active)
         return context.json(
-          { error: "This channel is no longer active." },
+          { error: "This conversation is no longer active." },
           409,
         );
       const agentId = channel.agentIds[0];
       if (channel.agentIds.length !== 1 || !agentId)
         return context.json(
-          { error: "Live voice requires a channel with exactly one agent." },
+          { error: "Voice calls only work in a conversation with one Bot." },
           400,
         );
       let profile: Awaited<ReturnType<AgentProfileStore["get"]>>;
@@ -147,12 +165,12 @@ export function createVoiceRoutes(
         profile = await profiles.get(context.var.actor, agentId);
       } catch {
         return context.json(
-          { error: "The agent could not be loaded. Please retry." },
+          { error: "Couldn't load this Bot. Try again." },
           503,
         );
       }
       if (!profile || profile.deletedAt)
-        return context.json({ error: "Agent not found." }, 404);
+        return context.json({ error: "Couldn't find that Bot." }, 404);
       const timeout = new AbortController();
       const timer = setTimeout(
         () => timeout.abort(),
@@ -175,8 +193,7 @@ export function createVoiceRoutes(
         return signal.aborted
           ? context.json(
               {
-                error:
-                  "Voice connection timed out or was cancelled. Please retry.",
+                error: "The call timed out or was cancelled. Try again.",
               },
               504,
             )
@@ -187,7 +204,7 @@ export function createVoiceRoutes(
                 error:
                   error instanceof VoiceError
                     ? error.message
-                    : "The voice service could not start a call. Please retry.",
+                    : "Couldn't start the call. Try again.",
               },
               502,
             );

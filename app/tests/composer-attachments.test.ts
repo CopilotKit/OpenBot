@@ -78,8 +78,7 @@ describe("uploadToChannel", () => {
     global.fetch = (async () =>
       jsonResponse(
         {
-          error:
-            "'icon.svg' is an SVG, which can carry scripts and is not accepted.",
+          error: "'icon.svg' can't be attached. SVG files aren't accepted.",
         },
         415,
       )) as unknown as typeof fetch;
@@ -110,7 +109,7 @@ describe("uploadToChannel", () => {
 
     await expect(
       uploadToChannel("chan_1", "group_1")(file("receipt.png", "image/png")),
-    ).rejects.toThrow('Could not upload "receipt.png".');
+    ).rejects.toThrow('Couldn\'t upload "receipt.png". Try again.');
   });
 
   test("a refusal whose `error` is empty throws the named fallback, not an empty refusal", async () => {
@@ -121,7 +120,7 @@ describe("uploadToChannel", () => {
 
     await expect(
       uploadToChannel("chan_1", "group_1")(file("receipt.png", "image/png")),
-    ).rejects.toThrow('Could not upload "receipt.png".');
+    ).rejects.toThrow('Couldn\'t upload "receipt.png". Try again.');
   });
 
   test("a refusal whose `error` is not a string throws the named fallback", async () => {
@@ -130,7 +129,7 @@ describe("uploadToChannel", () => {
 
     await expect(
       uploadToChannel("chan_1", "group_1")(file("receipt.png", "image/png")),
-    ).rejects.toThrow('Could not upload "receipt.png".');
+    ).rejects.toThrow('Couldn\'t upload "receipt.png". Try again.');
   });
 
   /**
@@ -151,7 +150,7 @@ describe("uploadToChannel", () => {
 
     const upload = uploadToChannel("chan_1", "group_1");
     await expect(upload(file("receipt.png", "image/png"))).rejects.toThrow(
-      'Could not upload "receipt.png".',
+      'Couldn\'t upload "receipt.png". Try again.',
     );
     await expect(upload(file("receipt.png", "image/png"))).rejects.not.toThrow(
       /JSON/,
@@ -169,7 +168,7 @@ describe("uploadToChannel", () => {
 
     await expect(
       uploadToChannel("chan_1", "group_1")(file("receipt.png", "image/png")),
-    ).rejects.toThrow('Could not upload "receipt.png".');
+    ).rejects.toThrow('Couldn\'t upload "receipt.png". Try again.');
   });
 });
 

@@ -3,10 +3,17 @@
  * for durable threads and memory. Configuration the product cannot function without belongs at the
  * boot boundary.
  */
+import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
 import {
   isLearningContainerId,
   type LearningTarget,
 } from "@openbot/shared/learning";
+import {
+  BROWSER_ABSENT_ENV,
+  BROWSER_URL_ENV,
+  type BrowserAbsence,
+  isBrowserAbsence,
+} from "@openbot/shared/openbot-browser";
 import { singleUserEnabled } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
@@ -16,6 +23,7 @@ import {
   type TranscriptionConfig,
   transcriptionConfig,
 } from "./dictation/config";
+import type { BrokerProvider } from "./plugins/access";
 import { type VoiceConfig, voiceConfig } from "./voice/config";
 import { type WebBotAuth, webBotAuthFromEnv } from "./web-bot-auth";
 
@@ -37,6 +45,11 @@ export type IntelligenceSettings = {
   gatewayWsUrl: string;
   apiKey: string;
   licenseToken?: string;
+  /**
+   * The gateway as the browser reaches it, when that is not where this server reaches it. See
+   * `INTELLIGENCE_BROWSER_GATEWAY_WS_URL` in `runtimeCapabilities`.
+   */
+  browserGatewayWsUrl?: string;
 };
 
 export type DockerComputerConfig = {
@@ -170,6 +183,11 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /**
+   * Browser extension ids OpenBot trusts as the Recorder besides its own fixed id, for a fork or a
+   * build signed with another key. From OPENBOT_RECORDER_EXTRA_EXTENSION_IDS, never from NODE_ENV.
+   */
+  recorder: { extraExtensionIds: string[] };
   /** Optional environment default. A saved Admin setting takes precedence. */
   learning?: LearningTarget;
   /**
@@ -249,6 +267,16 @@ export type DeploymentConfig = {
   composioApiKey: string | undefined;
   /** GitHub App user sign-in, so people can link their GitHub account. Both or neither of GITHUB_APP_CLIENT_ID / GITHUB_APP_CLIENT_SECRET. */
   githubApp?: GithubAppConfig;
+  /**
+   * The Arcade API key, from `ARCADE_API_KEY`. Unset is the ordinary state. Trimmed and never
+   * validated here, for the same reason as `composioApiKey`.
+   */
+  arcadeApiKey: string | undefined;
+  /**
+   * Which tool broker the operator asked for, from `OPENBOT_BROKER_PROVIDER`. Only read and
+   * validated here: which provider is active is decided elsewhere. Unset is `undefined`.
+   */
+  brokerProvider: BrokerProvider | undefined;
   /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
@@ -359,6 +387,19 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: ComputerConfig;
+  /**
+   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): OpenBot
+   * Desktop's host-side local Chrome computer, so a person's browser is a window on their own desktop while Bots'
+   * computers stay where they are. Called with the same COMPUTER_TOKEN as every computer. Absent, the Bots' computer
+   * provider runs people's browsers too.
+   */
+  browser?: { url: string; token?: string };
+  /**
+   * Why OpenBot Desktop found no browser of the person's own to run on this machine (`OPENBOT_BROWSER_ABSENT`), which
+   * the person is told beside whatever browser runs for them instead. A name this server does not know is left out:
+   * Desktop and the deployment it runs are released apart, and an explanation is no reason to refuse to start.
+   */
+  browserAbsent?: BrowserAbsence;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
   /**
@@ -419,6 +460,17 @@ function required(environment: Environment, name: string): string {
 
 function optional(environment: Environment, name: string): string | undefined {
   return environment[name]?.trim() || undefined;
+}
+
+function brokerProvider(environment: Environment): BrokerProvider | undefined {
+  const raw = optional(environment, "OPENBOT_BROKER_PROVIDER");
+  if (raw === undefined) return undefined;
+  if (raw !== "composio" && raw !== "arcade") {
+    throw new Error(
+      `OPENBOT_BROKER_PROVIDER must be "composio" or "arcade", got "${raw}". Leave it unset to choose by which API key is configured.`,
+    );
+  }
+  return raw;
 }
 
 /**
@@ -560,6 +612,7 @@ function reachOf(raw: string): Reach {
     return "public";
   }
   bare = bare.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  if (!bare) return "public";
 
   if (
     bare === "localhost" ||
@@ -949,14 +1002,14 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
     apiUrl: url(environment, "INTELLIGENCE_API_URL"),
     gatewayWsUrl: url(environment, "INTELLIGENCE_GATEWAY_WS_URL"),
-    apiKey: optional(environment, "INTELLIGENCE_API_KEY"),
+    apiKey: intelligenceApiKey(environment),
     licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
   };
 
   const missing = Object.entries({
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
-    INTELLIGENCE_API_KEY: settings.apiKey,
+    "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)": settings.apiKey,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -967,10 +1020,26 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     );
   }
 
+  /*
+   * Optional, and only ever a second address for the same gateway. The browser opens the gateway
+   * itself, at the address `/info` gives it, so a server that reaches Intelligence somewhere the
+   * browser cannot follow names the browser's address here. The server in OpenBot Desktop's
+   * container does: it reaches local Intelligence at `host.docker.internal`, and the window on the
+   * host reaches the same gateway at `localhost`. Unset, the browser is given `gatewayWsUrl`, as
+   * before.
+   */
+  const browserGatewayWsUrl = url(
+    environment,
+    "INTELLIGENCE_BROWSER_GATEWAY_WS_URL",
+  );
+
   return {
     mode: "intelligence",
     durableHistory: true,
-    intelligence: settings as IntelligenceSettings,
+    intelligence: {
+      ...(settings as IntelligenceSettings),
+      ...(browserGatewayWsUrl ? { browserGatewayWsUrl } : {}),
+    },
   };
 }
 
@@ -1100,6 +1169,19 @@ export function durationMs(value: string): number {
     default:
       return amount;
   }
+}
+
+function browserConfig(
+  environment: Environment,
+): Pick<DeploymentConfig, "browser" | "browserAbsent"> {
+  const address = url(environment, BROWSER_URL_ENV);
+  if (!address) {
+    // Only where there is no browser of the person's own: one that runs needs no reason why it does not.
+    const absent = optional(environment, BROWSER_ABSENT_ENV);
+    return absent && isBrowserAbsence(absent) ? { browserAbsent: absent } : {};
+  }
+  const token = optional(environment, "COMPUTER_TOKEN");
+  return { browser: { url: address, ...(token ? { token } : {}) } };
 }
 
 function computerConfig(environment: Environment): ComputerConfig | undefined {
@@ -1353,6 +1435,8 @@ export function loadConfig(
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
+    arcadeApiKey: optional(environment, "ARCADE_API_KEY"),
+    brokerProvider: brokerProvider(environment),
     publicUrl,
     appUrl: (
       optional(environment, "OPENBOT_APP_URL") ??
@@ -1363,6 +1447,7 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
+    recorder: { extraExtensionIds: recorderExtraExtensionIds(environment) },
     learning: learningDefault(environment),
     learningAutoAssign: learningAutoAssignEnabled(environment),
     ...learningSetupCredential(environment),
@@ -1390,6 +1475,7 @@ export function loadConfig(
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),
     computer: computerConfig(environment),
+    ...browserConfig(environment),
     handoff: handoffCaps(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
@@ -1407,6 +1493,20 @@ function learningAutoAssignEnabled(environment: Environment): boolean {
     return false;
   const value = optional(environment, "OPENBOT_LEARNING_AUTO_ASSIGN");
   return value !== "false" && value !== "0";
+}
+
+/** Comma separated, each trimmed, each a Chrome extension id (32 letters a to p). */
+function recorderExtraExtensionIds(environment: Environment): string[] {
+  const value = optional(environment, "OPENBOT_RECORDER_EXTRA_EXTENSION_IDS");
+  if (!value) return [];
+  const ids = value.split(",").map((id) => id.trim());
+  for (const id of ids) {
+    if (!/^[a-p]{32}$/.test(id))
+      throw new Error(
+        `OPENBOT_RECORDER_EXTRA_EXTENSION_IDS lists "${id}", which is not an extension id. An id is 32 letters from a to p; separate several with commas.`,
+      );
+  }
+  return ids;
 }
 
 /** On unless the variable is "false" or "0", the rule every default-on switch here follows. */

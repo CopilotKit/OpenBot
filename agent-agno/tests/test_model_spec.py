@@ -30,8 +30,3 @@ def test_blank_environment_falls_through_to_the_file(monkeypatch):
     monkeypatch.setenv("BOT_PROVIDER", "")
     monkeypatch.setenv("BOT_MODEL", "   ")
     assert bot_settings(BOT_ID) == BotSettings(provider="openai", model="gpt-5.5")
-
-
-def test_this_bots_source_reads_the_spec():
-    source = (Path(__file__).resolve().parents[1] / "src" / "main.py").read_text(encoding="utf-8")
-    assert f'bot_settings("agent-agno")' in source

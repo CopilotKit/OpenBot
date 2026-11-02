@@ -1,0 +1,251 @@
+# Frozen type errors in `server/tests`, as reported by
+#   bunx tsc --noEmit -p server/tsconfig.tests.json
+# One line per error: <file>: error TS<code>: <message>. NO line or column: an entry names the
+# error, not where it sits, so adding a line above it does not turn it into a "new" error.
+# The indented elaboration lines are dropped too.
+#
+# This file is a RECORD OF DEBT, not a list of things that are fine. Every line is a real defect
+# that the suite could not see because it was never type-checked. Fixing one and deleting its
+# line is always correct. ADDING a line is not: a new error means code written today is wrong,
+# and the gate exists to say so. Regenerate with `bun scripts/typecheck-tests.ts --update` only
+# after a deliberate decision that the new entries are pre-existing debt being surfaced rather
+# than debt being created.
+#
+# Sorted. Duplicates are significant: a line repeated N times allows exactly N identical errors
+# in that file, and an N+1th is new.
+server/tests/account-mode.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/admin-people-credentials-validation.test.ts: error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+server/tests/agent-auth-header.test.ts: error TS2741: Property 'updateSecret' is missing in type '{ create: () => Promise<{ id: string; revokedAt: null; }>; rotate: (input: CredentialStoreValue & { previousCredentialId: string; }) => Promise<{ id: string; revokedAt: null; }>; revoke: () => Promise<...>; isLive: (id: string) => Promise<...>; findLiveByKey: () => Promise<...>; }' but required in type 'CredentialStore'.
+server/tests/agent-endpoint.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/agent-endpoint.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/agent-endpoint.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/agent-endpoint.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/agent-endpoint.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<never>' but required in type 'typeof fetch'.
+server/tests/agent-endpoint.test.ts: error TS2741: Property 'preconnect' is missing in type '(_url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/agent-endpoint.test.ts: error TS2769: No overload matches this call.
+server/tests/agent-endpoint.test.ts: error TS2769: No overload matches this call.
+server/tests/agent-endpoint.test.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+server/tests/agent-endpoint.test.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+server/tests/agent-handoff-endtoend.integration.test.ts: error TS2345: Argument of type '{ desk: HandoffDesk; from: { botId: string; actorId: string; runId: string; threadId: string; depth: number; }; hasSomebodyToAsk: true; maxDepth: number; }' is not assignable to parameter of type '{ desk: HandoffDesk; from: RunAssertion; hasSomebodyToAsk: boolean; maxDepth: number; maxPerRun: number; approvalGate?: ApprovalGate | undefined; privateShare?: PrivateShareGate | undefined; }'.
+server/tests/agent-handoff-endtoend.integration.test.ts: error TS2345: Argument of type '{ desk: HandoffDesk; from: { botId: string; actorId: string; runId: string; threadId: string; depth: number; }; hasSomebodyToAsk: true; maxDepth: number; }' is not assignable to parameter of type '{ desk: HandoffDesk; from: RunAssertion; hasSomebodyToAsk: boolean; maxDepth: number; maxPerRun: number; approvalGate?: ApprovalGate | undefined; privateShare?: PrivateShareGate | undefined; }'.
+server/tests/agent-handoff-endtoend.integration.test.ts: error TS2345: Argument of type '{ desk: HandoffDesk; from: { botId: string; actorId: string; runId: string; threadId: string; depth: number; }; hasSomebodyToAsk: true; maxDepth: number; }' is not assignable to parameter of type '{ desk: HandoffDesk; from: RunAssertion; hasSomebodyToAsk: boolean; maxDepth: number; maxPerRun: number; approvalGate?: ApprovalGate | undefined; privateShare?: PrivateShareGate | undefined; }'.
+server/tests/agent-handoff-endtoend.integration.test.ts: error TS2554: Expected 2-3 arguments, but got 1.
+server/tests/agent-handoff-endtoend.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/agent-handoff-tool.test.ts: error TS2345: Argument of type '{ desk: HandoffDesk; from: { botId: string; actorId: string; runId: string; threadId: string; depth: number; }; hasSomebodyToAsk: true; maxDepth: number; }' is not assignable to parameter of type '{ desk: HandoffDesk; from: RunAssertion; hasSomebodyToAsk: boolean; maxDepth: number; maxPerRun: number; approvalGate?: ApprovalGate | undefined; privateShare?: PrivateShareGate | undefined; }'.
+server/tests/agent-handoff-tool.test.ts: error TS2345: Argument of type '{ desk: HandoffDesk; from: { depth: number; botId: string; actorId: string; runId: string; threadId: string; }; hasSomebodyToAsk: true; maxDepth: number; }' is not assignable to parameter of type '{ desk: HandoffDesk; from: RunAssertion; hasSomebodyToAsk: boolean; maxDepth: number; maxPerRun: number; approvalGate?: ApprovalGate | undefined; privateShare?: PrivateShareGate | undefined; }'.
+server/tests/agent-handoff.integration.test.ts: error TS2554: Expected 2-3 arguments, but got 1.
+server/tests/agent-handoff.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/agent-routes.test.ts: error TS2739: Type '{ list(receivedActor: AgentActor, hidden: boolean | undefined): Promise<AgentProfile[]>; get(receivedActor: AgentActor, id: string): Promise<...>; ... 6 more ...; softDelete(receivedActor: AgentActor, id: string): Promise<...>; }' is missing the following properties from type 'AgentProfileStore': issueCallbackToken, revokeCallbackToken, agentForCallbackToken
+server/tests/agent-routes.test.ts: error TS2769: No overload matches this call.
+server/tests/agent-routes.test.ts: error TS2769: No overload matches this call.
+server/tests/approvals-frontend.test.ts: error TS18048: 'message.toolCalls' is possibly 'undefined'.
+server/tests/approvals-interactive.integration.test.ts: error TS2741: Property 'preconnect' is missing in type '(url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/approvals-native.test.ts: error TS2345: Argument of type '(_url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' is not assignable to parameter of type 'typeof fetch'.
+server/tests/approvals-policy.test.ts: error TS2353: Object literal may only specify known properties, and 'id' does not exist in type '{ kind: "person"; }'.
+server/tests/approvals-question-resume.integration.test.ts: error TS2741: Property 'resumeWaiting' is missing in type 'Pick<ResponsibilityStore, "get" | "listRuns">' but required in type 'Pick<ResponsibilityStore, "get" | "listRuns" | "resumeWaiting">'.
+server/tests/approvals-question-resume.integration.test.ts: error TS2741: Property 'resumeWaiting' is missing in type 'Pick<ResponsibilityStore, "get" | "listRuns">' but required in type 'Pick<ResponsibilityStore, "get" | "listRuns" | "resumeWaiting">'.
+server/tests/approvals.test.ts: error TS2322: Type 'Promise<{ id: string; ownerUserId: string; botId: string; toolRef: string; effect: string; scope: string; revokedAt: Date | null; createdAt: Date; }[]>' is not assignable to type 'Promise<ApprovalRule[]>'.
+server/tests/approvals.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/attachment-routes.test.ts: error TS2322: Type 'Response | Promise<Response>' is not assignable to type 'Promise<Response>'.
+server/tests/attachment-routes.test.ts: error TS2322: Type 'Response | Promise<Response>' is not assignable to type 'Promise<Response>'.
+server/tests/attachment-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
+server/tests/attachment-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
+server/tests/attachment-routes.test.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+server/tests/attachment-routes.test.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+server/tests/attachment-store.test.ts: error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+server/tests/attachment-store.test.ts: error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+server/tests/attachment-store.test.ts: error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+server/tests/audit.test.ts: error TS2322: Type '(query: AuditEventQuery) => Promise<{ events: { id: string; eventType: string; targetType: string; targetId: string; actorUserId: string; payload: { itemCount: number; }; createdAt: string; }[]; nextCursor: string; }>' is not assignable to type '(query: AuditEventQuery) => Promise<{ events: AuditEvent[]; nextCursor?: string | undefined; }>'.
+server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revoke: (id: string) => Promise<undefined>; }' is not assignable to parameter of type 'Pick<CredentialStore, "revoke">'.
+server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revoke: (id: string) => Promise<undefined>; }' is not assignable to parameter of type 'Pick<CredentialStore, "revoke">'.
+server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revoke: (id: string) => Promise<undefined>; }' is not assignable to parameter of type 'Pick<CredentialStore, "revoke">'.
+server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revoke: (id: string) => Promise<undefined>; }' is not assignable to parameter of type 'Pick<CredentialStore, "revoke">'.
+server/tests/bot-lifecycle-audit.test.ts: error TS2769: No overload matches this call.
+server/tests/channel-routes.test.ts: error TS2322: Type '(receivedActor: AgentActor, id: string) => Promise<void>' is not assignable to type '(actor: AgentActor, channelId: string) => Promise<boolean>'.
+server/tests/channel-routes.test.ts: error TS2769: No overload matches this call.
+server/tests/channel-routes.test.ts: error TS2769: No overload matches this call.
+server/tests/channel-summary.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/component-catalogue-entries.test.ts: error TS2769: No overload matches this call.
+server/tests/component-catalogue.test.ts: error TS2769: No overload matches this call.
+server/tests/component-decision-functions.test.ts: error TS2769: No overload matches this call.
+server/tests/component-decision.test.ts: error TS2769: No overload matches this call.
+server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
+server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
+server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
+server/tests/composio-connection-kinds.test.ts: error TS2769: No overload matches this call.
+server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"key" | "none" | "consent" | "unreadable", Cell>'.
+server/tests/composio-connection-kinds.test.ts: error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"nothing" | "answered" | "unreachable" | "complained", Cell>'.
+server/tests/composio-connections.test.ts: error TS2345: Argument of type '{ url: string; provenance: string; vendor: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
+server/tests/composio-connections.test.ts: error TS2769: No overload matches this call.
+server/tests/computer-client.test.ts: error TS2769: No overload matches this call.
+server/tests/computer-download-routes.test.ts: error TS2345: Argument of type '(actor: AuthenticatedActor, botId: string) => Promise<boolean>' is not assignable to parameter of type 'BotAccessCheck'.
+server/tests/computer-gateway.test.ts: error TS2353: Object literal may only specify known properties, and 'text' does not exist in type 'WriteFileInput'.
+server/tests/computer-gateway.test.ts: error TS2769: No overload matches this call.
+server/tests/computer-policy.test.ts: error TS2322: Type '{ tool: { name: string; }; bot: { id: string; }; page: { url: string; host: string; }; actor: { id: string; }; element?: { ref: string; role: string; name: string; type?: string; } | undefined; ... 5 more ...; initiator?: { ...; } | undefined; }' is not assignable to type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2345: Argument of type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; intent: "activate"; key: string; element: { ref: string; role: string; name: string; type: string; }; file: { ...; }; command: string; mcp: { ...; }; }' is not assignable to parameter of type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2345: Argument of type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; key: string; element: { ref: string; role: string; name: string; type: string; }; file: { path: string; name: string; extension: string; }; command: string; mcp: { ...; }; }' is not assignable to parameter of type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2345: Argument of type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; key: string; }' is not assignable to parameter of type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2345: Argument of type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; key: string; }' is not assignable to parameter of type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2741: Property 'initiator' is missing in type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; element: { ref: string; role: string; name: string; type: string; }; key: string; file: { path: string; name: string; extension: string; }; mcp: { ...; }; }' but required in type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2741: Property 'initiator' is missing in type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; intent: "activate"; element: { ref: string; role: string; name: string; type: string; }; key: string; file: { ...; }; command: string; mcp: { ...; }; }' but required in type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2741: Property 'initiator' is missing in type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; intent: "navigate"; }' but required in type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2741: Property 'initiator' is missing in type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; intent: "read_tool"; element: { ref: string; role: string; name: string; type: string; }; key: string; file: { ...; }; command: string; mcp: { ...; }; }' but required in type 'PolicyContext'.
+server/tests/computer-policy.test.ts: error TS2741: Property 'initiator' is missing in type '{ tool: { name: string; }; bot: { id: string; }; actor: { id: string; }; page: { url: string; host: string; }; intent: "run_command"; command: string; }' but required in type 'PolicyContext'.
+server/tests/computer-provider.test.ts: error TS2345: Argument of type '{ provider: "sandbox"; namespace: string; idleAfterMs: number; templateFile: string; }' is not assignable to parameter of type 'ComputerConfig'.
+server/tests/copilot.test.ts: error TS2322: Type 'Promise<{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }[]>' is not assignable to type 'Promise<RegisteredAgent[]>'.
+server/tests/copilot.test.ts: error TS2322: Type 'Promise<{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }[]>' is not assignable to type 'Promise<RegisteredAgent[]>'.
+server/tests/copilot.test.ts: error TS2322: Type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }' is not assignable to type 'RegisteredAgent'.
+server/tests/copilot.test.ts: error TS2322: Type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }' is not assignable to type 'RegisteredAgent'.
+server/tests/copilot.test.ts: error TS2322: Type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }' is not assignable to type 'RegisteredAgent'.
+server/tests/copilot.test.ts: error TS2339: Property 'prompt' does not exist on type 'BuiltInAgentConfiguration'.
+server/tests/copilot.test.ts: error TS2339: Property 'prompt' does not exist on type 'BuiltInAgentConfiguration'.
+server/tests/copilot.test.ts: error TS2339: Property 'prompt' does not exist on type 'BuiltInAgentConfiguration'.
+server/tests/copilot.test.ts: error TS2339: Property 'prompt' does not exist on type 'BuiltInAgentConfiguration'.
+server/tests/copilot.test.ts: error TS2345: Argument of type '() => never' is not assignable to parameter of type 'typeof fetch'.
+server/tests/copilot.test.ts: error TS2345: Argument of type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }[]' is not assignable to parameter of type 'RegisteredAgent[]'.
+server/tests/copilot.test.ts: error TS2345: Argument of type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }[]' is not assignable to parameter of type 'RegisteredAgent[]'.
+server/tests/copilot.test.ts: error TS2345: Argument of type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }[]' is not assignable to parameter of type 'RegisteredAgent[]'.
+server/tests/copilot.test.ts: error TS2345: Argument of type '{ id: string; name: string; type: "remote_ag_ui"; endpoint: string; }[]' is not assignable to parameter of type 'RegisteredAgent[]'.
+server/tests/copilot.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/copilot.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/copilot.test.ts: error TS2739: Type '{ id: string; name: string; type: "built_in"; systemPrompt: string; }[]' is missing the following properties from type 'Promise<RegisteredAgent[]>': then, catch, finally, [Symbol.toStringTag]
+server/tests/credentials.test.ts: error TS2345: Argument of type '{ encryptionKey: string; store: { create: () => Promise<never>; rotate: () => Promise<never>; revoke: () => Promise<never>; }; auditStore: { insert: (event: unknown) => Promise<...>; }; }' is not assignable to parameter of type 'CredentialService'.
+server/tests/credentials.test.ts: error TS2345: Argument of type '{ encryptionKey: string; store: { create: () => Promise<{ id: string; revokedAt: null; }>; updateSecret: () => Promise<never>; rotate: (input: { previousCredentialId: string; }) => Promise<...>; revoke: (id: string) => Promise<...>; }; auditStore: { ...; }; }' is not assignable to parameter of type 'CredentialService'.
+server/tests/credentials.test.ts: error TS2345: Argument of type '{ encryptionKey: string; store: { create: () => Promise<{ id: string; revokedAt: null; }>; updateSecret: () => Promise<never>; rotate: (input: { previousCredentialId: string; }) => Promise<...>; revoke: (id: string) => Promise<...>; }; auditStore: { ...; }; }' is not assignable to parameter of type 'CredentialService'.
+server/tests/credentials.test.ts: error TS2345: Argument of type '{ list: () => Promise<never[]>; create: (input: CredentialInput) => Promise<{ id: string; kind: "model" | "agent" | "connector" | "mcp" | "mcp_oauth_client" | "mcp_user_token"; provider: string; keyId: string; metadata: Record<...>; revokedAt: null; }>; }' is not assignable to parameter of type 'CredentialAdminService'.
+server/tests/credentials.test.ts: error TS2345: Argument of type '{ list: () => Promise<{ id: string; kind: "model"; provider: string; keyId: string; metadata: { label: string; }; revokedAt: null; }[]>; }' is not assignable to parameter of type 'CredentialAdminService'.
+server/tests/delivery-router.test.ts: error TS2322: Type 'Promise<null>' is not assignable to type 'Promise<DeliveryOutbox>'.
+server/tests/delivery-router.test.ts: error TS2322: Type 'Promise<{ id: string; ownerUserId: string; token: string; projectId: string; platform: "ios"; enabled: boolean; }[]>' is not assignable to type 'Promise<never[]>'.
+server/tests/delivery-router.test.ts: error TS2322: Type '{ findBinding: (_source: string, realm: string, identity: string, address?: string) => Promise<{ ownerUserId: string; channelId: string; agentId: string; threadId: string; id: string; ... 6 more ...; optedOutAt?: Date | null; } | null>; ... 15 more ...; botIdentity: (agentId: string) => Promise<...>; }' is not assignable to type 'RouterStore'.
+server/tests/delivery-router.test.ts: error TS2322: Type '{ findBinding: (_source: string, realm: string, identity: string, address?: string) => Promise<{ ownerUserId: string; channelId: string; agentId: string; threadId: string; id: string; ... 6 more ...; optedOutAt?: Date | null; } | null>; ... 15 more ...; botIdentity: (agentId: string) => Promise<...>; }' is not assignable to type 'RouterStore'.
+server/tests/delivery-router.test.ts: error TS2322: Type '{ findBinding: (_source: string, realm: string, identity: string, address?: string) => Promise<{ ownerUserId: string; channelId: string; agentId: string; threadId: string; id: string; ... 6 more ...; optedOutAt?: Date | null; } | null>; ... 15 more ...; botIdentity: (agentId: string) => Promise<...>; }' is not assignable to type 'RouterStore'.
+server/tests/delivery-router.test.ts: error TS2322: Type '{ findBinding: (_source: string, realm: string, identity: string, address?: string) => Promise<{ ownerUserId: string; channelId: string; agentId: string; threadId: string; id: string; ... 6 more ...; optedOutAt?: Date | null; } | null>; ... 15 more ...; botIdentity: (agentId: string) => Promise<...>; }' is not assignable to type 'RouterStore'.
+server/tests/delivery-router.test.ts: error TS2322: Type '{ findBinding: (_source: string, realm: string, identity: string, address?: string) => Promise<{ ownerUserId: string; channelId: string; agentId: string; threadId: string; id: string; ... 6 more ...; optedOutAt?: Date | null; } | null>; ... 15 more ...; botIdentity: (agentId: string) => Promise<...>; }' is not assignable to type 'RouterStore'.
+server/tests/delivery-routes.test.ts: error TS2322: Type '(input: Omit<DeliveryBinding, "id" | "enabled">) => Promise<{ identity: string; agentId: string; threadId: string; ownerUserId: string; channelId: string; transport: BindingTransport; ... 5 more ...; enabled: boolean; }>' is not assignable to type '(input: Omit<DeliveryBinding, "id" | "enabled">) => Promise<{ id: string; identity: string; createdAt: Date; agentId: string; threadId: string; ownerUserId: string; ... 6 more ...; optedOutAt: Date | null; }>'.
+server/tests/delivery-routes.test.ts: error TS2322: Type 'Promise<DeliveryBinding | null>' is not assignable to type 'Promise<{ transport: BindingTransport; identity: string; realm: string; address: string; mentionId: string | null; enabled: boolean; optedOutAt: Date | null; createdAt: Date; ... 4 more ...; id: string; }>'.
+server/tests/delivery-turn.test.ts: error TS2322: Type 'string | ContentPart[]' is not assignable to type 'string'.
+server/tests/dictation-routes.test.ts: error TS2739: Type 'Response & TypedResponse<{ error: string; }, 401, "json">' is missing the following properties from type 'Promise<void | Response>': then, catch, finally, [Symbol.toStringTag]
+server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but got 1.
+server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but got 1.
+server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but got 1.
+server/tests/enterprise-controls.integration.test.ts: error TS2345: Argument of type '(context: Parameters<Parameters<MiddlewareHandlerInterface<{ Variables: AppVariables; }, BlankSchema, "/">>[1]>[0], next: () => Promise<void>) => Promise<...>' is not assignable to parameter of type 'MiddlewareHandler<{ Variables: AppVariables; }>'.
+server/tests/enterprise-controls.integration.test.ts: error TS2345: Argument of type '(context: Parameters<Parameters<MiddlewareHandlerInterface<{ Variables: AppVariables; }, BlankSchema, "/">>[1]>[0], next: () => Promise<void>) => Promise<...>' is not assignable to parameter of type 'MiddlewareHandler<{ Variables: AppVariables; }>'.
+server/tests/enterprise-controls.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/google-drive-rest.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
+server/tests/google-drive-rest.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
+server/tests/group-conversations.integration.test.ts: error TS2339: Property 'serverId' does not exist on type 'object'.
+server/tests/headless-components.integration.test.ts: error TS2352: Conversion of type 'BaseEvent' to type '{ delta: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+server/tests/headless-components.integration.test.ts: error TS2741: Property 'preconnect' is missing in type '(url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/headless-components.integration.test.ts: error TS6142: Module '../../app/src/components/gallery/charts' was resolved to 'app/src/components/gallery/charts.tsx', but '--jsx' is not set.
+server/tests/headless-components.integration.test.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
+server/tests/headless-components.integration.test.ts: error TS7031: Binding element 'description' implicitly has an 'any' type.
+server/tests/headless-components.integration.test.ts: error TS7031: Binding element 'kind' implicitly has an 'any' type.
+server/tests/headless-components.integration.test.ts: error TS7031: Binding element 'name' implicitly has an 'any' type.
+server/tests/headless-components.integration.test.ts: error TS7031: Binding element 'title' implicitly has an 'any' type.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/activity' was resolved to 'app/src/components/gallery/activity.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/cards' was resolved to 'app/src/components/gallery/cards.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/charts' was resolved to 'app/src/components/gallery/charts.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/decisions' was resolved to 'app/src/components/gallery/decisions.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/form' was resolved to 'app/src/components/gallery/form.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/quote' was resolved to 'app/src/components/gallery/quote.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS6142: Module '../../app/src/components/gallery/table' was resolved to 'app/src/components/gallery/table.tsx', but '--jsx' is not set.
+server/tests/headless-components.test.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
+server/tests/headless-tools.test.ts: error TS2322: Type '(context: { ownerUserId: string; agentId: string; initiator: { kind: string; id?: string | undefined; }; }) => Promise<unknown[]>' is not assignable to type '(input: { ownerUserId: string; agentId: string; initiator: AuditInitiator; threadId: string; runId: string; }) => Promise<HeadlessTool[]>'.
+server/tests/headless-tools.test.ts: error TS2741: Property 'preconnect' is missing in type '(url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/health.test.ts: error TS2345: Argument of type '{ handler: () => Response; }' is not assignable to parameter of type 'AuthService'.
+server/tests/identity-provider-audit.test.ts: error TS2322: Type 'Promise<string[]>' is not assignable to type 'Promise<OpenBotRole[]>'.
+server/tests/identity-provider-audit.test.ts: error TS7006: Parameter 'event' implicitly has an 'any' type.
+server/tests/intelligence-authentication.test.ts: error TS2769: No overload matches this call.
+server/tests/intelligence-authentication.test.ts: error TS2769: No overload matches this call.
+server/tests/learning-ensure-container.test.ts: error TS2322: Type '{ probes: number; probe: () => Promise<ContainerProbe>; project: () => Promise<{ organizationSlug: string; projectSlug: string; }>; }' is not assignable to type 'KeyIntelligence & { probes: number; }'.
+server/tests/learning-routes.test.ts: error TS2322: Type '{ "content-type": string; origin: string; } | { "content-type": string; origin?: undefined; }' is not assignable to type 'HeadersInit | undefined'.
+server/tests/mcp-grant-removal.integration.test.ts: error TS2322: Type 'Promise<undefined>' is not assignable to type 'Promise<AuthConfigOutcome>'.
+server/tests/mcp-grant-removal.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: () => Promise<never>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/memory-runtime.test.ts: error TS2344: Type 'BaseEvent' does not satisfy the constraint 'readonly unknown[]'.
+server/tests/memory-store.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/model-providers.test.ts: error TS2345: Argument of type '(input: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' is not assignable to parameter of type 'typeof fetch'.
+server/tests/model-providers.test.ts: error TS2769: No overload matches this call.
+server/tests/passwords-sign-in.test.ts: error TS2353: Object literal may only specify known properties, and 'code' does not exist in type '{ username?: string | undefined; password: string; save?: boolean | undefined; }'.
+server/tests/people-routes.test.ts: error TS2322: Type 'Response | Promise<Response>' is not assignable to type 'Promise<Response>'.
+server/tests/plan-model.test.ts: error TS2345: Argument of type '(id: string) => Promise<{ name: string; description: string; parameters: ZodObject<{ query: ZodString; }, $strip>; ref: { kind: string; serverId: string; toolName: string; }; execute: (args: unknown) => Promise<...>; }[]>' is not assignable to parameter of type 'LoadToolsForBot'.
+server/tests/plan-model.test.ts: error TS2769: No overload matches this call.
+server/tests/plugin-catalogue.test.ts: error TS2531: Object is possibly 'null'.
+server/tests/plugin-curated-credential.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; revoke: () => Promise<never>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-oauth-callback.test.ts: error TS2769: No overload matches this call.
+server/tests/plugin-routes.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<never>; create: () => Promise<never>; revoke: () => Promise<never>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-routes.test.ts: error TS2322: Type '(serverId: string) => Promise<{ id: string; title: string; url: string; authScheme: string | null; accountMode?: "shared"; } | undefined>' is not assignable to type '(serverId: string) => Promise<ServerAddress | undefined>'.
+server/tests/plugin-routes.test.ts: error TS2322: Type '(serverId: string, actorId: string) => Promise<{ refusal: string; readonly ref?: undefined; readonly title?: undefined; mode?: undefined; } | { ref: { holder: "deployment"; vendorUserId: string; userId?: undefined; }; title: string; mode: "shared"; refusal?: undefined; } | { ...; }>' is not assignable to type '(serverId: string, actorId: string) => Promise<{ ref: AccountRef; title: string; mode: "personal" | "shared"; appId: string; } | { refusal: string; }>'.
+server/tests/plugin-routes.test.ts: error TS2769: No overload matches this call.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '() => Promise<string>' is not assignable to type '(config: { toolkit: string; name: string; }) => Promise<void>'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '(request: { toolkit: string; name: string; }) => Promise<void>' is not assignable to type '(config: { toolkit: string; name: string; connection: BrokerConnection; }) => Promise<AuthConfigOutcome>'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<Date>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<Date>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<Date>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<Date>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<Date>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-store.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<Date>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/plugin-store.integration.test.ts: error TS2339: Property 'payload' does not exist on type '{ eventType: string; targetId?: string | undefined; }'.
+server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '(string | null)[]' is not assignable to parameter of type 'string[]'.
+server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '(string | null)[]' is not assignable to parameter of type 'string[]'.
+server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
+server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '{ provenance: string; url: string; }' is not assignable to parameter of type '{ provenance: string; url: string; authScheme: string | null; accountMode?: string | null | undefined; }'.
+server/tests/plugin-store.integration.test.ts: error TS2345: Argument of type '{ slug: string; title: string; by: string; }' is not assignable to parameter of type '{ slug: string; title: string; logo?: string | null | undefined; by: string; connection: BrokerConnection; }'.
+server/tests/plugin-store.integration.test.ts: error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+server/tests/plugin-user-credential.integration.test.ts: error TS2322: Type '{ readSecret: (id: string) => Promise<{ encryptedValue: string; revokedAt: Date | null; }>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: (id: string) => Promise<...>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/policy-dry-run.test.ts: error TS2739: Type '{ id: string; actorUserId: null; eventType: string; targetType: string; targetId: string; createdAt: string; payload: Record<string, unknown>; }' is missing the following properties from type 'AuditEvent': initiatorKind, initiatorId
+server/tests/remote-approval-context.test.ts: error TS2345: Argument of type '(input: RunAgentInput) => Observable<{ type: string; threadId: string; runId: string; } | { type: string; snapshot: { real: string; }; } | { type: string; toolCallId: string; toolCallName: string; parentMessageId: string; } | { ...; } | { ...; } | { ...; } | { ...; }>' is not assignable to parameter of type '(input: RunAgentInput) => Observable<BaseEvent>'.
+server/tests/remote-bot-handoff.integration.test.ts: error TS2322: Type 'Promise<undefined>' is not assignable to type 'Promise<AuthConfigOutcome>'.
+server/tests/remote-bot-handoff.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: () => Promise<never>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/remote-bot-handoff.integration.test.ts: error TS2554: Expected 2-3 arguments, but got 1.
+server/tests/remote-bot-handoff.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/remote-coordination.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/responsibility-triggers.test.ts: error TS2353: Object literal may only specify known properties, and 'agentId' does not exist in type 'ResolvedTrigger'.
+server/tests/routine-routes.test.ts: error TS2739: Type '{ create(): Promise<never>; listFor(ownerUserId: string): Promise<RoutineSummary[]>; update(): Promise<never>; remove(ownerUserId: string, id: string): Promise<...>; ... 9 more ...; consecutiveFailures(): Promise<...>; }' is missing the following properties from type 'RoutineStore': startManualRun, listRuns, reapAbandonedRuns, markUnschedulable
+server/tests/routine-run-now.test.ts: error TS2322: Type '() => Promise<({ id: string; status: null; startedAt: Date; finishedAt: null; error: null; } | { id: string; status: "failed"; startedAt: Date; finishedAt: Date; error: string; })[]>' is not assignable to type '(ownerUserId: string, id: string, limit?: number | undefined) => Promise<RoutineRunSummary[]>'.
+server/tests/routine-runner.test.ts: error TS2740: Type '{ create: () => never; listFor: () => never; update: () => never; remove: () => never; dueRoutines: () => never; advanceNextRun: () => never; insertRun: () => never; runContext(runId: string): Promise<RoutineRunContext | null>; finishRun(runId: string, status: RoutineRunOutcome, error: string | undefined): Promise<....' is missing the following properties from type 'RoutineStore': startManualRun, listRuns, routineForFiring, reapAbandonedRuns, and 3 more.
+server/tests/routine-runner.test.ts: error TS2741: Property 'lastMessageAt' is missing in type '{ id: string; name: string; agentIds: string[]; threadId: string; active: true; }' but required in type 'AgentChannel'.
+server/tests/routing-routes.test.ts: error TS2345: Argument of type '(input: { id: string; name: string; roleDescription: string; visibility: AgentVisibility; }) => AgentProfile' is not assignable to parameter of type '(value: { id: string; name: string; roleDescription: string; visibility: string; }, index: number, array: { id: string; name: string; roleDescription: string; visibility: string; }[]) => AgentProfile'.
+server/tests/routing-service.test.ts: error TS2339: Property 'names' does not exist on type 'CoworkerRouteResult'.
+server/tests/routing-service.test.ts: error TS2339: Property 'names' does not exist on type 'CoworkerRouteResult'.
+server/tests/routing-service.test.ts: error TS2339: Property 'names' does not exist on type 'CoworkerRouteResult'.
+server/tests/routing-service.test.ts: error TS2339: Property 'names' does not exist on type 'CoworkerRouteResult'.
+server/tests/schema.test.ts: error TS2345: Argument of type '<T extends Table>(table: T) => T["_"]["name"]' is not assignable to parameter of type '(value: PgTableWithColumns<{ name: "capability_settings"; schema: undefined; columns: { scopeKind: PgColumn<{ name: "scope_kind"; tableName: "capability_settings"; dataType: "string"; columnType: "PgText"; data: "organization" | "role" | "group"; ... 9 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ......'.
+server/tests/schema.test.ts: error TS2345: Argument of type '<T extends Table>(table: T) => T["_"]["name"]' is not assignable to parameter of type '(value: PgTableWithColumns<{ name: "capability_settings"; schema: undefined; columns: { scopeKind: PgColumn<{ name: "scope_kind"; tableName: "capability_settings"; dataType: "string"; columnType: "PgText"; data: "organization" | "role" | "group"; ... 9 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ......'.
+server/tests/schema.test.ts: error TS2345: Argument of type '<T extends Table>(table: T) => T["_"]["name"]' is not assignable to parameter of type '(value: PgTableWithColumns<{ name: "capability_settings"; schema: undefined; columns: { scopeKind: PgColumn<{ name: "scope_kind"; tableName: "capability_settings"; dataType: "string"; columnType: "PgText"; data: "organization" | "role" | "group"; ... 9 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ......'.
+server/tests/schema.test.ts: error TS2345: Argument of type 'PgTableWithColumns<{ name: "capability_settings"; schema: undefined; columns: { scopeKind: PgColumn<{ name: "scope_kind"; tableName: "capability_settings"; dataType: "string"; columnType: "PgText"; data: "organization" | "role" | "group"; ... 9 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ...; update...' is not assignable to parameter of type 'PgTable<TableConfig>'.
+server/tests/schema.test.ts: error TS2345: Argument of type 'PgTableWithColumns<{ name: "capability_settings"; schema: undefined; columns: { scopeKind: PgColumn<{ name: "scope_kind"; tableName: "capability_settings"; dataType: "string"; columnType: "PgText"; data: "organization" | "role" | "group"; ... 9 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ...; update...' is not assignable to parameter of type 'Table<TableConfig<Column<any, object, object>>>'.
+server/tests/schema.test.ts: error TS2677: A type predicate's type must be assignable to its parameter's type.
+server/tests/server-side-tools.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/settings-instructions-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
+server/tests/settings-instructions-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
+server/tests/settings-instructions-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
+server/tests/settings-instructions-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
+server/tests/settings-instructions-routes.test.ts: error TS7006: Parameter 'response' implicitly has an 'any' type.
+server/tests/settings-instructions-routes.test.ts: error TS7006: Parameter 'response' implicitly has an 'any' type.
+server/tests/settings-instructions-routes.test.ts: error TS7006: Parameter 'response' implicitly has an 'any' type.
+server/tests/settings-instructions-routes.test.ts: error TS7006: Parameter 'response' implicitly has an 'any' type.
+server/tests/skill-ownership.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/skill-tools.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/skill-uninstall-grants.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.
+server/tests/tenant-package.test.ts: error TS2698: Spread types may only be created from object types.
+server/tests/tenant-package.test.ts: error TS2698: Spread types may only be created from object types.
+server/tests/thread-routes.test.ts: error TS2769: No overload matches this call.
+server/tests/tool-selection.integration.test.ts: error TS2345: Argument of type '() => string | undefined' is not assignable to parameter of type 'SignRun'.
+server/tests/tool-selection.integration.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/tool-selection.integration.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/tool-selection.integration.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/tool-selection.integration.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/tool-selection.integration.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/tool-selection.integration.test.ts: error TS2353: Object literal may only specify known properties, and 'type' does not exist in type 'FixtureFileResponse | ResponseFactory'.
+server/tests/user-preferences.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/voice-routes.test.ts: error TS2739: Type 'Response & TypedResponse<{ error: string; }, 401, "json">' is missing the following properties from type 'Promise<void | Response>': then, catch, finally, [Symbol.toStringTag]
+server/tests/voice-routes.test.ts: error TS2739: Type 'Response & TypedResponse<{ error: string; }, 401, "json">' is missing the following properties from type 'Promise<void | Response>': then, catch, finally, [Symbol.toStringTag]
+server/tests/voice-session-preview.integration.test.ts: error TS2769: No overload matches this call.
+server/tests/voice-session-routes.test.ts: error TS2739: Type 'Response & TypedResponse<{ error: string; }, 401, "json">' is missing the following properties from type 'Promise<void | Response>': then, catch, finally, [Symbol.toStringTag]
+server/tests/voice-session-store.integration.test.ts: error TS2345: Argument of type '`page-${string}`' is not assignable to parameter of type '`${string}-${string}-${string}-${string}-${string}`'.
+server/tests/voice-sessions.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/voice-sessions.test.ts: error TS2741: Property 'preconnect' is missing in type '(_url: URL | RequestInfo, init: RequestInit | BunFetchRequestInit | undefined) => Promise<Response>' but required in type 'typeof fetch'.
+server/tests/web-research.test.ts: error TS2339: Property 'get' does not exist on type 'never'.
+server/tests/web-research.test.ts: error TS2339: Property 'get' does not exist on type 'never'.
+server/tests/web-research.test.ts: error TS2339: Property 'get' does not exist on type 'never'.

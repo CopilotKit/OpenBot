@@ -1,3 +1,4 @@
+import { IconChecklist } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
@@ -46,8 +47,8 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
     <PageSection
       description={
         <>
-          The strictest matching rule wins, so an "ask" rule beats an "allow"
-          one. Rules for every Bot are in{" "}
+          The strictest matching rule wins. An "ask" rule beats an "allow" rule.
+          Rules for every Bot are in{" "}
           <Link
             className="underline underline-offset-4"
             to="/settings/approvals"
@@ -56,7 +57,7 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
           </Link>
           .
           {rulesOff
-            ? " Your team has switched personal rules off, so they are kept but do not apply."
+            ? " An admin has turned off personal rules. Yours are kept but don't apply."
             : ""}
         </>
       }
@@ -67,7 +68,9 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
           {error.message}
         </p>
       ) : null}
-      {saved === 0 ? <PageEmpty>No rules for this Bot.</PageEmpty> : null}
+      {saved === 0 ? (
+        <PageEmpty icon={IconChecklist} title="No rules for this Bot" />
+      ) : null}
       {saved > 0 || canAdd ? (
         <PageRows>
           {team.map((rule, index) => (

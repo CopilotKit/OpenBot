@@ -41,14 +41,19 @@ starts, the platform reports the deploy a success, and the URL serves a 502. Mou
 leaves `data` as an ordinary subdirectory, which is what PostgreSQL asks for. A Docker named volume
 works either way; a platform volume does not. Platforms that offer no persistent volume are the ones to
 point at a managed database instead: set `DATABASE_URL` and leave `EMBEDDED_POSTGRES` off. The
-`vector` extension must be enabled there; RDS, Cloud SQL and Azure Database all support it, none
-enable it for you.
+`vector` extension must be available there, and the role in `DATABASE_URL` has to be the one that
+creates it. The first migration creates it and migration `0010` drops it again, since nothing stores
+vectors any more, and only the extension's owner can drop it. So do not enable it ahead of time as
+an administrator: that leaves the migrations failing with `must be owner of extension vector`. RDS,
+Cloud SQL and Azure Database all offer it; [Your own database](../charts/openbot/README.md#your-own-database-which-is-what-a-real-deployment-uses)
+has the grant each one needs.
 
 **Not in it:**
 
-**The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
-serverless container platform permits. Without it, every Bot shares the one browser, exactly as they
-do on a laptop with no supervisor configured. A shared browser means shared logins, shared files and
+**The supervisor.** It gives each person their own container, and each Isolated Bot one of its own,
+which needs a Docker socket, which no serverless container platform permits. Without it, every Bot
+shares the one computer, exactly as they do on a laptop with no supervisor configured. Each person's
+Bots still keep their own browser profile and folder there, but a shared computer means shared files and
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
 
@@ -115,7 +120,7 @@ and the fix would not be available.
 
 | Variable | |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL with the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
+| `DATABASE_URL` | PostgreSQL where this role can create the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
 | an identity provider | `GOOGLE_OAUTH_*`, `MICROSOFT_OAUTH_*` or `OKTA_OAUTH_*`, with `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` and `INITIAL_ADMIN_EMAILS`. See the README |
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
@@ -181,6 +186,26 @@ against an empty database. The script uses the migrator inside `drizzle-orm`, wh
 dependency, and keeps the same journal, so a database migrated by either is migrated. It is what
 this image's own start-up path and the Helm chart's migration Job both run.
 
+**If a migration run refuses with "the migrator only runs migrations stamped after the row it
+reads"**, this database has recorded a migration stamped later than one it is now being asked to
+apply, and nothing has been applied. The migrator decides what to run by comparing journal
+timestamps against the newest timestamp in `drizzle.__drizzle_migrations` and nothing else, so a
+migration stamped below that mark would be walked past and the run reported as a success over the
+tables it should have created. The refusal names every migration in that position.
+
+It happens when a database ran a branch's migrations before that branch was merged: merging renumbers
+and restamps the branch's migrations to sit after the ones it merged in, and those merged-in
+migrations are older than the stamp the database already holds. Development, preview and reused CI
+databases are where it is met.
+
+Recreate the database from empty if it is disposable. If it is not, apply each named migration's SQL
+by hand and record it, which leaves the high-water mark where it is and lets the next run proceed:
+
+```sql
+insert into drizzle.__drizzle_migrations (hash, created_at)
+values ('<sha256 of server/drizzle/<tag>.sql>', <that entry's "when" in meta/_journal.json>);
+```
+
 ## Replicas
 
 The page snapshot a Bot resolves element references against lives in Postgres, so a second replica
@@ -202,7 +227,7 @@ Plain ECS on Fargate behind an ALB is the answer if you want task definitions an
 No shared-memory configuration is needed or possible.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
-and it is the only one that gives a Bot a computer of its own, runs the routines schedule without
+and it is the only one that gives each person (or an Isolated Bot) a computer of its own, runs the routines schedule without
 something outside the container, and scales the API past a single replica. That is the Helm chart:
 [charts/openbot/README.md](../charts/openbot/README.md), which covers EKS, GKE, AKS and a plain
 self-hosted cluster from the same templates.
@@ -218,8 +243,9 @@ which makes them the shortest path from nothing to a running deployment.
 
 **The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the
 published `agent-computer` Dockerfile both build from Ubuntu and run Playwright's pinned
-`install --with-deps chromium` path, so Firefox and WebKit are never introduced into the final image
-layers. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
+`install --with-deps --no-shell chromium` path, so Firefox and WebKit are never introduced into the
+final image layers. `--no-shell` leaves out Playwright's separate headless shell: every launch names a
+Chromium channel, and Playwright runs the full browser for a named channel even when headless. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
 the other can make the browser protocol and executable revision diverge. The images keep the
 baseline Node command-line tools (`node`, `npm`, and `npx`) from the official Node 24.18.1 image.
 Measured as local zstd OCI layer descriptors against the previous Playwright-base `agent-computer`

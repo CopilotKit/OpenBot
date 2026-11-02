@@ -90,7 +90,7 @@ export function summaryFor(
   const status = STATUS[goal.status].label;
   if (goal.status === "completed") return status;
   if (goal.status === "paused")
-    return `${status} · Nothing starts it until resumed`;
+    return `${status} · Nothing starts it until you resume it`;
   const starts = [
     ...goal.subscriptions.map(
       (subscription) =>
@@ -164,8 +164,8 @@ export function ResponsibilityDialog({
                     <ItemTitle>Active</ItemTitle>
                     <ItemDescription>
                       {goal.status === "active"
-                        ? "Its events and triggers start runs."
-                        : "Paused. Its triggers are acknowledged but never run it."}
+                        ? "Its events and triggers start it."
+                        : "Paused. Its triggers won't start it."}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -205,10 +205,10 @@ export function ResponsibilityDialog({
                     <IconPlayerPlay />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle>Run now (real run)</ItemTitle>
+                    <ItemTitle>Run now</ItemTitle>
                     <ItemDescription>
-                      Runs it for real, now: the Bot does the work and can post
-                      and act.
+                      Runs it now, for real. The Bot does the work and can post
+                      and take actions.
                     </ItemDescription>
                   </ItemContent>
                 </Item>
@@ -352,7 +352,7 @@ export function ResponsibilityDialog({
                         {goal.subscriptions
                           .map(
                             (subscription) =>
-                              `${subscription.source} · ${subscription.eventType}`,
+                              `${SOURCE_LABEL[subscription.source]} · ${subscription.eventType}`,
                           )
                           .join(", ")}
                       </ItemDescription>
@@ -459,15 +459,15 @@ function Runs({
                     params={{ channelId }}
                     className="text-sm underline"
                   >
-                    Open thread
+                    Open conversation
                   </Link>
                 </ItemActions>
                 {run.waiting || run.error || run.replyText ? (
                   <ItemFooter className="min-w-0 flex-col items-stretch">
                     {run.waiting && (
                       <p>
-                        Waiting for {run.waiting.kind}. Respond at the top of
-                        this Bot's page, or in the conversation.
+                        Waiting for {run.waiting.kind}. Answer at the top of
+                        this Bot's page or in the conversation.
                       </p>
                     )}
                     {run.error && (

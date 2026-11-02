@@ -1,7 +1,9 @@
 import {
+  IconApps,
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconChevronRight,
+  IconCircleCheck,
   IconPlug,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +17,11 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import {
+  AccessRequestsSection,
+  usePendingRequestCounts,
+} from "@/components/plugins/access-requests";
+import { PluginLogo } from "@/components/plugins/plugin-logo";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -23,11 +30,17 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
+  moreAppsRow,
+  moreAppsSectionDescription,
+  providerVocabulary,
+} from "@/lib/plugins/provider-vocabulary";
+import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
   personalConnections,
   pluginsPageQueryOptions,
+  pluginsProvider,
 } from "@/lib/plugins/queries";
 
 /**
@@ -48,18 +61,28 @@ export const Route = createFileRoute("/_authed/admin/plugins/")({
 });
 
 /**
- * A vendor's own mark where there is one, and a plug where there is not.
- *
- * The fallback covers a server an administrator added by URL, which has no catalogue entry and so no
- * mark of its own — and it would cover a catalogue vendor Tabler ships no brand for. Only Drive is in
- * the catalogue today, and Tabler has it.
+ * A vendor's own mark where Tabler ships one. Everything else draws the server's logo, or its
+ * initial: a server an administrator added by URL has no catalogue entry and so no mark of its own,
+ * and a column of identical plugs would tell one vendor from another no better than no icon at all.
  */
 const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
   "google-drive": IconBrandGoogleDrive,
   notion: IconBrandNotion,
 };
 
-const markFor = (key: string) => MARKS[key] ?? IconPlug;
+function VendorMark({
+  id,
+  logo,
+  name,
+}: {
+  id: string;
+  logo?: string | null;
+  name: string;
+}) {
+  const Brand = MARKS[id];
+  if (Brand) return <Brand className="size-4" />;
+  return <PluginLogo logo={logo} name={name} />;
+}
 
 /**
  * What a connected row says on the right.
@@ -96,6 +119,17 @@ function summaryFor(
 function RouteComponent() {
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
+  /*
+   * Requests waiting per app, so an administrator sees which app somebody is asking about from the
+   * list, without opening each one. Every request is also listed in full above the lists.
+   */
+  const requestCounts = usePendingRequestCounts();
+  // A NAME for the "More apps" row, which cannot be read off a row that may not exist yet.
+  const provider = pluginsProvider(plugins.data);
+  const moreApps = moreAppsRow(
+    provider,
+    plugins.data?.composioConfigured ?? false,
+  );
 
   /*
    * PERSONAL ONLY: a Shared app's connection is the deployment's standing account, not something
@@ -118,28 +152,33 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What this deployment can reach, and which Bots may reach it. Adding a plugin is account-wide; which Bots hold its tools is decided on its own page."
+      description="Connect services for your company, then choose which Bots can use each service’s tools."
       title="Plugins"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
       {plugins.isPending ? null : plugins.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Plugins could not be loaded.
+          Couldn't load plugins. Reload the page.
         </p>
       ) : (
         <>
+          {/*
+           * First, because each one is somebody waiting. All of them, not only those about an app
+           * that is connected: an app nobody has switched on has no page of its own to list them on.
+           */}
+          <AccessRequestsSection />
+
           <PageSection
-            description="Added for the whole deployment. Open one to set what it needs and which Bots hold its tools."
+            description="Added for everybody. Open one to set it up and choose which Bots get its tools."
             title="Connected"
           >
             {plugins.data?.servers.length === 0 ? (
-              <PageEmpty>
-                Nothing connected yet. Everything available is below.
+              <PageEmpty icon={IconPlug} title="Nothing connected yet">
+                Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
                 {plugins.data?.servers.map((server, index) => {
-                  const Mark = markFor(server.id);
                   return (
                     <React.Fragment key={server.id}>
                       {/*
@@ -158,7 +197,11 @@ function RouteComponent() {
                         size="sm"
                       >
                         <RowMark>
-                          <Mark className="size-4" />
+                          <VendorMark
+                            id={server.id}
+                            logo={server.logo}
+                            name={server.title}
+                          />
                         </RowMark>
                         <ItemContent>
                           <ItemTitle>{server.title}</ItemTitle>
@@ -176,6 +219,9 @@ function RouteComponent() {
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
+                          <PendingRequests
+                            count={requestCounts?.byApp[server.id] ?? 0}
+                          />
                           <span className="text-muted-foreground text-xs">
                             {summaryFor(
                               server,
@@ -197,15 +243,16 @@ function RouteComponent() {
           </PageSection>
 
           <PageSection
-            description="Reviewed, first-party servers this build will talk to. Open one to add it."
+            description="Reviewed, first-party servers. Open one to add it."
             title="Explore plugins"
           >
             {explore.length === 0 ? (
-              <PageEmpty>Everything in the catalogue is connected.</PageEmpty>
+              <PageEmpty icon={IconCircleCheck} title="All connected">
+                Every plugin in the catalogue is connected.
+              </PageEmpty>
             ) : (
               <PageRows>
                 {explore.map((entry: CatalogueItem, index) => {
-                  const Mark = markFor(entry.key);
                   return (
                     <React.Fragment key={entry.key}>
                       <Item
@@ -219,13 +266,16 @@ function RouteComponent() {
                         size="sm"
                       >
                         <RowMark>
-                          <Mark className="size-4" />
+                          <VendorMark id={entry.key} name={entry.title} />
                         </RowMark>
                         <ItemContent>
                           <ItemTitle>{entry.title}</ItemTitle>
                           <ItemDescription>{entry.summary}</ItemDescription>
                         </ItemContent>
                         <ItemActions>
+                          <PendingRequests
+                            count={requestCounts?.byApp[entry.key] ?? 0}
+                          />
                           <span className="text-muted-foreground text-xs">
                             Not added
                           </span>
@@ -241,7 +291,7 @@ function RouteComponent() {
           </PageSection>
 
           <PageSection
-            description="A directory this deployment has not reviewed, reached through Composio."
+            description={moreAppsSectionDescription(provider)}
             title="More apps"
           >
             <PageRows>
@@ -252,21 +302,25 @@ function RouteComponent() {
                * administrator with nothing to search for, and nothing to tell them the handful of
                * connectors above is not the whole story.
                */}
-              {plugins.data?.composioConfigured ? (
+              {moreApps.linked ? (
                 <Item
-                  data-testid="plugin-composio"
-                  render={<Link to="/admin/plugins/composio" />}
+                  data-testid="plugin-directory"
+                  /* The ACTIVE provider's own directory. Read from the vocabulary rather than
+                     written here: a hard-coded path is the lowercase spelling of a vendor name,
+                     which is how this row pointed every Arcade deployment at a screen that
+                     redirected it straight back. The field is a literal union over the generated
+                     route tree, so a path no route answers does not compile. */
+                  render={
+                    <Link to={providerVocabulary(provider).directoryPath} />
+                  }
                   size="sm"
                 >
                   <RowMark>
-                    <IconPlug className="size-4" />
+                    <IconApps className="size-4" />
                   </RowMark>
                   <ItemContent>
-                    <ItemTitle>Browse Composio</ItemTitle>
-                    <ItemDescription>
-                      A few hundred apps, reached as whoever is asking. Each
-                      person connects their own account.
-                    </ItemDescription>
+                    <ItemTitle>{moreApps.title}</ItemTitle>
+                    <ItemDescription>{moreApps.description}</ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -275,16 +329,13 @@ function RouteComponent() {
               ) : (
                 /* No chevron and no link: the row goes nowhere, because there is nowhere to go
                    until the key is set. */
-                <Item data-testid="plugin-composio" size="sm">
+                <Item data-testid="plugin-directory" size="sm">
                   <RowMark>
-                    <IconPlug className="size-4" />
+                    <IconApps className="size-4" />
                   </RowMark>
                   <ItemContent>
-                    <ItemTitle>Composio</ItemTitle>
-                    <ItemDescription>
-                      Add your Composio key to enable a catalogue of tools. Set
-                      COMPOSIO_API_KEY on this deployment.
-                    </ItemDescription>
+                    <ItemTitle>{moreApps.title}</ItemTitle>
+                    <ItemDescription>{moreApps.description}</ItemDescription>
                   </ItemContent>
                 </Item>
               )}
@@ -293,5 +344,18 @@ function RouteComponent() {
         </>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * "2 requests", beside a row's summary, in the foreground colour so it is the first thing on the
+ * row that reads as something to do. Nothing at zero: a count of nothing on every row is noise.
+ */
+function PendingRequests({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="font-medium text-foreground text-xs tabular-nums">
+      {count} {count === 1 ? "request" : "requests"}
+    </span>
   );
 }

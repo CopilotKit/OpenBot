@@ -5,11 +5,14 @@
       "**",
       "!**/dist",
       "!.",
+      "!.superpowers",
+      "!**/.venv*",
       "!app/src/lib/generated/application-config.ts",
       "!app/src/routeTree.gen.ts",
       "!desktop/src-tauri/gen",
       "!**/target",
-      "!server/drizzle"
+      "!server/drizzle",
+      "!server/tests/fixtures/arcade-catalogue.json"
     ]
   },
   "formatter": {
@@ -65,6 +68,37 @@
                       "hono/**"
                     ],
                     "message": "The toolkit core depends on @ag-ui, rxjs, zod and @openbot/shared only. CopilotKit-specific code goes in toolkit/src/copilotkit."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["extension/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../../server/**",
+                      "../../../server/**",
+                      "../../../../server/**",
+                      "drizzle-orm",
+                      "drizzle-orm/**",
+                      "hono",
+                      "hono/**",
+                      "@/routes/**",
+                      "@/lib/client",
+                      "@/query-client"
+                    ],
+                    "message": "The extension runs in the browser. It talks to OpenBot over HTTP only, and takes only OpenBot's UI primitives and layout parts from the app."
                   }
                 ]
               }

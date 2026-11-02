@@ -20,7 +20,7 @@ export type ClientOptions = {
   /**
    * What a person reads when the server sent no message of its own.
    *
-   * Name the entity in it — "Could not load coworkers" rather than "Request failed" — because this
+   * Name the entity in it — "Couldn't load your Bots." rather than "Request failed" — because this
    * is the sentence that reaches the screen when the server is the one that broke.
    */
   fallback?: string;

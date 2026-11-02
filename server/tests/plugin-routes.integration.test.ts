@@ -26,6 +26,7 @@ import { testEnvironment } from "./support/environment";
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: {

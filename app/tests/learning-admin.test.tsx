@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { LearningSettings } from "@openbot/shared/learning";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -9,7 +10,6 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearningPage } from "@/routes/_authed/admin/learning";
-import type { LearningSettings } from "@openbot/shared/learning";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -157,7 +157,7 @@ test.each([
   [
     { enabled: true, defaultTarget: null, agents: {} },
     { state: "not_entitled" },
-    "plan does not include Learning",
+    "plan doesn't include Learning",
   ],
 ] as const)(
   "the page says what automatic assignment found (%#)",

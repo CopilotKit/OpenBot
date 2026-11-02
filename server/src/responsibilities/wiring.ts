@@ -108,7 +108,10 @@ export function createServerResponsibilityEngine(deps: {
               )
                 ? createHeadlessComputerTools({
                     gateway: computerGateway,
-                    botId: context.agentId,
+                    seat: await computerGateway.seatFor(
+                      context.agentId,
+                      actor.id,
+                    ),
                     actor: { id: actor.id, userId: actor.id, initiator },
                     auditStore: bootAuditStore,
                     ...(signInService ? { signIn: signInService } : {}),

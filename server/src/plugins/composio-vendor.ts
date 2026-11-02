@@ -1,4 +1,6 @@
 import {
+  BrokerAccountGoneError,
+  BrokerAccountHeldError,
   type BrokerApp,
   type BrokerConnection,
   BrokerRefusalError,
@@ -178,7 +180,41 @@ export type VendorAuthConfig = {
   id?: unknown;
   name?: unknown;
   status?: unknown;
+  /**
+   * What the config was created to ask for, where Composio publishes it, and `unknown` because it
+   * is copied across verbatim like the three above.
+   *
+   * IT IS A PROPERTY OF THE CONFIG RATHER THAN OF AN ACCOUNT, which is the whole of why
+   * {@link ComposioBroker.grantsFor}'s answer is one state for a toolkit: the scope set is fixed
+   * when the config is created and every account connected against it holds exactly that set.
+   */
+  scopes?: unknown;
 };
+
+/**
+ * One connected account as the listing hands it over, narrowed to the fields this file reads.
+ *
+ * `id` and `data` are read by the withdrawal and by {@link ComposioBroker.accountName}.
+ * `authConfig` is read by {@link ComposioBroker.grantsFor} alone, for the id of the config the
+ * account was minted against, because that config — and no other — fixes the scopes the account
+ * holds. `transformConnectedAccountResponse` builds it on every row from the raw
+ * `auth_config` (`@composio/core` 0.18.1, `src/utils/transformers/connectedAccounts.ts:55-62`), and
+ * it is `unknown` for the reason every other field here is: the transform is warn-only.
+ */
+export type AccountRow = { id?: unknown; data?: unknown; authConfig?: unknown };
+
+/**
+ * The id of the auth config one account was minted against, or null where Composio did not name it.
+ *
+ * NULL RATHER THAN A REFUSAL, BECAUSE ITS ONE READER REPORTS RATHER THAN ACTS — the reasoning of
+ * {@link scopesOf}, one field along. An account whose config cannot be named is still an account,
+ * and what is lost is only the description of what it holds.
+ */
+export function configIdOf(row: AccountRow): string | null {
+  const config = row.authConfig;
+  if (!config || typeof config !== "object") return null;
+  return textOf((config as { id?: unknown }).id);
+}
 
 /**
  * The connected-account statuses this file knows how to ask for, as the literals the SDK admits.
@@ -1038,6 +1074,16 @@ export function appOf(row: VendorToolkit, position: number): BrokerApp {
     logo,
     categories,
     actionCount,
+    /*
+     * THREE EXPLICIT NULLS, AND NEVER `?? 0`. Composio's toolkit listing publishes no behaviour
+     * classification and no per-action scope sets, so this deployment has not measured them here —
+     * which is a different fact from having measured them and found none. A zero would say the
+     * second, and the page would fire its coverage warning on every Composio app: a false alarm at
+     * exactly the moment somebody is deciding whether to trust one. See {@link BrokerApp}.
+     */
+    classifiedCount: null,
+    permissionCount: null,
+    scopedActionCount: null,
     connection: connectionOf(row),
   };
 }
@@ -1055,7 +1101,34 @@ export type CheckedAuthConfig = {
   id: string;
   name: string;
   status: unknown;
+  /** The scope set this config was created with, as {@link scopesOf} could read it. */
+  scopes: string[];
 };
+
+/**
+ * The scope names on an auth config row, and the EMPTY LIST for everything else.
+ *
+ * NOT A REFUSAL, BECAUSE ITS ONE READER REPORTS RATHER THAN ACTS. Every other field this file
+ * reads off a config decides something destructive or something a person is sent through — which
+ * id to delete, which config to mint a consent against — so a shape that cannot be read is a thing
+ * to stop on. Scopes are carried on a {@link GrantState}, which is a description handed to a page:
+ * Composio publishes none at all for a key-scheme config, so "no scope set published" is the
+ * ordinary case and not a fault, and an app somebody is plainly connected to must not become
+ * unreportable because the field arrived as a string.
+ *
+ * ONE PASS, AND THE NON-STRINGS ARE DROPPED RATHER THAN RENDERED. A scope is a name sent to a
+ * provider; `String({})` is not one, and a list half of whose entries were invented here is worse
+ * than a shorter list.
+ */
+function scopesOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const names: string[] = [];
+  for (const entry of value) {
+    const name = textOf(entry);
+    if (name !== null) names.push(name);
+  }
+  return names;
+}
 
 /**
  * That status as the WORD it is, so the test and the sentence about it are about the same value.
@@ -1198,7 +1271,12 @@ export function readableConfigs(
       return;
     }
 
-    const config: CheckedAuthConfig = { id, name, status: row.status };
+    const config: CheckedAuthConfig = {
+      id,
+      name,
+      status: row.status,
+      scopes: scopesOf(row.scopes),
+    };
     if (slot === undefined) {
       slotOf.set(id, settled.length);
       settled.push(config);
@@ -1612,10 +1690,21 @@ function vendorRefusal(
      * rule met one layer down — one person holds one account per app, because the call that runs an
      * action names the person and not the account. So it is a settled fact rather than a moment,
      * and "check the key and try again" is advice that cannot ever come true.
+     *
+     * RAISED AS ITS OWN CLASS, BECAUSE THE ACCOUNT IT REPORTS IS ONE THIS DEPLOYMENT MAY NOT KNOW
+     * ABOUT. The connect route refuses a second connection itself wherever it holds a row, so this
+     * only reaches it where the row is missing: a fresh or upgraded install, or two installs
+     * signing in as one person against one Composio key. See {@link BrokerAccountHeldError}: the
+     * route asks again and records the account rather than passing this sentence on.
+     *
+     * AND THE SENTENCE NO LONGER SENDS ANYBODY TO DISCONNECT IT. It used to name this deployment's
+     * Connected accounts page as the place to end the account, which is false exactly when this
+     * fires: with no row here, that page draws the app as not connected and offers no Disconnect.
      */
     case "ComposioMultipleConnectedAccountsError":
-      return refusal(
-        `Composio answered that this person already holds a connected account for ${app}, so ${outcome}. That is a settled state at Composio rather than a moment that passes — asking again meets the same answer — and what clears it is disconnecting the account they already hold, on this deployment's Connected accounts page, before another is attached.`,
+      return new BrokerAccountHeldError(
+        `Composio answered that this person already holds a connected account for ${app}, so ${outcome}. That is a settled state at Composio and not a moment that passes, so asking for another link meets the same answer. It is an account this person is already connected through, whether or not this deployment has recorded it yet.`,
+        { cause: error },
       );
 
     /*
@@ -1676,8 +1765,13 @@ function vendorRefusal(
      * neither; connecting again is what puts an account back under the row.
      */
     case "ComposioConnectedAccountNotFoundError":
-      return refusal(
+      /*
+       * Raised as its own class so the tool call that met it can put Reconnect in front of the
+       * person rather than this sentence alone. See {@link BrokerAccountGoneError}.
+       */
+      return new BrokerAccountGoneError(
         `Composio holds no connected account for this person and ${app}, so ${outcome}. A grant withdrawn at the provider and an account removed in Composio's own dashboard both read exactly like this, and a retry reaches neither: connecting ${app} again on this deployment's Connected accounts page is what restores it.`,
+        { cause: error },
       );
 
     /*

@@ -11,10 +11,9 @@ import { IdentityConflictError } from "../src/identity/types";
 const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const now = new Date("2026-01-01T00:00:00.000Z");
 const clientSecret = "client-secret-value";
-const OK = "https://app.test/settings/connected-accounts?linked=github";
-const FAILED = "https://app.test/settings/connected-accounts?linked=failed";
-const TAKEN =
-  "https://app.test/settings/connected-accounts?linked=github-taken";
+const OK = "https://app.test/connections/github?linked=github";
+const FAILED = "https://app.test/connections/github?linked=failed";
+const TAKEN = "https://app.test/connections/github?linked=github-taken";
 
 type Harness = ReturnType<typeof build>;
 

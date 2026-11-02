@@ -1,7 +1,8 @@
-import type {
-  ComposioAction,
-  ComposioActions,
-  ComposioResult,
+import {
+  type ComposioAction,
+  type ComposioActions,
+  type ComposioResult,
+  withheldArguments,
 } from "../composio";
 import {
   actionOf,
@@ -174,6 +175,35 @@ export function actionsFor(context: ClientContext): ComposioActions {
           `${call.slug} was not sent to Composio: this connection is for ${call.toolkit}, and Composio resolves that action to ${
             ran ?? "no app at all"
           }. Refreshing this app's tools on its Plugins page recovers it where the action was recorded against a url that has since changed.`,
+        );
+      }
+
+      /*
+       * A FILE PARAMETER THE LISTING LEFT OUT IS REFUSED HERE, AND THE RESOLVE IS WHAT MAKES THAT
+       * POSSIBLE. `./composio` offers an action whose file parameters are all optional with those
+       * parameters removed, because the only value a model can put in one is a staging key it made
+       * up. A model can still send one, so the call has to be checked against the action's own
+       * schema, and the tool resolved above at the recorded version is that schema: the same
+       * definition the listing was read from, asked the same question by the same walk. See
+       * {@link withheldArguments}.
+       *
+       * REFUSED IN A SENTENCE RATHER THAN STRIPPED, which is how this file answers every call it
+       * will not send. Dropping the value quietly would run a different call from the one the model
+       * made and tell it nothing, so the email would go without the attachment the model believes it
+       * attached. The sentence names the parameter and the remedy, which is the same call without it.
+       *
+       * ONE LIMIT, WRITTEN DOWN RATHER THAN HIDDEN. What resolves here has been through
+       * `ToolSchema.parse`, which keeps `properties`, `required`, the composition keywords, `items`
+       * and the flag itself, and drops the rarer 2020-12 applicators (`prefixItems`, `contains` and
+       * the like). A file reachable only through one of those is withheld by the listing and not
+       * seen here. In the fifteen toolkits read when this was written, every file sat directly on a
+       * named property or under its `anyOf` or `items`, all of which survive the parse.
+       */
+      const withheld = withheldArguments(resolved.inputParameters, args);
+      if (withheld.length > 0) {
+        const named = withheld.join(", ");
+        throw new Error(
+          `${call.slug} was not run, because it included ${named}, which is a file. OpenBot can't pass a file to this action, so any value there could only have been made up, and the action is offered without ${named} for that reason. Try again without ${named}.`,
         );
       }
 

@@ -60,6 +60,8 @@ export async function startHandoffDelivery(deps: {
      */
     sign: (work, claim) =>
       signHandoffDeliveryRun(work, config.keyEncryptionKey, undefined, claim),
+    // The asking conversation, told what it is waiting on once the queue has moved for a hop.
+    onSettled: (work) => channelStore.signalWork(work.threadId),
     delivery: createHandoffDelivery({
       admission: serverTurnAdmission,
       /*

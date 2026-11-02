@@ -38,7 +38,7 @@ export function EditSkill({ slug }: { slug: string }) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
         <p className="text-destructive text-sm" role="alert">
-          This skill could not be loaded.
+          Couldn't load this skill. Reload the page.
         </p>
       </div>
     );
@@ -54,7 +54,7 @@ export function EditSkill({ slug }: { slug: string }) {
          * not own.
          */}
         <p className="text-muted-foreground text-sm">
-          That skill no longer exists, or it is not yours to edit.
+          This skill was deleted, or it isn't yours to edit.
         </p>
       </div>
     );
@@ -65,8 +65,8 @@ export function EditSkill({ slug }: { slug: string }) {
       <header>
         <h1 className="text-2xl font-semibold">Edit skill</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Changes apply the next time <code>/{skill.slug}</code> is used. Agents
-          already carrying it keep it.
+          Changes apply the next time someone uses <code>/{skill.slug}</code>.
+          Bots that have it keep it.
         </p>
       </header>
 
@@ -89,7 +89,7 @@ export function EditSkill({ slug }: { slug: string }) {
         footer={<SkillAgents grantedTo={skill.grantedTo} slug={skill.slug} />}
         onSubmit={async (values) => {
           await saveSkill.mutateAsync(values);
-          await navigate({ search: {}, to: "/skills" });
+          await navigate({ search: {}, to: "/capabilities/skills" });
         }}
         slugLocked
         submitLabel="Save changes"

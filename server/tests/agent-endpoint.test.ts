@@ -88,6 +88,21 @@ describe("the agent form", () => {
     visibility: "private",
   };
 
+  test("titles may be blank and are trimmed without losing existing text", () => {
+    for (const [title, expected] of [
+      ["", ""],
+      ["   ", ""],
+      [" Sales ", "Sales"],
+    ]) {
+      const parsed = parseAgentInput({ ...base, title });
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.value.title).toBe(expected);
+    }
+    for (const title of [undefined, null, 12, {}, "x".repeat(121)]) {
+      expect(parseAgentInput({ ...base, title }).ok).toBe(false);
+    }
+  });
+
   test("an agent with no endpoint is valid, and runs on the Bot in the box", () => {
     const parsed = parseAgentInput(base);
     expect(parsed.ok).toBe(true);

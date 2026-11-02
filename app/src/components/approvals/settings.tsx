@@ -1,4 +1,9 @@
-import { IconEyeCheck, IconHandStop, IconTerminal2 } from "@tabler/icons-react";
+import {
+  IconChecklist,
+  IconEyeCheck,
+  IconHandStop,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
@@ -17,6 +22,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   approvalInboxOptions,
   approvalPreferencesMutationOptions,
@@ -25,7 +31,6 @@ import {
   ruleCoversBot,
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
-import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
@@ -121,11 +126,10 @@ export function ApprovalSettings() {
                     className="line-clamp-none"
                     id="auto-review-description"
                   >
-                    {enforced ? "Required by your team. " : ""}
-                    Before an action that could affect your accounts or share
-                    information, a model checks it against what you asked for,
-                    your rules and the safety requirements. If it cannot decide,
-                    it asks you.
+                    {enforced ? "An admin requires this. " : ""}
+                    Before a Bot does something that could affect your accounts
+                    or share information, OpenBot checks it against your request
+                    and your rules. If it can't tell, it asks you.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -153,10 +157,10 @@ export function ApprovalSettings() {
                     {inbox.data.hostCommands &&
                     inbox.data.hostCommands !==
                       inbox.data.preferences.hostCommands
-                      ? `Your team limits this to "${HOST_LABELS[inbox.data.hostCommands]}". `
+                      ? `An admin limits this to "${HOST_LABELS[inbox.data.hostCommands]}". `
                       : ""}
-                    The OpenBot desktop app still shows each command before it
-                    runs on your computer.
+                    The OpenBot desktop app still shows you each command before
+                    it runs.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -178,21 +182,23 @@ export function ApprovalSettings() {
       <PageSection
         description={
           <>
-            The strictest matching rule wins, so an "ask" rule beats an "allow"
-            one. Team rules are locked. Changing a password, security settings
-            and payments are always handed to you. Rules for a single Bot are on{" "}
+            The strictest matching rule wins. An "ask" rule beats an "allow"
+            rule. Team rules are locked. Passwords, security settings and
+            payments are always handed to you. Rules for one Bot are on{" "}
             <Link className="underline underline-offset-4" to="/bots">
               that Bot's page
             </Link>
             .
             {rulesOff
-              ? " Your team has switched personal rules off, so they are kept but do not apply."
+              ? " An admin has turned off personal rules. Yours are kept but don't apply."
               : ""}
           </>
         }
         title="Rules for every Bot"
       >
-        {saved === 0 ? <PageEmpty>No rules saved.</PageEmpty> : null}
+        {saved === 0 ? (
+          <PageEmpty icon={IconChecklist} title="No rules yet" />
+        ) : null}
         {saved > 0 || canAdd ? (
           <PageRows>
             {teamRules.map((rule, index) => (
@@ -233,7 +239,7 @@ export function ApprovalSettings() {
       </PageSection>
       {agents.data !== undefined && otherBots.length > 0 ? (
         <PageSection
-          description="These name no Bot you can open, but they still apply to any Bot they match. Remove the ones you no longer want."
+          description="These don't match a Bot you can open. They still apply to any Bot they match. Remove the ones you don't want."
           title="Rules for other Bots"
         >
           <PageRows>

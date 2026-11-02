@@ -20,6 +20,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: { readSecret: async () => null },

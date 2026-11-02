@@ -51,8 +51,8 @@ export function createRoutingRoutes(
       return context.json(
         {
           error: agentId
-            ? "That coworker is not on your roster."
-            : "No coworker is available.",
+            ? "That Bot isn't one you can use."
+            : "No Bot is available.",
         },
         agentId ? 404 : 409,
       );
@@ -60,7 +60,7 @@ export function createRoutingRoutes(
     if (result.kind === "ambiguous") {
       return context.json(
         {
-          error: "More than one coworker matches that name.",
+          error: "More than one Bot has that name.",
           names: result.names,
         },
         409,

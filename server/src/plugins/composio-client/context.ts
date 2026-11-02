@@ -1,6 +1,7 @@
 import type { BrokerApp, BrokerRefusalError } from "../broker";
 import { LISTING_LIMIT } from "../composio";
 import {
+  type AccountRow,
   appOf,
   askVendor,
   type CheckedAuthConfig,
@@ -34,8 +35,8 @@ export function createClientContext(
    *
    * AND SO ARE THE OTHER TWO THINGS THE TWO QUESTIONS DO NOT SHARE, for the same reason the
    * statuses are. `configs` is which authorization configs the answer is about — every one of them
-   * for the gate, and only this deployment's for the withdrawal, because the withdrawal ACTS on
-   * what it finds. `enough` is when the rows in hand already settle the question, which is true of
+   * for the three that only READ (the gate, `grantsFor` and `accountName`), and only this
+   * deployment's for the withdrawal, because the withdrawal ACTS on what it finds. `enough` is when the rows in hand already settle the question, which is true of
    * a boolean the moment one row arrives and never true of a set of accounts to end. Both are
    * written at the call sites below, beside the statuses, so that the whole of the difference
    * between the two questions is one argument list a reader can compare.
@@ -46,9 +47,9 @@ export function createClientContext(
     statuses: VendorAccountStatus[],
     asked: {
       configs?: string[];
-      enough?: (rows: { id?: unknown; data?: unknown }[]) => boolean;
+      enough?: (rows: AccountRow[]) => boolean;
     } = {},
-  ): Promise<{ id?: unknown; data?: unknown }[]> => {
+  ): Promise<AccountRow[]> => {
     /*
      * EVERY PAGE UNLESS THE CALLER SAYS OTHERWISE, READ HERE RATHER THAN AT EITHER CALLER, so that
      * the two questions cannot drift on the one thing they do share. A truncated listing is the

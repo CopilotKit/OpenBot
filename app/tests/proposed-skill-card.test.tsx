@@ -60,9 +60,7 @@ test("a complete draft shows the whole instruction before anything is written", 
   ).toBeTruthy();
   expect(getByText("/weekly-summary")).toBeTruthy();
   expect(getByText("google-drive/search_files")).toBeTruthy();
-  expect(
-    getByText("Nothing is saved until you press the button."),
-  ).toBeTruthy();
+  expect(getByText("Nothing is saved until you say so.")).toBeTruthy();
   expect(getByRole("button", { name: "Create it" })).toBeTruthy();
 });
 

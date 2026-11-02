@@ -1,14 +1,13 @@
-import type * as React from "react";
 import {
   MessageScroller as MessageScrollerPrimitive,
   useMessageScroller,
   useMessageScrollerScrollable,
   useMessageScrollerVisibility,
 } from "@shadcn/react/message-scroller";
-
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { IconArrowDown } from "@tabler/icons-react";
+import type * as React from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 function MessageScrollerProvider(
   props: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>,
@@ -34,11 +33,16 @@ function MessageScroller({
 
 function MessageScrollerViewport({
   className,
+  tabIndex,
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Viewport>) {
+  // The primitive is always a tab stop so the keyboard can scroll it. One with nothing to scroll,
+  // like a conversation that has not started, is a stop between the To: field and the composer.
+  const scrollable = useMessageScrollerScrollable();
   return (
     <MessageScrollerPrimitive.Viewport
       data-slot="message-scroller-viewport"
+      tabIndex={tabIndex ?? (scrollable.start || scrollable.end ? 0 : -1)}
       className={cn(
         "size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-autoscrolling:scrollbar-thumb-transparent data-autoscrolling:scrollbar-track-transparent",
         className,
@@ -118,12 +122,12 @@ function MessageScrollerButton({
 }
 
 export {
-  MessageScrollerProvider,
   MessageScroller,
-  MessageScrollerViewport,
+  MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
-  MessageScrollerButton,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
   useMessageScroller,
   useMessageScrollerScrollable,
   useMessageScrollerVisibility,

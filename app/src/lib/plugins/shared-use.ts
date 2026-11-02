@@ -53,7 +53,7 @@ export function sharedUseRequestsQueryOptions(enabled: boolean) {
     queryKey: sharedUseKeys.requests(),
     queryFn: () =>
       client<SharedUseRequest[]>("/api/approvals/shared-use", "requests", {
-        fallback: "Shared account requests could not be loaded.",
+        fallback: "Couldn't load shared account requests.",
       }),
     enabled,
     refetchInterval: 10_000,
@@ -66,7 +66,7 @@ export function botSharedAppsQueryOptions(botId: string) {
     queryFn: async (): Promise<BotSharedApps> => {
       const response = await client(
         `/api/approvals/shared-use/bot/${encodeURIComponent(botId)}`,
-        { fallback: "This Bot's shared apps could not be loaded." },
+        { fallback: "Couldn't load this Bot's shared apps." },
       );
       return response.json();
     },
@@ -84,7 +84,7 @@ export function decideSharedUseMutationOptions(queryClient: QueryClient) {
     }) =>
       client(
         `/api/approvals/shared-use/${encodeURIComponent(id)}/${decision}`,
-        { method: "POST", fallback: "That decision could not be saved." },
+        { method: "POST", fallback: "Couldn't save that decision." },
       ),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["approvals"] }),
   });
@@ -100,7 +100,7 @@ export function requestSharedUseMutationOptions(queryClient: QueryClient) {
       client("/api/approvals/shared-use", {
         method: "POST",
         body,
-        fallback: "The request could not be sent.",
+        fallback: "Couldn't send the request.",
       }),
     onSettled: (_data, _error, body) =>
       queryClient.invalidateQueries({

@@ -1,4 +1,9 @@
 pydantic-ai-slim[openai,anthropic,google,ag-ui]
+# anthropic 2.0.0 fails every Anthropic run in this harness: the stream ends in RUN_ERROR
+# `Cannot instantiate typing.Union` before a request leaves the process. pydantic-ai-slim
+# 2.59.0 asks only for anthropic>=1.12.1, so a fresh install picks up 2.0.0. 1.17.0 works.
+# Lift this when pydantic-ai supports anthropic 2.
+anthropic<2
 fastapi
 python-multipart
 uvicorn[standard]

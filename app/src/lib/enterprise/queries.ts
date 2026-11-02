@@ -10,7 +10,9 @@ export type CapabilityKey =
   | "customRules"
   | "passwordManager"
   | "slackTeams"
-  | "teamBots";
+  | "teamBots"
+  | "ownerApps"
+  | "isolatedComputers";
 
 /** One switch as the server stored it at each scope. `null` means no row: the scope inherits. */
 export type CapabilitySetting = {
@@ -48,6 +50,8 @@ export type EnterpriseSettings = {
   inactiveComputerDays: number;
   modelAllowlist: { enabled: boolean; models: string[] };
   mcpAllowlist: { enabled: boolean; servers: string[] };
+  /** People may open the Skills learned from their recordings to every Bot. Off by default. */
+  skillSharing: boolean;
 };
 
 export type EnterpriseOverview = {
@@ -139,5 +143,31 @@ export function actionRecordsQueryOptions() {
       client("/api/admin/enterprise/actions?limit=50", "actions", {
         fallback: "Could not load recorded actions",
       }),
+  });
+}
+
+/** The capability switches as they apply to the person asking. */
+export type MyCapabilities = {
+  capabilities: Partial<Record<CapabilityKey, boolean>>;
+  /** False on a deployment running without enterprise controls, where the defaults stand. */
+  enforced: boolean;
+};
+
+/**
+ * What this person may use, which is not an administrator's read.
+ *
+ * `/me` sits under the enterprise ADMIN prefix and is deliberately the one route there that any
+ * signed-in person may call: the switches decide what the app offers them, so the app has to be
+ * able to ask. Everything else behind that prefix requires an administrator.
+ */
+export function myCapabilitiesQueryOptions() {
+  return queryOptions({
+    queryKey: ["enterprise", "me"] as const,
+    queryFn: async (): Promise<MyCapabilities> =>
+      (
+        await client("/api/admin/enterprise/me", {
+          fallback: "Could not load what this deployment allows",
+        })
+      ).json(),
   });
 }

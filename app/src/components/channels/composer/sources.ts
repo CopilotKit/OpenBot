@@ -16,6 +16,6 @@ export const PLACEHOLDER_COMMANDS: CommandOption[] = [
     name: "summarize",
     description: "Summarize this conversation",
     kind: "prompt",
-    prompt: "Summarize what we covered in this channel so far.",
+    prompt: "Summarize what we covered in this conversation so far.",
   },
 ];

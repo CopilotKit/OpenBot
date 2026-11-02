@@ -40,6 +40,16 @@ export const agentProfiles = pgTable(
     avatarSeed: text("avatar_seed").notNull(),
     visibility: agentVisibility("visibility").notNull(),
     /*
+     * A computer of its own rather than its owner's.
+     *
+     * By default every Bot a person uses runs on that person's one computer, each Bot with its own
+     * browser profile and folder there. An isolated Bot gets a computer keyed by the Bot instead, which
+     * keeps its logins between runs and which everyone who uses the Bot shares. Only someone the
+     * `isolatedComputers` capability allows may set it; when that is withdrawn the Bot runs on the
+     * person's computer again rather than stopping.
+     */
+    isolated: boolean("isolated").notNull().default(false),
+    /*
      * The credential this Bot's agent presents when it calls a tool back.
      *
      * A hash, never the token. We issue it, the agent's owner holds it, and this side only ever needs

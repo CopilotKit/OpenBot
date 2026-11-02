@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useBotLook } from "@/components/agents/bot-look";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import {
   type AgentOption,
@@ -32,9 +33,11 @@ export function ConversationView({
   pending = false,
   autoFocus = false,
   stopped,
+  working,
   stoppable,
   queueWhileBusy = false,
   restoring = false,
+  intro,
   onSubmit,
   onStop,
   voiceCall,
@@ -69,6 +72,8 @@ export function ConversationView({
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
+  /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
+  working?: ReactNode;
   /**
    * There is a run for Stop to abort, which is a narrower fact than `pending` and is the honest one
    * to draw a Stop button from. Defaults to `pending` for a caller with no gap between the two.
@@ -90,6 +95,11 @@ export function ConversationView({
   queueWhileBusy?: boolean;
   /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
+  /**
+   * The top of the conversation, drawn above the first message and scrolled away with it. Only
+   * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
+   */
+  intro?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
@@ -105,6 +115,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
+  const orbs = useBotLook() === "orb";
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 
@@ -425,6 +436,7 @@ export function ConversationView({
           commandNames={(commands ?? [])
             .map((command) => command.name)
             .join(",")}
+          {...(orbs && intro ? { intro } : {})}
           messages={messages}
           onRemoveQueued={(id) => {
             apply({ id, type: "remove" });
@@ -432,9 +444,13 @@ export function ConversationView({
           queued={queued}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
+          working={working}
         />
       </div>
-      <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">
+      <div
+        className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0"
+        data-slot="composer-column"
+      >
         {notice}
         <Composer
           agents={agents}

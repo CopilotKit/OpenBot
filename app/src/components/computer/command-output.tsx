@@ -28,7 +28,7 @@ export function CommandOutput({
     <div className="space-y-1.5">
       {truncated ? (
         <p className="text-muted-foreground text-xs">
-          Output was cut short at the start. What follows is the end of it.
+          The output was too long. This is the end of it.
         </p>
       ) : null}
       {output ? (

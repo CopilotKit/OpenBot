@@ -1,8 +1,18 @@
-import { ApprovalRefusedError } from "../approvals/types";
-import type { AuditInitiator } from "../audit";
+import {
+  addressedTo,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
+import { RESEARCH_TOOLS, type ResearchRole } from "@openbot/shared/research";
 import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { ApprovalRefusedError } from "../approvals/types";
+import type { AuditInitiator } from "../audit";
 import { markUntrusted } from "../untrusted-content";
+import {
+  type CatalogueEntry,
+  catalogueEntry,
+  researchRoleFor,
+} from "./catalogue";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -70,7 +80,7 @@ export function vendorAnswer(result: { text: string; isError: boolean }) {
  * A tool array tells a model a tool exists. It does not tell it that the tool is the right way to
  * reach that system, and it competes with a page of prose about the browser that every Bot is given
  * whether or not it has any connectors at all. The browser prose wins: it is emphatic, it is about
- * capability, and it says "never claim you cannot browse".
+ * capability, and it used to say "never claim you cannot browse".
  *
  * So a Bot holding four Google Drive tools browsed to drive.google.com, met a sign-in page its
  * container could never satisfy, and asked its person to sign in to a vendor that person had already
@@ -94,10 +104,19 @@ export function grantedToolGuidance(
    */
   connectedButNotHeld: readonly string[] = [],
 ): string {
-  if (tools.length === 0 && connectedButNotHeld.length === 0) return "";
+  /*
+   * THE CARD TOOL IS NOT A SYSTEM. It is offered to every Bot so a missing app can be put in front of
+   * the person with the step that fixes it, and it reaches nothing — listed beside the vendors it
+   * would read as one more system this Bot "can reach directly, as the person asking". It is named
+   * below instead, at exactly the sentences that used to end on "an administrator can grant it".
+   */
+  const showsCards = tools.some((tool) => tool.name === SHOW_APP_ACCESS_TOOL);
+  const reaching = tools.filter((tool) => tool.name !== SHOW_APP_ACCESS_TOOL);
+  if (reaching.length === 0 && connectedButNotHeld.length === 0 && !showsCards)
+    return "";
 
   const bySystem = new Map<string, string[]>();
-  for (const tool of tools) {
+  for (const tool of reaching) {
     // `mcp__server__tool`, which is the shape the model is offered.
     const parts = tool.name.replace(/^mcp__/, "").split("__");
     const system = parts.length > 1 ? (parts[0] as string) : "this deployment";
@@ -110,22 +129,10 @@ export function grantedToolGuidance(
     (system) => !held.includes(system),
   );
 
-  const researchConnector = ["parallel-authenticated", "parallel"].find(
-    (server) =>
-      ["web_search", "web_fetch"].every((name) =>
-        tools.some((tool) => tool.ref === `${server}/${name}`),
-      ),
-  );
-  const researchTools = researchConnector
-    ? tools.filter(
-        (tool) =>
-          tool.ref === `${researchConnector}/web_search` ||
-          tool.ref === `${researchConnector}/web_fetch`,
-      )
-    : [];
+  const research = researchProviders(reaching);
 
   return [
-    ...(tools.length > 0
+    ...(reaching.length > 0
       ? [
           "You can reach these systems directly, as the person asking, with their own access:",
         ]
@@ -133,7 +140,7 @@ export function grantedToolGuidance(
     ...[...bySystem.entries()].map(
       ([system, names]) => `- ${system}: ${names.join(", ")}`,
     ),
-    ...(tools.length > 0
+    ...(reaching.length > 0
       ? [
           "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
           "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
@@ -145,13 +152,7 @@ export function grantedToolGuidance(
           "access, and the thing that is missing is yours, not theirs.",
         ]
       : []),
-    ...(researchConnector
-      ? [
-          `Parallel provides public-web search and extraction: ${researchTools.map((tool) => tool.name).join(" and ")} discover sources and read selected pages.`,
-          "Parallel searches the public web; it does not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents. Generate one session_id for the conversation and reuse it on related search/fetch calls. Omit model_name unless the exact configured model identifier is known.",
-          "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
-        ]
-      : []),
+    ...researchGuidance(research),
     /*
      * The vendors this deployment connects to and this Bot does not hold.
      *
@@ -163,15 +164,120 @@ export function grantedToolGuidance(
      */
     ...(missing.length > 0
       ? [
-          ...(tools.length > 0 ? [""] : []),
+          ...(reaching.length > 0 ? [""] : []),
           `This deployment also connects to: ${missing.join(", ")}. You hold none of their tools.`,
-          "If a question needs one of them, say plainly that you have not been granted it and that an",
-          "administrator can grant it on that connector. Do NOT browse to its website: that is not the",
-          "same thing, your browser is signed in as nobody, and it will meet a sign-in wall that the",
-          "connector exists to avoid. Do not ask the person to sign in there either.",
+          ...(showsCards
+            ? [
+                `If a question needs one of them, call ${SHOW_APP_ACCESS_TOOL} with its name: that puts a card in`,
+                "front of the person saying you have not been granted it, with a button to ask an administrator",
+                "for it. Then say so in a sentence; the card already carries the rest.",
+              ]
+            : [
+                "If a question needs one of them, say plainly that you have not been granted it and that an",
+                "administrator can grant it on that connector.",
+              ]),
+          "Do NOT browse to its website: that is not the same thing, your browser is signed in as nobody,",
+          "and it will meet a sign-in wall that the connector exists to avoid. Do not ask the person to",
+          "sign in there either.",
+        ]
+      : []),
+    /*
+     * AN APP THIS DEPLOYMENT DOES NOT CONNECT AT ALL is the one case nothing above names, and the
+     * one a Bot met most bluntly: asked about Gmail on a deployment that has not switched it on, it
+     * had no word for Gmail anywhere in its instructions and either browsed or said it could not.
+     * The card says whether it can be switched on and lets the person ask for it.
+     */
+    ...(showsCards
+      ? [
+          ...(reaching.length > 0 || missing.length > 0 ? [""] : []),
+          `If the person needs a work app that is not named here at all (Gmail, Slack, Salesforce), call`,
+          `${SHOW_APP_ACCESS_TOOL} with its name before saying you cannot reach it: the card tells them whether it`,
+          "can be switched on and lets them ask an administrator. Do not browse to its website instead.",
         ]
       : []),
   ].join("\n");
+}
+
+type ResearchProvider = {
+  entry: CatalogueEntry;
+  search: GrantedTool;
+  fetch: GrantedTool;
+};
+
+/**
+ * Whether these tools include one that finds sources, from any research provider.
+ *
+ * The search role alone, not the full pair `researchProviders` wants: a Bot holding a search tool and
+ * no reader can still search, and telling it to drive its browser to a search engine instead would
+ * be the very routing mistake this decides against. See `computerGuidance`.
+ */
+export function holdsWebSearch(tools: readonly GrantedTool[]): boolean {
+  return tools.some((tool) => researchRoleFor(tool.ref) === "search");
+}
+
+/**
+ * The research providers this Bot can actually use: a search tool and a fetch tool from one server.
+ *
+ * One per vendor. A deployment that added a vendor twice, once free and once with its key, has
+ * granted the keyed one for its limits, so that is the one the Bot is told about.
+ */
+function researchProviders(tools: GrantedTool[]): ResearchProvider[] {
+  const byServer = new Map<
+    string,
+    Partial<Record<ResearchRole, GrantedTool>>
+  >();
+  for (const tool of tools) {
+    const role = researchRoleFor(tool.ref);
+    if (!role) continue;
+    const server = tool.ref.slice(0, tool.ref.indexOf("/"));
+    byServer.set(server, { ...byServer.get(server), [role]: tool });
+  }
+  const byVendor = new Map<string, ResearchProvider>();
+  for (const [server, held] of byServer) {
+    const entry = catalogueEntry(server);
+    if (!entry || !held.search || !held.fetch) continue;
+    const provider = { entry, search: held.search, fetch: held.fetch };
+    const existing = byVendor.get(entry.vendor);
+    if (!existing || entry.auth.kind === "deployment-bearer")
+      byVendor.set(entry.vendor, provider);
+  }
+  return [...byVendor.values()];
+}
+
+/**
+ * What a Bot is told about public-web research, the same for every provider.
+ *
+ * Described, not preferred: a Bot holding one of these and some other search tool is not told to
+ * pass the other over. With more than one, the person's choice decides.
+ *
+ * Told to search unprompted for facts that change, because a Bot holding these answered "top five
+ * countries by GDP" from memory and then, asked, said it could search. The bound in the next line
+ * is what keeps that from becoming the open-web hunt the provenance guidance warns about.
+ */
+function researchGuidance(providers: ResearchProvider[]): string[] {
+  if (providers.length === 0) return [];
+  return [
+    "For public-web research you can use:",
+    ...providers.map(
+      ({ entry, search, fetch }) =>
+        `- ${entry.vendor}: ${search.name} finds sources and ${fetch.name} reads selected pages.`,
+    ),
+    ...(providers.length > 1
+      ? [
+          "Use the one the person asks for. Otherwise pick one and keep to it for the conversation.",
+        ]
+      : []),
+    "Search before answering when the answer depends on facts that change: current figures, rankings, prices, who holds a role, recent events. Do not answer those from memory while you hold these tools, even when the person did not ask you to search.",
+    "Keep it bounded: a search or two and a read of the best sources, then answer, and say what you could not confirm.",
+    "These search the public web; they do not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents.",
+    ...providers.flatMap(({ entry }) =>
+      (RESEARCH_TOOLS[entry.key]?.notes ?? []).map(
+        (note) => `${entry.vendor}: ${note}`,
+      ),
+    ),
+    "Do not name the provider in your answer unless the person asks which one you used: cite the sources you read.",
+    "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
+  ];
 }
 
 /**
@@ -222,7 +328,12 @@ export async function grantedTools(options: {
           error instanceof PluginRefusedError ||
           error instanceof ApprovalRefusedError
         ) {
-          return `${REFUSAL_MARKER} ${error.message}`;
+          /*
+           * A refusal that carries an app card names the Bot here, the one place both are known:
+           * in a channel several Bots answer in, the card has to ask what the app is for this
+           * person on THIS Bot, not on whichever one the surface happens to have declared.
+           */
+          return `${REFUSAL_MARKER} ${addressedTo(error.message, botId)}`;
         }
         /*
          * A contradiction in this deployment's own tables says nothing to a model.

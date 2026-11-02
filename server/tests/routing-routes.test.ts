@@ -72,6 +72,7 @@ function profile(input: {
     hasCallbackToken: false,
     hidden: false,
     pinned: false,
+    isolated: false,
     id: input.id,
     name: input.name,
     ownerUserId: ACTOR.id,

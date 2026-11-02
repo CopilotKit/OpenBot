@@ -28,6 +28,9 @@ const authorizedFor: string[] = [];
 const returnUrlsSeen: string[] = [];
 let connectWithFieldsCalls = 0;
 const revokedFor: string[] = [];
+// Whether retiring the ask-before-write rule fails. One test makes it, to reach the removal
+// route's clean-up branch — the removal itself has already happened at the vendor by then.
+let revokeRuleThrows = false;
 const rules: {
   id: string;
   botId: string;
@@ -39,13 +42,24 @@ const rules: {
 }[] = [];
 
 const broker: ConnectedAppBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: async () => [],
   listApps: async () => [],
   ensureAuthConfig: async () => "standing",
   deleteAuthConfig: async () => {},
   authorize: async ({ account, returnUrl }) => {
     authorizedFor.push(account.vendorUserId);
     returnUrlsSeen.push(returnUrl);
-    return { redirectUrl: "https://vendor.example/consent" };
+    return {
+      redirectUrl: "https://vendor.example/consent",
+      authorizationId: null,
+    };
   },
   isConnected: async () => true,
   revoke: async ({ account }) => {
@@ -63,6 +77,7 @@ const broker: ConnectedAppBroker = {
 
 function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
   const store = createPluginStore({
+    brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
     credentials: {} as never,
@@ -71,7 +86,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
     broker,
     deploymentId: `acme-${suite}`,
   });
-  const sharedUseStore = createSharedUseStore(database);
+  const sharedUseStore = createSharedUseStore(database, "composio");
   const modes = createAccountModeSwitch({
     store,
     sharedUse: sharedUseStore,
@@ -85,6 +100,8 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
       },
       teamRules: async () => rules as never,
       revokeTeamRule: async (_by, ruleId) => {
+        if (revokeRuleThrows)
+          throw new Error("Failed query: update team_rules");
         const rule = rules.find((row) => row.id === ruleId);
         if (rule) rule.revokedAt = new Date();
       },
@@ -109,7 +126,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
         encryptionKey: `${"A".repeat(43)}=`,
         personHasAccess: async () => true,
       },
-      { broker },
+      { broker, provider: "composio" },
       { modes, use: sharedUseStore },
     ),
   );
@@ -121,6 +138,7 @@ beforeEach(async () => {
   connectWithFieldsCalls = 0;
   revokedFor.length = 0;
   rules.length = 0;
+  revokeRuleThrows = false;
   await database.insert(mcpServers).values({
     id: app,
     title: "Team GitHub",
@@ -147,7 +165,7 @@ describe("connecting a shared app", () => {
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: "An administrator connects shared apps.",
+      error: "Only an admin can connect shared apps.",
     });
     expect(authorizedFor).toEqual([]);
   });
@@ -256,7 +274,7 @@ describe("connecting a shared app", () => {
       );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
-        error: "An administrator connects shared apps.",
+        error: "Only an admin can connect shared apps.",
       });
       expect(connectWithFieldsCalls).toBe(0);
     } finally {
@@ -283,7 +301,7 @@ describe("connecting a shared app", () => {
       );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
-        error: "An administrator connects shared apps.",
+        error: "Only an admin can connect shared apps.",
       });
       expect(authorizedFor).toEqual([]);
       expect(connectWithFieldsCalls).toBe(0);
@@ -352,6 +370,7 @@ describe("granting a shared app's action", () => {
     await database.insert(mcpTools).values({
       serverId: app,
       name: "GITHUB_CREATE_ISSUE",
+      vendorName: "GITHUB_CREATE_ISSUE",
       description: "x",
       effect: "write",
       version: "1",
@@ -375,7 +394,7 @@ describe("granting a shared app's action", () => {
     });
     expect(response.status).toBe(200);
     expect(
-      await createSharedUseStore(database).approvalFor(botId, app),
+      await createSharedUseStore(database, "composio").approvalFor(botId, app),
     ).toEqual({ audience: "team", outsideInput: false, members: [] });
   });
 
@@ -391,7 +410,7 @@ describe("granting a shared app's action", () => {
       }),
     });
     expect(
-      await createSharedUseStore(database).approvalFor(botId, app),
+      await createSharedUseStore(database, "composio").approvalFor(botId, app),
     ).toEqual({ audience: "owner", outsideInput: false, members: [] });
   });
 
@@ -507,5 +526,50 @@ describe("removing a Shared app", () => {
     );
     expect(response.status).toBe(200);
     expect(rules.filter((rule) => rule.revokedAt === null)).toEqual([]);
+  });
+
+  /*
+   * THE CLEAN-UP RUNS AFTER SOMETHING IRREVERSIBLE. `removeServer` has already revoked every
+   * account AT THE VENDOR and deleted the rows, and a second Remove finds no app — so a fault
+   * retiring the leftover rule must not come back as the framework's bodyless 500 telling an
+   * administrator the removal failed.
+   */
+  test("a rule that cannot be retired does not turn a completed removal into a bodyless 500", async () => {
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
+    await appAs("admin").request(`/api/plugins/servers/${app}/account-mode`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "shared", confirm: true }),
+    });
+    expect(rules.filter((rule) => rule.revokedAt === null)).toHaveLength(1);
+
+    revokeRuleThrows = true;
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+    let response: Response;
+    try {
+      response = await appAs("admin").request(`/api/plugins/servers/${app}`, {
+        method: "DELETE",
+      });
+    } finally {
+      console.error = realError;
+    }
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    // The removal really did happen, which is why it is answered as one.
+    expect(
+      await database.select().from(mcpServers).where(eq(mcpServers.id, app)),
+    ).toEqual([]);
+    const line = said.find((line) =>
+      line.includes("shared-rule-not-forgotten"),
+    );
+    expect(line).toBeDefined();
+    expect(line).toContain(app);
   });
 });

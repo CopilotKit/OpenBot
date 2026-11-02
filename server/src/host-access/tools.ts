@@ -1,12 +1,12 @@
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { z } from "zod";
 import {
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { REFUSAL_MARKER } from "../plugins/tools";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { type HostAccessBroker, HostAccessRefusedError } from "./broker";
 
 const empty = z.object({});

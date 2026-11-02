@@ -90,6 +90,12 @@ describe("declared tools no connected server offers", () => {
     expect(undeclaredElsewhere(offered, offered)).toEqual([]);
   });
 
+  test("a research role is never reported as not connected", () => {
+    expect(
+      undeclaredElsewhere(["@research/search", "@research/fetch"], []),
+    ).toEqual([]);
+  });
+
   test("declaring nothing leaves nothing over", () => {
     expect(undeclaredElsewhere([], offered)).toEqual([]);
   });

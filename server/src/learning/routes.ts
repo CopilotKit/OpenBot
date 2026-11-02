@@ -1,11 +1,11 @@
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import { type Context, Hono, type MiddlewareHandler } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import type {
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
 } from "@openbot/shared/learning";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
 import type { LearningAutoAssign } from "./auto-assign";
@@ -62,7 +62,7 @@ export function createLearningRoutes(
     return new Response(
       JSON.stringify({
         error:
-          "Learning settings could not be accessed. Try again or contact your administrator.",
+          "Couldn't load learning settings. Try again, or ask an admin if it keeps happening.",
       }),
       { status: 503, headers: { "content-type": "application/json" } },
     );

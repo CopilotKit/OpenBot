@@ -1,8 +1,8 @@
 import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
-import { z } from "zod";
-import type { AuditInitiator, AuditSink } from "../audit";
 import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
 import type { ComponentCatalog } from "@openbot/toolkit/ports";
+import { z } from "zod";
+import type { AuditInitiator, AuditSink } from "../audit";
 import type { ComponentStore } from "./store";
 
 /**
@@ -32,6 +32,34 @@ const point = z.object({
   value: z.number().describe("Its value"),
 });
 
+/** Where the figures came from. The same fields, and the same reason, as the app's charts. */
+const provenance = {
+  basis: z
+    .enum(["read", "given", "own-knowledge"])
+    .describe(
+      "Where the figures come from. read: you read them with a tool in this conversation, and sources lists what you read. given: the person supplied them, in the conversation or a file. own-knowledge: you recalled them without looking them up; the chart then says they are unchecked. For figures that change over time, look them up before charting if you can",
+    ),
+  sources: z
+    .array(
+      z.object({
+        title: z
+          .string()
+          .describe(
+            "The page, report or dataset, named the way a person would",
+          ),
+        url: z.string().optional().describe("Its address, when it has one"),
+      }),
+    )
+    .optional()
+    .describe("What you read the figures from. Required when basis is read"),
+  asOf: z
+    .string()
+    .optional()
+    .describe(
+      "When the figures are from, e.g. 'Q3 2026' or '24 Oct 2026'. Leave out for figures that do not date",
+    ),
+};
+
 const common = {
   title: z.string().describe("A short title for the chart"),
   caption: z
@@ -40,6 +68,7 @@ const common = {
     .describe(
       "One line under the title saying what the reader should take from it",
     ),
+  ...provenance,
 };
 
 const BarChartProps = z.object({
@@ -217,11 +246,15 @@ const ActivityReportProps = z.object({
     ),
 });
 
-/** Which server-side function each activity report reads. The same map `activity.tsx` holds. */
-const ACTIVITY_FUNCTION_FOR: Record<string, string> = {
-  activity: "botActivity",
-  refusals: "recentRefusals",
-};
+/**
+ * Which server-side function each activity report reads. The same map `activity.tsx` holds, and a
+ * Map there for the same reason: the key is a string somebody else chose, and an object lookup
+ * answers a borrowed `Object.prototype` member with something truthy that is no function name.
+ */
+const ACTIVITY_FUNCTION_FOR: ReadonlyMap<string, string> = new Map([
+  ["activity", "botActivity"],
+  ["refusals", "recentRefusals"],
+]);
 
 export type HeadlessComponentSpec = {
   /** The tool name, the catalogue key, and the renderer's key in the app. */
@@ -315,7 +348,7 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
     reads: (args) => {
       const functionName =
         typeof args.report === "string"
-          ? ACTIVITY_FUNCTION_FOR[args.report]
+          ? ACTIVITY_FUNCTION_FOR.get(args.report)
           : undefined;
       return functionName ? [functionName] : [];
     },
@@ -423,7 +456,7 @@ export async function createHeadlessComponentTools(options: {
           if (await store.mayCall(spec.name, functionName)) continue;
           return refuse(
             spec,
-            `${spec.name} has not been granted the function ${functionName}. An administrator grants each function to each component.`,
+            `${spec.name} can't use the function ${functionName}. An admin has to give it to this component.`,
             { function: functionName },
           );
         }

@@ -49,6 +49,9 @@ pub struct Ports {
     pub langgraph: u16,
     pub supervisor: u16,
     pub harness: Option<u16>,
+    /// The host-side computer that runs the person's own browser, only where this machine runs one
+    /// (see `local_browser`). A host process's port, like the server's, never a container's.
+    pub browser: Option<u16>,
 }
 
 impl Default for Ports {
@@ -62,6 +65,7 @@ impl Default for Ports {
             langgraph: 4201,
             supervisor: 4500,
             harness: None,
+            browser: None,
         }
     }
 }
@@ -79,6 +83,7 @@ impl Ports {
                 "LANGGRAPH_PORT",
                 "SUPERVISOR_PORT",
                 "PICKED_HARNESS_HOST_PORT",
+                "BROWSER_PORT",
             ],
         )?;
         let mut ports = Self::default();
@@ -99,6 +104,10 @@ impl Ports {
             .get("PICKED_HARNESS_HOST_PORT")
             .map(|value| parse_port("PICKED_HARNESS_HOST_PORT", value))
             .transpose()?;
+        ports.browser = values
+            .get("BROWSER_PORT")
+            .map(|value| parse_port("BROWSER_PORT", value))
+            .transpose()?;
         Ok(ports)
     }
 
@@ -118,16 +127,21 @@ impl Ports {
         if let Some(port) = self.harness {
             settings.insert("PICKED_HARNESS_HOST_PORT".into(), port.to_string());
         }
+        if let Some(port) = self.browser {
+            settings.insert("BROWSER_PORT".into(), port.to_string());
+        }
         settings
     }
 
     /// A connect probe misses Windows excluded ports: only a bind proves a port is usable.
     /// Hold the probes until every port is chosen so allocations cannot collide with each other.
     /// Existing containers from this exact Compose project are reusable, never foreign listeners.
+    /// `browser` asks for a port for the person's browser, kept from the last run where it is free.
     pub fn available(
         self,
         ours: &std::collections::HashSet<u16>,
         harness: Option<u16>,
+        browser: bool,
     ) -> std::io::Result<Self> {
         let mut held = Vec::new();
         let mut chosen = std::collections::HashSet::new();
@@ -170,6 +184,14 @@ impl Ports {
             supervisor: choose(self.supervisor, true)?,
             harness: harness
                 .map(|default| choose(self.harness.unwrap_or(default), true))
+                .transpose()?,
+            browser: browser
+                .then(|| {
+                    choose(
+                        self.browser.unwrap_or(crate::local_browser::DEFAULT_PORT),
+                        false,
+                    )
+                })
                 .transpose()?,
         })
     }
@@ -223,14 +245,17 @@ mod port_tests {
             langgraph: port,
             supervisor: port,
             harness: Some(port),
+            browser: Some(port),
         };
-        let chosen = preferred.available(&HashSet::new(), Some(port)).unwrap();
+        let chosen = preferred
+            .available(&HashSet::new(), Some(port), true)
+            .unwrap();
         let values: HashSet<u16> = chosen
             .settings()
             .values()
             .map(|value| value.parse().unwrap())
             .collect();
-        assert_eq!(values.len(), 8);
+        assert_eq!(values.len(), 9);
         assert!(!values.contains(&port));
         for value in values {
             assert!(bind_loopbacks(value).is_ok(), "port {value} is unavailable");
@@ -249,7 +274,7 @@ mod port_tests {
             postgres: port,
             ..Ports::default()
         };
-        let chosen = preferred.available(&HashSet::new(), None).unwrap();
+        let chosen = preferred.available(&HashSet::new(), None, false).unwrap();
         assert_ne!(chosen.postgres, port);
     }
 
@@ -258,7 +283,7 @@ mod port_tests {
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
         let chosen = Ports::default()
-            .available(&HashSet::new(), Some(4206))
+            .available(&HashSet::new(), Some(4206), true)
             .unwrap();
         std::fs::write(
             root.join(".env"),
@@ -269,11 +294,15 @@ mod port_tests {
         let reopened = Ports::read(&root).unwrap();
         assert_eq!(reopened, chosen);
         assert_eq!(
-            reopened.available(&HashSet::new(), Some(4206)).unwrap(),
+            reopened
+                .available(&HashSet::new(), Some(4206), true)
+                .unwrap(),
             chosen
         );
         let foreign = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, chosen.server)).unwrap();
-        let changed = reopened.available(&HashSet::new(), Some(4206)).unwrap();
+        let changed = reopened
+            .available(&HashSet::new(), Some(4206), true)
+            .unwrap();
         assert_ne!(changed.server, chosen.server);
         assert_eq!(
             Ports {
@@ -298,11 +327,16 @@ mod port_tests {
             server: port,
             ..Ports::default()
         };
-        let chosen = preferred.available(&HashSet::from([port]), None).unwrap();
+        let chosen = preferred
+            .available(&HashSet::from([port]), None, false)
+            .unwrap();
         assert_eq!(chosen.postgres, port);
         assert_ne!(chosen.server, port);
         assert_ne!(
-            preferred.available(&HashSet::new(), None).unwrap().postgres,
+            preferred
+                .available(&HashSet::new(), None, false)
+                .unwrap()
+                .postgres,
             port
         );
     }
@@ -319,6 +353,30 @@ mod port_tests {
             );
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The person's browser is a host process, so a foreign listener on its port moves it, as one
+    /// on the server's port moves the server. Where this machine runs no browser, no port is held
+    /// for one and none is written.
+    #[test]
+    fn the_browser_gets_a_port_of_its_own_only_where_it_runs() {
+        let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
+        let taken = foreign.local_addr().unwrap().port();
+        let preferred = Ports {
+            browser: Some(taken),
+            ..Ports::default()
+        };
+        let chosen = preferred.available(&HashSet::new(), None, true).unwrap();
+        let port = chosen.browser.expect("a running browser is given a port");
+        assert_ne!(port, taken);
+        assert_eq!(
+            chosen.settings().get("BROWSER_PORT"),
+            Some(&port.to_string())
+        );
+
+        let none = preferred.available(&HashSet::new(), None, false).unwrap();
+        assert_eq!(none.browser, None);
+        assert!(!none.settings().contains_key("BROWSER_PORT"));
     }
 }
 
@@ -538,10 +596,11 @@ pub fn compose(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
         intelligence.gateway_ws_url.trim().to_string(),
     );
-    env.insert(
-        "INTELLIGENCE_API_KEY".into(),
-        intelligence.api_key.trim().to_string(),
-    );
+    // Explicit desktop selection must override a CLI key left in the checkout's .env.
+    // Supply both names for consumers that still read the legacy variable directly.
+    for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
+        env.insert(key.into(), intelligence.api_key.trim().to_string());
+    }
 
     /*
      * MINTED ONCE PER DEPLOYMENT, NOT ONCE PER START.
@@ -688,6 +747,21 @@ pub fn compose(
         "COMPUTER_SUPERVISOR_URL".into(),
         format!("http://127.0.0.1:{}", ports.supervisor),
     );
+
+    /*
+     * The person's own browser, where this machine runs one: the host-side local Chrome computer
+     * started beside the server (see `local_browser`). Bots keep the supervisor above; only a
+     * person's browser is sent here.
+     *
+     * Left out rather than written blank where there is none, so it is not set at all. `write`
+     * keeps a line it does not own, so Start purges the value an earlier run wrote.
+     */
+    if let Some(port) = ports.browser {
+        env.insert(
+            crate::local_browser::BROWSER_URL_ENV.into(),
+            format!("http://127.0.0.1:{port}"),
+        );
+    }
 
     // The worker refuses to start without this, by design: it is a fact about where this process
     // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
@@ -889,6 +963,32 @@ pub const MINTED: [&str; 6] = [
     "SUPERVISOR_TOKEN",
     "WORKER_SHARED_SECRET",
 ];
+
+/// Settings `compose` writes only when this run's answer implies them, and Start takes out of the
+/// file when it does not. `write` keeps every line it does not own, so without this a value an
+/// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
+/// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
+/// no longer runs.
+pub const REMOVED_WHEN_UNSET: [&str; 5] = [
+    "BOT_PROVIDER",
+    "BOT_MODEL",
+    "AGENT_BOT_MODEL",
+    crate::local_browser::BROWSER_URL_ENV,
+    crate::local_browser::BROWSER_ABSENT_ENV,
+];
+
+/// Tell the server why this machine runs no browser of the person's own (`BROWSER_ABSENT_ENV`), so
+/// the app can say it to them in a sentence of their own rather than leave it in Desktop's log.
+/// Nothing where a browser runs, and [`REMOVED_WHEN_UNSET`] then takes out what an earlier Start
+/// wrote: a Chrome installed since is no longer explained away.
+pub fn explain_browser_absence(
+    settings: &mut BTreeMap<String, String>,
+    absent: Option<crate::local_browser::Absent>,
+) {
+    if let Some(code) = absent.and_then(crate::local_browser::Absent::code) {
+        settings.insert(crate::local_browser::BROWSER_ABSENT_ENV.into(), code.into());
+    }
+}
 
 const PUBLISHED: [&str; 4] = [
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -1345,6 +1445,42 @@ HTTPS_PROXY=http://proxy:8080
     }
 
     #[test]
+    fn desktop_project_selection_replaces_and_purges_a_previous_cli_key() {
+        let dir = temp_root("env-cli-project-selection");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "CPK_INTELLIGENCE_API_KEY=cpk-old-cli-project\nINTELLIGENCE_API_KEY=cpk-old-legacy\nCUSTOM=keep-me\n",
+        )
+        .unwrap();
+        let selected = Intelligence {
+            api_url: "https://selected.example".into(),
+            gateway_ws_url: "wss://selected.example".into(),
+            api_key: " cpk-desktop-project ".into(),
+        };
+        let (settings, secrets) = crate::vault::split(compose(
+            &selected,
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        ));
+        for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
+            assert_eq!(secrets[key], "cpk-desktop-project");
+            assert!(!settings.contains_key(key));
+        }
+        write(&path, &settings, &secrets).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("INTELLIGENCE_API_KEY="));
+        assert!(saved.contains("CUSTOM=keep-me"));
+        assert!(saved.contains("INTELLIGENCE_API_URL=https://selected.example"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_value_with_nothing_around_it_is_untouched() {
         let env = compose(
             &intelligence(),
@@ -1550,6 +1686,123 @@ HTTPS_PROXY=http://proxy:8080
             env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
             Some("http://127.0.0.1:4500")
         );
+    }
+
+    #[test]
+    fn the_server_finds_the_persons_browser_and_the_bots_keep_their_computers() {
+        let with = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports {
+                browser: Some(4107),
+                ..Ports::default()
+            },
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            with.get("OPENBOT_BROWSER_URL").map(String::as_str),
+            Some("http://127.0.0.1:4107")
+        );
+        assert_eq!(with.get("BROWSER_PORT").map(String::as_str), Some("4107"));
+        let without = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert!(!without.contains_key("OPENBOT_BROWSER_URL"));
+        assert!(!without.contains_key("BROWSER_PORT"));
+        for key in ["AGENT_COMPUTER_URL", "COMPUTER_SUPERVISOR_URL"] {
+            assert_eq!(with[key], without[key], "a Bot's computer moved: {key}");
+        }
+    }
+
+    /// Chrome uninstalled since the last Start: the server must stop being pointed at a browser that
+    /// no longer runs, or it sends the person's Browser button to a port nothing answers on.
+    #[test]
+    fn a_browser_an_earlier_start_ran_is_not_left_in_the_file() {
+        let dir = temp_root("env-browser-gone");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        let run = |browser: Option<u16>| {
+            let settings = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine_status(None),
+                &Ports {
+                    browser,
+                    ..Ports::default()
+                },
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            );
+            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+                .iter()
+                .filter(|key| !settings.contains_key(**key))
+                .map(|key| (key.to_string(), String::new()))
+                .collect();
+            write(&path, &settings, &purge).unwrap();
+        };
+        run(Some(4107));
+        assert_eq!(
+            value_of(
+                &std::fs::read_to_string(&path).unwrap(),
+                "OPENBOT_BROWSER_URL"
+            ),
+            "http://127.0.0.1:4107"
+        );
+        run(None);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("OPENBOT_BROWSER_URL"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// No browser of the person's own on this machine: the server is told why, so the app can say
+    /// it, and a later Start that finds one takes the reason out again.
+    #[test]
+    fn why_there_is_no_browser_is_written_and_taken_out_once_there_is_one() {
+        use crate::local_browser::{Absent, Product, BROWSER_ABSENT_ENV};
+        let dir = temp_root("env-browser-absent");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        let run = |browser: Option<u16>, absent: Option<Absent>| {
+            let mut settings = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine_status(None),
+                &Ports {
+                    browser,
+                    ..Ports::default()
+                },
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            );
+            explain_browser_absence(&mut settings, absent);
+            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+                .iter()
+                .filter(|key| !settings.contains_key(**key))
+                .map(|key| (key.to_string(), String::new()))
+                .collect();
+            write(&path, &settings, &purge).unwrap();
+            std::fs::read_to_string(&path).unwrap()
+        };
+        let flatpak = run(None, Some(Absent::FlatpakOnly(Product::Chrome)));
+        assert_eq!(value_of(&flatpak, BROWSER_ABSENT_ENV), "flatpak-chrome");
+        assert!(!flatpak.contains("OPENBOT_BROWSER_URL"), "{flatpak}");
+        let found = run(Some(4107), None);
+        assert!(!found.contains(BROWSER_ABSENT_ENV), "{found}");
+        // A release from before the browser has nothing to explain.
+        let old = run(None, Some(Absent::NotInRelease));
+        assert!(!old.contains(BROWSER_ABSENT_ENV), "{old}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

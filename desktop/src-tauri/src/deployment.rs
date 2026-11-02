@@ -30,6 +30,10 @@ const IMAGES: &str = "container-images.json";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Installed {
     pub version: String,
+    /// The top-level entries this app laid out. A stamp written before this existed reads as
+    /// empty, which never matches, so that deployment is laid out again.
+    #[serde(default)]
+    pub layout: Vec<String>,
 }
 
 /// The tarball GitHub publishes for a tag.
@@ -141,6 +145,7 @@ pub fn record(root: &Path, version: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     let stamp = Installed {
         version: version.to_string(),
+        layout: layout(),
     };
     std::fs::write(
         stamp_path(root),
@@ -157,14 +162,29 @@ pub fn record(root: &Path, version: &str) -> std::io::Result<()> {
 /// The image manifest is the one exception. A deployment laid down by an app that predates it has a
 /// stamp that matches and no manifest, and re-fetching is a better answer than an error about a
 /// file the person has never heard of.
+///
+/// So is a stamp that laid out less than this app copies. An app that left a folder out wrote a
+/// stamp that still matches its version, and Repair would otherwise keep the gap forever.
 pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
     if !images_path(root).exists() {
         return true;
     }
     match installed(root) {
-        Some(found) => found.version != wanted,
+        // A deployment laid out by an app that copied less is missing something this one runs.
+        Some(found) => found.version != wanted || found.layout != layout(),
         None => true,
     }
+}
+
+/// What this app lays out, in a fixed order, as recorded in the stamp.
+fn layout() -> Vec<String> {
+    let mut entries: Vec<String> = REQUIRED
+        .iter()
+        .chain(ALSO_COPIED.iter())
+        .map(|entry| entry.to_string())
+        .collect();
+    entries.sort();
+    entries
 }
 
 /// Everything the three host processes and Compose need from the tree.
@@ -175,8 +195,15 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 8] = [
+pub const ALSO_COPIED: [&str; 11] = [
     "shared",
+    // The dependency patches `package.json` names in `patchedDependencies`. Without them `bun install
+    // --frozen-lockfile` stops with `Couldn't find patch file`.
+    "patches",
+    // Not a workspace, but the server imports its egress rules from `agent-computer/src` and
+    // `scripts/start-local-chrome-computer.ts` its browser runtime. Without it the server exits at
+    // start with `Cannot find module '../../../agent-computer/src/egress'`.
+    "agent-computer",
     // A root workspace the server imports as `@openbot/toolkit`. Without it, `bun install
     // --frozen-lockfile` stops with `Workspace not found "toolkit"`.
     "toolkit",
@@ -188,7 +215,16 @@ pub const ALSO_COPIED: [&str; 8] = [
     // stack trace that names the parser and not the missing file.
     "tsconfig.base.json",
     "bunfig.toml",
+    // The Recorder, whole. Installation builds it into `extension/dist` (see
+    // `preparation::build_recorder`), and the person's browser loads that build. Its build reads
+    // its source, its public assets and its public key, and `bun install --frozen-lockfile` needs
+    // its manifest as a workspace.
+    "extension",
 ];
+
+/// Single files copied from a directory that is otherwise left behind. None now: the Recorder's
+/// manifest was the one, before Desktop built the Recorder.
+pub const ALSO_COPIED_FILES: [&str; 0] = [];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
 ///
@@ -241,14 +277,13 @@ fn destination_in(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
     }
 
     // Only what a deployment needs. The rest of the tree is a place to develop, not to run.
-    let wanted = relative
+    let names: Vec<String> = relative
         .components()
-        .next()
-        .map(|first| {
-            let name = first.as_os_str().to_string_lossy().into_owned();
-            REQUIRED.contains(&name.as_str()) || ALSO_COPIED.contains(&name.as_str())
-        })
-        .unwrap_or(false);
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let wanted = names.first().is_some_and(|first| {
+        REQUIRED.contains(&first.as_str()) || ALSO_COPIED.contains(&first.as_str())
+    }) || ALSO_COPIED_FILES.contains(&names.join("/").as_str());
     if !wanted {
         return Ok(None);
     }
@@ -308,8 +343,25 @@ fn fetch_images(root: &Path, version: &str) -> Result<(), String> {
 /// Shared with `install.rs`, which fetches the engine's installers through it and then checks their
 /// digests. One client, one user agent, one set of TLS defaults.
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
-    let response = reqwest::blocking::Client::builder()
+    get_waiting(url, IDLE_TIMEOUT)
+}
+
+/// How long a download may go without receiving anything before it is given up.
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/**
+`get`, giving up only when nothing arrives for `idle`.
+
+READ AS A STREAM, NOT WITH `bytes()`. The blocking client's timeout (30 s by default) bounds each
+read on a stream, but `bytes()` waits for the whole body within it, and reports running out of time
+as "error decoding response body". So any download that took longer than 30 seconds failed, however
+steadily it was arriving: Bun's 30 MB on a connection under about 1 MB/s, every time.
+*/
+fn get_waiting(url: &str, idle: std::time::Duration) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut response = reqwest::blocking::Client::builder()
         .user_agent("openbot-desktop")
+        .timeout(idle)
         .build()
         .map_err(|error| format!("could not prepare the download: {error}"))?
         .get(url)
@@ -318,15 +370,63 @@ pub fn get(url: &str) -> Result<Vec<u8>, String> {
     if !response.status().is_success() {
         return Err(format!("{url} answered {}", response.status()));
     }
+    let mut body = Vec::new();
     response
-        .bytes()
-        .map(|body| body.to_vec())
-        .map_err(|error| format!("the download did not finish: {error}"))
+        .read_to_end(&mut body)
+        .map_err(|error| format!("the download did not finish: {error}"))?;
+    Ok(body)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server that sends `chunks` pieces of `body`, `gap` apart, then closes.
+    fn dripping(chunks: usize, gap: std::time::Duration) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file", listener.local_addr().unwrap());
+        let served = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let length = chunks * 4;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {length}\r\nconnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            for _ in 0..chunks {
+                std::thread::sleep(gap);
+                if stream.write_all(b"data").is_err() {
+                    return;
+                }
+                let _ = stream.flush();
+            }
+        });
+        (url, served)
+    }
+
+    #[test]
+    fn a_download_that_keeps_arriving_finishes_however_long_it_takes() {
+        // Six pieces 300 ms apart take 1.8 s in all, longer than the 1 s allowed between pieces.
+        // `bytes()` gave up here with "error decoding response body"; a stream does not.
+        let (url, served) = dripping(6, std::time::Duration::from_millis(300));
+        let body = get_waiting(&url, std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(body, b"data".repeat(6));
+        served.join().unwrap();
+    }
+
+    #[test]
+    fn a_download_that_stalls_is_given_up() {
+        let (url, served) = dripping(2, std::time::Duration::from_millis(1500));
+        let error = get_waiting(&url, std::time::Duration::from_millis(500)).unwrap_err();
+        assert!(error.starts_with("the download did not finish"), "{error}");
+        served.join().unwrap();
+    }
 
     fn manifest(names: &[&str]) -> Images {
         Images {
@@ -531,6 +631,175 @@ mod tests {
         assert!(!docs, "the rest of the tree is not part of a deployment");
     }
 
+    /// Relative module specifiers in one source file: `from "..."`, `import("...")` and
+    /// `require("...")`, with either quote. Package names are not relative and are skipped.
+    fn relative_imports(source: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for opener in [
+            "from \"",
+            "from '",
+            "import(\"",
+            "import('",
+            "require(\"",
+            "require('",
+        ] {
+            let quote = opener.chars().last().unwrap();
+            for (at, _) in source.match_indices(opener) {
+                let rest = &source[at + opener.len()..];
+                if let Some(end) = rest.find(quote) {
+                    let specifier = &rest[..end];
+                    if specifier.starts_with("./") || specifier.starts_with("../") {
+                        found.push(specifier.to_owned());
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    fn sources_under(dir: &Path, into: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_dir() {
+                // Tests and build output run from a checkout, never from a deployment.
+                if !matches!(
+                    name.as_str(),
+                    "node_modules" | "dist" | "tests" | "test" | "__tests__"
+                ) {
+                    sources_under(&path, into);
+                }
+            } else if [".ts", ".tsx", ".js", ".mjs", ".cjs"]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+                && !name.contains(".test.")
+                && !name.contains(".spec.")
+            {
+                into.push(path);
+            }
+        }
+    }
+
+    /// `#673` made the server import `../../../agent-computer/src/egress`, and the unpacker kept
+    /// copying only the folders listed here, so every new Desktop install of v0.2.0 had a server
+    /// that exited at start with `Cannot find module`. A checkout has every folder, which is why
+    /// nothing caught it. This walks the real tree: whatever the unpacked code imports by a
+    /// relative path has to be something the unpacker keeps.
+    #[test]
+    fn everything_the_unpacked_code_imports_is_unpacked_too() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let kept: Vec<&str> = REQUIRED.iter().chain(ALSO_COPIED.iter()).copied().collect();
+        let mut files = Vec::new();
+        for top in &kept {
+            sources_under(&repo.join(top), &mut files);
+        }
+        assert!(
+            files
+                .iter()
+                .any(|file| file.starts_with(repo.join("server"))),
+            "the walk found no server sources, so it proves nothing"
+        );
+
+        let mut missing = Vec::new();
+        for file in &files {
+            let Ok(source) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            for specifier in relative_imports(&source) {
+                let mut resolved = file.parent().unwrap().to_path_buf();
+                for part in Path::new(&specifier).components() {
+                    match part {
+                        std::path::Component::ParentDir => {
+                            resolved.pop();
+                        }
+                        std::path::Component::Normal(name) => resolved.push(name),
+                        _ => {}
+                    }
+                }
+                let top = resolved
+                    .strip_prefix(&repo)
+                    .ok()
+                    .and_then(|inside| inside.components().next())
+                    .map(|first| first.as_os_str().to_string_lossy().into_owned());
+                if !top.as_deref().is_some_and(|top| kept.contains(&top)) {
+                    missing.push(format!(
+                        "{} imports {specifier}",
+                        file.strip_prefix(&repo).unwrap_or(file).display()
+                    ));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "a deployment would not contain what these import:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    /// Installation builds the Recorder in the deployment, so everything its build reads is laid
+    /// out: its source, its public assets, its public key and its build script, as well as the
+    /// manifest the frozen install needs. `tests/desktop-release-tree.test.ts` runs that build in a
+    /// tree laid out from these lists.
+    #[test]
+    fn the_recorder_is_copied_whole_so_installation_can_build_it() {
+        let dir = scratch("extension");
+
+        let files = [
+            "extension/package.json",
+            "extension/src/background/index.ts",
+            "extension/public/icons/16.png",
+            "extension/keys/public-key.txt",
+            "extension/scripts/build.ts",
+            "shared/openbot-browser.ts",
+        ];
+        let entries: Vec<(String, &[u8])> = files
+            .iter()
+            .map(|file| (format!("OpenBot-0.0.8/{file}"), b"x".as_slice()))
+            .collect();
+        let archive = tarball(
+            &entries
+                .iter()
+                .map(|(name, body)| (name.as_str(), *body))
+                .collect::<Vec<_>>(),
+        );
+        unpack(&dir, &archive).expect("the download is laid out");
+
+        let missing: Vec<&str> = files
+            .iter()
+            .copied()
+            .filter(|file| !dir.join(file).is_file())
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(missing.is_empty(), "not laid out: {missing:?}");
+    }
+
+    /// An app that copied only the Recorder's manifest laid out a deployment that cannot build it,
+    /// and its stamp still matches its version. It is fetched again once, like any deployment laid
+    /// out by an app that copied less.
+    #[test]
+    fn a_deployment_without_the_recorders_source_is_fetched_again() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-recorder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(images_path(&dir), "{}").unwrap();
+        let before: Vec<String> = layout()
+            .into_iter()
+            .filter(|entry| entry != "extension")
+            .collect();
+        std::fs::write(
+            stamp_path(&dir),
+            serde_json::json!({ "version": "v0.2.0", "layout": before }).to_string(),
+        )
+        .unwrap();
+        assert!(needs_fetch(&dir, "v0.2.0"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_recorded_version_is_not_fetched_again() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-same-{}", std::process::id()));
@@ -541,6 +810,24 @@ mod tests {
             needs_fetch(&dir, "v0.0.8"),
             "a newer version has to be fetched"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// v0.2.0 installs were laid out by an app that did not copy `agent-computer`, and their stamp
+    /// matches the version they run, so Repair never fetched again and the server never started.
+    /// A stamp says what it laid out; one that laid out less than this app copies is fetched once.
+    #[test]
+    fn a_deployment_laid_out_by_an_app_that_copied_less_is_fetched_again() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-layout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(images_path(&dir), "{}").unwrap();
+        // Exactly what an earlier app wrote.
+        std::fs::write(stamp_path(&dir), r#"{"version":"v0.2.0"}"#).unwrap();
+        assert!(needs_fetch(&dir, "v0.2.0"));
+        assert_eq!(installed(&dir).unwrap().version, "v0.2.0");
+
+        record(&dir, "v0.2.0").unwrap();
+        assert!(!needs_fetch(&dir, "v0.2.0"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -590,5 +877,20 @@ mod tests {
             "a deployment is not a place to develop"
         );
         assert!(!REQUIRED.contains(&"docs"));
+    }
+
+    #[test]
+    fn every_root_workspace_is_copied() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../package.json")).unwrap();
+        for workspace in manifest["workspaces"].as_array().unwrap() {
+            let workspace = workspace.as_str().unwrap();
+            assert!(
+                REQUIRED.contains(&workspace)
+                    || ALSO_COPIED.contains(&workspace)
+                    || ALSO_COPIED_FILES.contains(&format!("{workspace}/package.json").as_str()),
+                "{workspace} is a root workspace that a frozen install needs, but is not copied"
+            );
+        }
     }
 }

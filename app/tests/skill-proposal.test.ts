@@ -232,6 +232,7 @@ describe("the tool refs a skill may declare", () => {
     ]);
     expect(answer).toContain("Notion (notion):");
     expect(answer).toContain("notion/notion-create (writes)");
+    expect(answer).toContain("`@research/search` and `@research/fetch`");
   });
 
   test("a connector advertising nothing is left out rather than shown empty", () => {

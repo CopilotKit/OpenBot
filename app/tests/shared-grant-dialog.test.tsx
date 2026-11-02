@@ -52,7 +52,7 @@ describe("SharedApprovalFields", () => {
     await userEvent.click(view.getByRole("radio", { name: "Only its owner" }));
     await userEvent.click(
       view.getByRole("checkbox", {
-        name: "Outside input (email, Slack, webhooks) may use it",
+        name: "Messages from outside (email, Slack, webhooks) can use it",
       }),
     );
     expect(seen).toEqual({

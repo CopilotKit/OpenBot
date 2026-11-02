@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
@@ -15,7 +16,6 @@ import {
   saveUserPreferencesMutationOptions,
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
-import type { UserPreferences } from "@openbot/shared/user-preferences";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -71,7 +71,7 @@ function setup() {
 test("loads preferences from the account and renders the saved emphasis", async () => {
   const { view } = setup();
   const agent = await view.findByText("General Assistant");
-  expect(agent.className).toContain("text-[0.9rem]");
+  expect(agent.className).toContain("text-sm");
   expect(requests).toEqual([
     { path: "/api/settings/preferences", method: "GET", body: undefined },
   ]);
@@ -89,7 +89,7 @@ test("shows loading and read errors without enabling a save", async () => {
   expect((await view.findByRole("alert")).textContent).toBe(
     "Storage unavailable",
   );
-  expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
 });
 
 test("successful writes update only the current account cache; failures preserve saved values", async () => {
@@ -99,6 +99,8 @@ test("successful writes update only the current account cache; failures preserve
   client.setQueryData(bobKey, {
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "opendots",
   });
   const mutation = client
     .getMutationCache()
@@ -108,13 +110,13 @@ test("successful writes update only the current account cache; failures preserve
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
+        narration: null,
+        skin: "openbot",
       },
     });
   await mutation.execute({ messageListEmphasis: "thread" });
   await waitFor(() =>
-    expect(view.getByText("Plan next week").className).toContain(
-      "text-[0.9rem]",
-    ),
+    expect(view.getByText("Plan next week").className).toContain("text-sm"),
   );
   expect(requests.at(-1)).toEqual({
     path: "/api/settings/preferences",
@@ -124,6 +126,8 @@ test("successful writes update only the current account cache; failures preserve
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "opendots",
   });
   response = async () =>
     Response.json({ error: "Could not save" }, { status: 500 });
@@ -134,5 +138,10 @@ test("successful writes update only the current account cache; failures preserve
     client.getQueryData<UserPreferences>(
       userPreferencesQueryOptions("alice").queryKey,
     ),
-  ).toEqual({ messageListEmphasis: "thread", selfHostBannerDismissed: false });
+  ).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
+  });
 });

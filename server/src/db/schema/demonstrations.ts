@@ -6,12 +6,9 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type {
-  DemonstrationAction,
-  DemonstrationDraft,
-} from "../../demonstrations/types";
 import { agents, users } from "./core";
 import { jsonb } from "./json";
+// Recordings from the retired "Teach a browser workflow" panel; nothing reads or writes this table now.
 export const demonstrations = pgTable(
   "demonstrations",
   {
@@ -28,10 +25,10 @@ export const demonstrations = pgTable(
       .notNull()
       .default("recording"),
     actions: jsonb("actions")
-      .$type<DemonstrationAction[]>()
+      .$type<Record<string, unknown>[]>()
       .notNull()
       .default([]),
-    draft: jsonb("draft").$type<DemonstrationDraft>(),
+    draft: jsonb("draft").$type<Record<string, unknown>>(),
     skillSlug: text("skill_slug"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

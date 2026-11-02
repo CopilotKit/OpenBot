@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { mcpServers } from "../src/db/schema";
 import type { BrokerApp } from "../src/plugins/broker";
-import { backfillComposioLogos } from "../src/plugins/logos";
+import { backfillBrokeredLogos } from "../src/plugins/logos";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -17,13 +17,17 @@ afterAll(async () => {
   await database.$client.close();
 });
 
-async function server(logo: string | null, provenance = "composio") {
+async function server(
+  logo: string | null,
+  provenance = "composio",
+  urlOf = (id: string) => `composio://${id}`,
+) {
   const id = `logo-${randomUUID()}`;
   await database.insert(mcpServers).values({
     id,
     title: "Example",
     vendor: "Composio",
-    url: `composio://${id}`,
+    url: urlOf(id),
     provenance,
     logo,
     authScheme: "API_KEY",
@@ -39,6 +43,9 @@ function app(slug: string): BrokerApp {
     logo: "https://example.com/logo.svg",
     categories: [],
     actionCount: 0,
+    classifiedCount: null,
+    permissionCount: null,
+    scopedActionCount: null,
     connection: { kind: "fields", authScheme: "API_KEY" },
   };
 }
@@ -54,7 +61,7 @@ test("fills existing brokered apps by their URL, preserving existing logos and s
   const missing = await server(null);
   const existing = await server("https://example.com/existing.svg");
   const custom = await server(null, "custom");
-  await backfillComposioLogos(database, {
+  await backfillBrokeredLogos(database, "composio", {
     listApps: async () => [app(missing), app(existing), app(custom)],
   });
   expect((await row(missing))?.logo).toBe("https://example.com/logo.svg");
@@ -66,7 +73,7 @@ test("fills existing brokered apps by their URL, preserving existing logos and s
 test("catalogue errors preserve the saved app and propagate to the startup warning", async () => {
   const id = await server(null);
   await expect(
-    backfillComposioLogos(database, {
+    backfillBrokeredLogos(database, "composio", {
       listApps: async () => {
         throw new Error("Catalogue unavailable");
       },
@@ -74,4 +81,21 @@ test("catalogue errors preserve the saved app and propagate to the startup warni
   ).rejects.toThrow("Catalogue unavailable");
   expect((await row(id))?.logo).toBeNull();
   expect((await row(id))?.authScheme).toBe("API_KEY");
+});
+
+test("an arcade-provenanced row is filled when the call passes arcade", async () => {
+  const id = await server(null, "arcade", () => "arcade://Gmail");
+  await backfillBrokeredLogos(database, "arcade", {
+    listApps: async () => [app("Gmail")],
+  });
+  expect((await row(id))?.logo).toBe("https://example.com/logo.svg");
+});
+
+// This is what fails if the backfill is ever made provider-agnostic by widening the slice and trying both parsers; see `access.ts`'s `TOOLKIT_OF`.
+test("the same arcade row is left untouched when the call passes composio", async () => {
+  const id = await server(null, "arcade", () => "arcade://Gmail");
+  await backfillBrokeredLogos(database, "composio", {
+    listApps: async () => [app("Gmail")],
+  });
+  expect((await row(id))?.logo).toBeNull();
 });

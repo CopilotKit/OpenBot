@@ -21,8 +21,8 @@ export function NewSkill() {
       <header>
         <h1 className="text-2xl font-semibold">New skill</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          A named instruction you invoke with <code>/</code>. It goes on the
-          Bots you own, and nobody else sees it.
+          An instruction you start with <code>/</code>. Only you see it, and it
+          works on Bots you own.
         </p>
       </header>
 
@@ -33,7 +33,7 @@ export function NewSkill() {
           await createSkill.mutateAsync(values);
           // Panel closed rather than swapped for a detail view: there is nothing more to say about a
           // skill than the form just said, and the new row is already behind it in the list.
-          await navigate({ search: {}, to: "/skills" });
+          await navigate({ search: {}, to: "/capabilities/skills" });
         }}
         submitLabel="Save skill"
       />

@@ -1,0 +1,571 @@
+{
+  "source": "The final end-to-end run's run 1 (trajectory 764dddf8), rows ...68097 to ...68112 from cpki.trajectory_events: on /support the person opened the account in a new tab (row ...68104), saved the memo there, then went Home in the first tab. seq and each save's request (the service worker attaches it) removed; navigation rows are what Chrome's webNavigation reported, as the service worker recorded them.",
+  "rows": [
+    {
+      "row": "68097",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 674,
+          "y": 15,
+          "width": 55,
+          "height": 18
+        },
+        "url": "http://127.0.0.1:7420/address",
+        "page": {
+          "url": "http://127.0.0.1:7420/address",
+          "title": "Delivery address - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/address",
+        "target": {
+          "tag": "a",
+          "name": "Support",
+          "role": null,
+          "text": "Support",
+          "input": "pointer",
+          "label": "Support",
+          "action": null,
+          "ariaRole": "link",
+          "attributes": {
+            "href": "/support"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=link[name=\"Support\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Support\""
+          },
+          {
+            "by": "href",
+            "selector": "a[href=\"/support\"]"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > header > nav > a:nth-of-type(7)"
+          }
+        ]
+      },
+      "timestamp": 1792555639943
+    },
+    {
+      "row": "68098",
+      "name": "navigation",
+      "type": "CUSTOM",
+      "value": {
+        "to": "http://127.0.0.1:7420/support",
+        "from": "http://127.0.0.1:7420/address",
+        "page": {
+          "url": "http://127.0.0.1:7420/support",
+          "title": "Support - Corner Shop admin"
+        },
+        "step": "navigate",
+        "frameId": 0,
+        "parentFrameId": -1,
+        "navigationType": "push",
+        "transitionType": "link",
+        "transitionQualifiers": []
+      },
+      "timestamp": 1792555639955.078
+    },
+    {
+      "row": "68100",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 285,
+          "width": 720,
+          "height": 62
+        },
+        "url": "http://127.0.0.1:7420/support",
+        "page": {
+          "url": "http://127.0.0.1:7420/support",
+          "title": "Support - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/support",
+        "target": {
+          "tag": "textarea",
+          "name": "Reply to Grace",
+          "role": null,
+          "text": "",
+          "input": "pointer",
+          "value": "",
+          "action": null,
+          "ariaRole": "textbox",
+          "inputType": "textarea",
+          "attributes": {
+            "id": "reply"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Reply to Grace\"]"
+          },
+          {
+            "by": "id",
+            "selector": "#reply"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > textarea"
+          }
+        ]
+      },
+      "timestamp": 1792555643003
+    },
+    {
+      "row": "68102",
+      "name": "input",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 285,
+          "width": 720,
+          "height": 62
+        },
+        "url": "http://127.0.0.1:7420/support",
+        "page": {
+          "url": "http://127.0.0.1:7420/support",
+          "title": "Support - Corner Shop admin"
+        },
+        "step": "input",
+        "route": "/support",
+        "target": {
+          "tag": "textarea",
+          "name": "Reply to Grace",
+          "role": null,
+          "text": "",
+          "value": "Sorry about the mug, a refund is on its way",
+          "action": null,
+          "ariaRole": "textbox",
+          "inputType": "textarea",
+          "attributes": {
+            "id": "reply"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "eventType": "input",
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Reply to Grace\"]"
+          },
+          {
+            "by": "id",
+            "selector": "#reply"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > textarea"
+          }
+        ]
+      },
+      "timestamp": 1792555645345
+    },
+    {
+      "row": "68103",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 367,
+          "width": 107,
+          "height": 42
+        },
+        "url": "http://127.0.0.1:7420/support",
+        "page": {
+          "url": "http://127.0.0.1:7420/support",
+          "title": "Support - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/support",
+        "target": {
+          "tag": "button",
+          "name": "Send reply",
+          "role": null,
+          "text": "Send reply",
+          "input": "pointer",
+          "label": "Send reply",
+          "action": null,
+          "ariaRole": "button",
+          "attributes": {
+            "id": "send",
+            "type": "button"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=button[name=\"Send reply\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Send reply\""
+          },
+          {
+            "by": "id",
+            "selector": "#send"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > button"
+          }
+        ]
+      },
+      "timestamp": 1792555646910
+    },
+    {
+      "row": "68104",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 224,
+          "width": 209,
+          "height": 18
+        },
+        "url": "http://127.0.0.1:7420/support",
+        "page": {
+          "url": "http://127.0.0.1:7420/support",
+          "title": "Support - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/support",
+        "target": {
+          "tag": "a",
+          "name": "Open the account in a new tab",
+          "role": null,
+          "text": "Open the account in a new tab",
+          "input": "pointer",
+          "label": "Open the account in a new tab",
+          "action": null,
+          "ariaRole": "link",
+          "attributes": {
+            "id": "newtab",
+            "href": "/account",
+            "target": "_blank"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=link[name=\"Open the account in a new tab\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Open the account in a new tab\""
+          },
+          {
+            "by": "id",
+            "selector": "#newtab"
+          },
+          {
+            "by": "href",
+            "selector": "a[href=\"/account\"]"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > main > p > a"
+          }
+        ]
+      },
+      "timestamp": 1792555649900
+    },
+    {
+      "row": "68105",
+      "name": "navigation",
+      "type": "CUSTOM",
+      "value": {
+        "to": "http://127.0.0.1:7420/account",
+        "from": "http://127.0.0.1:7420/account",
+        "page": {
+          "url": "http://127.0.0.1:7420/account",
+          "title": "Account - Corner Shop admin"
+        },
+        "step": "navigate",
+        "frameId": 0,
+        "parentFrameId": -1,
+        "navigationType": "push",
+        "transitionType": "link",
+        "transitionQualifiers": []
+      },
+      "timestamp": 1792555649936.539
+    },
+    {
+      "row": "68107",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 450,
+          "width": 720,
+          "height": 40
+        },
+        "url": "http://127.0.0.1:7420/account",
+        "page": {
+          "url": "http://127.0.0.1:7420/account",
+          "title": "Account - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/account",
+        "target": {
+          "tag": "input",
+          "name": "Internal memo",
+          "role": null,
+          "text": "",
+          "input": "pointer",
+          "value": "",
+          "action": null,
+          "ariaRole": "textbox",
+          "inputType": "text",
+          "attributes": {
+            "id": "memo",
+            "name": "memo"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Internal memo\"]"
+          },
+          {
+            "by": "id",
+            "selector": "#memo"
+          },
+          {
+            "by": "name",
+            "selector": "input[name=\"memo\"]"
+          },
+          {
+            "by": "css",
+            "selector": "#account > input:nth-of-type(4)"
+          }
+        ]
+      },
+      "timestamp": 1792555652991
+    },
+    {
+      "row": "68108",
+      "name": "input",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 450,
+          "width": 720,
+          "height": 40
+        },
+        "url": "http://127.0.0.1:7420/account",
+        "page": {
+          "url": "http://127.0.0.1:7420/account",
+          "title": "Account - Corner Shop admin"
+        },
+        "step": "input",
+        "route": "/account",
+        "target": {
+          "tag": "input",
+          "name": "Internal memo",
+          "role": null,
+          "text": "",
+          "value": "memo [redacted]",
+          "action": null,
+          "ariaRole": "textbox",
+          "inputType": "text",
+          "attributes": {
+            "id": "memo",
+            "name": "memo"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "eventType": "input",
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=textbox[name=\"Internal memo\"]"
+          },
+          {
+            "by": "id",
+            "selector": "#memo"
+          },
+          {
+            "by": "name",
+            "selector": "input[name=\"memo\"]"
+          },
+          {
+            "by": "css",
+            "selector": "#account > input:nth-of-type(4)"
+          }
+        ]
+      },
+      "timestamp": 1792555654420
+    },
+    {
+      "row": "68109",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 280,
+          "y": 505,
+          "width": 126,
+          "height": 42
+        },
+        "url": "http://127.0.0.1:7420/account",
+        "page": {
+          "url": "http://127.0.0.1:7420/account",
+          "title": "Account - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/account",
+        "target": {
+          "tag": "button",
+          "name": "Save account",
+          "role": null,
+          "text": "Save account",
+          "input": "keyboard",
+          "label": "Save account",
+          "action": null,
+          "ariaRole": "button",
+          "attributes": {
+            "type": "submit",
+            "class": "ghost"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=button[name=\"Save account\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Save account\""
+          },
+          {
+            "by": "css",
+            "selector": "#account > button"
+          }
+        ]
+      },
+      "timestamp": 1792555655974
+    },
+    {
+      "row": "68111",
+      "name": "click",
+      "type": "CUSTOM",
+      "value": {
+        "box": {
+          "x": 213,
+          "y": 15,
+          "width": 41,
+          "height": 18
+        },
+        "url": "http://127.0.0.1:7420/support",
+        "page": {
+          "url": "http://127.0.0.1:7420/support",
+          "title": "Support - Corner Shop admin"
+        },
+        "step": "click",
+        "route": "/support",
+        "target": {
+          "tag": "a",
+          "name": "Home",
+          "role": null,
+          "text": "Home",
+          "input": "pointer",
+          "label": "Home",
+          "action": null,
+          "ariaRole": "link",
+          "attributes": {
+            "href": "/"
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 860
+        },
+        "selectors": [
+          {
+            "by": "role",
+            "selector": "role=link[name=\"Home\"]"
+          },
+          {
+            "by": "text",
+            "selector": "text=\"Home\""
+          },
+          {
+            "by": "href",
+            "selector": "a[href=\"/\"]"
+          },
+          {
+            "by": "css",
+            "selector": "html > body > header > nav > a:nth-of-type(1)"
+          }
+        ]
+      },
+      "timestamp": 1792555660484
+    },
+    {
+      "row": "68112",
+      "name": "navigation",
+      "type": "CUSTOM",
+      "value": {
+        "to": "http://127.0.0.1:7420/",
+        "from": "http://127.0.0.1:7420/support",
+        "page": {
+          "url": "http://127.0.0.1:7420/",
+          "title": "Today - Corner Shop admin"
+        },
+        "step": "navigate",
+        "frameId": 0,
+        "parentFrameId": -1,
+        "navigationType": "push",
+        "transitionType": "link",
+        "transitionQualifiers": []
+      },
+      "timestamp": 1792555660499.094
+    }
+  ]
+}

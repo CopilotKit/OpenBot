@@ -6,11 +6,11 @@ export {
 } from "./composer";
 export {
   AGENT_TRIGGER,
-  canSendDraft,
   COMMAND_TRIGGER,
   type CommandKind,
   type CommandOption,
   type ComposerDraft,
+  canSendDraft,
 } from "./draft";
 export {
   type QueueAction,

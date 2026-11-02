@@ -20,18 +20,29 @@ export type EntitlementWarning = {
   fix: string;
 };
 
-const FIXES: Record<string, string> = {
-  RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED:
+/**
+ * The codes this build has advice for. A Map, because the code is Intelligence's string rather than
+ * this deployment's: a plain object answers `toString` with an inherited function, which is truthy
+ * and so takes the place of the sentence the `||` below exists to supply.
+ */
+const FIXES: ReadonlyMap<string, string> = new Map([
+  [
+    "RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED",
     "Intelligence has no valid licence. Give Intelligence's own deployment a COPILOTKIT_LICENSE_TOKEN " +
-    "(its Helm chart takes it as appApi.licenseSecret, or externalSecrets.secrets.license); setting it " +
-    "on OpenBot alone is not enough. Until then memory and other licensed features are refused.",
-  RUNTIME_ENTITLEMENTS_SELF_HOSTED_EXPIRED:
+      "(its Helm chart takes it as appApi.licenseSecret, or externalSecrets.secrets.license); setting it " +
+      "on OpenBot alone is not enough. Until then memory and other licensed features are refused.",
+  ],
+  [
+    "RUNTIME_ENTITLEMENTS_SELF_HOSTED_EXPIRED",
     "Intelligence's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN on Intelligence's " +
-    "deployment. Until then memory and other licensed features are refused.",
-  RUNTIME_ENTITLEMENTS_MANAGED_UNAVAILABLE:
+      "deployment. Until then memory and other licensed features are refused.",
+  ],
+  [
+    "RUNTIME_ENTITLEMENTS_MANAGED_UNAVAILABLE",
     "Managed Intelligence could not resolve this project's entitlement just now. This is usually " +
-    "temporary; licensed features may be refused until it recovers.",
-};
+      "temporary; licensed features may be refused until it recovers.",
+  ],
+]);
 
 /** The warning a response deserves, or null when Intelligence answers ready and active. */
 export function entitlementWarning(
@@ -52,7 +63,7 @@ export function entitlementWarning(
     ...(code ? { code } : {}),
     ...(response.error?.message ? { message: response.error.message } : {}),
     fix:
-      (code && FIXES[code]) ||
+      (code && FIXES.get(code)) ||
       "Intelligence did not confirm this deployment's entitlement, so licensed features such as memory may be refused.",
   };
 }

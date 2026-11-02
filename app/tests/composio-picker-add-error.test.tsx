@@ -176,8 +176,9 @@ test("an add that fails while a second one is pressed still says what went wrong
   const view = renderPicker();
 
   // Both rows, in the order the screen sorts them: Gmail then Slack.
-  const slackRow = await view.findByTestId("composio-slack");
-  const gmailRow = await view.findByTestId("composio-gmail");
+  // `directory-…`, not `composio-…`: one provider-blind screen draws both brokers' directories.
+  const slackRow = await view.findByTestId("directory-slack");
+  const gmailRow = await view.findByTestId("directory-gmail");
 
   // The press that will fail, held open by the stub.
   await userEvent.click(

@@ -14,7 +14,6 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 import {
   cleanup,
   fireEvent,
@@ -23,13 +22,14 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ApprovalSettings } from "@/components/approvals/settings";
+import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
-import {
-  BrowserActivity,
-  groupBrowserSteps,
-} from "@/components/channels/browser-activity";
+import { ApprovalSettings } from "@/components/approvals/settings";
 import { toVisibleChatItems } from "@/components/channels/chat-messages";
+import {
+  groupToolSteps,
+  ToolActivity,
+} from "@/components/channels/tool-activity";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -164,9 +164,9 @@ test("team rules are locked for members, enforced auto-review is shown as requir
   expect(view.getByText("Locked")).toBeTruthy();
   const review = view.getByRole("switch", { name: "Auto-review" });
   expect(review.getAttribute("aria-checked")).toBe("true");
-  expect(view.getByText(/Required by your team/)).toBeTruthy();
+  expect(view.getByText(/An admin requires this/)).toBeTruthy();
   expect(
-    view.getByText(/Your team limits this to "Ask every time"/),
+    view.getByText(/An admin limits this to "Ask every time"/),
   ).toBeTruthy();
   expect(view.queryByText("Team settings")).toBeNull();
 });
@@ -289,7 +289,11 @@ test("with personal rules switched off by the team, they are shown as not applyi
     team: { ...inbox.team, customRulesEnabled: false },
   };
   const view = draw(<ApprovalSettings />);
-  expect(await view.findByText(/kept but do not apply/)).toBeTruthy();
+  expect(
+    await view.findByText(
+      /An admin has turned off personal rules\. Yours are kept but don't apply\./,
+    ),
+  ).toBeTruthy();
   expect(view.queryByText("Add a rule")).toBeNull();
 });
 
@@ -382,7 +386,7 @@ test("a pending change is drawn in the conversation where the action was, and de
 test("in the real transcript shape a waiting click is folded into browser activity, so its card is drawn beside the group", async () => {
   // What the channel transcript builds from the conversation: a navigate that finished and the
   // click the chat stopped on, unanswered, grouped into one browser-activity line.
-  const items = groupBrowserSteps(
+  const items = groupToolSteps(
     toVisibleChatItems([
       { id: "u1", role: "user", content: "Order a pizza on httpbin" },
       {
@@ -415,17 +419,19 @@ test("in the real transcript shape a waiting click is folded into browser activi
         content: '{"ok":true,"url":"https://httpbin.org/forms/post"}',
       },
     ] as never),
+    // Browser steps fold whatever the app draws, so nothing else needs naming here.
+    () => false,
   );
-  const group = items.find((item) => item.kind === "browser");
-  if (group?.kind !== "browser") throw new Error("no browser group");
+  const group = items.find((item) => item.kind === "tools");
+  if (group?.kind !== "tools") throw new Error("no tool group");
   const view = render(
     <QueryClientProvider
       client={
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      {/* BrowserActivity mounts the waiting cards beside its folded line itself. */}
-      <BrowserActivity group={group} active={false} />
+      {/* ToolActivity mounts the waiting cards beside its folded line itself. */}
+      <ToolActivity group={group} active={false} />
     </QueryClientProvider>,
   );
   await view.findByRole("region", { name: "Waiting for your approval" });

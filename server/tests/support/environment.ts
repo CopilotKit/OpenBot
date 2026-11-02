@@ -29,3 +29,10 @@ export function testEnvironment(
     ...overrides,
   };
 }
+
+/**
+ * How long a session lasts unused on a deployment that signs people in through Better Auth: Better Auth's own default,
+ * a week, which OpenBot does not change. Production reads it from the auth instance (`sessionLifetimeMs`); tests that
+ * build the Recorder's wiring without one pass this, and recorder-lifetime.integration.test.ts holds the two together.
+ */
+export const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;

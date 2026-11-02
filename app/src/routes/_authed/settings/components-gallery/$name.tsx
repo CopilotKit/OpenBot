@@ -78,7 +78,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components gallery">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Could not load components.
+          Couldn't load components. Reload the page.
         </p>
       </PageShell>
     );
@@ -96,15 +96,14 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={BACK}
-        description="Nothing here answers to that name."
+        description="There's no component with that name."
         title="No such component"
       >
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">
           <EmptyHeader>
             <EmptyTitle>{name}</EmptyTitle>
             <EmptyDescription className="text-pretty">
-              It may have been withdrawn, or this deployment may no longer ship
-              it.
+              It may have been removed or unpublished.
             </EmptyDescription>
           </EmptyHeader>
           <Button

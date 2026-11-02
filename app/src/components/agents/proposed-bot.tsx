@@ -95,7 +95,7 @@ export function ProposedBotCard({
   if (!respond) {
     return (
       <GalleryFrame title={titleFor(args.name, clashes)}>
-        <p className="text-muted-foreground text-sm">Writing the coworker…</p>
+        <p className="text-muted-foreground text-sm">Writing the Bot…</p>
       </GalleryFrame>
     );
   }
@@ -116,9 +116,7 @@ export function ProposedBotCard({
       // Left on the card with the buttons still live. See `refusal` above.
       setSending(null);
       setRefusal(
-        cause instanceof Error
-          ? cause.message
-          : "The coworker was not created.",
+        cause instanceof Error ? cause.message : "The Bot wasn't created.",
       );
       return;
     }
@@ -139,8 +137,8 @@ export function ProposedBotCard({
       action={<Badge tone="caution">Waiting on you</Badge>}
       caption={
         clashes
-          ? `There is already a ${clashes.title} here, which is ${clashes.ownership}. Names do not have to be unique, but two with the same name are hard to tell apart in a channel list.`
-          : "Nothing is created until you press the button."
+          ? `There's already a ${clashes.title}, and it's ${clashes.ownership === "the deployment's" ? "built into OpenBot" : clashes.ownership}. Two Bots with the same name are hard to tell apart.`
+          : "Nothing is created until you press Create it."
       }
       title={titleFor(values.name, clashes)}
     >
@@ -162,7 +160,7 @@ export function ProposedBotCard({
       </dl>
 
       <p className="mt-3 text-muted-foreground text-xs">
-        Its standing instructions. This text is given to a model on every turn.
+        Its instructions. It follows these every time it replies.
       </p>
       {/*
        * Scrolled rather than clamped, and the distinction is the whole point of the card. A clamp
@@ -174,8 +172,7 @@ export function ProposedBotCard({
       </p>
 
       <p className="mt-2 text-muted-foreground text-xs">
-        It arrives private, with no address, no connector and no tool. Anything
-        it needs to reach is granted on its profile afterwards.
+        It starts private, with no apps. Apps are added on its page afterwards.
       </p>
 
       {refusal ? (
@@ -209,7 +206,7 @@ function titleFor(
   name: string | undefined,
   clashes: { title: string } | undefined,
 ): string {
-  const called = name?.trim() ? name.trim() : "a new coworker";
+  const called = name?.trim() ? name.trim() : "a new Bot";
   return clashes ? `Create ${called}, again` : `Create ${called}`;
 }
 
@@ -233,7 +230,7 @@ function TalkToIt({
       params={{ agentId }}
       to="/bots/$agentId"
     >
-      Open {name?.trim() || "the coworker"}
+      Open {name?.trim() || "the Bot"}
     </Link>
   );
 }
@@ -269,11 +266,10 @@ function Unwritable({
   return (
     <GalleryFrame
       action={<Badge tone="neutral">Not created</Badge>}
-      title="Create a coworker"
+      title="Create a Bot"
     >
       <p className="text-sm">
-        The coworker could not be created as written, so nothing was asked of
-        you. It is being redrafted.
+        This Bot couldn't be created as written. It's being rewritten.
       </p>
     </GalleryFrame>
   );

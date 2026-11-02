@@ -54,6 +54,32 @@ describe("accountFor", () => {
   });
 });
 
+describe("accountFor for an Arcade row", () => {
+  const arcade = (accountMode: string | null) => ({
+    ...brokered(accountMode),
+    provenance: "arcade",
+  });
+
+  test("a personal Arcade row resolves to the credential actor's own account", () => {
+    expect(accountFor(arcade("personal"), "user_a")).toEqual({
+      kind: "person",
+      userId: "user_a",
+    });
+  });
+
+  test("a shared Arcade row resolves to the deployment's account", () => {
+    expect(accountFor(arcade("shared"), "user_a")).toEqual({
+      kind: "deployment",
+    });
+  });
+
+  test("a non-brokered row still has no account", () => {
+    expect(
+      accountFor({ ...brokered("personal"), provenance: "manual" }, "user_a"),
+    ).toEqual({ kind: "none" });
+  });
+});
+
 describe("asAccountMode", () => {
   test("reads the two modes and nothing else", () => {
     expect(asAccountMode("personal")).toBe("personal");
