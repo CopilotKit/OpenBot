@@ -315,6 +315,52 @@ describe("built-in safety requirements", () => {
     expect(
       shopify("SHOPIFY_UPDATE_ORDER", { id: 123, note: "gift wrap" }),
     ).toBeUndefined();
+    // A field left empty is not an argument sent: the billing_address the Bot did not
+    // fill in must not hand the note off as money-moving (#890).
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", {
+        id: 123,
+        billing_address: null,
+        note: "gift wrap",
+      }),
+    ).toBeUndefined();
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", {
+        id: 123,
+        billing_address: {},
+        note: "",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("a field nested past the depth cap still counts by its name", () => {
+    // Values deeper than the cap are not read, so a field there flattens to nothing whether or not
+    // it holds anything. Its name is all the rule gets to see of it, and an unread value is not an
+    // empty one: dropping the name too let a money field through just by nesting it deep enough.
+    const sent = (args: Record<string, unknown>) =>
+      safetyRequirement(
+        candidate({
+          toolRef: "composio-shopify/SHOPIFY_GRAPHQL_MUTATION",
+          scope: "composio-shopify",
+          args,
+          target: {
+            serverId: "composio-shopify",
+            toolName: "SHOPIFY_GRAPHQL_MUTATION",
+            url: "https://mcp.composio.dev/shopify",
+            effect: "write",
+          },
+        }),
+      )?.id;
+    const nested = (leaf: Record<string, unknown>) =>
+      sent({ a: { b: { c: { d: { e: { f: leaf } } } } } });
+    expect(nested({ payment_method: { card: "tok_123" } })).toBe("payments");
+    expect(nested({ billing: [{ line: 1 }] })).toBe("payments");
+    // A list read at the cap whose entries are past it is not empty either.
+    expect(
+      sent({ a: { b: { c: { d: { e: { refund_lines: [{ id: 1 }] } } } } } }),
+    ).toBe("payments");
+    // Past the cap as well, but genuinely empty: still nothing sent.
+    expect(nested({ billing_address: {}, refund: [] })).toBeUndefined();
   });
 });
 
