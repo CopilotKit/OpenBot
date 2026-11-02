@@ -8,12 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### Concurrent routine edits keep their limit and saved schedule
-
-An update now reads the current routine under the same owner lock used to count and write it. An
-enable queued behind a pause and another create cannot take a person past 20 enabled routines.
-Concurrent cron and timezone edits also calculate the next firing from the schedule actually saved.
-
 **Before upgrading.** Sixteen things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
@@ -83,6 +77,12 @@ Concurrent cron and timezone edits also calculate the next firing from the sched
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+
+### Concurrent routine edits keep their limit and saved schedule
+
+An update now reads the current routine under the same owner lock used to count and write it. An
+enable queued behind a pause and another create cannot take a person past 20 enabled routines.
+Concurrent cron and timezone edits also calculate the next firing from the schedule actually saved.
 
 ### An unreconciled app authorization always reaches the audit trail
 
