@@ -340,8 +340,18 @@ export function createApprovalService(
       const evaluated = await evaluate(
         trustedRead ? { ...candidate, effect: "read" } : candidate,
       );
+      /*
+       * EVERY ASK IN A TASK IS THE TASK'S, whichever layer would have asked anyway. An ask the
+       * person's own switch or rule raised would otherwise keep `default` or `personal_rule`, and
+       * those are exactly what "Always allow here", turning the switch off and saving an allow rule
+       * answer: the card would offer a rule the next task ignores, and the switch or the rule would
+       * withdraw what the task is waiting on. Only a stricter answer, a hand-off or a refusal,
+       * keeps its own source.
+       */
       const outcome: ApprovalPolicyOutcome | undefined =
-        taskAsks && (!evaluated || evaluated.behaviour === "allow")
+        taskAsks &&
+        evaluated?.behaviour !== "hand_off" &&
+        evaluated?.behaviour !== "deny"
           ? {
               behaviour: "ask",
               source: "task",

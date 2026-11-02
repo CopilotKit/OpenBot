@@ -695,6 +695,60 @@ describe("where a task stands", () => {
     ).toHaveLength(1);
   });
 
+  test("with Ask before making changes on, a task's send still waits as the task's: no Always allow, and switching it off or saving an allow rule leaves it waiting", async () => {
+    const { owner, item } = await seed();
+    // The deployment's default for a person who turned it on: their own switch already asks.
+    await approvalService.setPreferences(owner.id, { enabled: true });
+    const toSam = { to: "sam@example.test", body: "Friday works." };
+    script = (input) =>
+      input.messages.some((message) => message.role === "tool")
+        ? reply(input, "I sent your reply to Sam.")
+        : callTool(input, "send_message", toSam, "send");
+    const sentBefore = sent.length;
+
+    await start(owner, item.id);
+    await tasks.idle();
+    expect(sent.length).toBe(sentBefore);
+    const waiting = await database
+      .select()
+      .from(approvalRequests)
+      .where(
+        and(
+          eq(approvalRequests.ownerUserId, owner.id),
+          eq(approvalRequests.status, "pending"),
+        ),
+      );
+    // The task's own reason, not the person's switch, so nothing that answers the switch reaches it.
+    expect(waiting.map((request) => request.action.policy)).toEqual([
+      {
+        behaviour: "ask",
+        source: "task",
+        reason: "Tasks started from a check-in ask before every change.",
+      },
+    ]);
+    const id = waiting[0]?.id ?? "";
+    await expect(
+      approvalService.decide(owner.id, id, "allow_always"),
+    ).rejects.toThrow(
+      "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
+    );
+    expect(await approvalStore.rules(owner.id)).toEqual([]);
+
+    // Turning the switch off withdraws what only the switch asked about; the task's send stays.
+    await approvalService.setPreferences(owner.id, { enabled: false });
+    expect((await approvalStore.get(owner.id, id)).status).toBe("pending");
+    // So does a rule of their own that would allow the send anywhere else.
+    await approvalService.createRule(owner.id, {
+      botId: "*",
+      toolRef: "mail/send_message",
+      effect: "*",
+      scope: "*",
+      behaviour: "allow",
+    });
+    expect((await approvalStore.get(owner.id, id)).status).toBe("pending");
+    expect(sent.length).toBe(sentBefore);
+  });
+
   test("a turn that fails twice reads failed, says so in its conversation, and Try again runs once however often it is pressed", async () => {
     const { owner, item } = await seed();
     script = providerDown;
