@@ -342,6 +342,7 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | `MICROSOFT_OAUTH_CLIENT_SECRET` | Microsoft Entra ID client secret.                                                   |
 | `MICROSOFT_OAUTH_TENANT_ID`  | Directory to admit. `common` by default, which admits personal accounts too; a GUID admits one directory. |
 | `MICROSOFT_OAUTH_API_SCOPE`  | OpenBot's own API in Entra, as a scope. `api://<client id>/.default` by default. See [Company systems behind Microsoft Entra](#company-systems-behind-microsoft-entra). |
+| `MICROSOFT_OAUTH_ALLOWED_CLIENTS` | The apps that may call OpenBot with a person's Entra token, as client ids separated by commas. Unset, no app may. See [Company systems behind Microsoft Entra](#company-systems-behind-microsoft-entra). |
 | `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
 | `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
 | `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
@@ -474,6 +475,14 @@ agent request. It is checked against the directory's published keys, its issuer 
 that person exactly as a signed-in browser does. Somebody OpenBot has not seen before is signed in
 the way Microsoft sign-in signs them in, under the same SSO, domain and removal rules.
 
+**Only the apps you list can do this.** Entra issues a token for OpenBot's API to any app that a
+person or an admin consents to, including other companies' multi-tenant apps if your tenant lets
+people consent to apps themselves. So OpenBot also checks the token's `azp` claim, the client id of
+the app the token was issued to, against `MICROSOFT_OAUTH_ALLOWED_CLIENTS`. A token from any other
+app is refused, and the server logs `entra-token-client-not-allowed` with that app's client id.
+With the setting unset, no app can call in. Routines and check-ins still reach marked servers from
+each person's stored Microsoft sign-in.
+
 In Entra, on OpenBot's app registration:
 
 1. **Expose an API** (an Application ID URI such as `api://<client id>` and a delegated scope such
@@ -483,6 +492,8 @@ In Entra, on OpenBot's app registration:
    grant admin consent.
 3. **Let the company's apps request tokens for OpenBot's API**: add them as authorized client
    applications of the scope from step 1, or have them request it with consent.
+4. **List those apps' client ids in `MICROSOFT_OAUTH_ALLOWED_CLIENTS`.** Step 3 decides which apps
+   Entra issues tokens to. This setting decides which of those tokens OpenBot takes.
 
 ### SCIM provisioning
 

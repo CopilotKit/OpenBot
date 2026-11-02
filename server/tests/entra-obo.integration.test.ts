@@ -58,6 +58,8 @@ const tag = randomUUID().slice(0, 8);
 const TENANT = randomUUID();
 const CLIENT_ID = randomUUID();
 const CLIENT_SECRET = `secret-${tag}`;
+/** The company's own app, the one MICROSOFT_OAUTH_ALLOWED_CLIENTS lists. */
+const APP_CLIENT = randomUUID();
 const DOWNSTREAM_APP = randomUUID();
 const HR_SCOPE = `api://${DOWNSTREAM_APP}/.default`;
 const PAYROLL_SCOPE = "api://payroll/.default";
@@ -106,7 +108,10 @@ async function sign(
     .sign(options.key ?? signingKey);
 }
 
-/** A person's token to OpenBot's own API, as Entra issues one to their app. */
+/**
+ * A person's token to OpenBot's own API, as Entra issues one to their app: `azp` names the app it
+ * was issued to, and `azpacr` how that app proved itself (`0`, a public client such as a SPA).
+ */
 const tokenToOpenBot = (
   person: { oid: string; upn: string },
   overrides: Record<string, unknown> = {},
@@ -118,7 +123,8 @@ const tokenToOpenBot = (
       aud: CLIENT_ID,
       oid: person.oid,
       sub: `sub-${person.oid}`,
-      azp: randomUUID(),
+      azp: APP_CLIENT,
+      azpacr: "0",
       scp: "access_as_user",
       name: person.upn.split("@")[0],
       preferred_username: person.upn,
@@ -213,7 +219,11 @@ async function tokenEndpoint(request: Request): Promise<Response> {
       scope: `api://${CLIENT_ID}/access_as_user`,
       expires_in: 3599,
       ext_expires_in: 3599,
-      access_token: await tokenToOpenBot(held),
+      // Issued to OpenBot itself, which proved itself with its secret.
+      access_token: await tokenToOpenBot(held, {
+        azp: CLIENT_ID,
+        azpacr: "1",
+      }),
       refresh_token: rotated,
     });
   }
@@ -328,6 +338,7 @@ const config = loadConfig(
     MICROSOFT_OAUTH_CLIENT_ID: CLIENT_ID,
     MICROSOFT_OAUTH_CLIENT_SECRET: CLIENT_SECRET,
     MICROSOFT_OAUTH_TENANT_ID: TENANT,
+    MICROSOFT_OAUTH_ALLOWED_CLIENTS: APP_CLIENT,
     BETTER_AUTH_URL: "http://127.0.0.1:7480",
     INITIAL_ADMIN_EMAILS: ADMIN,
   }),
@@ -343,9 +354,9 @@ const betterAuth = createAuth(config, database, undefined, auditStore, {
   vouchesForMicrosoftToken: (token) =>
     instances.some((instance) => instance.vouches(token)),
 });
-const newEntra = () => {
+const newEntra = (settings = microsoft) => {
   const instance = createEntra({
-    microsoft,
+    microsoft: settings,
     authConfig,
     auth: betterAuth,
     database,
@@ -615,14 +626,48 @@ describe("an app calls OpenBot with a person's Entra token", () => {
       { scp: undefined },
       undefined,
     ],
+    [
+      "a token issued to an app MICROSOFT_OAUTH_ALLOWED_CLIENTS does not list",
+      { azp: randomUUID() },
+      undefined,
+    ],
+    ["a token that names no app", { azp: undefined }, undefined],
+    [
+      // What Entra issues when OpenBot's registration asks for v1.0 tokens: the app is in `appid`.
+      "a v1.0 token, even from a listed app",
+      {
+        ver: "1.0",
+        iss: `https://sts.windows.net/${TENANT}/`,
+        aud: `api://${CLIENT_ID}`,
+        azp: undefined,
+        azpacr: undefined,
+        appid: APP_CLIENT,
+        appidacr: "0",
+      },
+      undefined,
+    ],
   ] as const)("%s is refused", async (_name, overrides, expiresIn) => {
-    const stranger = person("stranger");
+    // Somebody new each time, so one case signing them in cannot decide the next.
+    const stranger = person(`stranger-${randomUUID().slice(0, 8)}`);
     const response = await api(
       "/me",
       await tokenToOpenBot(stranger, overrides, expiresIn),
     );
     expect(response.status).toBe(401);
     // Nobody was signed in on its strength.
+    expect(await userId(stranger.upn)).toBeNull();
+  });
+
+  test("a deployment that lists no app takes no app's token", async () => {
+    const unlisted = newEntra({ ...microsoft, allowedClients: [] });
+    const stranger = person("unlisted");
+    expect(
+      await unlisted.sessionFrom(
+        new Headers({
+          authorization: `Bearer ${await tokenToOpenBot(stranger)}`,
+        }),
+      ),
+    ).toBeNull();
     expect(await userId(stranger.upn)).toBeNull();
   });
 

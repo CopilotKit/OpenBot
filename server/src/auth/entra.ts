@@ -19,8 +19,9 @@ import { type createAuth, decideSignInMethod } from "./index";
  *
  * INBOUND. An app that signed somebody in with Entra asks for a token to OpenBot's own API
  * (`MICROSOFT_OAUTH_API_SCOPE`) and sends it as `Authorization: Bearer`. It is checked against the
- * directory's published keys, its issuer, its audience and its expiry, and the request then runs as
- * that person exactly as a signed-in browser does. Somebody OpenBot has not seen before is signed in
+ * directory's published keys, its issuer, its audience and its expiry, the app it was issued to must
+ * be one `MICROSOFT_OAUTH_ALLOWED_CLIENTS` lists, and the request then runs as that person exactly
+ * as a signed-in browser does. Somebody OpenBot has not seen before is signed in
  * the way the sign-in screen signs them in, through Better Auth's own Microsoft provider, so the
  * admission, domain and deny rules and the user it creates are the ones every sign-in gets.
  *
@@ -94,6 +95,8 @@ export function createEntra(options: {
   const acceptsInbound = !namesNoDirectory(tenant);
   const issuer = `${AUTHORITY}/${tenant}/v2.0`;
   const audiences = [microsoft.clientId, resourceOf(microsoft.apiScope)];
+  /** The apps whose tokens are taken, by client id; see `sessionFrom`. */
+  const allowedClients = new Set(microsoft.allowedClients);
   const keys = createRemoteJWKSet(
     new URL(`${AUTHORITY}/${tenant}/discovery/v2.0/keys`),
   );
@@ -164,6 +167,7 @@ export function createEntra(options: {
     }
 
     let claims: { iss: string; oid: string; exp: number };
+    let client: string;
     try {
       const { payload } = await jwtVerify(token, keys, {
         issuer,
@@ -178,7 +182,28 @@ export function createEntra(options: {
       if (typeof payload.oid !== "string" || typeof payload.scp !== "string")
         return null;
       claims = { iss: issuer, oid: payload.oid, exp: payload.exp as number };
+      client = typeof payload.azp === "string" ? payload.azp.toLowerCase() : "";
     } catch {
+      return null;
+    }
+
+    /*
+     * And the app it was issued to must be one this company listed.
+     *
+     * Entra issues a token for OpenBot's API to any app a person or an admin consents to, multi-
+     * tenant apps included, so a valid token says who the person is and nothing about whether the
+     * app holding it is one this company meant to let act as them. `azp` names that app. It is the
+     * v2.0 claim (v1.0 tokens carry `appid` instead), and the issuer pinned above admits v2.0 tokens
+     * only, so `azp` is the one to read. Missing is refused like unlisted.
+     */
+    if (!allowedClients.has(client)) {
+      console.warn(
+        JSON.stringify({
+          type: "entra-token-client-not-allowed",
+          note: "A valid Entra token arrived from an app MICROSOFT_OAUTH_ALLOWED_CLIENTS does not list, and was refused.",
+          client: client || null,
+        }),
+      );
       return null;
     }
 
