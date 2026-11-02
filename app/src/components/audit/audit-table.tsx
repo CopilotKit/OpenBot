@@ -44,11 +44,11 @@ import {
   botText,
   DecisionCell,
   OnCell,
-  OutcomeMark,
+  OUTCOME_MARK,
+  OUTCOME_ROW,
   StartedByCell,
   searchTextOf,
   startedByText,
-  useOutcomeRow,
   whatText,
   whenText,
 } from "./audit-cells";
@@ -126,7 +126,6 @@ export function AuditTable({
     getColumnCanGlobalFilter: (column) => SEARCHABLE.has(column.id),
   });
   const rows = table.getRowModel().rows;
-  const outcomeRow = useOutcomeRow();
 
   return (
     <>
@@ -178,7 +177,7 @@ export function AuditTable({
             const outcome = outcomeOf(row.original.eventType);
             return (
               <TableRow
-                className={outcomeRow[outcome]}
+                className={OUTCOME_ROW[outcome]}
                 data-outcome={outcome}
                 key={row.id}
               >
@@ -317,7 +316,13 @@ function auditColumns(
       filterFn: anyOf,
       header: () => <span className="sr-only">Outcome</span>,
       cell: ({ row }) => (
-        <OutcomeMark outcome={outcomeOf(row.original.eventType)} />
+        <span
+          aria-hidden
+          className={cn(
+            "mt-1 block size-2.5 rounded-[3px]",
+            OUTCOME_MARK[outcomeOf(row.original.eventType)],
+          )}
+        />
       ),
       enableSorting: false,
     },

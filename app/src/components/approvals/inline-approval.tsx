@@ -6,8 +6,6 @@ import {
   approvalInboxOptions,
   decideApproval,
 } from "@/lib/approvals";
-import { cn } from "@/lib/utils";
-import { DEFAULT_SKIN, useSkinId } from "@/skins/store";
 
 /**
  * A pending approval, drawn in the conversation where the action it holds would have been.
@@ -24,7 +22,6 @@ export function InlineApproval({
   fallback: ReactNode;
 }) {
   const cache = useQueryClient();
-  const openbot = useSkinId() === DEFAULT_SKIN;
   const inbox = useQuery(approvalInboxOptions());
   const decision = useMutation({
     mutationFn: (choice: ApprovalDecision) =>
@@ -51,19 +48,9 @@ export function InlineApproval({
   return (
     <section
       aria-label="Waiting for your approval"
-      /*
-       * In OpenBot's own look, a card in orange, the color that means "waits for you", with its
-       * buttons on a row of their own at the end.
-       */
-      className={
-        openbot
-          ? "flex flex-col gap-3.5 rounded-2xl border border-warning/60 bg-warning/10 px-5 py-4.5 text-sm"
-          : "space-y-2 rounded-lg border p-3 text-sm"
-      }
+      className="space-y-2 rounded-lg border p-3 text-sm"
     >
-      <p
-        className={openbot ? "font-bold text-base leading-snug" : "font-medium"}
-      >
+      <p className="font-medium">
         {handOff ? "This needs you" : "Waiting for your approval"}:{" "}
         {request.action.toolRef
           .replace(/^computer_|^host\//, "")
@@ -71,16 +58,14 @@ export function InlineApproval({
         on {request.action.scope}
       </p>
       {request.action.policy ? (
-        <p className={cn("text-muted-foreground", openbot && "-mt-3")}>
-          {request.action.policy.reason}
-        </p>
+        <p className="text-muted-foreground">{request.action.policy.reason}</p>
       ) : null}
       {decision.error ? (
         <p role="alert" className="text-destructive">
           {decision.error.message}
         </p>
       ) : null}
-      <div className={cn("flex flex-wrap gap-2", openbot && "justify-end")}>
+      <div className="flex flex-wrap gap-2">
         {choices.map(([choice, label], index) => (
           <Button
             key={choice}

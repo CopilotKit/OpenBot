@@ -31,7 +31,6 @@ export const Channel = memo(function Channel({
   pinned,
   unread,
   busy,
-  waiting,
   emphasis,
 }: {
   channelId: string;
@@ -45,8 +44,6 @@ export const Channel = memo(function Channel({
   pinned: boolean;
   unread: boolean;
   busy: boolean;
-  /** An approval or a question here waits on the person. */
-  waiting: boolean;
   emphasis: MessageListEmphasis;
 }) {
   const queryClient = useQueryClient();
@@ -99,7 +96,6 @@ export const Channel = memo(function Channel({
               lastMessageAt={lastMessageAt}
               emphasis={emphasis}
               busy={busy}
-              waiting={waiting}
               unread={unread}
               pinned={pinned}
               revealing={revealed.typing}
