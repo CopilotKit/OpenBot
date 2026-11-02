@@ -85,6 +85,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
   affected.
 
+### Bots can install packages on their computers
+
+Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
+with the old permissions are replaced when next used, keeping their saved files and browser profiles.
+
 ### Bots tell you when something needs you
 
 A Bot a person has talked to now checks what that person connected (any app or server they
