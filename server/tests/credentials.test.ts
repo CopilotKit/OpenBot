@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
@@ -864,4 +864,8 @@ describe("admin credential API", () => {
     expect(calls).toEqual(["rotate:credential-old", "revoke:credential-new"]);
     expect(await rotate.text()).not.toContain("rotated-secret");
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

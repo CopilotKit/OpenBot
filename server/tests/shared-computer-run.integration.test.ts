@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import { botSeat } from "../src/computer/computer-key";
@@ -334,4 +334,8 @@ describe("two people on one public Bot, on the shared computer", () => {
       server.stop(true);
     }
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });
