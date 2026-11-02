@@ -292,6 +292,56 @@ describe("falling back to somebody who can actually answer", () => {
     expect(decision.agentId).toBe("general-assistant");
   });
 
+  test("different unique holders do not make an arbitrary multi-system fallback", async () => {
+    const general: RoutingCandidate = {
+      id: "general",
+      name: "General",
+      roleDescription: "everyday work",
+    };
+    const slack: RoutingCandidate = {
+      id: "slack-bot",
+      name: "Slack Bot",
+      roleDescription: "chat",
+      reaches: ["slack"],
+    };
+    const drive: RoutingCandidate = {
+      id: "drive-bot",
+      name: "Drive Bot",
+      roleDescription: "documents",
+      reaches: ["google-drive"],
+    };
+    for (const roster of [
+      [general, slack, drive],
+      [general, drive, slack],
+    ]) {
+      const decision = await BROKEN.route(
+        "Compare the Slack discussion with the document in Google Drive",
+        roster,
+        "general",
+      );
+      expect(decision.agentId).toBe("general");
+      expect(decision.undecided).toBe("unreachable");
+    }
+  });
+
+  test("one Bot uniquely reaching both named systems is still an unambiguous fallback", async () => {
+    const decision = await BROKEN.route(
+      "Compare the Slack discussion with the document in Google Drive",
+      [
+        { id: "general", name: "General", roleDescription: "everyday work" },
+        {
+          id: "knowledge",
+          name: "Knowledge",
+          roleDescription: "company knowledge",
+          reaches: ["slack", "google-drive"],
+        },
+      ],
+      "general",
+    );
+    expect(decision.agentId).toBe("knowledge");
+    expect(decision.undecided).toBe("unreachable");
+  });
+
   test("a confident match still wins over reach", async () => {
     /*
      * The line this must not cross. A specialist with no connectors is the right answer to a
