@@ -13,12 +13,13 @@ export const RULE_TEMPLATES: RuleTemplate[] = [
   {
     name: "Never submit a form",
     description: "Stops a Bot pressing a submit button, or Enter while typing.",
-    // `key` is guarded by tool name so the clause short-circuits before it on actions that have no
-    // keypress in them. Both tools that can press Enter are named: `computer_type` takes a `submit`
-    // flag that presses it once the text is in, and a rule naming only `computer_key` left that door
-    // open.
-    rule: '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")',
-    cost: "Also stops the Bot pressing Enter anywhere else. A form can submit from Enter in any field.",
+    // The keypress clause is guarded by tool name so a click is only refused on a submit button.
+    // Both tools that can press Enter are named: `computer_type` takes a `submit` flag that presses
+    // it once the text is in, and a rule naming only `computer_key` left that door open. It asks for
+    // the activation the gateway reads from the key, not `key == "Enter"`, so Shift+Enter, `\n` and
+    // Space (which press a focused button) are refused as well.
+    rule: '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && intent == "activate")',
+    cost: "Also stops the Bot pressing Enter or Space anywhere else. A form can submit from Enter in any field.",
   },
   {
     name: "Never type into a password field",
