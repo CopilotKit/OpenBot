@@ -191,6 +191,16 @@ export function createAuth(
      * session is not ended either: see `endRecordersOrRefuse`.
      */
     signOutRecorders?: (userId: string, ending: string) => Promise<void>;
+    /**
+     * Whether `auth/entra.ts` has just verified this Entra token, for the one sign-in it starts with
+     * one: somebody arriving from their app's token whom OpenBot has not seen before.
+     *
+     * Better Auth's own check of a Microsoft token cannot pass against Entra's real keys, which
+     * publish no `alg`, so its id-token sign-in is answered here instead. Only a token verified a
+     * moment ago on that path passes: `/sign-in/social` with a token from anywhere else is refused,
+     * as it always has been.
+     */
+    vouchesForMicrosoftToken?: (token: string) => boolean;
   } = {},
 ) {
   const authConfig = config.auth;
@@ -424,6 +434,8 @@ export function createAuth(
               clientSecret: authConfig.microsoft.clientSecret,
               tenantId: authConfig.microsoft.tenantId,
               mapProfileToUser: mapEntraProfile,
+              verifyIdToken: async (token: string) =>
+                options.vouchesForMicrosoftToken?.(token) ?? false,
             },
           }
         : {}),

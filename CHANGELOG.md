@@ -217,6 +217,15 @@ longer `COMPUTER_NAMESPACE` made every isolated Bot's computer start healthy whi
 to resolve its name, reported it as not running on every action. The supervisor now gives the server the container's short
 id, which Docker also answers for, whenever the name is too long. Names that fit are used as before.
 
+### Company systems behind Microsoft Entra, reached as the signed-in person
+
+An admin can mark a server added by URL with an Entra scope, and each call then carries a token
+Entra issues for the person asking through the on-behalf-of exchange, from their app's Entra token
+or, for routines, their stored Microsoft sign-in. Apps listed in `MICROSOFT_OAUTH_ALLOWED_CLIENTS`
+can also call OpenBot's API with a person's Entra token; a token issued to any other app is refused.
+Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
+without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.

@@ -139,6 +139,7 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
     skippedTools: [],
     authScheme: null,
     accountMode: null,
+    entraScope: null,
     sharedVendorConnected: false,
     ownCredential: false,
     ownerGrants: "admin",
