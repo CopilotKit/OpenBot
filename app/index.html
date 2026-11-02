@@ -5,15 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenBot</title>
     <!-- Sets the theme before the first paint. Must stay inline and classic: `defer` or `type="module"` runs too late. -->
+    <!-- The rule in src/lib/theme.ts (parseThemePreference, then resolveTheme): the person's choice, else the system's setting. -->
     <script>
-      // localStorage throws in some privacy modes; a theme is not worth taking the app down for.
-      try {
-        const dark = window.localStorage.getItem("openbot-theme") === "dark";
+      (() => {
+        let choice = null;
+        // localStorage throws in some privacy modes; the system's setting still applies.
+        try {
+          choice = window.localStorage.getItem("openbot-appearance");
+          if (choice !== "system" && choice !== "light" && choice !== "dark")
+            choice = window.localStorage.getItem("openbot-theme") === "dark" ? "dark" : "system";
+        } catch {}
+        const dark =
+          choice === "dark" ||
+          (choice !== "light" && !!window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
-        const skin = window.localStorage.getItem("openbot-skin");
-        if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
-      } catch {}
+        // The person's skin, painted before the bundle loads, the same way.
+        try {
+          const skin = window.localStorage.getItem("openbot-skin");
+          if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
+        } catch {}
+      })();
     </script>
   </head>
   <body>

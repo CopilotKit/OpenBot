@@ -207,8 +207,6 @@ function BotsSection({
                   className={cn(
                     navItem,
                     "min-h-[42px] gap-[9px] px-2.5 py-1.5 text-[12px] text-(--opendots-dot-ink) hover:bg-(--opendots-hover)",
-                    // The row's only drawing is the avatar, which keeps its own size.
-                    "[&_svg]:size-full",
                     active &&
                       "bg-(--opendots-active) hover:bg-(--opendots-active)",
                   )}

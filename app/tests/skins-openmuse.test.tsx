@@ -743,6 +743,66 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
     expect(readable()).not.toMatch(/openmuse/i);
     expect(capybaras()).toEqual([]);
   });
+
+  /*
+   * The face is a canvas drawn at a size in px, so no class can rescale it afterwards: one drawn
+   * bigger than its slot is clipped and sits off centre. The slot is 44px on a phone and 52px from
+   * 900px wide.
+   */
+  test.each([
+    [390, "44px"],
+    [1024, "52px"],
+  ])(
+    "%ipx wide, the centre face and the orb in it are drawn at %s",
+    async (width, size) => {
+      const viewport = (
+        window as unknown as {
+          happyDOM: {
+            setViewport: (size: { width: number; height: number }) => void;
+          };
+        }
+      ).happyDOM;
+      viewport.setViewport({ width, height: 844 });
+      const drawnAt = (orb: HTMLElement | null) => [
+        orb?.style.width,
+        orb?.style.height,
+      ];
+      try {
+        serve();
+        renderAt("/connections");
+        const centre = await page().findByRole("button", {
+          name: /Switch Bot$/,
+        });
+        const face = within(centre).getByRole("img", { name: "Muse" });
+        expect(drawnAt(face)).toEqual([size, size]);
+        expect(drawnAt(face.querySelector("[data-palette]"))).toEqual([
+          size,
+          size,
+        ]);
+        cleanup();
+
+        // With no Bot yet, the deployment's own mark fills the same slot.
+        const real = globalThis.fetch;
+        globalThis.fetch = Object.assign(
+          (input: RequestInfo | URL, init?: RequestInit) =>
+            String(input) === "/api/agents"
+              ? Promise.resolve(Response.json({ agents: [] }))
+              : real(input, init),
+          { preconnect: originalFetch.preconnect },
+        );
+        renderAt("/s/activity");
+        const empty = await page().findByRole("button", {
+          name: "Choose a Bot",
+        });
+        expect(drawnAt(empty.querySelector(".agent-orb"))).toEqual([
+          size,
+          size,
+        ]);
+      } finally {
+        viewport.setViewport({ width: 1024, height: 768 });
+      }
+    },
+  );
 });
 
 describe("every OpenBot surface stays reachable", () => {
