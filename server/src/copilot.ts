@@ -163,23 +163,6 @@ export type AgentStandingProfile = {
 };
 
 /**
- * What every standing role ends with, in order.
- *
- * Here rather than in the package, because for a remote Bot the standing role is the only
- * instruction there is: `role_description` is one sentence somebody wrote about what it is for, and
- * nothing else reaches it. The compliance Bot that answered a filing question with thresholds and
- * deadlines and no source was a `remote-ag-ui` agent whose entire prompt was "Investigate policies,
- * transaction monitoring, and control evidence." Then when to answer with a component, which a
- * remote Bot is offered through the run's tools, and for the same reason, how to read the
- * untrusted-content envelope its tool results carry.
- */
-const STANDING_GUIDANCE_PARTS = [
-  PROVENANCE_GUIDANCE,
-  COMPONENT_GUIDANCE,
-  UNTRUSTED_GUIDANCE,
-];
-
-/**
  * The coworker's job, as one system message.
  *
  * It is an ordinary AG-UI system message rather than `forwardedProps` or framework-specific state
@@ -197,7 +180,18 @@ export function standingRoleMessage(
       `You are ${profile.name}, ${profile.title}.`,
       profile.roleDescription,
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
-      ...STANDING_GUIDANCE_PARTS,
+      /*
+       * Here rather than in the package, because for a remote Bot the standing role is the only
+       * instruction there is: `role_description` is one sentence somebody wrote about what it is
+       * for, and nothing else reaches it. The compliance Bot that answered a filing question with
+       * thresholds and deadlines and no source was a `remote-ag-ui` agent whose entire prompt was
+       * "Investigate policies, transaction monitoring, and control evidence."
+       */
+      PROVENANCE_GUIDANCE,
+      // When to answer with a component, which a remote Bot is offered through the run's tools.
+      COMPONENT_GUIDANCE,
+      // And for the same reason, how to read the untrusted-content envelope its tool results carry.
+      UNTRUSTED_GUIDANCE,
     ].join("\n\n"),
   };
 }
@@ -205,12 +199,8 @@ export function standingRoleMessage(
 /**
  * The guidance {@link standingRoleMessage} ends with, which every Bot OpenBot runs itself is given
  * anyway (see {@link builtInAgentConfiguration}): left off a role run here so it is not said twice.
- *
- * ONE LIST FOR BOTH. The role used to spell its guidance out and this suffix to spell it again, and
- * when the role gained the component guidance between the other two, the suffix stopped matching:
- * a remote Bot run by OpenBot's own runner was then told the provenance guidance twice.
  */
-const STANDING_GUIDANCE = `\n\n${STANDING_GUIDANCE_PARTS.join("\n\n")}`;
+const STANDING_GUIDANCE = `\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`;
 
 /**
  * A Bot as OpenBot's own runner builds it, whatever it runs on elsewhere: what a check-in runs.
