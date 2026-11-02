@@ -9,6 +9,9 @@ import { settleReactWork } from "./settle-react-work";
  * Shiki is fetched with the first code block, not with the conversation. `@streamdown/code` imports
  * Shiki's core and regex engine at its top, so whatever imports it statically puts them in the chunk
  * every chat surface loads. Its loads are counted here; what it hands back is the real module.
+ *
+ * Not named `.test`: it only means something in a process where nothing has loaded Shiki yet, so
+ * `code-highlighting-lazy.test.ts` runs it in one of its own.
  */
 
 let loads = 0;
