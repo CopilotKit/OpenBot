@@ -171,6 +171,12 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
 
+### A message naming different Bots' apps stays on the default when routing is unsure
+
+When the router cannot decide and a message names apps held by different Bots, OpenBot keeps the
+default Bot instead of picking whichever app appears first in the roster. A single Bot uniquely
+holding the named apps still receives the message, and a confident routing decision still wins.
+
 ### A client read failure does not replace a working app registration
 
 A server that cannot decrypt an app's stored OAuth client now fails that connection attempt without
