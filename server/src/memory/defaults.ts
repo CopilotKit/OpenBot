@@ -4,10 +4,9 @@
  * Both used to start only when a person set them up by hand, one Bot and one app at a time, so on a
  * fresh deployment a Bot remembered what it was told and nothing else. Now:
  *
- * - A person who talks to one of their Bots in a conversation with that Bot alone gets background
- *   research from it: the same read-only run (`proactive/restriction.ts`), every four hours, first
- *   run one interval after the conversation so it never races it. Suggestions land in that
- *   conversation.
+ * - A person who talks to one of their Bots in a conversation with that Bot alone gets check-ins
+ *   from it: the same read-only run (`proactive/restriction.ts`), hourly, first run one interval
+ *   after the conversation so it never races it. A Bot they never talked to alone stays quiet.
  * - Each app the person connected in their own account, that the Bot can read, becomes a memory
  *   source for that Bot: one per app, read as the person, through the same authorization a source
  *   made by hand passes (`MemoryIngestion.defaultSourceCandidates`).
@@ -35,8 +34,11 @@ import { memorySources } from "../db/schema/memory";
 import { proactiveSettings } from "../db/schema/proactive";
 import type { MemoryIngestion } from "./ingestion";
 
-/** How often background research runs when OpenBot switched it on, in minutes. */
-export const DEFAULT_RESEARCH_INTERVAL_MINUTES = 240;
+/**
+ * How often check-ins run when OpenBot switched them on, in minutes: hourly, the most often a Bot
+ * may look. Most end silently, and the person hears at most once an hour whatever they find.
+ */
+export const DEFAULT_RESEARCH_INTERVAL_MINUTES = 60;
 /** The shortest gap between two adoption passes for one person and Bot in this process. */
 const MIN_INTERVAL_MS = 5 * 60_000;
 

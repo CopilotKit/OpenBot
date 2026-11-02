@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readToolName } from "../src/lib/plugins/tool-name";
+import { approvalWords, readToolName } from "@openbot/shared/tool-name";
 
 /**
  * What the person watching is told a Bot just did.
@@ -162,5 +162,51 @@ describe("this deployment's own tools", () => {
 
   test("any other bare name is left exactly as it is", () => {
     expect(readToolName("run_command", true)).toEqual({ label: "run_command" });
+  });
+});
+
+/**
+ * What an approval says it waits on, from the `toolRef` and `scope` the server asks under: an app's
+ * tool as `<app>/<tool>` on the app, a computer action on the site it acts on, a command on the
+ * computer it runs on.
+ */
+describe("naming what an approval asks to do", () => {
+  test("an app's tool reads as the action in words, on the app by its name", () => {
+    expect(
+      approvalWords({ toolRef: "requests/get_request", scope: "requests" }),
+    ).toEqual({ action: "get request", place: "Requests" });
+    expect(
+      approvalWords({
+        toolRef: "google-drive/createFile",
+        scope: "google-drive",
+      }),
+    ).toEqual({ action: "create file", place: "Google Drive" });
+  });
+
+  test("a brokered app is named as the app, and its action without the app's prefix", () => {
+    expect(
+      approvalWords({
+        toolRef: "composio-gmail/GMAIL_SEND_EMAIL",
+        scope: "composio-gmail",
+      }),
+    ).toEqual({ action: "send email", place: "Gmail" });
+    expect(
+      approvalWords({
+        toolRef: "arcade-Slack/SendMessage",
+        scope: "arcade-Slack",
+      }),
+    ).toEqual({ action: "send message", place: "Slack" });
+  });
+
+  test("a computer action and a command keep the words they always had", () => {
+    expect(
+      approvalWords({ toolRef: "computer_click", scope: "example.com" }),
+    ).toEqual({ action: "click", place: "example.com" });
+    expect(
+      approvalWords({ toolRef: "computer_write_file", scope: "workspace" }),
+    ).toEqual({ action: "write file", place: "workspace" });
+    expect(
+      approvalWords({ toolRef: "host/run_command", scope: "grant-1" }),
+    ).toEqual({ action: "run command", place: "grant-1" });
   });
 });

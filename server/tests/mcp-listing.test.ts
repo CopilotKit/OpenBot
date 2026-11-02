@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { catalogueEntry, classifyTool } from "../src/plugins/catalogue";
+import {
+  catalogueEntry,
+  classifyTool,
+  labelledRead,
+} from "../src/plugins/catalogue";
 import { listTools } from "../src/plugins/mcp";
 
 /**
@@ -81,6 +85,14 @@ const readOnlyButReviewedAsWrite: AnnotatedTool = {
   annotations: { readOnlyHint: true },
 };
 
+/** A tool that says both, which contradicts itself and is read as destructive. */
+const readOnlyAndDestructive: AnnotatedTool = {
+  name: "notion-tidy-workspace",
+  description: "Says it only reads and that it destroys.",
+  inputSchema: NO_ARGUMENTS,
+  annotations: { readOnlyHint: true, destructiveHint: true },
+};
+
 /** A tool with no annotations at all, which is what most MCP servers publish. */
 const unannotated: AnnotatedTool = {
   name: "notion-search",
@@ -93,6 +105,7 @@ beforeAll(async () => {
     .addTool(destructiveUnreviewed)
     .addTool(readOnlyUnreviewed)
     .addTool(readOnlyButReviewedAsWrite)
+    .addTool(readOnlyAndDestructive)
     .addTool(unannotated);
   url = await mock.start();
 });
@@ -179,5 +192,55 @@ describe("what an MCP listing tells the classifier", () => {
     expect(search?.effect).toBeUndefined();
     expect(search?.destructive).toBeUndefined();
     expect(classify(tools, "notion-search")).toBe("read");
+  });
+});
+
+/**
+ * The read-only hint, recorded as the server said it, for the one reader that believes it: a
+ * check-in, on an app the person connected with their own account. Chat's answer is the one the
+ * suite above pins, and these cases show it does not move.
+ */
+describe("what an MCP listing tells a check-in", () => {
+  const listed = async (name: string) => {
+    const tool = (await listTools({ url })).find(
+      (candidate) => candidate.name === name,
+    );
+    if (!tool) throw new Error(`the mock did not list ${name}`);
+    return tool;
+  };
+  /** What a refresh writes and `listServers` then reads, as the check-in sees it. */
+  const forCheckIn = async (name: string) => {
+    const tool = await listed(name);
+    return labelledRead(notion, name, {
+      effect: tool.effect ?? null,
+      destructive: tool.destructive ?? false,
+      declaredRead: tool.declaredRead ?? false,
+    });
+  };
+
+  test("readOnlyHint is recorded as declared, and is still nothing to chat", async () => {
+    const fetch = await listed("notion-fetch");
+    expect(fetch.declaredRead).toBe(true);
+    expect(fetch.effect).toBeUndefined();
+    expect(await forCheckIn("notion-fetch")).toBe(true);
+  });
+
+  test("a tool that says nothing is not a read to a check-in unless a reviewed list says so", async () => {
+    expect((await listed("notion-search")).declaredRead).toBeUndefined();
+    // On Notion's reviewed read list.
+    expect(await forCheckIn("notion-search")).toBe(true);
+  });
+
+  test("destructive always wins, beside a read-only hint or alone", async () => {
+    const tidy = await listed("notion-tidy-workspace");
+    expect(tidy.declaredRead).toBeUndefined();
+    expect(tidy.destructive).toBe(true);
+    expect(await forCheckIn("notion-tidy-workspace")).toBe(false);
+    expect(await forCheckIn("notion-purge-workspace")).toBe(false);
+  });
+
+  test("a reviewed write stays a write to a check-in, whatever the server claims", async () => {
+    expect((await listed("notion-update-page")).declaredRead).toBe(true);
+    expect(await forCheckIn("notion-update-page")).toBe(false);
   });
 });

@@ -1,9 +1,35 @@
 import { DELIVERY_REQUEST_TIMEOUT_MS } from "../timeouts";
 import {
+  type DeliveryKind,
   DeliveryProviderError,
   type ProviderFetch,
   providerJson,
 } from "./types";
+
+/**
+ * What a tap on a notification opens in the mobile app, and the data it carries there. A reply opens
+ * its conversation and a question or an approval the inbox, both by conversation. A ping opens the
+ * person's Needs you list: it folds several Bots' items, so no one conversation is where it leads.
+ */
+function pushData(input: {
+  channelId: string;
+  kind: DeliveryKind;
+  requestId?: string | null;
+}): Record<string, string> {
+  if (input.kind === "attention")
+    return { kind: input.kind, url: "openbotmobile://needs-you" };
+  const path = input.kind === "reply" ? "conversation" : "approvals";
+  const query = new URLSearchParams({
+    channelId: input.channelId,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+  });
+  return {
+    channelId: input.channelId,
+    kind: input.kind,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    url: `openbotmobile://${path}?${query}`,
+  };
+}
 export function createExpoPushTransport(
   config: {
     accessToken?: string;
@@ -37,25 +63,15 @@ export function createExpoPushTransport(
       title: string;
       body: string;
       channelId: string;
-      kind: "reply" | "question" | "approval";
+      kind: DeliveryKind;
       requestId?: string | null;
     }) {
-      const path = input.kind === "reply" ? "conversation" : "approvals";
-      const query = new URLSearchParams({
-        channelId: input.channelId,
-        ...(input.requestId ? { requestId: input.requestId } : {}),
-      });
       const result = await call("send", {
         to: input.token,
         title: input.title,
         body: Array.from(input.body).slice(0, 200).join(""),
         sound: "default",
-        data: {
-          channelId: input.channelId,
-          kind: input.kind,
-          ...(input.requestId ? { requestId: input.requestId } : {}),
-          url: `openbotmobile://${path}?${query}`,
-        },
+        data: pushData(input),
       });
       const ticket = result.data;
       if (

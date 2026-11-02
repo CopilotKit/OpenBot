@@ -45,6 +45,9 @@ export const WITHDRAWN_APPROVALS_OFF =
   "Not done: this request was withdrawn because the person switched off asking before changes. Try the action again if it is still needed.";
 export const WITHDRAWN_RULE_ALLOWS =
   "Not done: this request was withdrawn because a rule the person saved now allows it without asking. Try the action again if it is still needed.";
+/** Why a change in a check-in task waits for the person, on its card where they decide it. */
+export const TASK_ASKS =
+  "Tasks started from a check-in ask before every change.";
 
 /** Snapshot ids and element refs change on every page read; the action they point at does not. */
 const VOLATILE = new Set(["snapshotId", "ref", "toolCallId", "signal"]);
@@ -274,8 +277,27 @@ export function createApprovalService(
        */
       const policy = store.policy;
       const continuation = candidate.continuation ?? currentApprovalContext();
+      /*
+       * A TASK STARTED FROM A CHECK-IN ASKS BEFORE EVERYTHING BUT A TRUSTED READ, whatever the
+       * person's own switch or rules would allow: the work came from something a Bot noticed, not
+       * something the person wrote out, so they see each step before it happens. The one thing it
+       * does unasked is read an app the person connected with their own account, with a tool a
+       * reviewed read list names (`ownConnectionRead`). A tool only labelled a read, by its server or
+       * a broker, asks; so does a read chat would run freely (a page, a search on the deployment's
+       * key). A stricter answer (a hand-off, a refusal) still stands.
+       */
+      const inTask =
+        continuation?.threadId !== undefined &&
+        (await store.asksEveryChange?.(
+          candidate.actorId,
+          continuation.threadId,
+        )) === true;
+      const trustedRead = inTask && candidate.ownConnectionRead === true;
+      const taskAsks = inTask && !trustedRead;
       const equivalence =
-        policy && candidate.effect !== "read" && continuation?.threadId
+        policy &&
+        (candidate.effect !== "read" || taskAsks) &&
+        continuation?.threadId
           ? equivalenceOf(candidate)
           : undefined;
       const userTurns = userTurnsOf(continuation);
@@ -310,16 +332,44 @@ export function createApprovalService(
           throw new ApprovalRefusedError(DECLINED_BY_PERSON);
         }
       }
-      const outcome = await evaluate(candidate);
+      /*
+       * A trusted read in a task is judged as the read it is, the way a check-in judges it: the
+       * person's and the team's rules about reads still apply, and the switch that asks before
+       * changes does not, though chat classifies the tool as a change.
+       */
+      const evaluated = await evaluate(
+        trustedRead ? { ...candidate, effect: "read" } : candidate,
+      );
+      /*
+       * EVERY ASK IN A TASK IS THE TASK'S, whichever layer would have asked anyway. An ask the
+       * person's own switch or rule raised would otherwise keep `default` or `personal_rule`, and
+       * those are exactly what "Always allow here", turning the switch off and saving an allow rule
+       * answer: the card would offer a rule the next task ignores, and the switch or the rule would
+       * withdraw what the task is waiting on. Only a stricter answer, a hand-off or a refusal,
+       * keeps its own source.
+       */
+      const outcome: ApprovalPolicyOutcome | undefined =
+        taskAsks &&
+        evaluated?.behaviour !== "hand_off" &&
+        evaluated?.behaviour !== "deny"
+          ? {
+              behaviour: "ask",
+              source: "task",
+              reason: TASK_ASKS,
+              ...(evaluated?.review ? { review: evaluated.review } : {}),
+            }
+          : evaluated;
       if (outcome) {
         if (outcome.behaviour === "allow") return;
       } else if (
         candidate.effect === "read" ||
+        trustedRead ||
         !(await store.enabled(candidate.actorId))
       )
         return;
+      const { ownConnectionRead: _trust, ...asked } = candidate;
       const action: ApprovalAction = {
-        ...approvalAction(candidate),
+        ...approvalAction(asked),
         ...(outcome ? { policy: outcome } : {}),
         ...(equivalence ? { equivalence, userTurns } : {}),
       };

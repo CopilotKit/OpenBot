@@ -9,6 +9,7 @@ import {
   IconLayoutGrid,
   IconListDetails,
   IconPuzzle,
+  IconRadar,
   IconShieldCheck,
   IconSlash,
   IconUsers,
@@ -87,6 +88,11 @@ const GROUPS: {
         title: "Automatic learning",
         icon: IconBulb,
         linkOptions: { to: "/admin/learning" },
+      },
+      {
+        title: "Check-ins",
+        icon: IconRadar,
+        linkOptions: { to: "/admin/proactive" },
       },
       {
         title: "UI components",

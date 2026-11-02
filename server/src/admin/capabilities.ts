@@ -27,6 +27,7 @@ export const CAPABILITIES = [
   "teamBots",
   "ownerApps",
   "isolatedComputers",
+  "proactive",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -92,12 +93,19 @@ export const CAPABILITY_LABELS: Record<
     description:
       "People may give a Bot a computer of its own instead of sharing theirs.",
   },
+  proactive: {
+    title: "Check-ins",
+    description:
+      "Bots check people's apps in the background and tell them when something needs them.",
+  },
 };
 
 /**
  * What an untouched deployment allows.
  *
- * Everything the product already did stays on.
+ * Everything the product already did stays on. Check-ins are on too: a Bot checking quietly and
+ * reaching out only when something needs the person is the product, and an admin who wants it off
+ * turns it off for everybody here (`proactive/engine.ts` asks before any model call).
  */
 export const DEFAULT_CAPABILITIES: Record<Capability, boolean> = {
   useBots: true,
@@ -111,6 +119,7 @@ export const DEFAULT_CAPABILITIES: Record<Capability, boolean> = {
   teamBots: true,
   ownerApps: true,
   isolatedComputers: true,
+  proactive: true,
 };
 
 export type CapabilityRow = {

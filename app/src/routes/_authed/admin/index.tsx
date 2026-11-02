@@ -9,6 +9,7 @@ import {
   IconLayoutGrid,
   IconListDetails,
   IconPuzzle,
+  IconRadar,
   IconShieldCheck,
   IconUsers,
 } from "@tabler/icons-react";
@@ -105,6 +106,13 @@ const SECTIONS: {
           "Learn from finished conversations and review the skills it proposes.",
         icon: IconFileText,
         linkOptions: { to: "/admin/learning" },
+      },
+      {
+        title: "Check-ins",
+        description:
+          "Turn check-ins on or off, limit them, and see how often people start what Bots raise.",
+        icon: IconRadar,
+        linkOptions: { to: "/admin/proactive" },
       },
       {
         title: "UI components",

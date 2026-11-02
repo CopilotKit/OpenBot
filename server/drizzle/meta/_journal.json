@@ -498,6 +498,20 @@
       "when": 1793641867987,
       "tag": "0070_memory_dedup_per_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1793645097032,
+      "tag": "0071_proactive_check_ins",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1793645107629,
+      "tag": "0072_check_in_read_labels",
+      "breakpoints": true
     }
   ]
 }
