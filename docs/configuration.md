@@ -382,6 +382,38 @@ address and a `.local` name are what this flag is mostly used for, and anybody o
 the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
 it.
 
+**A single-user deployment has its own identity at Composio or Arcade.** Both keep accounts apart
+by a user id OpenBot sends, and the one person of every single-user deployment is `dev-local-user`,
+so two of them on the same `COMPOSIO_API_KEY` or `ARCADE_API_KEY` used to share one set of
+connections: one deployment's Gmail, or its consent to Google, was used by the other, and a
+disconnect in one ended it for both. Now each is given its own user id at its broker,
+`dev-local-user:` and a random part, at its first start with that broker's key, and keeps it in its
+database (the `brokered_identities` table, one row per broker), so it is the same after a restart
+and on every replica. Only the name at the broker changes: threads, memory and everything else stay
+with `dev-local-user`.
+
+A deployment that already had connections under `dev-local-user` gets its own id too, at the same
+start, and **connects each of its apps once more**. Neither broker can move a connection to another
+user id: Composio's connected-account update takes no user id, and Arcade's user connections can
+only be listed and deleted. Nor can either say which deployment made a connection under the shared
+id, and before this change one deployment opening an app another had connected recorded that
+account as its own. So at that start the deployment removes its own records of connections under
+`dev-local-user` (its `brokered_connections` rows for the active broker whose `user_id` and
+`vendor_user_id` are both `dev-local-user`), logs the apps it removed as
+`single-user-connections-retired`, and asks the broker nothing. Each app then reads as not connected
+and one Connect files it under the new id. The accounts themselves stay at the broker under
+`dev-local-user`, because another OpenBot on the same key may still be using them. If this was the
+only OpenBot on its key, remove them there: they are Composio's connected accounts for user id
+`dev-local-user`, and Arcade's user connections for `user_id=dev-local-user`
+(`GET /v1/admin/user_connections`).
+
+A consent begun under `dev-local-user` before that start and finished after it is refused, and the
+person is asked to press Connect again; nothing held under `dev-local-user` is confirmed or
+withdrawn. A deployment that signs people in keeps filing each person under their own id. To see
+the id in use, run `select provider, vendor_user_id from brokered_identities`; no row for the
+active broker means the person's own id. That is also the `--user` to give
+`bun run composio:smoke`.
+
 **`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an
 administrator once in. Matching is exact with no wildcards, so `example.com` admits neither
 `sub.example.com` nor `evil-example.com`, and both sides go through the same IDNA normalisation, so

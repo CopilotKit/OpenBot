@@ -16,7 +16,13 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   type BrokeredAccount,
@@ -1174,8 +1180,8 @@ test("the row names the app rather than calling it the app", async () => {
  */
 function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
   return {
-    authorizesPerAction: false,
     configured: true,
+    reconnectsInPlace: false,
     connect: () => {},
     connected: false,
     connecting: false,
@@ -1256,52 +1262,53 @@ test("both kinds say Connected, and the line beneath says how", () => {
   ).toBeTruthy();
 });
 
-test("a per-action broker offers no whole-app Connect, and still offers Disconnect", () => {
+test("a consent app offers Connect, and Disconnect once it is connected", () => {
   /*
-   * THE DEFECT THIS CLOSES, FOUND BY PRESSING THE BUTTON AND NOT BY ANY TEST. Both screens drew
-   * this row unconditionally, so under Arcade a disconnected app offered Connect — and the adapter
-   * refuses an authorization carrying no action, so the press could only ever come back with
-   * "Arcade grants per action, so an authorization needs the action it is for and none was given."
-   * Every time, with no state in which it could succeed, and with the thing the person actually
-   * wanted sitting in the list underneath.
-   */
-  const disconnected = renderRow(
-    accountState({ authorizesPerAction: true, kind: "consent" }),
-  );
-
-  expect(disconnected.queryByRole("button", { name: /Connect/ })).toBeNull();
-  expect(disconnected.getByText("Approved per action")).toBeTruthy();
-
-  cleanup();
-
-  /*
-   * AND THE OTHER HALF OF THE ROW IS UNTOUCHED, which is the part worth guarding. Per-action
-   * authorizations still add up to ONE account at the vendor, `revoke` is a real act on it, and
-   * this row is the only place it is offered — so withholding Disconnect along with Connect would
-   * strand somebody holding a live connection with no way to end it.
-   */
-  const connected = renderRow(
-    accountState({
-      authorizesPerAction: true,
-      connected: true,
-      kind: "consent",
-    }),
-  );
-
-  expect(connected.getByText("Connected")).toBeTruthy();
-  expect(connected.getByRole("button", { name: "Disconnect" })).toBeTruthy();
-  expect(connected.queryByText("Approved per action")).toBeNull();
-});
-
-test("a whole-app broker keeps its Connect", () => {
-  /*
-   * THE OTHER SIDE OF THE GATE, so the case above cannot pass by the row having lost Connect
-   * outright. Composio fixes one auth state for a whole toolkit, and one press is the whole story.
+   * ON EVERY BROKER. Arcade's apps used to draw "Approved per action" here in place of Connect,
+   * because its adapter refused a consent with no action on it. It now asks Arcade for the whole
+   * app in one consent, as Composio's Connect does, so the row is the same row on both.
    */
   const view = renderRow(accountState({ kind: "consent" }));
 
   expect(view.getByRole("button", { name: /Connect/ })).toBeTruthy();
   expect(view.queryByText("Approved per action")).toBeNull();
+
+  cleanup();
+
+  const connected = renderRow(
+    accountState({ connected: true, kind: "consent" }),
+  );
+  expect(connected.getByText("Connected")).toBeTruthy();
+  expect(connected.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+  expect(connected.queryByRole("button", { name: /Connect/ })).toBeNull();
+});
+
+test("a connected Arcade row offers Reconnect beside Disconnect, and a Composio row does not", () => {
+  /*
+   * WHERE A BOT'S CARD SENDS SOMEBODY TO RECONNECT, ON BOTH BROKERS. On Arcade a consent over the
+   * connection that stands adds what it asks for, so one press finishes reconnecting here. On
+   * Composio a second consent would attach a second account, so reconnecting is Disconnect first.
+   */
+  const pressed: string[] = [];
+  const arcade = renderRow(
+    accountState({
+      connected: true,
+      kind: "consent",
+      reconnectsInPlace: true,
+      connect: () => pressed.push("connect"),
+    }),
+  );
+  fireEvent.click(arcade.getByRole("button", { name: "Reconnect" }));
+  expect(pressed).toEqual(["connect"]);
+  expect(arcade.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+
+  cleanup();
+
+  const composio = renderRow(
+    accountState({ connected: true, kind: "consent" }),
+  );
+  expect(composio.queryByRole("button", { name: "Reconnect" })).toBeNull();
+  expect(composio.getByRole("button", { name: "Disconnect" })).toBeTruthy();
 });
 
 test("an app needing no account offers nothing to press", () => {
@@ -2516,7 +2523,7 @@ function AccountProbe() {
     verifiedAt: null,
     probe: null,
     checkable: true,
-    authorizesPerAction: false,
+    reconnectsInPlace: false,
     authScheme: "API_KEY",
     returnTo: "settings",
     report: () => {},

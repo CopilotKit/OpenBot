@@ -533,6 +533,45 @@ export const brokeredConnections = pgTable(
 );
 
 /**
+ * The name a person's accounts are filed under at a broker, where it is not their own id.
+ *
+ * A person is filed under their own `users.id` everywhere else (see `personAccount`), and that is
+ * only safe because the id is theirs alone. The single-user actor's is not: every single-user
+ * deployment signs its one person in as `dev-local-user`, so every one of them sharing a Composio
+ * or Arcade key was one user there. One deployment's Gmail was listed and used by another, a
+ * disconnect in one ended the account for both, and a call naming no account ran in whichever of
+ * them connected last. So a single-user deployment's own name is minted once per broker,
+ * `dev-local-user:<random>`, and kept here, where every replica and every restart reads the same
+ * one. The local id is unchanged, so threads, memory and everything else stay attached to
+ * `dev-local-user`.
+ *
+ * NO ROW MEANS THE PERSON'S OWN ID, which is every signed-in person. Every single-user deployment
+ * with a broker has one, written at its first start with that broker and never replaced; the
+ * connections it had recorded under `dev-local-user` are retired then, here and not at the broker,
+ * and connected again under the new name. See `ensureSingleUserIdentity` in
+ * `plugins/single-user-identity.ts`, the only writer.
+ *
+ * NO KEY TO `users`, for the reason `brokered_connections.user_id` has none: the name has to
+ * outlive the person for as long as accounts filed under it might need ending.
+ */
+export const brokeredIdentities = pgTable(
+  "brokered_identities",
+  {
+    provider: text("provider").$type<"composio" | "arcade">().notNull(),
+    userId: text("user_id").notNull(),
+    vendorUserId: text("vendor_user_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.userId] }),
+    check(
+      "brokered_identities_provider_check",
+      sql`${table.provider} IN ('composio', 'arcade')`,
+    ),
+  ],
+);
+
+/**
  * One in-flight Arcade authorization: what the returning browser is verified against.
  *
  * `actor_id` IS THE SIGNED-IN PERSON'S `users.id` — the session subject — AND NEVER
@@ -589,7 +628,13 @@ export const pendingAuthorizations = pgTable(
     serverId: text("server_id")
       .notNull()
       .references(() => mcpServers.id, { onDelete: "cascade" }),
-    action: text("action").notNull(),
+    /**
+     * The one action Authorize was pressed for, or `null` for Connect, which asks the broker for
+     * everything the app's actions need. Null rather than the app's own name, because the verifier
+     * lands the person on `?action=` and the trail files it as `action`, and an app's name there
+     * read as an action that was just authorized.
+     */
+    action: text("action"),
     /**
      * Whose account this attempt is for, with the same meaning and the same two values as
      * {@link brokeredConnections.holder} — and held by the same CHECK, because `$type<>` is erased
