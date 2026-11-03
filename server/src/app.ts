@@ -127,6 +127,7 @@ import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
 import type { ProactiveEngine } from "./proactive/engine";
 import { createProactiveRoutes } from "./proactive/routes";
 import type { ProactiveStore } from "./proactive/store";
+import type { TaskReportReader } from "./tasks/report";
 import { createTaskRoutes } from "./tasks/routes";
 import type { TaskRunner } from "./tasks/runner";
 import type { TaskStore } from "./tasks/store";
@@ -454,8 +455,12 @@ export function createApp(
     };
     memory?: { store: MemoryStore; ingestion: MemoryIngestion };
     proactive?: { store: ProactiveStore; engine: ProactiveEngine };
-    /** Started items, each run as a task in a conversation of its own. See tasks/runner.ts. */
-    tasks?: { store: TaskStore; runner: TaskRunner };
+    /**
+     * Started items and asked work, each run as a task in a conversation of its own. See
+     * tasks/runner.ts. `report` reads a task's report from its conversation; absent, it is not
+     * served.
+     */
+    tasks?: { store: TaskStore; runner: TaskRunner; report?: TaskReportReader };
     responsibilities?: {
       store: ResponsibilityStore;
       engine: ResponsibilityEngine;
@@ -1743,6 +1748,7 @@ export function createApp(
         coworker.tasks.store,
         coworker.tasks.runner,
         requireUser,
+        { report: coworker.tasks.report },
       ),
     );
   if (coworker?.memory)
