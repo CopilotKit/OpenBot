@@ -525,6 +525,12 @@ export const auditEventTypes = [
   "agent.handoff_failed",
   "agent.handoff_retried",
   /*
+   * A hop that was accepted and then never run, because a pause stopped it: the Bot it was for, or
+   * the Bot that asked for it. Its own name because it is neither a failure nor a delivery, and the
+   * transcript of a conversation nobody ran says nothing at all.
+   */
+  "agent.handoff_skipped",
+  /*
    * A Bot asking a person instead.
    *
    * The counterpart to the rows above, and the one that says a chain stopped on purpose. Without it

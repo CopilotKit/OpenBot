@@ -21,6 +21,10 @@ import {
   sql,
 } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
+import {
+  ASKING_BOT_PAUSED_REASON,
+  BOT_PAUSED_REASON,
+} from "../agents/lifecycle";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
 import type { Database } from "../db/client";
 import {
@@ -318,7 +322,11 @@ export function createActivityStore(database: Database) {
           status: hop.finishedAt
             ? hop.lastError === "Stopped by the person"
               ? "stopped"
-              : "delivered"
+              : // Finished with, never run: the runner drops a hop whose Bot was paused, and says so.
+                hop.lastError === BOT_PAUSED_REASON ||
+                  hop.lastError === ASKING_BOT_PAUSED_REASON
+                ? "skipped"
+                : "delivered"
             : gaveUp
               ? "failed"
               : running
