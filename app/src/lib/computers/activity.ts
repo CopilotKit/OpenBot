@@ -1,3 +1,8 @@
+import type { Message } from "@ag-ui/core";
+import { useCopilotKit } from "@copilotkit/react-core/v2";
+import { useEffect } from "react";
+import type { ToolOutcome } from "./call";
+
 /**
  * What a Bot has been doing on its computer, other than browsing.
  *
@@ -7,20 +12,33 @@
  * word. The same was true of reading a file and listing a folder. That is a poor deal on a machine
  * holding somebody's logins, and it is the thing an operator asks about first.
  *
- * A live view of this session rather than a record. The record is the audit trail, which is on the
- * server, survives a reload and is what an investigation reads; this is the pane beside the screen,
- * and it is allowed to be gone when the tab is closed. Keeping it in the browser means no new
- * endpoint, no polling, and no second copy of command output in the database.
+ * READ FROM THE CONVERSATION, NOT WRITTEN BY THE TOOL HANDLERS. It used to be written by the browser's
+ * handlers as each call came back, and since the approval gate most calls never come back through
+ * them: a command, a keystroke or a saved file is sent to the server's gate, which runs it and
+ * answers, or holds it for a person and runs it once they allow it, continuing the conversation
+ * itself. The pane sat on "Nothing yet" while a Bot ran command after command. Whichever way a call
+ * ran (the browser, the gate at once, the gate after a decision), its answer ends up in the
+ * conversation as the tool's result, and that is where this reads it. A conversation opened again
+ * after a reload is read the same way, so the pane shows what was done in it.
  *
- * Written from the tool handlers, which run exactly once per call. A tool's `render` runs on every
- * re-render, so recording from there would append the same command repeatedly.
+ * ONE ENTRY PER TOOL CALL. The conversation is read again every time it changes and every time it is
+ * opened, so an entry is keyed by the call it came from, and reading it twice changes nothing.
+ *
+ * Still a view, not the record. The audit trail on the server is what an investigation reads; this is
+ * the pane beside the screen, kept in the page. Keeping it there means no new endpoint, no polling,
+ * and no second copy of command output in the database.
  */
 
 /** One thing a Bot did on its computer. */
 export type ComputerActivity = {
+  /** The tool call it was. A call read again is this same entry, never a second one. */
   id: string;
-  /** When it happened, for the timestamp beside it. */
-  at: number;
+  /**
+   * When it finished, for the timestamp beside it. Only for a call this page saw asked and then
+   * answered. One already done when its conversation was opened says what was done, not when: the
+   * time the page was opened would be a guess drawn as a fact.
+   */
+  at?: number;
   kind: "command" | "read_file" | "write_file" | "list_files";
   /** The command, or the path. What the line says it acted on. */
   subject: string;
@@ -28,12 +46,18 @@ export type ComputerActivity = {
   output: string;
   /** Present for a command. Non-zero is drawn as a failure. */
   exitCode?: number;
-  /** A boundary refused it. Drawn differently from a command that ran and failed. */
+  /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
   /** The far side cut the output short, or stopped the command. Said out loud rather than implied. */
   truncated?: boolean;
   timedOut?: boolean;
 };
+
+/** What a call did, without the bookkeeping the pane adds to it. */
+export type ActivityDetails = Omit<ComputerActivity, "id" | "at">;
+
+/** One computer call in a conversation: what it did, or null while it waits for its answer. */
+export type ConversationCall = { id: string; did: ActivityDetails | null };
 
 /**
  * The most recent entries per computer.
@@ -44,29 +68,329 @@ export type ComputerActivity = {
 const LIMIT = 200;
 
 const byComputer = new Map<string, ComputerActivity[]>();
+/**
+ * Every call a computer's pane has taken in, including the ones it has since let go: aged out past
+ * the limit, or wiped with the computer. The conversation is read again on every change, and those
+ * must stay gone rather than come back on the next read.
+ */
+const taken = new Map<string, Set<string>>();
+/**
+ * Calls this page watched being made, so their answer can say when it came: ones this page started
+ * running, and ones it saw in a conversation still waiting for an answer.
+ */
+const asked = new Set<string>();
 const listeners = new Set<() => void>();
 
 /** A stable empty array, so `useSyncExternalStore` does not see a new value on every render. */
 const NONE: ComputerActivity[] = [];
 
-let counter = 0;
+function notify(): void {
+  for (const listener of listeners) listener();
+}
 
+function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
+  return (
+    entry.kind === details.kind &&
+    entry.subject === details.subject &&
+    entry.output === details.output &&
+    entry.exitCode === details.exitCode &&
+    entry.refused === details.refused &&
+    entry.truncated === details.truncated &&
+    entry.timedOut === details.timedOut
+  );
+}
+
+/**
+ * Take in one conversation's computer calls, in the order they were made.
+ *
+ * A call already here is updated in place, never added twice: its answer is read again on every
+ * change, and can arrive twice (the browser's placeholder while a person decides, then the server's
+ * real answer beside it). A call new to the pane goes in just before the next of the conversation's
+ * calls already here. So a conversation whose earlier history is read after its latest turns, which
+ * is how a stored thread merges in, still lists in the order things ran; and a call with nothing after
+ * it, which is what live work is, goes at the end.
+ */
 export function recordActivity(
   computerId: string,
-  entry: Omit<ComputerActivity, "id" | "at">,
+  calls: readonly ConversationCall[],
 ): void {
-  counter += 1;
-  const existing = byComputer.get(computerId) ?? [];
-  const next = [
-    ...existing,
-    { ...entry, id: `activity-${counter}`, at: Date.now() },
-  ];
+  const current = byComputer.get(computerId) ?? NONE;
+  const had = taken.get(computerId) ?? new Set<string>();
+  const present = new Map(current.map((entry) => [entry.id, entry]));
+  let next: ComputerActivity[] | null = null;
+  // The nearest later call of this conversation that the pane holds, which a new one goes before.
+  let after: string | undefined;
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (!call) continue;
+    if (!call.did) {
+      if (!had.has(call.id)) asked.add(call.id);
+      continue;
+    }
+    const existing = present.get(call.id);
+    if (existing) {
+      if (!sameDetails(existing, call.did)) {
+        next ??= [...current];
+        const position = next.findIndex((entry) => entry.id === call.id);
+        next[position] = {
+          ...call.did,
+          id: call.id,
+          ...(existing.at === undefined ? {} : { at: existing.at }),
+        };
+      }
+      after = call.id;
+      continue;
+    }
+    // Wiped, or aged out past the limit.
+    if (had.has(call.id)) continue;
+    next ??= [...current];
+    const entry: ComputerActivity = {
+      ...call.did,
+      id: call.id,
+      ...(asked.delete(call.id) ? { at: Date.now() } : {}),
+    };
+    const before =
+      after === undefined
+        ? -1
+        : next.findIndex((candidate) => candidate.id === after);
+    next.splice(before === -1 ? next.length : before, 0, entry);
+    had.add(call.id);
+    after = call.id;
+  }
+  if (!next) return;
+  taken.set(computerId, had);
   byComputer.set(computerId, next.slice(-LIMIT));
-  for (const listener of listeners) listener();
+  notify();
 }
 
 export function activityFor(computerId: string): ComputerActivity[] {
   return byComputer.get(computerId) ?? NONE;
+}
+
+/** The four calls that act on the computer behind the screen, and what the pane calls each. */
+const KINDS: Record<string, ComputerActivity["kind"]> = {
+  computer_run_command: "command",
+  computer_read_file: "read_file",
+  computer_write_file: "write_file",
+  computer_list_files: "list_files",
+};
+
+/** CopilotKit's stand-in for a frontend tool's answer that has not been given yet. */
+const FORWARDED_TO_CLIENT = "Forwarded to client";
+
+/**
+ * A tool message's content, read as the outcome of a computer call, or null when it is not one yet.
+ *
+ * Three shapes reach a computer call's result. The computer's own answer, as JSON: from the
+ * browser's handler, or the gate's `{ result }`, or the server's continuation after a decision, which
+ * stores the same object. A placeholder while the answer is on its way: `{ waiting: true }`, which
+ * the browser's handler returns when the gate holds the step for a person, and CopilotKit's own. And
+ * a sentence instead of an answer: the server's, for a step that was not carried out (declined,
+ * refused when it was checked again, or its outcome unknown), or the SDK's `Error: <message>` for a
+ * handler that threw. A sentence is drawn as not done, with the sentence as its reason, because a
+ * step that did not run must never be drawn as one that ran and printed nothing.
+ */
+function outcomeOf(content: unknown): ToolOutcome | null {
+  if (typeof content !== "string") return null;
+  const text = content.trim();
+  if (!text || text === FORWARDED_TO_CLIENT) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const outcome = parsed as Record<string, unknown>;
+    if (outcome.waiting === true) return null;
+    return { ...outcome, ok: outcome.ok !== false };
+  }
+  return text.startsWith("Error:")
+    ? { ok: false, reason: text.slice("Error:".length).trim() }
+    : { ok: false, refused: true, reason: text };
+}
+
+/**
+ * Each answer parsed once. A conversation is read on every change, and a command's output can be
+ * long; parsing every result again on every streamed word of the reply after it is not free. Keyed by
+ * the message, with its content, because a message the SDK fills in is a new object or new content.
+ */
+const outcomes = new WeakMap<
+  object,
+  { content: unknown; outcome: ToolOutcome | null }
+>();
+
+function answerOf(message: { content?: unknown }): ToolOutcome | null {
+  const known = outcomes.get(message);
+  if (known && known.content === message.content) return known.outcome;
+  const outcome = outcomeOf(message.content);
+  outcomes.set(message, { content: message.content, outcome });
+  return outcome;
+}
+
+function argumentsOf(text: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * What a call printed, as text a person can read.
+ *
+ * One helper because the three surfaces this feeds all want the same thing and shape it differently:
+ * a command has `stdout` and `stderr`, a file read has `text`, a listing has `entries`. A refusal
+ * carries only its reason, and that is the most useful thing on the line.
+ *
+ * Never guesses. Something with none of those fields gives an empty string, and the pane says the
+ * call printed nothing rather than inventing a summary.
+ */
+export function outputOf(result: ToolOutcome): string {
+  if (result.refused === true || result.ok === false) {
+    return typeof result.reason === "string" ? result.reason : "";
+  }
+
+  // `text`, which is what the read route answers with. Not `contents`: that is the name on the way
+  // in, and reading it back gave an empty pane for a file the Bot had just read out loud.
+  if (typeof result.text === "string") return result.text;
+
+  if (Array.isArray(result.entries)) {
+    return result.entries
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return String(entry);
+        const { path, kind, bytes } = entry as Record<string, unknown>;
+        const label = String(path ?? "");
+        // A trailing slash for a folder, the way a terminal marks one, so a listing of a workspace
+        // full of folders does not read as a list of extensionless files.
+        if (kind === "folder") return `${label}/`;
+        return typeof bytes === "number" ? `${label}  ${bytes} bytes` : label;
+      })
+      .join("\n");
+  }
+
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  // Both, in the order a terminal shows them, and labelled only when there is something on stderr:
+  // most commands write nothing there and a permanent empty heading is noise.
+  return stderr ? `${stdout}${stdout ? "\n" : ""}${stderr}` : stdout;
+}
+
+/** What one answered computer call did, as the pane draws it. */
+export function detailsOf(
+  kind: ComputerActivity["kind"],
+  args: Record<string, unknown>,
+  result: ToolOutcome,
+): ActivityDetails {
+  const refused = result.refused === true ? { refused: true } : {};
+  const path = typeof args.path === "string" ? args.path : "";
+  if (kind === "command")
+    return {
+      kind,
+      subject: typeof args.command === "string" ? args.command : "",
+      output: outputOf(result),
+      ...(typeof result.exitCode === "number"
+        ? { exitCode: result.exitCode }
+        : {}),
+      ...refused,
+      ...(result.truncated === true ? { truncated: true } : {}),
+      ...(result.timedOut === true ? { timedOut: true } : {}),
+    };
+  if (kind === "write_file")
+    return {
+      kind,
+      subject: path,
+      /*
+       * The path and the size, never the contents. A Bot may well be saving something it was told in
+       * confidence, and the write route declines to echo it back for exactly that reason; putting it
+       * in a pane would undo that. The arguments carry the contents, and they are not read here.
+       */
+      output:
+        result.ok === false
+          ? outputOf(result)
+          : typeof result.bytes === "number"
+            ? `${result.bytes} bytes${args.append === true ? ", appended" : ""}`
+            : "",
+      ...refused,
+    };
+  return {
+    kind,
+    subject: kind === "list_files" ? path || "the workspace" : path,
+    output: outputOf(result),
+    ...refused,
+  };
+}
+
+/**
+ * The computer calls a conversation holds, in the order they were made, each with what it did, or
+ * null while it waits for its answer.
+ *
+ * The answers are gathered first, from anywhere in the conversation: a stored thread can hold a
+ * result ahead of its own call (see `repair-history.ts`). The last real answer to a call is the one
+ * read, so the server's answer stored beside the browser's placeholder wins, as it does in the
+ * transcript (`chat-messages.ts`).
+ */
+export function conversationActivity(
+  messages: readonly Message[],
+): ConversationCall[] {
+  const answers = new Map<string, ToolOutcome>();
+  for (const message of messages) {
+    if (message.role !== "tool") continue;
+    const answer = answerOf(message);
+    if (answer) answers.set(message.toolCallId, answer);
+  }
+  const calls: ConversationCall[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? []) {
+      const kind = KINDS[call.function.name];
+      if (!kind) continue;
+      const answer = answers.get(call.id);
+      calls.push({
+        id: call.id,
+        did: answer
+          ? detailsOf(kind, argumentsOf(call.function.arguments), answer)
+          : null,
+      });
+    }
+  }
+  return calls;
+}
+
+/**
+ * Keep a Bot's Activity pane in step with the conversation in front of the person.
+ *
+ * Read after every render of the surface holding the conversation rather than on a message event:
+ * the SDK puts a frontend tool's answer into the conversation by splicing it into the message list,
+ * which no event announces, and the conversation is drawn again on whatever comes next. Reading after
+ * each render keeps the pane exactly as current as the transcript beside it, for one pass over the
+ * messages with each answer parsed once.
+ *
+ * A call this page starts running is marked as watched when it starts, not when a render happens to
+ * catch it unanswered: a quick answer can land before the conversation is drawn again, and the entry
+ * would then lose its time for no reason. That covers all three ways a call runs, since the browser
+ * starts every one of them, including those it hands to the gate.
+ */
+export function useConversationActivity(
+  computerId: string,
+  messages: readonly Message[],
+): void {
+  const { copilotkit } = useCopilotKit();
+  useEffect(
+    () =>
+      copilotkit.subscribe({
+        onToolExecutionStart: ({ toolCallId, toolName }) => {
+          if (KINDS[toolName]) asked.add(toolCallId);
+        },
+      }).unsubscribe,
+    [copilotkit],
+  );
+  useEffect(() => {
+    recordActivity(computerId, conversationActivity(messages));
+  });
 }
 
 /**
@@ -86,7 +410,7 @@ const browsed = new Set<string>();
 export function noteBrowsed(computerId: string): void {
   if (browsed.has(computerId)) return;
   browsed.add(computerId);
-  for (const listener of listeners) listener();
+  notify();
 }
 
 export function subscribeToActivity(listener: () => void): () => void {
@@ -100,10 +424,11 @@ export function subscribeToActivity(listener: () => void): () => void {
  * Forget one computer's activity.
  *
  * Wiping a computer deletes the machine those commands ran on, so leaving them on screen would
- * describe something that no longer exists.
+ * describe something that no longer exists. They stay forgotten when the conversation is read again
+ * (see `taken`); what the Bot does from here on still appears.
  */
 export function clearActivity(computerId: string): void {
   byComputer.delete(computerId);
   browsed.delete(computerId);
-  for (const listener of listeners) listener();
+  notify();
 }

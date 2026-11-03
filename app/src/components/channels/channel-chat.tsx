@@ -35,6 +35,7 @@ import {
   onTurnFinishedAway,
   turnFinishedAway,
 } from "@/lib/channels/turns-finished-away";
+import { useConversationActivity } from "@/lib/computers/activity";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { ConversationProvider } from "@/lib/copilot/conversation";
@@ -597,6 +598,8 @@ export function ChannelChat({
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);
+  // And what they did there is what the Activity pane beside its screen lists, whichever way they ran.
+  useConversationActivity(runtimeAgentId, agent.messages);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
   /*

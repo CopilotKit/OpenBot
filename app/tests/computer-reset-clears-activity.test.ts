@@ -24,16 +24,25 @@ function mutationContext(queryClient: QueryClient) {
   return { client: queryClient, meta: undefined };
 }
 
+/** A new call for each case, as every real one is: a call a wipe forgot stays forgotten. */
+let calls = 0;
+
 beforeEach(() => {
+  calls += 1;
   globalThis.fetch = (async () =>
     new Response(null, { status: 200 })) as unknown as typeof fetch;
   clearActivity("general-assistant");
-  recordActivity("general-assistant", {
-    kind: "command",
-    subject: "echo repro-marker-bravo",
-    output: "repro-marker-bravo\n",
-    exitCode: 0,
-  });
+  recordActivity("general-assistant", [
+    {
+      id: `call-echo-${calls}`,
+      did: {
+        kind: "command",
+        subject: "echo repro-marker-bravo",
+        output: "repro-marker-bravo\n",
+        exitCode: 0,
+      },
+    },
+  ]);
 });
 
 afterEach(() => {
@@ -75,11 +84,16 @@ test("stopping a browser keeps the history, because the profile survives it", as
 });
 
 test("one Bot's reset leaves another Bot's history alone", async () => {
-  recordActivity("knowledge", {
-    kind: "list_files",
-    subject: "the workspace",
-    output: "notes.md\n",
-  });
+  recordActivity("knowledge", [
+    {
+      id: `call-list-${calls}`,
+      did: {
+        kind: "list_files",
+        subject: "the workspace",
+        output: "notes.md\n",
+      },
+    },
+  ]);
 
   await run("reset");
 

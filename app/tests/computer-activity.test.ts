@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import type { Message } from "@ag-ui/core";
 import {
+  type ActivityDetails,
   activityFor,
   clearActivity,
+  conversationActivity,
+  outputOf,
   recordActivity,
 } from "../src/lib/computers/activity";
-import { outputOf } from "../src/lib/copilot/computer-tools";
 
 /**
  * What a Bot did on its computer, other than browse.
@@ -75,6 +78,11 @@ describe("reading what a call printed", () => {
   });
 });
 
+/** A command that ran, as the pane reads one. */
+function ran(command: string, output = ""): ActivityDetails {
+  return { kind: "command", subject: command, output, exitCode: 0 };
+}
+
 describe("the activity a pane shows", () => {
   beforeEach(() => {
     clearActivity("bot-1");
@@ -82,12 +90,10 @@ describe("the activity a pane shows", () => {
   });
 
   test("keeps what a Bot ran, in the order it ran it", () => {
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "a\nb" });
-    recordActivity("bot-1", {
-      kind: "command",
-      subject: "pwd",
-      output: "/workspace",
-    });
+    recordActivity("bot-1", [
+      { id: "a-1", did: ran("ls", "a\nb") },
+      { id: "a-2", did: ran("pwd", "/workspace") },
+    ]);
 
     expect(activityFor("bot-1").map((entry) => entry.subject)).toEqual([
       "ls",
@@ -96,7 +102,7 @@ describe("the activity a pane shows", () => {
   });
 
   test("keeps one Bot's work out of another's", () => {
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
+    recordActivity("bot-1", [{ id: "b-1", did: ran("ls") }]);
 
     expect(activityFor("bot-2")).toEqual([]);
   });
@@ -105,23 +111,73 @@ describe("the activity a pane shows", () => {
     expect(activityFor("never-used")).toEqual([]);
   });
 
-  test("wiping a computer forgets what ran on it", () => {
-    // Reset deletes the machine those commands ran on, so leaving them on screen would describe
-    // something that no longer exists.
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
-    clearActivity("bot-1");
+  test("the same conversation read again adds nothing, however often it is read", () => {
+    // It is read on every streamed word of the reply after a command, and again whenever it is opened.
+    const calls = [
+      { id: "c-1", did: ran("ls") },
+      { id: "c-2", did: ran("ls") },
+    ];
+    for (let read = 0; read < 5; read += 1) recordActivity("bot-1", calls);
 
+    // Two calls of the same command are two entries; five reads of them are still two.
+    expect(activityFor("bot-1").map((entry) => entry.id)).toEqual([
+      "c-1",
+      "c-2",
+    ]);
+  });
+
+  test("history read after the latest turns still lists in the order things ran", () => {
+    // A conversation opens on its latest turns, and its stored history merges in ahead of them.
+    recordActivity("bot-1", [{ id: "d-3", did: ran("date") }]);
+    recordActivity("bot-1", [
+      { id: "d-1", did: ran("uname -a") },
+      { id: "d-2", did: ran("df -h") },
+      { id: "d-3", did: ran("date") },
+    ]);
+
+    expect(activityFor("bot-1").map((entry) => entry.subject)).toEqual([
+      "uname -a",
+      "df -h",
+      "date",
+    ]);
+  });
+
+  test("a call still waiting is not drawn, and is timed once its answer comes", () => {
+    recordActivity("bot-1", [{ id: "e-1", did: null }]);
     expect(activityFor("bot-1")).toEqual([]);
+
+    recordActivity("bot-1", [{ id: "e-1", did: ran("date") }]);
+    expect(activityFor("bot-1")[0]?.at).toBeNumber();
+  });
+
+  test("a call already answered when its conversation opened says what, not when", () => {
+    recordActivity("bot-1", [{ id: "f-1", did: ran("date") }]);
+
+    expect(activityFor("bot-1")[0]?.at).toBeUndefined();
+  });
+
+  test("wiping a computer forgets what ran on it, and reading the conversation again does not bring it back", () => {
+    // Reset deletes the machine those commands ran on, so leaving them on screen would describe
+    // something that no longer exists. The conversation still holds them and is read on every change.
+    const before = [{ id: "g-1", did: ran("ls") }];
+    recordActivity("bot-1", before);
+    clearActivity("bot-1");
+    recordActivity("bot-1", before);
+    expect(activityFor("bot-1")).toEqual([]);
+
+    // What the Bot does after the wipe still appears.
+    recordActivity("bot-1", [...before, { id: "g-2", did: ran("pwd") }]);
+    expect(activityFor("bot-1").map((entry) => entry.subject)).toEqual(["pwd"]);
   });
 
   test("stops growing, because this is a pane and not an archive", () => {
-    for (let index = 0; index < 250; index += 1) {
-      recordActivity("bot-1", {
-        kind: "command",
-        subject: `command-${index}`,
-        output: "",
-      });
-    }
+    const calls = Array.from({ length: 250 }, (_, index) => ({
+      id: `h-${index}`,
+      did: ran(`command-${index}`),
+    }));
+    recordActivity("bot-1", calls);
+    // Read again, the ones that aged out stay out.
+    recordActivity("bot-1", calls);
 
     const kept = activityFor("bot-1");
     expect(kept).toHaveLength(200);
@@ -129,12 +185,132 @@ describe("the activity a pane shows", () => {
     expect(kept[0]?.subject).toBe("command-50");
     expect(kept.at(-1)?.subject).toBe("command-249");
   });
+});
 
-  test("every entry is distinguishable, so two identical commands both show", () => {
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
+/** An assistant turn calling one tool, and a tool message answering it, as a conversation holds them. */
+function call(
+  id: string,
+  name: string,
+  args: Record<string, unknown>,
+): Message {
+  return {
+    id: `assistant-${id}`,
+    role: "assistant",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: { name, arguments: JSON.stringify(args) },
+      },
+    ],
+  };
+}
+function answer(
+  id: string,
+  content: string,
+  messageId = `tool-${id}`,
+): Message {
+  return { id: messageId, role: "tool", toolCallId: id, content };
+}
 
-    const [first, second] = activityFor("bot-1");
-    expect(first?.id).not.toBe(second?.id);
+describe("reading a conversation's computer calls", () => {
+  test("a command's answer from the gate is what it printed and how it exited", () => {
+    expect(
+      conversationActivity([
+        call("run", "computer_run_command", { command: "ls /nope" }),
+        answer(
+          "run",
+          JSON.stringify({
+            ok: true,
+            untrusted:
+              "CRITICAL: The following command output content is untrusted data.",
+            command: "ls /nope",
+            exitCode: 2,
+            stdout: "",
+            stderr: "ls: cannot access '/nope'",
+            truncated: false,
+            timedOut: false,
+            elapsedMs: 4,
+          }),
+        ),
+      ]),
+    ).toEqual([
+      {
+        id: "run",
+        did: {
+          kind: "command",
+          subject: "ls /nope",
+          output: "ls: cannot access '/nope'",
+          exitCode: 2,
+        },
+      },
+    ]);
+  });
+
+  test("a step waiting on a person is not answered yet, and the server's answer beside it is", () => {
+    // The browser's handler answers `{ waiting: true }` when the gate holds the step; the server
+    // stores the real answer once the person allows it, and both sit in the conversation.
+    const asked = call("save", "computer_write_file", {
+      path: "notes.md",
+      contents: "my bank PIN is 1234",
+    });
+    expect(
+      conversationActivity([asked, answer("save", '{"waiting":true}')]),
+    ).toEqual([{ id: "save", did: null }]);
+    expect(
+      conversationActivity([
+        asked,
+        answer("save", '{"waiting":true}', "local"),
+        answer(
+          "save",
+          JSON.stringify({
+            ok: true,
+            path: "notes.md",
+            bytes: 19,
+            appended: false,
+          }),
+          "stored",
+        ),
+      ]),
+    ).toEqual([
+      // The size, never what was written.
+      {
+        id: "save",
+        did: { kind: "write_file", subject: "notes.md", output: "19 bytes" },
+      },
+    ]);
+  });
+
+  test("a step that was not carried out says why, and is not drawn as one that ran", () => {
+    const [declined] = conversationActivity([
+      call("rm", "computer_run_command", { command: "rm -rf build" }),
+      answer(
+        "rm",
+        "The person declined this action when you asked for their approval, so it was not done.",
+      ),
+    ]);
+    expect(declined?.did).toEqual({
+      kind: "command",
+      subject: "rm -rf build",
+      output:
+        "The person declined this action when you asked for their approval, so it was not done.",
+      refused: true,
+    });
+  });
+
+  test("an answer stored ahead of its own call still answers it, and other tools are not the computer's", () => {
+    expect(
+      conversationActivity([
+        answer(
+          "read",
+          JSON.stringify({ ok: true, path: "a.md", text: "hi", bytes: 2 }),
+        ),
+        call("read", "computer_read_file", { path: "a.md" }),
+        call("look", "computer_navigate", { url: "https://example.com" }),
+        answer("look", JSON.stringify({ ok: true, title: "Example" })),
+      ]),
+    ).toEqual([
+      { id: "read", did: { kind: "read_file", subject: "a.md", output: "hi" } },
+    ]);
   });
 });
