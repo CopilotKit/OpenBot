@@ -14,7 +14,13 @@ import {
   type BotConfiguration,
   createBotConfiguration,
 } from "../src/configuration/directory";
-import { removeBots, seedBot, testIntelligence } from "./support/bots";
+import {
+  grantBot,
+  removeBots,
+  seedBot,
+  testIntelligence,
+  useTestConfiguration,
+} from "./support/bots";
 
 setDefaultTimeout(20_000);
 
@@ -185,4 +191,25 @@ describe("Bot configuration across replicas", () => {
       ),
     ).toBe(true);
   });
+
+  /*
+   * The Bot directory runs the purge listeners when a purge is announced, sometimes after the same id
+   * was made again and given something (the announcement is late, and the directory's own check of
+   * the registry was sent before the id came back). Forgetting the Bot's access there dropped the new
+   * grant from memory until the next full read.
+   */
+  test("a Bot made again under a purged id keeps what it was given, however late the purge is heard", async () => {
+    const configuration = await useTestConfiguration();
+    const id = `purged-again-${randomUUID()}`;
+    let lost = 0;
+    for (let round = 0; round < 15; round++) {
+      await removeBots([id]);
+      await seedBot({ id });
+      await grantBot(id, "mcp", `app-${round}/READ`);
+      await Bun.sleep(400);
+      if (configuration.accessOf(id).grants.length === 0) lost += 1;
+    }
+    await removeBots([id]);
+    expect(lost).toBe(0);
+  }, 60_000);
 });

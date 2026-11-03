@@ -8,9 +8,9 @@
  * answer at once. Nothing on a turn's path reaches Intelligence: reads come from memory.
  *
  * A BOT PURGED FOR GOOD. Intelligence removes its access record and every preference and withholding
- * that named it, and announces each. This instance also strips the Bot from what it holds the moment
- * the Bot directory hears of the purge, so a Bot made again under the same id does not inherit a
- * dead one's settings while the announcements are on their way.
+ * that named it, and announces each. This instance also reads those records again the moment the Bot
+ * directory hears of the purge, rather than waiting on the announcements, and reads rather than
+ * forgets: a purge heard late may follow the same id being made again, and given things.
  */
 import type { AgentRegistryClient } from "../agents/bot-registry/client";
 import { subscribeToProjectEvents } from "../agents/bot-registry/events";
@@ -71,8 +71,8 @@ export type BotConfiguration = {
     botId: string,
     serverId: string,
   ): Promise<boolean>;
-  /** A Bot was purged: strip it from everything held here. */
-  botPurged(botId: string): void;
+  /** A Bot was purged: read again everything held here that named it. */
+  botPurged(botId: string): Promise<void>;
 };
 
 export const emptyAccess = (botId: string): BotAccess => ({
@@ -256,31 +256,37 @@ export function createBotConfiguration(options: {
       return consumed;
     },
 
-    botPurged(botId) {
-      access.forget(botId);
-      preferences.rewrite((record) => {
-        const touches =
-          record.bots.some((entry) => entry.botId === botId) ||
-          record.optOuts.some((entry) => entry.botId === botId) ||
-          record.consents.some((entry) => entry.botId === botId);
-        if (!touches) return record;
-        return {
-          ...record,
-          bots: record.bots.filter((entry) => entry.botId !== botId),
-          optOuts: record.optOuts.filter((entry) => entry.botId !== botId),
-          consents: record.consents.filter((entry) => entry.botId !== botId),
-        };
-      });
-      components.rewrite((record) =>
-        record.withheldFrom.some((entry) => entry.botId === botId)
-          ? {
-              ...record,
-              withheldFrom: record.withheldFrom.filter(
-                (entry) => entry.botId !== botId,
-              ),
-            }
-          : record,
-      );
+    async botPurged(botId) {
+      /*
+       * Read again rather than forgotten. Intelligence removed the Bot's access and everything that
+       * named it when it purged the Bot, so what it holds now is the truth, and it is also the truth
+       * when this announcement is late: the id may have been made again since, and given things,
+       * and forgetting here would drop those until the next full read.
+       */
+      const named = (entries: { botId: string }[]) =>
+        entries.some((entry) => entry.botId === botId);
+      const reads: Promise<unknown>[] = [access.refresh(botId)];
+      for (const record of preferences.all())
+        if (
+          named(record.bots) ||
+          named(record.optOuts) ||
+          named(record.consents)
+        )
+          reads.push(preferences.refresh(record.userId));
+      for (const record of components.all())
+        if (named(record.withheldFrom))
+          reads.push(components.refresh(record.name));
+      const settled = await Promise.allSettled(reads);
+      const failed = settled.filter((result) => result.status === "rejected");
+      if (failed.length > 0)
+        console.warn(
+          JSON.stringify({
+            type: "bot-configuration-purge-read-failed",
+            botId,
+            note: "The next full read picks the change up.",
+            failed: failed.length,
+          }),
+        );
     },
   };
   return configuration;
