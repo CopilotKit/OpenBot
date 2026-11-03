@@ -99,6 +99,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### A responsibility hears about large pull requests
+
+GitHub events for a responsibility were refused above 32 KB, and most `pull_request` deliveries are
+larger: the pull request repeats its repository under `head` and `base`. For the last 30 pull
+requests on this repository, 23 were refused. They were answered 503, which GitHub does not deliver
+again on its own, so the responsibility never ran and nothing said why. The route now takes up to
+256 KB, like the event triggers, and fits what it stores into 32 KB the same way they do: an event
+over 32 KB is kept as its short top-level fields (`action`, `number`) and an excerpt from the start of
+the rest, so the Bot sees which pull request changed and the beginning of its details. A body over
+256 KB is answered 413.
+
 ### A Bot can hold hundreds of tools
 
 A Bot that holds more than 50 tools is no longer sent all of them on every step. Its own tools stay
