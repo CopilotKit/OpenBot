@@ -99,6 +99,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### A Bot can hold hundreds of tools
+
+A Bot that holds more than 50 tools is no longer sent all of them on every step. Its own tools stay
+in front of the model, and an app's tools wait behind one search tool: the model searches in a few
+words and calls what it found from its next step, by the tool's real name. Every call still goes
+through the grant, the approval rules and the audit trail. A Bot holding 279 tools after approving
+Shopify, which stopped answering, now answers. A question that needs an app's tool makes one more
+model call than before. Bots at or under 50 tools are sent exactly what they were.
+
+Where the model is called on Chat Completions, which refuses more than 128 tools, a run whose own
+tools still pass 128 is refused before the call. The person is told why, and the audit log records
+it under Blocked as "Too many tools for its model".
+
 ### Bots can install packages on their computers
 
 Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
