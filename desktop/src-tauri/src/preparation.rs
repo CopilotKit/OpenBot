@@ -204,7 +204,6 @@ fn fingerprint(root: &Path) -> Result<String, Problem> {
         PathBuf::from(".openbot-deployment"),
         PathBuf::from("container-images.json"),
         PathBuf::from("docker-compose.yml"),
-        PathBuf::from(DEPENDENCIES),
     ];
     // A release with the person's browser is installed only with its Recorder in place, so one that
     // has gone missing sends Start back to Installation rather than starting a browser with no
@@ -469,7 +468,6 @@ fn complete_with(
     images: Vec<String>,
     verify: impl FnOnce(&[String]) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
-    dependencies_ready(root)?;
     verify(&images)?;
     record(root, harness, images)
 }
@@ -723,6 +721,19 @@ fn main() {
             .detail
             .unwrap_or_default()
             .contains(crate::install::BUN));
+    }
+
+    /// Installing is pulling images, so a clean machine, which has never installed the host's
+    /// packages, completes it. The self-hosted sign-in installs them later, and that is not a
+    /// change to the installation.
+    #[test]
+    fn a_clean_machine_installs_without_the_hosts_packages() {
+        let f = Fixture::new();
+        assert!(!f.root.join(DEPENDENCIES).exists());
+        complete_with(&f.root, None, vec!["synthetic-image".into()], |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&None), |_| Ok(())).unwrap();
+        f.dependencies();
+        require_with(&f.root, Some(&None), |_| Ok(())).unwrap();
     }
 
     #[test]
