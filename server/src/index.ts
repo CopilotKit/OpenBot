@@ -222,8 +222,10 @@ import {
 } from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
+import { createMemoryCache } from "./memory/cache";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
+import { copyLocalMemoryToIntelligence } from "./memory/upgrade";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
 import { copyLocalLearningToIntelligence } from "./learning/upgrade";
@@ -473,6 +475,28 @@ botDirectory.onPurged((botId) => removeBotLocalRows(database, [botId]));
 await botDirectory.start();
 // An upgraded deployment's Bots, copied from the local tables once (agents/bot-registry/upgrade.ts).
 await copyLocalBotsToIntelligence(database, botDirectory);
+/*
+ * Each person's memories and memory sources live in Intelligence (memory/intelligence.ts), on every plan.
+ * Every turn reads them, so each instance holds a person's memory once read, kept fresh by Intelligence's
+ * `memory_changes` announcements and a timer (memory/cache.ts). An upgraded deployment's memory is copied
+ * in from the local tables once (memory/upgrade.ts), after its Bots, loud when any is missing.
+ */
+const memoryIntelligence = createIntelligenceMemory({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+await copyLocalMemoryToIntelligence(database, memoryIntelligence);
+const memoryCache = createMemoryCache({
+  intelligence: memoryIntelligence,
+  changes: {
+    client: createProjectChangesClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  },
+});
+memoryCache.start();
 // Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
 // upgrading deployment's own Bots are not in Intelligence yet.
 await sweepPurgedBotRows(
@@ -1441,14 +1465,14 @@ const hostAccessBroker = createHostAccessBroker(Date.now, {
 // grant, the policy and the audit row are exactly where they were. Host-folder tools are also
 // server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
 // receives only opaque grant ids and relative paths.
-// Memory lives in CopilotKit Intelligence when this deployment is entitled to it, and in OpenBot's own
-// tables when it is not; see memory/store.ts. Its own client, like the thread reader's: the
-// constructor opens nothing.
+// Memory lives in CopilotKit Intelligence; see memory/store.ts.
 const personalMemoryStore = createMemoryStore(database, {
-  intelligence: createIntelligenceMemory({
-    client: createIntelligenceClient(config.runtime.intelligence),
-  }),
+  intelligence: memoryIntelligence,
+  cache: memoryCache,
 });
+// A Bot deleted for good takes the memory sources bound to it and the memories it formed, as the old
+// foreign keys did.
+botDirectory.onPurged((botId) => personalMemoryStore.forgetBot(botId));
 const recorderExtension = createRecorderExtension({
   config,
   database,
@@ -1535,6 +1559,7 @@ const deliveryScopeFor: DeliveryScopeResolver = async (
 const memoryDefaults = createMemoryDefaults({
   database,
   ingestion: memoryIngestion,
+  memory: personalMemoryStore,
   sources: config.memoryDefaults.sources,
   research: config.memoryDefaults.research,
   channelBots: async (ownerUserId, channelId) =>
@@ -1563,20 +1588,6 @@ const memorySweep = repeatAfterEach(async () => {
         type: "memory-sweep-error",
         error: error instanceof Error ? error.name : "UnknownError",
         context: { operation: "syncDue" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
-  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
-  try {
-    await personalMemoryStore.mirrorPending();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "mirrorPending" },
         timestamp: new Date().toISOString(),
       }),
     );
@@ -2952,6 +2963,7 @@ const app = createApp(
         database,
         softDeleteChannel: (actor, channelId) =>
           channelStore.softDelete(actor, channelId),
+        memory: personalMemoryStore,
       }),
       activity: createActivityStore(database),
       wakeUps: wakeUpStore,
@@ -2997,6 +3009,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     wakeUpSweep.stop();
     wakeUpReaper.stop();
     memorySweep.stop();
+    memoryCache.stop();
     proactiveSweep.stop();
     taskSweep.stop();
     approvalSweep.stop();

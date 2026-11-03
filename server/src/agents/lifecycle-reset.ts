@@ -12,8 +12,9 @@
  *
  * Conversations go the way every other deletion of them does, soft, through the channel store, so
  * every open tab is told and the thread survives on the platform as it would for a manual delete.
- * Routines, responsibilities and memory sources are deleted, and their runs and imported memories
- * with them through the foreign keys that already cascade.
+ * Routines and responsibilities are deleted, and their runs with them through the foreign keys that
+ * already cascade. Memory sources are deleted in Intelligence, which takes their imported memories with
+ * them, after the local transaction commits: no OpenBot transaction is held across a call to it.
  *
  * "STARTS FRESH" ALSO MEANS what the Bot learned and was allowed on its own: memories it formed for
  * this person, the background research it runs for them (its suggestions go with it, and any run
@@ -32,8 +33,6 @@ import {
   channelAgents,
   channelMemberships,
   channels,
-  memorySources,
-  personalMemories,
   proactiveSettings,
   proactiveSuggestions,
   responsibilities,
@@ -41,6 +40,7 @@ import {
   workItems,
 } from "../db/schema";
 import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
+import type { MemoryStore } from "../memory/store";
 import { PROACTIVE_RUN_KIND } from "../proactive/engine";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
@@ -68,8 +68,10 @@ export function createBotReset(options: {
   database: Database;
   // Whether the channel was still there to delete is the store's business, not the reset's.
   softDeleteChannel: (actor: AgentActor, channelId: string) => Promise<unknown>;
+  /** The person's memory, in Intelligence. */
+  memory: Pick<MemoryStore, "botResetPlan" | "resetBot">;
 }) {
-  const { database, softDeleteChannel } = options;
+  const { database, softDeleteChannel, memory } = options;
 
   /** Every live conversation this person is in that has this Bot in it, split by whether it is theirs alone. */
   async function conversations(ownerUserId: string, agentId: string) {
@@ -114,14 +116,6 @@ export function createBotReset(options: {
       sql`${workItems.payload}->>'agentId' = ${agentId}`,
     );
 
-  const formedMemories = (ownerUserId: string, agentId: string) =>
-    and(
-      eq(personalMemories.ownerUserId, ownerUserId),
-      eq(personalMemories.formedByAgentId, agentId),
-      isNull(personalMemories.sourceId),
-      isNull(personalMemories.deletedAt),
-    );
-
   const research = (ownerUserId: string, agentId: string) =>
     and(
       eq(proactiveSettings.ownerUserId, ownerUserId),
@@ -147,38 +141,13 @@ export function createBotReset(options: {
     agentId: string,
   ): Promise<ResetPlan> {
     const conversationsFound = await conversations(ownerUserId, agentId);
-    const sources = await database
-      .select({ id: memorySources.id })
-      .from(memorySources)
-      .where(
-        and(
-          eq(memorySources.ownerUserId, ownerUserId),
-          eq(memorySources.agentId, agentId),
-        ),
-      );
+    const remembered = await memory.botResetPlan(ownerUserId, agentId);
     const total = sql<number>`count(*)::int`;
     return {
       conversations: conversationsFound.mine.length,
       sharedConversationsKept: conversationsFound.kept,
-      memorySources: sources.length,
-      memories:
-        sources.length === 0
-          ? 0
-          : await count(
-              database
-                .select({ total })
-                .from(personalMemories)
-                .where(
-                  and(
-                    eq(personalMemories.ownerUserId, ownerUserId),
-                    inArray(
-                      personalMemories.sourceId,
-                      sources.map((source) => source.id),
-                    ),
-                    isNull(personalMemories.deletedAt),
-                  ),
-                ),
-            ),
+      memorySources: remembered.sources.length,
+      memories: remembered.importedMemories,
       routines: await count(
         database
           .select({ total })
@@ -207,12 +176,7 @@ export function createBotReset(options: {
           .from(workItems)
           .where(pendingFollowUps(ownerUserId, agentId)),
       ),
-      formedMemories: await count(
-        database
-          .select({ total })
-          .from(personalMemories)
-          .where(formedMemories(ownerUserId, agentId)),
-      ),
+      formedMemories: remembered.formedMemoryIds.length,
       backgroundResearch: await count(
         database
           .select({ total })
@@ -237,23 +201,15 @@ export function createBotReset(options: {
       const found = await conversations(ownerUserId, agentId);
       for (const channelId of found.mine)
         await softDeleteChannel(actor, channelId);
+      // Read from Intelligence before the transaction: none is held across a call to it.
+      const remembered = await memory.botResetPlan(ownerUserId, agentId);
+      const { sources } = remembered;
 
-      return database.transaction(async (transaction) => {
-        // The lock defaults adoption takes, so no default is adopted between these reads and the deletes.
+      const done = await database.transaction(async (transaction) => {
+        // The lock defaults adoption takes. The turn-downs are recorded here, before the sources are
+        // deleted in Intelligence below, so an adoption arriving meanwhile never switches back on a
+        // source the person had switched off (memory/defaults.ts).
         await lockDefaults(transaction, ownerUserId, agentId);
-        const sources = await transaction
-          .select({
-            id: memorySources.id,
-            toolRef: memorySources.toolRef,
-            enabled: memorySources.enabled,
-          })
-          .from(memorySources)
-          .where(
-            and(
-              eq(memorySources.ownerUserId, ownerUserId),
-              eq(memorySources.agentId, agentId),
-            ),
-          );
         for (const source of sources)
           if (!source.enabled)
             await recordOptOut(transaction, {
@@ -262,31 +218,6 @@ export function createBotReset(options: {
               feature: "memory_source",
               scope: sourceServerId(source.toolRef),
             });
-        const memories =
-          sources.length === 0
-            ? []
-            : await transaction
-                .select({ id: personalMemories.id })
-                .from(personalMemories)
-                .where(
-                  and(
-                    eq(personalMemories.ownerUserId, ownerUserId),
-                    inArray(
-                      personalMemories.sourceId,
-                      sources.map((source) => source.id),
-                    ),
-                    isNull(personalMemories.deletedAt),
-                  ),
-                );
-        // Memories go with their source through the foreign key.
-        await transaction
-          .delete(memorySources)
-          .where(
-            and(
-              eq(memorySources.ownerUserId, ownerUserId),
-              eq(memorySources.agentId, agentId),
-            ),
-          );
         const deletedRoutines = await transaction
           .delete(routines)
           .where(
@@ -316,10 +247,6 @@ export function createBotReset(options: {
           })
           .where(pendingFollowUps(ownerUserId, agentId))
           .returning({ key: workItems.key });
-        const formed = await transaction
-          .delete(personalMemories)
-          .where(formedMemories(ownerUserId, agentId))
-          .returning({ id: personalMemories.id });
         const settings = await transaction
           .select({
             id: proactiveSettings.id,
@@ -369,15 +296,18 @@ export function createBotReset(options: {
           conversations: found.mine.length,
           sharedConversationsKept: found.kept,
           memorySources: sources.length,
-          memories: memories.length,
+          memories: remembered.importedMemories,
           routines: deletedRoutines.length,
           responsibilities: deletedGoals.length,
           followUps: followUps.length,
-          formedMemories: formed.length,
+          formedMemories: 0,
           backgroundResearch: settings.length,
           standingApprovals: revoked.length,
         };
       });
+      // The sources (with what they imported) and what the Bot formed itself, in Intelligence.
+      done.formedMemories = await memory.resetBot(ownerUserId, remembered);
+      return done;
     },
   };
 }
