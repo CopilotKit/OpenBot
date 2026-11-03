@@ -73,9 +73,9 @@ export async function storeAgentAuth(input: {
   /**
    * The transaction to write in, when the caller has one.
    *
-   * Agent edits are a transaction over `agents` and `agent_profiles`, and the
-   * credential is part of that same change. Written outside it, the key would
-   * commit even where the edit that asked for it rolled back.
+   * The Bot itself is in Intelligence and is written after this, never inside an
+   * OpenBot transaction; a caller that has its own transaction for other rows
+   * passes it here so the key commits with them.
    */
   executor?: CredentialExecutor;
 }): Promise<AgentAuth> {
@@ -92,16 +92,26 @@ export async function storeAgentAuth(input: {
   // A live previous credential is rotated, so the agent never holds two. Any
   // other case inserts: the partial unique index permits it, because there is
   // no live row for this agent to collide with.
-  const rotates =
+  //
+  // When the configuration names no live credential, the agent's live one is looked up by key and
+  // rotated instead. The Bot lives in Intelligence and its key here, so they are written one after
+  // the other rather than in one transaction: a save whose Intelligence write failed after the key was
+  // stored leaves a live key the configuration does not name, and inserting beside it would be refused
+  // by the index on every save after.
+  const previous =
     input.previousCredentialId !== undefined &&
-    (await input.store.isLive(input.previousCredentialId, input.executor));
+    (await input.store.isLive(input.previousCredentialId, input.executor))
+      ? input.previousCredentialId
+      : (
+          await input.store.findLiveByKey(
+            { kind: value.kind, provider: value.provider, keyId: value.keyId },
+            input.executor,
+          )
+        )?.id;
 
-  const credential = rotates
+  const credential = previous
     ? await input.store.rotate(
-        {
-          ...value,
-          previousCredentialId: input.previousCredentialId as string,
-        },
+        { ...value, previousCredentialId: previous },
         input.executor,
       )
     : await input.store.create(value, input.executor);

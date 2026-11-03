@@ -35,7 +35,8 @@ import {
 import { alias } from "drizzle-orm/pg-core";
 import { HANDOFF_KIND } from "../agents/handoff";
 import type { Database } from "../db/client";
-import { agents, routineRuns, routines, workItems } from "../db/schema";
+import { bots } from "../agents/bot-registry/directory";
+import { routineRuns, routines, workItems } from "../db/schema";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
 /** Something a conversation is waiting on. */
@@ -218,12 +219,10 @@ export async function workIn(
       channelId: routines.channelId,
       ownerUserId: routines.ownerUserId,
       botId: routines.agentId,
-      botName: agents.name,
       startedAt: routineRuns.startedAt,
     })
     .from(routineRuns)
     .innerJoin(routines, eq(routines.id, routineRuns.routineId))
-    .leftJoin(agents, eq(agents.id, routines.agentId))
     .where(
       and(
         isNull(routineRuns.status),
@@ -245,7 +244,7 @@ export async function workIn(
       key: run.runId,
       routineId: run.routineId,
       botId: run.botId,
-      botName: run.botName ?? null,
+      botName: bots().peek(run.botId)?.name ?? null,
       since: run.startedAt,
     });
   }

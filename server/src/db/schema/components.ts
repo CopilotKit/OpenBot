@@ -5,7 +5,6 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { agents } from "./core";
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -66,9 +65,7 @@ export const componentExclusions = pgTable(
     componentName: text("component_name")
       .notNull()
       .references(() => components.name, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     /** An email. Who decided this Bot should not answer with this. */
     withheldBy: text("withheld_by"),
     withheldAt: createdAt(),

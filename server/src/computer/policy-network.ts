@@ -4,7 +4,7 @@
  * The rules and their matcher are `agent-computer/src/egress.ts`, imported rather than copied so the
  * API server refusing a navigation and the computer refusing a connection are the same code.
  *
- * WHO A COMPUTER BELONGS TO is the Bot's owner (`agent_profiles.owner_user_id`). Their directory
+ * WHO A COMPUTER BELONGS TO is the Bot's owner (its `ownerUserId` in Intelligence's agent registry). Their directory
  * groups pick the policy: a group with a policy of its own replaces the organization's, unless the
  * organization policy is locked (Grok Bot: "groups can override team policy with their own, with
  * optional locks enforcing team-level restrictions"). When the owner's "Cloud network access"

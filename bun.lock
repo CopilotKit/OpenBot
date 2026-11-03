@@ -141,6 +141,7 @@
         "hono": "^4.10.0",
         "http-message-sig": "0.3.0",
         "jose": "^6.2.10",
+        "phoenix": "1.8.15",
         "postgres": "^3.4.9",
         "rxjs": "7.8.1",
         "twilio": "5.13.0",
@@ -150,6 +151,7 @@
       },
       "devDependencies": {
         "@copilotkit/aimock": "1.43.0",
+        "@types/phoenix": "1.6.7",
         "drizzle-kit": "^0.31.10",
       },
     },

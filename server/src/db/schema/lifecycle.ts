@@ -10,7 +10,7 @@
  * on the same durable queue routines and responsibilities already run through.
  */
 import { pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 
 export const botLifecycle = pgTable(
   "bot_lifecycle",
@@ -18,9 +18,7 @@ export const botLifecycle = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     /** When this person paused the Bot, or null while it runs. Every dispatch point reads this. */
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     /**

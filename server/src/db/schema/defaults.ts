@@ -6,7 +6,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 
 /** What a person can switch off that OpenBot otherwise switches on for them. */
 export type DefaultFeature = "memory_source" | "proactive_research";
@@ -30,9 +30,7 @@ export const defaultOptOuts = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     feature: text("feature").$type<DefaultFeature>().notNull(),
     scope: text("scope").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })

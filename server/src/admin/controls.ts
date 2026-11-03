@@ -19,7 +19,6 @@
  */
 
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import {
   type AuditStore,
@@ -42,7 +41,7 @@ import {
 } from "../computer/policy-network";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { agentProfiles, agents } from "../db/schema";
+import { bots } from "../agents/bot-registry/directory";
 import type { ProactiveAdmin } from "../proactive/contracts";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
@@ -422,13 +421,9 @@ export async function installEnterpriseControls(
       return deps.personBrowserPolicy ?? { mode: "deny_all", rules: [] };
     const current = snapshot;
     if (!current) return { mode: "deny_all", rules: [] };
-    const [profile] = await deps.database
-      .select({ owner: agentProfiles.ownerUserId })
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, botId))
-      .limit(1);
-    const member: Member = profile?.owner
-      ? await store.member(profile.owner)
+    const owner = (await bots().find(botId))?.ownerUserId;
+    const member: Member = owner
+      ? await store.member(owner)
       : { role: "user", groups: [] };
     const cloudNetwork = resolveCapability(
       current.rows,
@@ -478,12 +473,10 @@ export async function installEnterpriseControls(
   };
 
   const ownedBots = async (userId: string) =>
-    (
-      await deps.database
-        .select({ agentId: agentProfiles.agentId })
-        .from(agentProfiles)
-        .where(eq(agentProfiles.ownerUserId, userId))
-    ).map((row) => row.agentId);
+    bots()
+      .cached()
+      .filter((bot) => bot.ownerUserId === userId)
+      .map((bot) => bot.id);
 
   const terminateMemberComputers: EnterpriseControls["terminateMemberComputers"] =
     async (userId, by) => {
@@ -974,11 +967,7 @@ export async function recordHeadlessUsage(input: {
   const controls = installed;
   if (!controls) return;
   try {
-    const [row] = await controls.deps.database
-      .select({ type: agents.type })
-      .from(agents)
-      .where(eq(agents.id, input.agentId))
-      .limit(1);
+    const row = await bots().find(input.agentId);
     const model =
       row?.type === "built_in" ? controls.deps.builtInModel : undefined;
     // A model nobody named is allowed only while there is no list, as the gate records it.
@@ -1023,11 +1012,7 @@ export async function headlessTurnRefusal(input: {
       return capabilityRefusal("useBots");
     const allowlist = controls.snapshot()?.settings.modelAllowlist;
     if (!allowlist?.enabled) return null;
-    const [row] = await controls.deps.database
-      .select({ type: agents.type })
-      .from(agents)
-      .where(eq(agents.id, input.agentId))
-      .limit(1);
+    const row = await bots().find(input.agentId);
     const model =
       row?.type === "built_in" ? controls.deps.builtInModel : undefined;
     if (!model || allowlist.models.includes(model)) return null;

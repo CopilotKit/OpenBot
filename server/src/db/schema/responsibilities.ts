@@ -18,7 +18,7 @@ import type {
   ResponsibilitySource,
   ResponsibilitySubscription,
 } from "../../responsibilities/types";
-import { agents, credentials, users } from "./core";
+import { credentials, users } from "./core";
 import { jsonb } from "./json";
 
 export const responsibilityStatus = pgEnum("responsibility_status", [
@@ -41,9 +41,7 @@ export const responsibilities = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     channelId: text("channel_id").notNull(),
     threadId: text("thread_id").notNull(),
     title: text("title").notNull(),

@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { agents, credentials, users } from "./core";
+import { credentials, users } from "./core";
 import { jsonb } from "./json";
 
 const createdAt = () =>
@@ -882,9 +882,7 @@ export const pluginGrants = pgTable(
   {
     kind: text("kind").notNull(),
     ref: text("ref").notNull(),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     grantedBy: text("granted_by"),
     /**
      * Whether an administrator made this grant (`admin`, or null on every row from before this
@@ -1008,9 +1006,7 @@ export const appAccessRequests = pgTable(
     requestedBy: text("requested_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id").references(() => agents.id, {
-      onDelete: "cascade",
-    }),
+    agentId: text("agent_id"),
     appKey: text("app_key").notNull(),
     appTitle: text("app_title").notNull(),
     kind: text("kind").$type<"enable" | "grant" | "connect_shared">().notNull(),

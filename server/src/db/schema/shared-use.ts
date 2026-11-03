@@ -10,7 +10,6 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { agents } from "./core";
 import { jsonb } from "./json";
 import { mcpServers } from "./plugins";
 
@@ -22,9 +21,7 @@ import { mcpServers } from "./plugins";
 export const sharedUseApprovals = pgTable(
   "shared_use_approvals",
   {
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     serverId: text("server_id")
       .notNull()
       .references(() => mcpServers.id, { onDelete: "cascade" }),
@@ -92,9 +89,7 @@ export const sharedUseRequests = pgTable(
   "shared_use_requests",
   {
     id: text("id").primaryKey(),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     serverId: text("server_id")
       .notNull()
       .references(() => mcpServers.id, { onDelete: "cascade" }),

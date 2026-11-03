@@ -1,8 +1,7 @@
 import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
+import { bots } from "../../agents/bot-registry/directory";
 import {
-  agentProfiles,
-  agents,
   mcpServers,
   mcpTools,
   pluginGrants,
@@ -76,15 +75,10 @@ export function skillMethods(context: StoreContext) {
      * own endpoint calls back for it through the signed tool callback, which reaches the same desk.
      */
     async agentCanHandOn(agentId: string): Promise<boolean | undefined> {
-      const [row] = await database
-        .select({ id: agents.id })
-        .from(agents)
-        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-        // A deleted Bot is not one anybody may be given, and answering about it at all would say it
-        // had existed.
-        .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
-        .limit(1);
-      return row ? true : undefined;
+      const bot = await bots().find(agentId);
+      // A deleted Bot is not one anybody may be given, and answering about it at all would say it
+      // had existed.
+      return bot && bot.deletedAt === null ? true : undefined;
     },
 
     /**
@@ -97,13 +91,8 @@ export function skillMethods(context: StoreContext) {
      * to stop, arriving from the other side.
      */
     async agentIsRegistered(agentId: string): Promise<boolean> {
-      const [row] = await database
-        .select({ id: agents.id })
-        .from(agents)
-        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-        .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
-        .limit(1);
-      return row !== undefined;
+      const bot = await bots().find(agentId);
+      return bot !== null && bot.deletedAt === null;
     },
 
     /**
@@ -162,12 +151,8 @@ export function skillMethods(context: StoreContext) {
     },
 
     async agentOwner(agentId: string): Promise<string | null | undefined> {
-      const [row] = await database
-        .select({ ownerUserId: agentProfiles.ownerUserId })
-        .from(agentProfiles)
-        .where(eq(agentProfiles.agentId, agentId))
-        .limit(1);
-      return row ? row.ownerUserId : undefined;
+      const bot = await bots().find(agentId);
+      return bot ? bot.ownerUserId : undefined;
     },
 
     async installSkill(input: {
@@ -315,10 +300,11 @@ export function skillMethods(context: StoreContext) {
      * The join keeps a grant held by a Bot that no longer exists from counting.
      */
     async botsReachableFrom(agentId: string): Promise<string[]> {
+      // A grant held by a Bot Intelligence no longer has does not count.
+      if (!(await bots().find(agentId))) return [];
       const rows = await database
         .select({ ref: pluginGrants.ref })
         .from(pluginGrants)
-        .innerJoin(agents, eq(agents.id, pluginGrants.agentId))
         .where(
           and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, agentId)),
         );

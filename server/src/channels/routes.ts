@@ -17,12 +17,12 @@ import {
   AgentNotFoundError,
   type AgentProfileStore,
 } from "../agents/profile-store";
+import { bots } from "../agents/bot-registry/directory";
 import type { AgentActor, AgentProfile } from "../agents/profile-types";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import {
-  agentProfiles,
   botTasks,
   channelAgents,
   channelMemberships,
@@ -285,6 +285,22 @@ function channelName(names: string[]) {
   return `${codePoints.slice(0, MAX_CHANNEL_NAME_CODE_POINTS - 1).join("")}…`;
 }
 
+/**
+ * Each channel-agent row with its Bot's deletion, read from the Bot directory.
+ *
+ * A row whose Bot Intelligence no longer has at all is dropped, as the cascade that used to remove it
+ * with the Bot did; the boot sweep removes the row itself (agents/bot-registry/local-rows.ts).
+ */
+async function withBots<Row extends { agentId: string }>(
+  rows: Row[],
+): Promise<(Row & { deletedAt: Date | null })[]> {
+  const known = await bots().findMany(rows.map((row) => row.agentId));
+  return rows.flatMap((row) => {
+    const bot = known.get(row.agentId);
+    return bot ? [{ ...row, deletedAt: bot.deletedAt }] : [];
+  });
+}
+
 export function createChannelStore(
   database: Database,
   profileStore: AgentProfileStore,
@@ -304,12 +320,9 @@ export function createChannelStore(
     actor: AgentActor,
     agentIds: string[],
   ): Promise<AgentChannel> => {
-    // Validated on this transaction, not through `profileStore.get`: the read has to share
-    // the connection this transaction already holds, and has to hold the profile so an agent
-    // cannot be deleted between passing the check and being linked to the new channel.
-    //
-    // Locks are taken in agent-ID order. Two channels selecting the same pair of agents in
-    // opposite orders would otherwise be able to deadlock against each other.
+    // Validated on this transaction, not through `profileStore.get`: the person's own rows (Team Bot
+    // reach, preferences) are read on the connection this transaction already holds, and the Bot
+    // from memory, since a transaction must not wait on Intelligence.
     const profilesById = new Map<string, AgentProfile>();
     for (const agentId of [...agentIds].sort()) {
       const profile = await profileStore.getWithin(transaction, actor, agentId);
@@ -422,8 +435,10 @@ export function createChannelStore(
   };
 
   const store: ChannelStore = {
-    create(actor, agentIds, transaction) {
+    async create(actor, agentIds, transaction) {
       if (transaction) return makeChannel(transaction, actor, agentIds);
+      // Into this instance's memory before the transaction opens, which must not wait on Intelligence.
+      await bots().findMany(agentIds);
       return database.transaction(
         async (transaction) => makeChannel(transaction, actor, agentIds),
         { isolationLevel: "read committed" },
@@ -431,6 +446,8 @@ export function createChannelStore(
     },
 
     async direct(actor, agentId) {
+      // Into this instance's memory before the transaction opens, which must not wait on Intelligence.
+      await bots().find(agentId);
       const found = await database.transaction(
         async (transaction) => {
           /*
@@ -506,7 +523,6 @@ export function createChannelStore(
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           lastMessageAt: channels.lastMessageAt,
-          deletedAt: agentProfiles.deletedAt,
         })
         .from(channels)
         .innerJoin(
@@ -524,12 +540,9 @@ export function createChannelStore(
           ),
         )
         .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-        .innerJoin(
-          agentProfiles,
-          eq(agentProfiles.agentId, channelAgents.agentId),
-        )
         .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-        .orderBy(asc(channelAgents.agentId));
+        .orderBy(asc(channelAgents.agentId))
+        .then(withBots);
 
       const first = rows[0];
       if (!first) return null;
@@ -611,7 +624,6 @@ export function createChannelStore(
           name: channels.name,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
-          deletedAt: agentProfiles.deletedAt,
           channelSummary: channels.summary,
           lastMessage: channels.lastMessage,
           lastMessageAt: channels.lastMessageAt,
@@ -637,10 +649,6 @@ export function createChannelStore(
           ),
         )
         .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-        .innerJoin(
-          agentProfiles,
-          eq(agentProfiles.agentId, channelAgents.agentId),
-        )
         .where(
           and(
             inArray(
@@ -654,7 +662,8 @@ export function createChannelStore(
           ),
         )
         // The same order the page was chosen in, since the rows below are read in order.
-        .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId));
+        .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId))
+        .then(withBots);
 
       // One row per channel-agent pair; the ordering above keeps each channel's rows together and
       // its agents in the same lexicographic order `get` returns.

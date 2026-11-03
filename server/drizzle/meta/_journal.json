@@ -526,6 +526,13 @@
       "when": 1793655657340,
       "tag": "0074_single_user_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793731463963,
+      "tag": "0075_bots_in_intelligence",
+      "breakpoints": true
     }
   ]
 }

@@ -1,26 +1,23 @@
-import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { ManagedAgentConfig } from "../config";
 import { type RegisteredAgent, registeredAgentFromRow } from "../copilot";
 import type { CredentialSecretReader } from "../credentials";
 import type { Database } from "../db/client";
-import {
-  agentProfiles,
-  agents,
-  channelAgents,
-  channelMemberships,
-  channels,
-} from "../db/schema";
-import { teamBotAccess } from "../team-bots/access";
+import { channelAgents, channelMemberships, channels } from "../db/schema";
+import { botAccessFor } from "../team-bots/access";
 import { agentAuthHeaders, authFromConfiguration } from "./auth-header";
+import { bots } from "./bot-registry/directory";
 import { isManagedEndpoint } from "./managed-endpoint";
 import type { AgentActor } from "./profile-types";
 
 /**
  * Read the agents one person may run, on every request.
  *
- * The filtering is in the query, not in JavaScript afterwards: a private coworker must never be
- * read into the process for an actor who cannot see it, and "we fetched it but did not show it" is
- * the shape most accidental disclosures take.
+ * From this instance's Bot directory, which holds every Bot of the deployment in memory: Bots are in
+ * Intelligence, and a network read per request is what the directory exists to avoid. The filter is
+ * the one rule in team-bots/access.ts, applied before anything is built from a Bot, so a private
+ * coworker the actor cannot see never becomes a registered agent, never has its key resolved, and
+ * never reaches a response.
  */
 export function createRuntimeAgentLoader(
   database: Database,
@@ -91,31 +88,12 @@ export function createRuntimeAgentLoader(
   };
 }
 
-function selectActiveAgents(database: Database, actor: AgentActor) {
-  return database
-    .select({
-      id: agents.id,
-      name: agents.name,
-      type: agents.type,
-      configuration: agents.configuration,
-      title: agentProfiles.title,
-      roleDescription: agentProfiles.roleDescription,
-    })
-    .from(agents)
-    .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-    .where(
-      and(
-        isNull(agentProfiles.deletedAt),
-        actor.role === "admin"
-          ? undefined
-          : or(
-              eq(agentProfiles.visibility, "public"),
-              eq(agentProfiles.ownerUserId, actor.id),
-              // The same Team Bot rule as the roster: see team-bots/access.ts.
-              teamBotAccess(actor.id, agentProfiles.agentId),
-            ),
-      ),
-    );
+async function selectActiveAgents(database: Database, actor: AgentActor) {
+  const access = await botAccessFor(database, actor);
+  // The same Team Bot rule as the roster: see team-bots/access.ts.
+  return bots()
+    .live()
+    .filter((bot) => access.canSee(bot));
 }
 
 /**
@@ -125,12 +103,14 @@ function selectActiveAgents(database: Database, actor: AgentActor) {
  * the agent worked in is what authorizes this, not the profile's visibility, which is why deleting
  * a coworker leaves its conversations readable instead of erasing them.
  */
-function selectTombstoneAgents(database: Database, actor: AgentActor) {
-  return database
-    .selectDistinct({ id: agents.id, name: agents.name })
-    .from(agents)
-    .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-    .innerJoin(channelAgents, eq(channelAgents.agentId, agents.id))
+async function selectTombstoneAgents(database: Database, actor: AgentActor) {
+  const deleted = bots()
+    .cached()
+    .filter((bot) => bot.deletedAt !== null);
+  if (deleted.length === 0) return [];
+  const rows = await database
+    .selectDistinct({ id: channelAgents.agentId })
+    .from(channelAgents)
     .innerJoin(
       channels,
       and(eq(channels.id, channelAgents.channelId), isNull(channels.deletedAt)),
@@ -142,5 +122,14 @@ function selectTombstoneAgents(database: Database, actor: AgentActor) {
         eq(channelMemberships.userId, actor.id),
       ),
     )
-    .where(isNotNull(agentProfiles.deletedAt));
+    .where(
+      inArray(
+        channelAgents.agentId,
+        deleted.map((bot) => bot.id),
+      ),
+    );
+  const withHistory = new Set(rows.map((row) => row.id));
+  return deleted
+    .filter((bot) => withHistory.has(bot.id))
+    .map((bot) => ({ id: bot.id, name: bot.name }));
 }

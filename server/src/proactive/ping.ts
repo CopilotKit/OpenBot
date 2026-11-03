@@ -31,7 +31,8 @@ import {
   TransactionRollbackError,
 } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { agents, users } from "../db/schema/core";
+import { bots } from "../agents/bot-registry/directory";
+import { users } from "../db/schema/core";
 import { botLifecycle } from "../db/schema/lifecycle";
 import {
   proactivePeople,
@@ -142,11 +143,24 @@ const slotFree = or(
 const itemColumns = {
   suggestionId: proactiveSuggestions.id,
   agentId: proactiveSuggestions.agentId,
-  agentName: agents.name,
   title: proactiveSuggestions.title,
   why: proactiveSuggestions.detail,
   sourceApp: proactiveSuggestions.sourceApp,
 };
+
+/**
+ * Each item with its Bot's name, from the Bot directory's memory (some of these run inside a
+ * transaction, which must not wait on Intelligence). An item whose Bot Intelligence no longer has is
+ * left out, as the join to `agents` left it out before.
+ */
+function named<Row extends { agentId: string }>(
+  rows: Row[],
+): (Row & { agentName: string })[] {
+  return rows.flatMap((row) => {
+    const bot = bots().peek(row.agentId);
+    return bot ? [{ ...row, agentName: bot.name }] : [];
+  });
+}
 
 export function createPingStore(database: Database) {
   return {
@@ -179,16 +193,17 @@ export function createPingStore(database: Database) {
            * Locked, so a Start or Hide arriving now waits for this commit and then finds the item
            * still open: it was open when the ping was written, so the ping names it truthfully.
            */
-          const items = await transaction
-            .select(itemColumns)
-            .from(proactiveSuggestions)
-            .innerJoin(agents, eq(agents.id, proactiveSuggestions.agentId))
-            .where(pingable(ownerUserId))
-            .orderBy(
-              asc(proactiveSuggestions.createdAt),
-              asc(proactiveSuggestions.id),
-            )
-            .for("update", { of: proactiveSuggestions });
+          const items = named(
+            await transaction
+              .select(itemColumns)
+              .from(proactiveSuggestions)
+              .where(pingable(ownerUserId))
+              .orderBy(
+                asc(proactiveSuggestions.createdAt),
+                asc(proactiveSuggestions.id),
+              )
+              .for("update", { of: proactiveSuggestions }),
+          );
           // Everything waiting was started or hidden between the slot and here: give the slot back.
           if (items.length === 0) transaction.rollback();
           const pingId = randomUUID();
@@ -267,20 +282,21 @@ export function createPingStore(database: Database) {
         .orderBy(asc(proactivePings.createdAt))
         .limit(limit);
       if (pings.length === 0) return [];
-      const items = await database
-        .select({ ...itemColumns, pingId: proactiveSuggestions.pingId })
-        .from(proactiveSuggestions)
-        .innerJoin(agents, eq(agents.id, proactiveSuggestions.agentId))
-        .where(
-          inArray(
-            proactiveSuggestions.pingId,
-            pings.map((ping) => ping.id),
+      const items = named(
+        await database
+          .select({ ...itemColumns, pingId: proactiveSuggestions.pingId })
+          .from(proactiveSuggestions)
+          .where(
+            inArray(
+              proactiveSuggestions.pingId,
+              pings.map((ping) => ping.id),
+            ),
+          )
+          .orderBy(
+            asc(proactiveSuggestions.createdAt),
+            asc(proactiveSuggestions.id),
           ),
-        )
-        .orderBy(
-          asc(proactiveSuggestions.createdAt),
-          asc(proactiveSuggestions.id),
-        );
+      );
       return pings.map((ping) => ({
         pingId: ping.id,
         ownerUserId: ping.ownerUserId,

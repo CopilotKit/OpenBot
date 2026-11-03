@@ -12,7 +12,7 @@ import type {
   DeliveryScope,
   DeliveryState,
 } from "../../delivery/types";
-import { agents, channels, users } from "./core";
+import { channels, users } from "./core";
 
 const at = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -23,9 +23,7 @@ const scope = () => ({
   channelId: text("channel_id")
     .notNull()
     .references(() => channels.id, { onDelete: "cascade" }),
-  agentId: text("agent_id")
-    .notNull()
-    .references(() => agents.id, { onDelete: "cascade" }),
+  agentId: text("agent_id").notNull(),
   threadId: text("thread_id").notNull(),
 });
 export const deliveryBindings = pgTable(

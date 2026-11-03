@@ -268,6 +268,14 @@ export const deploymentPackages = pgTable("deployment_packages", {
     .defaultNow(),
 });
 
+/**
+ * A Bot's definition, as OpenBot kept it before Bots moved into Intelligence's agent registry.
+ *
+ * Read once, by the upgrade copy (`agents/bot-registry/upgrade.ts`), and written by nothing: every Bot
+ * is created, read, changed and deleted through Intelligence now. Kept for one release so a deployment
+ * that upgrades still has the rows to copy, then dropped. Other tables name a Bot by id without a
+ * foreign key, for the same reason.
+ */
 export const agents = pgTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -322,12 +330,7 @@ export const channels = pgTable(
     lastMessageSourceId: text("last_message_source_id"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     /** Which agent spoke, so a channel with several can show the right one. Null for a person. */
-    lastMessageAgentId: text("last_message_agent_id").references(
-      () => agents.id,
-      {
-        onDelete: "set null",
-      },
-    ),
+    lastMessageAgentId: text("last_message_agent_id"),
     /**
      * When this channel was deleted, or null. Soft: the row, the transcript, and the Intelligence
      * thread stay intact, and every read path filters on this instead. Channel grain, because
@@ -397,9 +400,7 @@ export const channelAgents = pgTable(
     channelId: text("channel_id")
       .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.channelId, table.agentId] })],

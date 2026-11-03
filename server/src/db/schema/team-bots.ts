@@ -13,7 +13,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 
 const at = (name: string) =>
   timestamp(name, { withTimezone: true }).notNull().defaultNow();
@@ -22,9 +22,7 @@ const at = (name: string) =>
 export const teamBotPublications = pgTable(
   "team_bot_publications",
   {
-    agentId: text("agent_id")
-      .primaryKey()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").primaryKey(),
     publishedBy: text("published_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -44,9 +42,7 @@ export const teamBotPublications = pgTable(
 export const teamBotAudience = pgTable(
   "team_bot_audience",
   {
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     kind: text("kind").$type<"user" | "group">().notNull(),
     value: text("value").notNull(),
     createdAt: at("created_at"),
@@ -67,9 +63,7 @@ export const teamBotAudience = pgTable(
 export const teamBotAssignments = pgTable(
   "team_bot_assignments",
   {
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     groupName: text("group_name").notNull(),
     assignedBy: text("assigned_by")
       .notNull()
@@ -89,9 +83,7 @@ export const teamBotConsents = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     serverId: text("server_id").notNull(),
     decision: text("decision").$type<"always" | "once">().notNull(),
     updatedAt: at("updated_at"),

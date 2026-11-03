@@ -18,7 +18,7 @@ import type {
   ProactiveRunStatus,
   SuggestionStatus,
 } from "../../proactive/types";
-import { agents, users } from "./core";
+import { users } from "./core";
 
 /**
  * Background research by one of a person's Bots.
@@ -41,9 +41,7 @@ export const proactiveSettings = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     channelId: text("channel_id").notNull(),
     threadId: text("thread_id").notNull(),
     focus: text("focus").notNull().default(""),
@@ -100,9 +98,7 @@ export const proactiveSuggestions = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     settingId: text("setting_id")
       .notNull()
       .references(() => proactiveSettings.id, { onDelete: "cascade" }),
@@ -173,9 +169,7 @@ export const proactiveRuns = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     /** The run's own fresh thread. Null when a gate skipped it before any thread was made. */
     threadId: text("thread_id"),
     trigger: text("trigger").$type<ProactiveRunTrigger>().notNull(),

@@ -5,11 +5,11 @@ import type {
   VoiceTranscriptEntry,
 } from "@openbot/shared/voice-session";
 import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
+import { bots } from "../agents/bot-registry/directory";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
 import {
-  agentProfiles,
   channelAgents,
   channelMemberships,
   channels,
@@ -150,19 +150,17 @@ export function createVoiceSessionStore(
     actor: AgentActor,
     channelId: string,
   ) {
-    // Hold membership, channel and profiles against revocation/deletion through the write.
+    // Hold membership and channel against revocation/deletion through the write. The Bots are read
+    // from memory: they are in Intelligence, and this transaction must not wait on it. The caller
+    // read the channel through `channelStore.get` first, which brought them into memory.
     const rows = await transaction
-      .select({ deletedAt: agentProfiles.deletedAt })
+      .select({ agentId: channelAgents.agentId })
       .from(channels)
       .innerJoin(
         channelMemberships,
         eq(channelMemberships.channelId, channels.id),
       )
       .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, channelAgents.agentId),
-      )
       .where(
         and(
           eq(channels.id, channelId),
@@ -173,7 +171,9 @@ export function createVoiceSessionStore(
       .for("share");
     if (rows.length === 0)
       throw new VoiceSessionError("Couldn't find that conversation.", 404);
-    if (rows.some((row) => row.deletedAt !== null))
+    if (
+      rows.some((row) => (bots().peek(row.agentId)?.deletedAt ?? null) !== null)
+    )
       throw new VoiceSessionError("This channel is no longer active.", 409);
   }
   async function requireChannel(

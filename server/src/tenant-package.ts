@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { parse } from "yaml";
 import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
 import type { Database } from "./db/client";
+import { bots } from "./agents/bot-registry/directory";
+import type { Bot } from "./agents/bot-registry/types";
 import {
-  agentProfiles,
-  agents as agentTable,
   channelAgents,
   channels as channelTable,
   deploymentPackages,
@@ -811,139 +811,60 @@ export async function synchronizeTenantPackage(
   database: Database,
   tenantPackage: LoadedTenantPackage,
 ) {
-  return database.transaction(async (transaction) => {
-    /*
-     * A Bot already holding one of those names, from a package that declared it before this was
-     * refused. Validation covers the file, and nothing here removes a canonical agent when a package
-     * stops declaring one, so correcting the YAML leaves the row and the router goes on stepping
-     * aside for its path. Checked inside the transaction so a deployment in that state does not come
-     * up half-synchronised, and refused rather than renamed because whose Bot that is, and what
-     * points at it, is not this function's to decide.
-     */
-    const reserved = await transaction
-      .select({ id: agentTable.id })
-      .from(agentTable)
-      .where(inArray(agentTable.id, [...DEPLOYMENT_ROUTES]));
-    if (reserved.length > 0) {
-      const names = reserved.map((agent) => `"${agent.id}"`).join(", ");
-      throw new Error(
-        `Bot ${names} is reserved for a deployment route and cannot exist; rename or remove it before this deployment can start`,
-      );
-    }
+  /*
+   * A Bot already holding one of those names, from a package that declared it before this was
+   * refused. Validation covers the file, and nothing here removes a canonical agent when a package
+   * stops declaring one, so correcting the YAML leaves the Bot and the router goes on stepping aside
+   * for its path. Checked before anything is written so a deployment in that state does not come up
+   * half-synchronised, and refused rather than renamed because whose Bot that is, and what points at
+   * it, is not this function's to decide.
+   */
+  const reserved = bots()
+    .cached()
+    .filter((bot) => DEPLOYMENT_ROUTES.has(bot.id));
+  if (reserved.length > 0) {
+    const names = reserved.map((agent) => `"${agent.id}"`).join(", ");
+    throw new Error(
+      `Bot ${names} is reserved for a deployment route and cannot exist; rename or remove it before this deployment can start`,
+    );
+  }
 
-    const [deploymentPackage] = await transaction
-      .insert(deploymentPackages)
-      .values({
-        tenantId: tenantPackage.tenantId,
+  const [deploymentPackage] = await database
+    .insert(deploymentPackages)
+    .values({
+      tenantId: tenantPackage.tenantId,
+      sourcePath: tenantPackage.sourcePath,
+      checksum: tenantPackage.checksum,
+    })
+    .onConflictDoUpdate({
+      target: deploymentPackages.tenantId,
+      set: {
         sourcePath: tenantPackage.sourcePath,
         checksum: tenantPackage.checksum,
-      })
-      .onConflictDoUpdate({
-        target: deploymentPackages.tenantId,
-        set: {
-          sourcePath: tenantPackage.sourcePath,
-          checksum: tenantPackage.checksum,
-          loadedAt: new Date(),
-        },
-      })
-      .returning();
+        loadedAt: new Date(),
+      },
+    })
+    .returning();
 
-    if (!deploymentPackage) {
-      throw new Error("Tenant package could not be synchronized");
-    }
+  if (!deploymentPackage) {
+    throw new Error("Tenant package could not be synchronized");
+  }
 
-    // Disable only explicitly unconfigured agents still owned by this package. Keep canonical
-    // rows and conversation memberships: runtime tombstones preserve their readable history.
-    // Normal seeding below clears deletedAt if an endpoint is configured again.
-    if (tenantPackage.omittedAgentIds.length > 0) {
-      const now = new Date();
-      await transaction
-        .update(agentProfiles)
-        .set({ deletedAt: now, updatedAt: now })
-        .where(
-          and(
-            isNull(agentProfiles.ownerUserId),
-            isNull(agentProfiles.deletedAt),
-            inArray(
-              agentProfiles.agentId,
-              transaction
-                .select({ id: agentTable.id })
-                .from(agentTable)
-                .where(
-                  and(
-                    eq(agentTable.packageId, deploymentPackage.id),
-                    inArray(agentTable.id, tenantPackage.omittedAgentIds),
-                  ),
-                ),
-            ),
-          ),
-        );
-    }
+  /*
+   * The package's Bots, in Intelligence, before the local rows that name them.
+   *
+   * Not in the transaction below: a Bot is written to Intelligence, and no OpenBot transaction stays
+   * open across that. Every write is keyed on the package checksum and the Bot's version, so replicas
+   * booting together send the same requests and Intelligence answers the later ones with the first's
+   * result; and a boot that fails part way is finished by the next.
+   */
+  await synchronizePackageBots(tenantPackage, deploymentPackage.id);
+  const packageBotIds = bots()
+    .cached()
+    .filter((bot) => bot.packageId === deploymentPackage.id)
+    .map((bot) => bot.id);
 
-    for (const agent of tenantPackage.agents) {
-      const updatedAt = new Date();
-      const [canonicalAgent] = await transaction
-        .insert(agentTable)
-        .values({
-          id: agent.id,
-          name: agent.name,
-          type: agent.type,
-          configuration: agent.configuration,
-          packageId: deploymentPackage.id,
-        })
-        .onConflictDoUpdate({
-          target: agentTable.id,
-          setWhere: eq(agentTable.packageId, deploymentPackage.id),
-          set: {
-            name: agent.name,
-            type: agent.type,
-            configuration: agent.configuration,
-            packageId: deploymentPackage.id,
-            updatedAt,
-          },
-        })
-        .returning({ id: agentTable.id });
-
-      if (!canonicalAgent) {
-        throw new Error(
-          `Tenant package agent "${agent.id}" collides with a user-created agent`,
-        );
-      }
-
-      const [profile] = await transaction
-        .insert(agentProfiles)
-        .values({
-          agentId: canonicalAgent.id,
-          ownerUserId: null,
-          title: agent.title,
-          roleDescription: agent.roleDescription,
-          avatarSeed: agent.avatarSeed ?? canonicalAgent.id,
-          visibility: "public",
-          deletedAt: null,
-          updatedAt,
-        })
-        .onConflictDoUpdate({
-          target: agentProfiles.agentId,
-          setWhere: isNull(agentProfiles.ownerUserId),
-          set: {
-            ownerUserId: null,
-            title: agent.title,
-            roleDescription: agent.roleDescription,
-            avatarSeed: agent.avatarSeed ?? canonicalAgent.id,
-            visibility: "public",
-            deletedAt: null,
-            updatedAt,
-          },
-        })
-        .returning({ agentId: agentProfiles.agentId });
-
-      if (!profile) {
-        throw new Error(
-          `Tenant package agent "${agent.id}" collides with a user-owned profile`,
-        );
-      }
-    }
-
+  return database.transaction(async (transaction) => {
     for (const channel of tenantPackage.channels) {
       const [ownedChannel] = await transaction
         .insert(channelTable)
@@ -1019,13 +940,7 @@ export async function synchronizeTenantPackage(
         and(
           eq(pluginGrants.kind, "skill"),
           eq(pluginGrants.grantedBy, PACKAGE_GRANT),
-          inArray(
-            pluginGrants.agentId,
-            transaction
-              .select({ id: agentTable.id })
-              .from(agentTable)
-              .where(eq(agentTable.packageId, deploymentPackage.id)),
-          ),
+          inArray(pluginGrants.agentId, packageBotIds),
         ),
       );
 
@@ -1121,6 +1036,109 @@ export async function synchronizeTenantPackage(
 
     return deploymentPackage;
   });
+}
+
+/** Whether two JSON values are the same, whatever order their keys are in. */
+function sameJson(left: unknown, right: unknown): boolean {
+  const canonical = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([key, item]) => [key, canonical(item)]),
+          )
+        : value;
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
+/**
+ * Make Intelligence hold exactly the Bots this package declares, as the package declares them.
+ *
+ * Only ever the package's own Bots. A Bot of the same id that a person made, or another package
+ * made, is refused rather than taken over, as the local upsert's `setWhere` did. A Bot whose type
+ * the package changed is refused too: Intelligence keeps a Bot's type for its lifetime, so the
+ * package has to give the new one a new id.
+ */
+async function synchronizePackageBots(
+  tenantPackage: LoadedTenantPackage,
+  packageId: string,
+) {
+  const key = (botId: string, operation: string, version: number) =>
+    `openbot-package:${tenantPackage.checksum}:${botId}:${operation}:${version}`;
+
+  // Disable only explicitly unconfigured agents still owned by this package. Keep the Bot and its
+  // conversation memberships: runtime tombstones preserve their readable history. Seeding below
+  // restores one if an endpoint is configured again.
+  for (const id of tenantPackage.omittedAgentIds) {
+    const bot = await bots().find(id);
+    if (
+      bot &&
+      bot.packageId === packageId &&
+      bot.ownerUserId === null &&
+      bot.deletedAt === null
+    ) {
+      await bots().remove(id, key(id, "delete", bot.version));
+    }
+  }
+
+  for (const agent of tenantPackage.agents) {
+    const wanted = {
+      name: agent.name,
+      title: agent.title,
+      roleDescription: agent.roleDescription,
+      avatarSeed: agent.avatarSeed ?? agent.id,
+      visibility: "public" as const,
+      ownerUserId: null,
+      packageId,
+      configuration: agent.configuration,
+    };
+    let bot: Bot | null = await bots().find(agent.id);
+    if (!bot) {
+      await bots().create(
+        { id: agent.id, type: agent.type, isolated: false, ...wanted },
+        key(agent.id, "create", 0),
+      );
+      continue;
+    }
+    if (bot.packageId !== packageId) {
+      throw new Error(
+        `Tenant package agent "${agent.id}" collides with a user-created agent`,
+      );
+    }
+    if (bot.ownerUserId !== null) {
+      throw new Error(
+        `Tenant package agent "${agent.id}" collides with a user-owned profile`,
+      );
+    }
+    if (bot.type !== agent.type) {
+      throw new Error(
+        `Tenant package agent "${agent.id}" was a ${bot.type} Bot and the package now makes it ${agent.type}. A Bot keeps its type for its lifetime in Intelligence; give the ${agent.type} Bot a new id in the package.`,
+      );
+    }
+    if (bot.deletedAt !== null) {
+      bot = await bots().restore(
+        agent.id,
+        key(agent.id, "restore", bot.version),
+      );
+    }
+    const differs =
+      bot.name !== wanted.name ||
+      bot.title !== wanted.title ||
+      bot.roleDescription !== wanted.roleDescription ||
+      bot.avatarSeed !== wanted.avatarSeed ||
+      bot.visibility !== wanted.visibility ||
+      !sameJson(bot.configuration, wanted.configuration);
+    if (differs) {
+      await bots().update(
+        agent.id,
+        bot.version,
+        wanted,
+        key(agent.id, "update", bot.version),
+      );
+    }
+  }
 }
 
 export function createPackageStatusReader(

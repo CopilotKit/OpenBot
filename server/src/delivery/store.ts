@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { agents } from "../db/schema/core";
-import { agentProfiles } from "../db/schema/coworker";
+import { bots } from "../agents/bot-registry/directory";
 import {
   type DeliveryChallenge,
   deliveryBindings,
@@ -356,12 +355,7 @@ export function createDeliveryStore(database: Database) {
     },
     /** The Bot's display name and avatar seed, so a chat surface can post under its identity. */
     async botIdentity(agentId: string) {
-      const [row] = await database
-        .select({ name: agents.name, avatarSeed: agentProfiles.avatarSeed })
-        .from(agents)
-        .leftJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-        .where(eq(agents.id, agentId))
-        .limit(1);
+      const row = await bots().find(agentId);
       return row
         ? {
             agentId,

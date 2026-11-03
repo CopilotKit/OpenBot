@@ -18,10 +18,9 @@
  * the whole ledger.
  */
 import { and, count, eq, gt, inArray, ne, sql } from "drizzle-orm";
+import { bots as directory } from "../agents/bot-registry/directory";
 import type { Database } from "../db/client";
 import {
-  agentProfiles,
-  agents,
   botLifecycle,
   proactivePings,
   proactiveRuns,
@@ -104,16 +103,30 @@ export async function proactiveMetrics(
    * items go with their setting, so this is every Bot with a number to show. One after another, not
    * Promise.all: see the note in controls.ts about concurrent statements on one connection.
    */
-  const bots = await database
-    .selectDistinct({
-      agentId: proactiveSettings.agentId,
-      name: agents.name,
-      avatarSeed: agentProfiles.avatarSeed,
-    })
-    .from(proactiveSettings)
-    .innerJoin(agents, eq(agents.id, proactiveSettings.agentId))
-    .leftJoin(agentProfiles, eq(agentProfiles.agentId, agents.id));
-  const byBot = new Map(bots.map((bot) => [bot.agentId, emptyBot(bot)]));
+  const settingBots = await database
+    .selectDistinct({ agentId: proactiveSettings.agentId })
+    .from(proactiveSettings);
+  // A setting whose Bot Intelligence no longer has is left out, as the join to `agents` left it out.
+  const known = await directory().findMany(
+    settingBots.map((row) => row.agentId),
+  );
+  const byBot = new Map(
+    settingBots.flatMap((row) => {
+      const bot = known.get(row.agentId);
+      return bot
+        ? [
+            [
+              row.agentId,
+              emptyBot({
+                agentId: row.agentId,
+                name: bot.name,
+                avatarSeed: bot.avatarSeed,
+              }),
+            ] as const,
+          ]
+        : [];
+    }),
+  );
   const agentIds = [...byBot.keys()];
   if (agentIds.length === 0)
     return {

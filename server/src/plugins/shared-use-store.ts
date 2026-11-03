@@ -5,9 +5,8 @@ import { type AuditStore, recordAuditEvent } from "../audit";
 import { createRoleRepository } from "../auth/guards";
 import type { OpenBotRole } from "../auth/roles";
 import type { Database } from "../db/client";
+import { bots } from "../agents/bot-registry/directory";
 import {
-  agentProfiles,
-  agents,
   mcpServers,
   pluginGrants,
   responsibilities,
@@ -483,14 +482,7 @@ export function createSharedUseStore(
   }
 
   async function botFacts(botId: string): Promise<BotFacts> {
-    const [profile] = await database
-      .select({
-        ownerUserId: agentProfiles.ownerUserId,
-        visibility: agentProfiles.visibility,
-      })
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, botId))
-      .limit(1);
+    const profile = await bots().find(botId);
     const [published] = await database
       .select({ audience: teamBotPublications.audience })
       .from(teamBotPublications)
@@ -518,7 +510,7 @@ export function createSharedUseStore(
       await Promise.all(goals.map((goal) => sourcesOf(goal.id)))
     ).flat();
     return {
-      /* A Bot with no profile is a package Bot: public and ownerless. */
+      /* A Bot Intelligence does not have is treated as a package Bot: public and ownerless. */
       ownerUserId: profile?.ownerUserId ?? null,
       visibility: profile?.visibility ?? "public",
       publication: published
@@ -736,22 +728,25 @@ export function createSharedUseStore(
   async function rows(
     where: ReturnType<typeof and> | ReturnType<typeof eq>,
   ): Promise<SharedUseRequestRow[]> {
-    const found = await database
+    const selected = await database
       .select({
         request: sharedUseRequests,
-        botName: agents.name,
-        ownerUserId: agentProfiles.ownerUserId,
         title: mcpServers.title,
       })
       .from(sharedUseRequests)
-      .innerJoin(agents, eq(agents.id, sharedUseRequests.agentId))
-      .leftJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, sharedUseRequests.agentId),
-      )
       .innerJoin(mcpServers, eq(mcpServers.id, sharedUseRequests.serverId))
       .where(where)
       .orderBy(sql`${sharedUseRequests.createdAt} desc`);
+    // A request whose Bot Intelligence no longer has is left out, as the join to `agents` left it out.
+    const known = await bots().findMany(
+      selected.map((row) => row.request.agentId),
+    );
+    const found = selected.flatMap((row) => {
+      const bot = known.get(row.request.agentId);
+      return bot
+        ? [{ ...row, botName: bot.name, ownerUserId: bot.ownerUserId }]
+        : [];
+    });
     return Promise.all(
       found.map(async ({ request, botName, ownerUserId, title }) => ({
         id: request.id,

@@ -7,7 +7,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { agents, channels, users } from "./core";
+import { channels, users } from "./core";
 import { proactiveSuggestions } from "./proactive";
 
 /** How a task began. Only from a check-in's item for now, so the check keeps it to that. */
@@ -33,9 +33,7 @@ export const botTasks = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     channelId: text("channel_id")
       .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),

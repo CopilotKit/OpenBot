@@ -26,9 +26,8 @@
  * made Isolated.
  */
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { and, eq, isNull } from "drizzle-orm";
+import { bots } from "../agents/bot-registry/directory";
 import type { Database } from "../db/client";
-import { agentProfiles } from "../db/schema";
 
 /** Which computer: a person's, which carries every Bot they use, or an isolated Bot's own. */
 export type ComputerKey =
@@ -168,18 +167,10 @@ export function createComputerSeatResolver(
 }
 
 /** Who owns a Bot and whether it is private, read from its profile row. Deleted Bots have none. */
-export function botOwnership(database: Database) {
+export function botOwnership(_database: Database) {
   return async (botId: string): Promise<BotOwnership | null> => {
-    const [row] = await database
-      .select({
-        ownerUserId: agentProfiles.ownerUserId,
-        visibility: agentProfiles.visibility,
-      })
-      .from(agentProfiles)
-      .where(
-        and(eq(agentProfiles.agentId, botId), isNull(agentProfiles.deletedAt)),
-      )
-      .limit(1);
-    return row ?? null;
+    const bot = await bots().find(botId);
+    if (!bot || bot.deletedAt !== null) return null;
+    return { ownerUserId: bot.ownerUserId, visibility: bot.visibility };
   };
 }

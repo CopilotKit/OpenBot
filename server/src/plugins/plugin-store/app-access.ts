@@ -11,9 +11,8 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { type AuditEventInput, recordAuditEvent } from "../../audit";
+import { bots } from "../../agents/bot-registry/directory";
 import {
-  agentProfiles,
-  agents,
   appAccessRequests,
   brokeredConnections,
   credentials as credentialRows,
@@ -458,17 +457,8 @@ export function appAccessMethods(context: StoreContext) {
 
   /** Who owns a Bot that still stands: a person's id, or null for one nobody owns or none at all. */
   async function botOwnerOf(agentId: string): Promise<string | null> {
-    const [row] = await database
-      .select({ ownerUserId: agentProfiles.ownerUserId })
-      .from(agentProfiles)
-      .where(
-        and(
-          eq(agentProfiles.agentId, agentId),
-          isNull(agentProfiles.deletedAt),
-        ),
-      )
-      .limit(1);
-    return row?.ownerUserId ?? null;
+    const bot = await bots().find(agentId);
+    return bot && bot.deletedAt === null ? bot.ownerUserId : null;
   }
 
   /**
@@ -605,21 +595,13 @@ export function appAccessMethods(context: StoreContext) {
     agentId: string,
     userId: string,
   ): Promise<string | null> {
-    const [row] = await database
-      .select({ ownerUserId: agentProfiles.ownerUserId })
+    const [published] = await database
+      .select({ agentId: teamBotPublications.agentId })
       .from(teamBotPublications)
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, teamBotPublications.agentId),
-      )
-      .where(
-        and(
-          eq(teamBotPublications.agentId, agentId),
-          isNull(agentProfiles.deletedAt),
-        ),
-      )
+      .where(eq(teamBotPublications.agentId, agentId))
       .limit(1);
-    const owner = row?.ownerUserId ?? null;
+    const bot = published ? await bots().find(agentId) : null;
+    const owner = bot && bot.deletedAt === null ? bot.ownerUserId : null;
     return owner && owner !== userId ? owner : null;
   }
 
@@ -831,7 +813,6 @@ export function appAccessMethods(context: StoreContext) {
 
   const requestColumns = {
     request: appAccessRequests,
-    botName: agents.name,
     requesterEmail: users.email,
     requesterName: users.name,
   };
@@ -863,11 +844,20 @@ export function appAccessMethods(context: StoreContext) {
     const rows = await database
       .select(requestColumns)
       .from(appAccessRequests)
-      .leftJoin(agents, eq(agents.id, appAccessRequests.agentId))
       .leftJoin(users, eq(users.id, appAccessRequests.requestedBy))
       .where(where)
       .orderBy(desc(appAccessRequests.createdAt), asc(appAccessRequests.id));
-    return rows.map(toRecord);
+    const named = await bots().findMany(
+      rows.flatMap((row) => (row.request.agentId ? [row.request.agentId] : [])),
+    );
+    return rows.map((row) =>
+      toRecord({
+        ...row,
+        botName: row.request.agentId
+          ? (named.get(row.request.agentId)?.name ?? null)
+          : null,
+      }),
+    );
   }
 
   /** See `closeAppAccessRequest` below. */

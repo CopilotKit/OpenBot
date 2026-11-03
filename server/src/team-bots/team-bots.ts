@@ -1,10 +1,10 @@
 /**
  * Team Bots: one Bot, published by its owner, used by teammates in chats of their own.
  *
- * WHO SEES IT. `teamBotAccess` is the one rule, added to the same SQL gate that already admits public
- * Bots and a person's own (`profile-store.ts` `accessFilter`, `runtime-agents.ts`), so the roster, the
- * runtime, handoffs and groups all see a Team Bot exactly where its publication says. No publication
- * row, no access: unpublishing is one delete.
+ * WHO SEES IT. `botAccessFor` (access.ts) is the one rule, the same gate that already admits public
+ * Bots and a person's own (`profile-store.ts`, `runtime-agents.ts`), so the roster, the runtime,
+ * handoffs and groups all see a Team Bot exactly where its publication says. No publication row, no
+ * access: unpublishing is one delete.
  *
  * PRIVATE CHATS. A teammate's conversation is an ordinary channel of their own, and channels are
  * membership-scoped, so the owner cannot read it and it cannot read theirs. Nothing here changes that.
@@ -15,13 +15,13 @@
  * only with their consent: Allow once, Always allow for this Bot, or Skip. Everything else about the
  * call (grant, policy, approvals, audit) is still decided as the teammate who is asking.
  */
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { capabilityRefusal } from "../admin/capabilities";
 import { enterpriseControls } from "../admin/controls";
+import { bots } from "../agents/bot-registry/directory";
 import type { AgentActor } from "../agents/profile-types";
 import type { Database } from "../db/client";
-import { agents, users } from "../db/schema/core";
-import { agentProfiles } from "../db/schema/coworker";
+import { users } from "../db/schema/core";
 import { pluginGrants } from "../db/schema/plugins";
 import {
   teamBotAssignments,
@@ -35,10 +35,8 @@ import {
   assignedCondition,
   describedForTeam,
   PLACEHOLDER_BOT_NAMES,
-  teamBotAccess,
+  teamBotReach,
 } from "./access";
-
-export { teamBotAccess } from "./access";
 
 /** Prefix a consent refusal carries, so a chat can draw the card instead of the sentence. */
 export const TEAM_BOT_CONSENT_MARKER = "[team-bot-consent]";
@@ -104,50 +102,32 @@ export function createTeamBots(options: {
    */
   const listening = new Map<string, TeamBotConsentAsk[]>();
 
+  /** The live, published Bot and who owns it, or null. */
   async function publication(botId: string) {
     const [row] = await database
       .select({
         agentId: teamBotPublications.agentId,
         audience: teamBotPublications.audience,
-        ownerUserId: agentProfiles.ownerUserId,
       })
       .from(teamBotPublications)
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, teamBotPublications.agentId),
-      )
-      .where(
-        and(
-          eq(teamBotPublications.agentId, botId),
-          isNull(agentProfiles.deletedAt),
-        ),
-      )
+      .where(eq(teamBotPublications.agentId, botId))
       .limit(1);
-    return row ?? null;
+    if (!row) return null;
+    const bot = await bots().find(botId);
+    if (!bot || bot.deletedAt !== null) return null;
+    return { ...row, ownerUserId: bot.ownerUserId };
   }
 
   /** The Bot as its owner, for owner-only acts; administrators may unpublish and assign. */
   async function owned(actor: AgentActor, botId: string, allowAdmin: boolean) {
-    const [row] = await database
-      .select({
-        id: agents.id,
-        name: agents.name,
-        roleDescription: agentProfiles.roleDescription,
-        ownerUserId: agentProfiles.ownerUserId,
-      })
-      .from(agents)
-      .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-      .where(and(eq(agents.id, botId), isNull(agentProfiles.deletedAt)))
-      .limit(1);
-    if (!row) throw new TeamBotNotFoundError();
-    if (row.ownerUserId !== actor.id && !(allowAdmin && actor.role === "admin"))
+    const bot = await bots().find(botId);
+    if (!bot || bot.deletedAt !== null) throw new TeamBotNotFoundError();
+    if (bot.ownerUserId !== actor.id && !(allowAdmin && actor.role === "admin"))
       throw new TeamBotNotFoundError();
-    return row;
+    return bot;
   }
 
   return {
-    teamBotAccess,
-
     /**
      * Whose account a Team Bot's call to `ref` goes out on, for the person asking.
      *
@@ -506,33 +486,42 @@ export function createTeamBots(options: {
 
     /** The Team Bots this person may use, their own publications, and each one's settings. */
     async list(actor: AgentActor) {
-      const rows = await database
+      const publications = await database
         .select({
-          id: agents.id,
-          name: agents.name,
-          title: agentProfiles.title,
-          roleDescription: agentProfiles.roleDescription,
-          ownerUserId: agentProfiles.ownerUserId,
+          agentId: teamBotPublications.agentId,
           audience: teamBotPublications.audience,
           publishedAt: teamBotPublications.publishedAt,
-          assigned: sql<boolean>`${assignedCondition(actor.id)}`,
-          described: sql<boolean>`${describedForTeam}`,
         })
-        .from(teamBotPublications)
-        .innerJoin(agents, eq(agents.id, teamBotPublications.agentId))
-        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-        .where(
-          and(
-            isNull(agentProfiles.deletedAt),
-            actor.role === "admin"
-              ? undefined
-              : or(
-                  eq(agentProfiles.ownerUserId, actor.id),
-                  teamBotAccess(actor.id, teamBotPublications.agentId),
-                ),
-          ),
-        )
-        .orderBy(agents.name);
+        .from(teamBotPublications);
+      const { reaches, assigned } = await teamBotReach(database, actor.id);
+      const live = await bots().findMany(
+        publications.map((publication) => publication.agentId),
+      );
+      const rows = publications
+        .flatMap((publication) => {
+          const bot = live.get(publication.agentId);
+          if (!bot || bot.deletedAt !== null) return [];
+          const described = describedForTeam(bot);
+          const visible =
+            actor.role === "admin" ||
+            bot.ownerUserId === actor.id ||
+            (reaches.has(bot.id) && described);
+          if (!visible) return [];
+          return [
+            {
+              id: bot.id,
+              name: bot.name,
+              title: bot.title,
+              roleDescription: bot.roleDescription,
+              ownerUserId: bot.ownerUserId,
+              audience: publication.audience,
+              publishedAt: publication.publishedAt,
+              assigned: assigned.has(bot.id),
+              described,
+            },
+          ];
+        })
+        .sort((left, right) => left.name.localeCompare(right.name));
       const ids = rows.map((row) => row.id);
       const [audience, assignments] = ids.length
         ? await Promise.all([
@@ -591,26 +580,18 @@ export function createTeamBots(options: {
 
     /** The owner's own Bots that could be published, for the publish list. */
     async publishable(actor: AgentActor) {
-      return database
-        .select({
-          id: agents.id,
-          name: agents.name,
-          title: agentProfiles.title,
-        })
-        .from(agents)
-        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-        .leftJoin(
-          teamBotPublications,
-          eq(teamBotPublications.agentId, agents.id),
-        )
-        .where(
-          and(
-            eq(agentProfiles.ownerUserId, actor.id),
-            isNull(agentProfiles.deletedAt),
-            isNull(teamBotPublications.agentId),
-          ),
-        )
-        .orderBy(agents.name);
+      const published = new Set(
+        (
+          await database
+            .select({ agentId: teamBotPublications.agentId })
+            .from(teamBotPublications)
+        ).map((row) => row.agentId),
+      );
+      return bots()
+        .live()
+        .filter((bot) => bot.ownerUserId === actor.id && !published.has(bot.id))
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title }));
     },
   };
 }
