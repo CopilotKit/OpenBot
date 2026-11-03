@@ -99,6 +99,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### Editing a responsibility keeps its events
+
+Saving an edit to a responsibility from its page, or a Bot calling `update_responsibility` without
+`subscriptions`, removed every event the responsibility listened to, so it stopped running when they
+arrived. Its page then showed no events, with nothing saying they had been removed. An edit now
+changes only the fields it names; clearing the events still takes an explicit empty list.
+Responsibilities already edited this way stay without their events: open each one and add them again.
+
 ### Bots can install packages on their computers
 
 Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers

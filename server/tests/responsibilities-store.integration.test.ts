@@ -106,6 +106,25 @@ test("owned lifecycle survives reads and rejects another owner", async () => {
   ).rejects.toBeInstanceOf(ResponsibilityRefusedError);
 });
 
+test("an edit that leaves out subscriptions keeps the goal's events", async () => {
+  const value = await goal();
+  const subscriptions: typeof value.subscriptions = [
+    { source: "github", eventType: "issues.opened" },
+  ];
+  expect(value.subscriptions).toEqual(subscriptions);
+  // The edit dialog sends exactly these three fields.
+  const edited = await store.update(ownerId, value.id, {
+    title: "Annual graph",
+    instruction: "Produce an annual report",
+    successCriteria: "The report has the annual graph",
+  });
+  expect(edited.subscriptions).toEqual(subscriptions);
+  expect(
+    (await store.update(ownerId, value.id, { subscriptions: [] }))
+      .subscriptions,
+  ).toEqual([]);
+});
+
 test("competing deliveries atomically produce one event, run and queue item", async () => {
   const value = await goal();
   const externalId = randomUUID();
