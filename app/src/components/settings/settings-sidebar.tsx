@@ -21,7 +21,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { desktopShell } from "@/lib/desktop/intelligence-dashboard";
+import { desktopShell } from "@/lib/desktop/shell";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 

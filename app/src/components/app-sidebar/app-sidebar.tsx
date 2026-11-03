@@ -46,7 +46,6 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
-import { IntelligenceRow } from "./intelligence-row";
 import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
@@ -350,8 +349,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             ))}
           {/* Your own browser, with the Recorder in it. Drawn only where OpenBot can run one for you. */}
           <BrowserNavItem />
-          {/* Inside OpenBot Desktop with a local Intelligence stack only; nothing otherwise. */}
-          <IntelligenceRow />
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger

@@ -26,7 +26,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { desktopShell } from "@/lib/desktop/intelligence-dashboard";
+import { desktopShell } from "@/lib/desktop/shell";
 import {
   intelligenceMutationOptions,
   restartOpenBotMutationOptions,

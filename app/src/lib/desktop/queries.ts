@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { desktopShell } from "./intelligence-dashboard";
+import { desktopShell } from "./shell";
 
 /**
  * Settings → This computer, read from the OpenBot Desktop app rather than the server.

@@ -6258,7 +6258,8 @@ fn utc_minute(seconds: u64) -> String {
 }
 
 /**
-The tray menu and the window's menu bar, with "Open Intelligence dashboard" when `intelligence`.
+The tray menu and the window's menu bar. The tray's has "Open Intelligence dashboard" when
+`intelligence`.
 
 Built again whenever that changes, because a menu item cannot be hidden, only removed.
 */
@@ -6370,16 +6371,7 @@ fn install_menus<R: tauri::Runtime>(
                 None::<&str>,
             )?),
         ];
-        if intelligence {
-            let (label, enabled) = dashboard();
-            entries.push(MenuEntry::Plain(MenuItem::with_id(
-                app,
-                "open-intelligence",
-                label,
-                enabled,
-                None::<&str>,
-            )?));
-        }
+        // "Open Intelligence dashboard" is the status bar menu's alone.
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "status",
