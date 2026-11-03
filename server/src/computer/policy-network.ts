@@ -73,7 +73,7 @@ export type EgressPushReport = {
  * A seat on the shared computer and an isolated Bot's computer each name their Bot. A person's
  * computer carries every Bot that person has used, and only the computer knows which, so it is asked.
  */
-async function botsOn(
+export async function botsOn(
   computer: ComputerLocation,
   options: { token?: string; fetchImpl: typeof fetch },
 ): Promise<string[]> {

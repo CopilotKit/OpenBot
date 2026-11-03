@@ -50,6 +50,34 @@
   --sidebar-accent-foreground: oklch(0.108 0.015 220.9);
   --sidebar-border: oklch(0.894 0.014 286.1);
   --sidebar-ring: oklch(0.644 0.167 276.1);
+  /*
+   * The few roles shadcn has no name for, kept beside its tokens so a customer still changes the look
+   * in one place. `--brand` is the periwinkle of `--ring`, darkened in light mode until a link in it
+   * clears 4.5:1 on every surface. Two status colours sit beside `--success` and `--destructive`,
+   * which stand for done and couldn't-finish: `--status-needs` is the orange that means waiting for
+   * you, `--status-working` a blue for work under way. `--target` is the smallest thing a finger can
+   * hit. The shadows are not registered with Tailwind (`--shadow-*` is its namespace, and a theme key
+   * of the same name would point at itself), so use them as `shadow-(--shadow-card)`. `--glass` is
+   * the frosted chrome the `glass` utility below draws over a scrolling screen.
+   */
+  --brand: oklch(0.5 0.19 276);
+  --status-needs: oklch(0.52 0.15 50);
+  --status-working: oklch(0.488 0.243 264.376);
+  --target: 44px;
+  --glass: oklch(1 0 0 / 80%);
+  --glass-edge: inset 0 0.5px 0 oklch(1 0 0 / 80%);
+  --shadow-float:
+    0 0 0 0.5px rgb(1 5 7 / 10%), 0 1px 1.5px rgb(1 5 7 / 6%),
+    0 4px 12px -4px rgb(1 5 7 / 12%);
+  --shadow-card: 0 0 0 1px var(--border), 0 6px 18px -12px rgb(1 5 7 / 18%);
+  --shadow-raised: 0 0 0 1px var(--border), 0 10px 26px -14px rgb(1 5 7 / 20%);
+  --shadow-glass: var(--glass-edge), var(--shadow-float);
+  /*
+   * A conversation's bubbles have one radius on every corner and no tail. It sits in Tailwind's
+   * `--radius-*` namespace like the shadows above, so it is not registered either: use it as
+   * `rounded-(--radius-bubble)`.
+   */
+  --radius-bubble: 1.25rem;
 }
 
 .dark {
@@ -90,6 +118,17 @@
   --sidebar-accent-foreground: oklch(0.956 0.005 286.3);
   --sidebar-border: oklch(0.28 0.035 298.6);
   --sidebar-ring: oklch(0.713 0.151 277.7);
+  /* `--brand` is the dark ring itself, which already clears 4.5:1 on every dark surface. */
+  --brand: oklch(0.713 0.151 277.7);
+  --status-needs: oklch(0.828 0.189 84.429);
+  --status-working: oklch(0.707 0.165 254.624);
+  --glass: oklch(0.212 0.028 297.1 / 82%);
+  --glass-edge: inset 0 0.5px 0 oklch(1 0 0 / 8%);
+  --shadow-float:
+    0 0 0 0.5px oklch(1 0 0 / 10%), 0 4px 12px -4px rgb(0 0 0 / 50%);
+  --shadow-card: 0 0 0 1px var(--border);
+  --shadow-raised: 0 0 0 1px var(--border), 0 10px 26px -14px rgb(0 0 0 / 60%);
+  --shadow-glass: var(--glass-edge), var(--shadow-float);
 }
 
 * {
@@ -179,6 +218,81 @@ body {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /*
+   * How work stands: done, needs you, working, couldn't finish. Done and couldn't-finish are shadcn's
+   * own `--success` and `--destructive` under the names the status lines use. Each soft fill is its
+   * colour mixed into the card, so it follows the theme and the colour beside it.
+   */
+  --color-brand: var(--brand);
+  --color-status-done: var(--success);
+  --color-status-done-soft: color-mix(
+    in oklab,
+    var(--success) 10%,
+    var(--card)
+  );
+  --color-status-needs: var(--status-needs);
+  --color-status-needs-soft: color-mix(
+    in oklab,
+    var(--status-needs) 10%,
+    var(--card)
+  );
+  --color-status-working: var(--status-working);
+  --color-status-working-soft: color-mix(
+    in oklab,
+    var(--status-working) 10%,
+    var(--card)
+  );
+  --color-status-problem: var(--destructive);
+  --color-status-problem-soft: color-mix(
+    in oklab,
+    var(--destructive) 10%,
+    var(--card)
+  );
+  /*
+   * A conversation's bubbles: a Bot's in the secondary grey, a shade darker than the page, the
+   * person's in a tint of the ring's periwinkle mixed into the card.
+   */
+  --color-bubble: var(--secondary);
+  --color-bubble-user: color-mix(in oklab, var(--ring) 14%, var(--card));
+}
+
+/*
+ * Three roles of type beside Tailwind's sizes, each a size, a line height and tracking together, in
+ * rem so they follow the person's text size. `cn` knows them as font sizes (`lib/utils.ts`), so one
+ * given later replaces a primitive's `text-*` and the `leading-*` that came with it.
+ *
+ *   type-body     17/23  messages, task and card titles
+ *   type-sub      15/20  status lines, chips, section headers, buttons
+ *   type-caption  13/16  captions, labels, timestamps, tags
+ */
+@utility type-body {
+  font-size: 1.0625rem;
+  line-height: 1.4375rem;
+  letter-spacing: -0.011em;
+}
+@utility type-sub {
+  font-size: 0.9375rem;
+  line-height: 1.25rem;
+  letter-spacing: -0.006em;
+}
+@utility type-caption {
+  font-size: 0.8125rem;
+  line-height: 1rem;
+  letter-spacing: 0;
+}
+/*
+ * Frosted chrome over a scrolling screen. The blur is what makes the translucency readable: without
+ * it, a message passing under the composer would sit legibly behind its placeholder. A browser that
+ * cannot blur gets the opaque card instead, never a see-through bar.
+ */
+@utility glass {
+  background-color: var(--card);
+  @supports (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px)) {
+    background-color: var(--glass);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
+  }
 }
 
 @layer base {

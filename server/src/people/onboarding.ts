@@ -5,10 +5,10 @@ import { users } from "../db/schema";
 /**
  * Where one person is in first-run onboarding.
  *
- * A null `completedAt` is what gates the app into /onboarding. `step` is stored and served but
- * NOTHING RESUMES FROM IT YET: the wizard keeps its step in browser state while its content is
- * still being designed, so this stays 0 through a whole run. It exists so resuming is a frontend
- * change when the wizard settles, not a migration.
+ * A null `completedAt` is what gates the app into /onboarding. `step` is the step somebody was last
+ * on, written on every move, so arriving at /onboarding without `?step=` opens it again. The number
+ * is the app's: each step has one of its own (`STEP_NUMBER` in `routes/_authed/onboarding.tsx`),
+ * never its position in the list, which changes with who is reading. 0 is "not started".
  */
 export type OnboardingStatus = {
   step: number;

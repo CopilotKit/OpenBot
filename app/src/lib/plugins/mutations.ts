@@ -390,10 +390,11 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
 /**
  * Start a consent flow, and say which screen it started from.
  *
- * `returnTo` decides where the vendor's callback puts somebody down, because two screens offer this:
- * a person's own connected-accounts page, and the connector's admin page where an administrator
- * verifies the setup they have just finished. Sending an administrator to their personal settings
- * afterwards is the round trip the inline row exists to remove.
+ * `returnTo` decides where the vendor's callback puts somebody down, because three screens offer this:
+ * a person's own connected-accounts page, the connector's admin page where an administrator
+ * verifies the setup they have just finished, and onboarding's Connect your apps step, which is the
+ * only page somebody who has not finished onboarding may come back to. Sending an administrator to
+ * their personal settings afterwards is the round trip the inline row exists to remove.
  *
  * A name rather than a URL. The server narrows it to a known set before signing it into the state,
  * so this parameter cannot become an open redirect however it is called.
@@ -430,7 +431,7 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
  * so a caller has to say what it draws for it.
  */
 export function connectAccountMutationOptions(
-  returnTo: "settings" | "admin" = "settings",
+  returnTo: "settings" | "admin" | "onboarding" = "settings",
 ) {
   return mutationOptions({
     mutationFn: async (serverId: string): Promise<ConnectStart> => {

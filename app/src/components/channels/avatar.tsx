@@ -2,9 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import Avatar from "boring-avatars";
 import { memo, type ReactNode } from "react";
 import { useBotLook } from "@/components/agents/bot-look";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotOrb, type BotOrbState } from "@/components/agents/bot-orb";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { cn } from "@/lib/utils";
 
 /**
  * Memoized roster avatar. Row updates usually change preview/timestamp only, and
@@ -13,8 +12,10 @@ import { cn } from "@/lib/utils";
  * `size-full` opts the generated SVG out of ancestor icon selectors such as
  * `[&_svg:not([class*='size-'])]:size-4`.
  *
- * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
- * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
+ * `typing` marks a channel whose Bot is mid-turn: every orb works, and a still dot at the
+ * bottom-right says so without moving the row's layout. `needsYou` marks one waiting on the person
+ * (an approval or a question), with the same dot in the needs colour; it outranks busy, since the
+ * Bot cannot go on until the person answers. `state` sets what the orbs show instead.
  *
  * Where Bots are orbs (`useBotLook`), each is drawn from its `avatarSeed`, as `AbstractAvatar`
  * draws it, so a Bot is one color everywhere; a skin that has not opted in keeps the faces. The orbs
@@ -25,13 +26,21 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
   size = 32,
   typing = false,
+  needsYou = false,
+  state = typing ? "working" : "idle",
 }: {
   participantIds: string[];
   size?: number;
   typing?: boolean;
+  /** An approval or a question in the conversation waits on the person. */
+  needsYou?: boolean;
+  /** What every orb shows. Working while `typing`, resting otherwise. A face shows no state. */
+  state?: BotOrbState;
 }) {
   const orbs = useBotLook() === "orb";
-  const face = orbs ? orbFace : boringFace;
+  const face: Face = orbs
+    ? (id, faceSize) => <OrbFace id={id} size={faceSize} state={state} />
+    : boringFace;
   const avatar =
     participantIds.length === 1 ? (
       face(participantIds[0], size)
@@ -47,7 +56,11 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   return (
     <div className="relative" style={{ height: size, width: size }}>
       {avatar}
-      {typing ? <TypingBadge /> : null}
+      {needsYou ? (
+        <StatusDot label="Needs you" tone="bg-status-needs" />
+      ) : typing ? (
+        <StatusDot label="Working…" tone="bg-status-working" />
+      ) : null}
     </div>
   );
 });
@@ -85,23 +98,29 @@ const ORB_PAIR: Layout = {
   ],
 };
 
+type Face = (id: string, size: number) => ReactNode;
+
 function boringFace(id: string, size: number) {
   return <Avatar className="size-full" name={id} size={size} />;
 }
 
-function orbFace(id: string, size: number) {
-  return <OrbFace id={id} size={size} />;
-}
-
 /** A participant that is not a listed Bot, such as a computer, is seeded by its id. */
-function OrbFace({ id, size }: { id: string; size: number }) {
+function OrbFace({
+  id,
+  size,
+  state,
+}: {
+  id: string;
+  size: number;
+  state: BotOrbState;
+}) {
   const { data: seed } = useQuery({
     ...agentListQueryOptions(),
     select: (agents) => agents.find((agent) => agent.id === id)?.avatarSeed,
   });
   return (
-    <span aria-hidden="true" className="contents">
-      <BotOrb name={id} seed={seed ?? id} size={size} />
+    <span aria-hidden="true" className="contents" data-state={state}>
+      <BotOrb name={id} seed={seed ?? id} size={size} state={state} />
     </span>
   );
 }
@@ -117,7 +136,7 @@ function GroupFaces({
   participantIds,
   size,
 }: {
-  face: (id: string, size: number) => ReactNode;
+  face: Face;
   layout: keyof typeof LAYOUTS | Layout;
   participantIds: string[];
   size: number;
@@ -161,25 +180,17 @@ function GroupFaces({
 }
 
 /**
- * Three bouncing dots in a small badge, ringed in the sidebar's own colour so it sits on the
- * avatar as a badge rather than floating over it. The staggered negative delays start each dot at
- * a different point in the same bounce, which is what makes the three read as one wave.
+ * A still dot in a status colour, ringed so it sits on the avatar as a badge rather than floating
+ * over it: working, or needs you. Still on purpose: reduced motion stills the orb, and a skin's faces
+ * show no state at all, so the avatar alone would not read from across the roster. The ring is the
+ * ground the avatar sits on, the sidebar's own unless a row lit behind it sets `--avatar-ground`.
  */
-function TypingBadge() {
-  return (
-    <div className="absolute -bottom-0.5 -right-0.5 flex items-center gap-0.5 rounded-full bg-sidebar p-0.5 ring-2 ring-sidebar">
-      <span className="sr-only">Working…</span>
-      <Dot className="[animation-delay:-0.3s]" />
-      <Dot className="[animation-delay:-0.15s]" />
-      <Dot />
-    </div>
-  );
-}
-
-function Dot({ className }: { className?: string }) {
+function StatusDot({ label, tone }: { label: string; tone: string }) {
   return (
     <span
-      className={cn("size-1 rounded-full bg-primary animate-bounce", className)}
-    />
+      className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-(--avatar-ground,var(--sidebar)) ${tone}`}
+    >
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }

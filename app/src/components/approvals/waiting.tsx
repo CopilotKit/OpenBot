@@ -1,6 +1,4 @@
-import { offersStandingRule } from "@openbot/shared/standing-rule";
-import { approvalWords } from "@openbot/shared/tool-name";
-import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
+import { IconMessageQuestion } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
@@ -24,6 +22,7 @@ import {
   decideApprovalMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
+import { ApprovalCard } from "./approval-card";
 
 type WaitingQuestion = ApprovalInboxData["questions"][number];
 type WaitingRequest = ApprovalInboxData["requests"][number];
@@ -33,7 +32,10 @@ type WaitingRequest = ApprovalInboxData["requests"][number];
  * Bots asked, and the actions waiting on a decision. A question asked during a hand-off belongs to
  * the Bot whose conversation it is.
  */
-function useWaiting(agentId: string | undefined) {
+function useWaiting(
+  agentId: string | undefined,
+  decidedHere: ReadonlySet<string> = new Set(),
+) {
   const inbox = useQuery(approvalInboxOptions());
   const ours = (botId: string) => agentId === undefined || botId === agentId;
   return {
@@ -41,8 +43,11 @@ function useWaiting(agentId: string | undefined) {
     questions: (inbox.data?.questions ?? []).filter((question) =>
       ours(question.conversationBotId ?? question.botId),
     ),
+    // One answered here stays, folded to how it went, until the page is left.
     pending: (inbox.data?.requests ?? []).filter(
-      (request) => request.status === "pending" && ours(request.action.botId),
+      (request) =>
+        (request.status === "pending" || decidedHere.has(request.id)) &&
+        ours(request.action.botId),
     ),
   };
 }
@@ -98,113 +103,43 @@ function QuestionRow({
 }
 
 /**
- * An action waiting on a decision, decided on the row's own footer line, in from the edge by the
- * icon and its gap so the buttons line up with the text, as a task's and an item's do beside it.
+ * An action waiting on a decision: the same approval card the conversation draws, framed as a row
+ * of the list, so a decision made in either place is the one decision.
  */
 function RequestRow({
   request,
   botName,
+  onDecided,
 }: {
   request: WaitingRequest;
   botName: string;
+  /** Told before the decision is sent, so the row stays, folded, once it is answered. */
+  onDecided: (id: string) => void;
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
-  const words = approvalWords(request.action);
   return (
-    <Item size="sm">
-      <ItemMedia variant="icon">
-        <IconHandStop />
-      </ItemMedia>
-      <ItemContent className="min-w-0">
-        <ItemTitle className="line-clamp-none">
-          {botName} wants to {words.action}
-        </ItemTitle>
-        <ItemDescription className="line-clamp-none break-all">
-          {words.place}
-        </ItemDescription>
-        {request.action.policy ? (
-          <p className="text-sm">
-            {request.action.policy.behaviour === "hand_off"
-              ? "Handed to you: "
-              : ""}
-            {request.action.policy.reason}
-          </p>
-        ) : null}
-        <pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
-          {JSON.stringify(request.action.args, null, 2)}
-        </pre>
-      </ItemContent>
-      {request.action.policy?.behaviour === "hand_off" ? (
-        <ItemFooter className="flex-wrap justify-start pl-11">
-          <Button
-            disabled={decision.isPending}
-            onClick={() =>
-              decision.mutate({ id: request.id, choice: "handled" })
-            }
-            size="sm"
-          >
-            I did it myself
-          </Button>
-          <Button
-            disabled={decision.isPending}
-            onClick={() => decision.mutate({ id: request.id, choice: "deny" })}
-            size="sm"
-            variant="outline"
-          >
-            Don't do it
-          </Button>
-        </ItemFooter>
-      ) : (
-        <ItemFooter className="flex-wrap justify-start pl-11">
-          <Button
-            disabled={decision.isPending}
-            onClick={() =>
-              decision.mutate({
-                id: request.id,
-                choice: "allow_once",
-              })
-            }
-            size="sm"
-          >
-            Allow once
-          </Button>
-          {offersStandingRule(request.action) ? (
-            <Button
-              disabled={decision.isPending}
-              onClick={() =>
-                decision.mutate({
-                  id: request.id,
-                  choice: "allow_always",
-                })
-              }
-              size="sm"
-              variant="outline"
-            >
-              Always allow here
-            </Button>
-          ) : null}
-          <Button
-            disabled={decision.isPending}
-            onClick={() => decision.mutate({ id: request.id, choice: "deny" })}
-            size="sm"
-            variant="outline"
-          >
-            Deny
-          </Button>
-        </ItemFooter>
-      )}
-      {decision.error ? (
-        <p role="alert" className="basis-full pl-11 text-sm text-destructive">
-          {decision.error.message}
-        </p>
-      ) : null}
-    </Item>
+    <ApprovalCard
+      botName={botName}
+      busy={decision.isPending}
+      error={decision.error?.message ?? null}
+      frame="row"
+      onDecide={(choice) => {
+        onDecided(request.id);
+        decision.mutate({ id: request.id, choice });
+      }}
+      request={request}
+    />
   );
 }
 
 /** The waiting questions and actions as rows, questions first, for a card that may hold more. */
 export function useWaitingRows(agentId: string | undefined) {
-  const waiting = useWaiting(agentId);
+  const [decidedHere, setDecidedHere] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const waiting = useWaiting(agentId, decidedHere);
+  const decided = (id: string) =>
+    setDecidedHere((prior) => new Set(prior).add(id));
   const agents = useQuery(agentListQueryOptions());
   const botName = (id: string) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? id;
@@ -222,6 +157,7 @@ export function useWaitingRows(agentId: string | undefined) {
         <RequestRow
           botName={botName(request.action.botId)}
           key={`request-${request.id}`}
+          onDecided={decided}
           request={request}
         />
       )),
@@ -230,10 +166,10 @@ export function useWaitingRows(agentId: string | undefined) {
 }
 
 /**
- * Questions and actions waiting on the person, one row each, decided where it is shown: the answer
- * box and the decision buttons sit on the row's own footer line. Given a Bot, only that Bot's. The
- * same requests the conversation draws inline, so a decision made in either place is the one
- * decision.
+ * Questions and actions waiting on the person, one row each, decided where it is shown: a question's
+ * answer box sits on its row's footer line, and an action is the same approval card the
+ * conversation draws, so a decision made in either place is the one decision. An action answered
+ * here stays, folded to how it went, until the page is left. Given a Bot, only that Bot's.
  */
 export function WaitingForYou({ agentId }: { agentId?: string }) {
   const { error, rows } = useWaitingRows(agentId);

@@ -16,6 +16,7 @@ import {
 } from "@/lib/groups";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
+import { AiNotice } from "./ai-notice";
 import { ChannelAvatar } from "./avatar";
 import { Composer, toAgentOptions } from "./composer";
 import { TeamBotConsentCard } from "./team-bot-consent";
@@ -145,6 +146,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
             });
           }}
         />
+        <AiNotice botNames={bots.map((bot) => bot.name)} />
       </div>
     </div>
   );

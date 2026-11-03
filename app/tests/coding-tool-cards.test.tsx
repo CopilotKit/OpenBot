@@ -312,7 +312,7 @@ test("a coding turn folds only its reads and searches, and keeps every change an
   ]);
   // A lone read keeps its own line; the two listings fold into one, which says both didn't work.
   expect(view.getByText("Read 39 lines")).toBeTruthy();
-  expect(view.getByText("Listed 2 directories")).toBeTruthy();
+  expect(view.getByText("Listed 2 directories, didn't work")).toBeTruthy();
   expect(view.getByText("2 issues")).toBeTruthy();
 });
 

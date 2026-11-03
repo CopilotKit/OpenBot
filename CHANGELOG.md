@@ -434,6 +434,64 @@ again when they come back to the end or press the arrow. A rail beside a convers
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
 
+### First run shows what OpenBot does, one step at a time
+
+- The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
+  own, a team of Bots, and asking before it acts, with Ask before making changes offered right
+  there), then Check your setup, Connect your apps, Get notified, and the name step, whose Get
+  started opens the app. On a desktop each step's words sit beside a picture of it, under one line
+  saying where the person is ("Step 5 of 9") that opens the list of steps; on a phone they come one
+  at a time. A reload, browser Back and a connection's return all keep the person's place, which is
+  now saved as they go. A link on a step to another page moves on to the next step and opens that
+  page once onboarding is done.
+- Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
+  more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
+  shown the page or the variables that close a gap; everybody else only that their admin sets it up,
+  with no warning colours. An admin can reopen the same checklist afterwards in Settings → Setup, to
+  check again after setting a variable and restarting OpenBot.
+  Check again asks Intelligence and the model provider again, at most every 10 seconds. Reading the
+  checklist does the same once an answer has failed or is five minutes old, without waiting for it,
+  so the next read has the new answer. To check the Bot computer, the server sends each running
+  computer its network policy whenever it asks, and sees that it answers; it wakes none.
+- An app connected from Connect your apps comes back to that step from the app's own sign-in page,
+  whether it connected, failed or was cancelled there. A connection started from Connections or an
+  app's admin page comes back where it did before.
+
+### The sidebar and a conversation, made easier to read
+
+- In the sidebar, OpenBot's orb sits beside its name. A row lifts to a card under the pointer and
+  while it is open, and you can always see where the keyboard is. While a Bot is working, its orb in
+  the list shows it, and so does a still blue dot. Each conversation has a "…" button with Pin and
+  Delete, which used to be on right-click alone. ⌘K, or Ctrl+K, opens the sidebar and puts you in
+  its search box.
+- A conversation reads like a chat. A Bot's reply arrives one bubble per thought, and a bubble holding
+  a code block or a table takes the full width on a wide screen; your messages sit in a tinted bubble,
+  and three dots show a Bot thinking. A step is marked done only when it worked: one that was refused,
+  failed or declined by you is named for what it would have done ("Send your email"), and one held on
+  its approval card says it is waiting for you. Mail and calendar steps, through any app, are named
+  for what happened to yours ("Searched your email").
+- A conversation with one Bot shows that Bot's orb in its header. The orb works while the Bot does,
+  listens while you type, and shows done when an answer lands; a skin that draws faces keeps its
+  face. Under the conversation's name, "Working · Searching the web" says which step the Bot is on,
+  and "Needs you" says an approval is waiting there. A run that goes on after you allow something
+  shows as working too. The message box is a rounded
+  pill with larger buttons, and it says "Message" and the Bot's name until you type.
+- A Bot's computer opens in a wider pane beside the conversation. Its header shows the Bot's orb,
+  whose computer it is and Take control, with a dot while the conversation needs you. Under the
+  screen, every step the Bot took in its browser, approved clicks included, sits among the commands
+  it ran, newest last, marked done, waiting for you or didn't work. The pane opens by itself only
+  when it fits beside the conversation; on a narrow screen the computer button lights up instead.
+  The box for a password or a code says the value goes straight to the page and the Bot never sees
+  it.
+- When a Bot asks before acting, its card says in plain words what it will do, in which app or
+  where, to whom, and what it will send, with everything else under Details. Decline and Allow once
+  answer it, and a quieter Always allow here saves a rule for that Bot, action and place; a step
+  handed to you asks "I did it myself" or "Don't do it". The same card is in the conversation, on
+  the Bot's page and in the list of what needs you. Once you answer, it folds to how it went
+  (Allowed, Sent, Done, Declined, Didn't work) and says who decided. A request for a step that is
+  alone in its turn now shows in the conversation too, where before it waited only on the Bot's
+  page. Under the message box, every conversation says that OpenBot is AI and can make mistakes.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from CopilotKit's standard catalog on A2UI 1.0

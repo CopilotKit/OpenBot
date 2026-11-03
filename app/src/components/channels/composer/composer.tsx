@@ -13,6 +13,7 @@ import {
   isSegmentsEmpty,
   mergeAdjacentTextSegments,
   type Segment,
+  segmentsToPlainText,
   text,
 } from "prompt-area/helpers";
 import {
@@ -115,9 +116,9 @@ function stagedModality(attachment: Attachment) {
 
 const MAX_HEIGHT_PX = 220;
 /**
- * Tracks the compact `text-sm` line box so PromptArea stays vertically centered in one row.
+ * Tracks the compact editor's 23px line box so PromptArea stays vertically centered in one row.
  */
-const COMPACT_MIN_HEIGHT_PX = 19;
+const COMPACT_MIN_HEIGHT_PX = 23;
 const COMPACT_MAX_HEIGHT_PX = 96;
 
 export type ComposerProps = {
@@ -243,6 +244,14 @@ export type ComposerProps = {
    * that can sum this; a caller with no queue leaves it out and nothing changes.
    */
   queuedAttachmentCount?: number;
+  /** What the empty box says. "Message Ana" in a conversation with one Bot; "Ask anything" elsewhere. */
+  placeholder?: string;
+  /**
+   * Called with the draft's plain text whenever it changes: typing, dictation, a send clearing the
+   * box and a failed send putting the words back alike. A conversation's header orb listens
+   * through it.
+   */
+  onTextChange?: (text: string) => void;
 };
 
 /**
@@ -328,6 +337,8 @@ export function Composer({
   droppedAttachments,
   // Nothing parked is the right answer for every caller without a queue, which is most of them.
   queuedAttachmentCount = 0,
+  placeholder = "Ask anything",
+  onTextChange,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>(
     initialValue ? [{ type: "text", text: initialValue }] : [],
@@ -1046,6 +1057,9 @@ export function Composer({
     [agents, commands],
   );
   const draft = useMemo(() => toDraft(value, staged), [staged, value]);
+  useEffect(() => {
+    onTextChange?.(segmentsToPlainText(value));
+  }, [onTextChange, value]);
 
   /**
    * MORE FILES ON THIS STRIP THAN ONE MESSAGE MAY CARRY — a state the screening is supposed to make
@@ -1337,9 +1351,10 @@ export function Composer({
   const sendLabel = parking ? "Queue message" : "Send message";
   const callAction =
     draft.isEmpty && draft.attachments.length === 0 ? voiceCall : undefined;
+  // The compact composer's controls are 44px, the smallest thing a finger can hit.
   const actionClassName = cn(
     "rounded-full p-0",
-    compact ? "size-8 self-end" : "size-7",
+    compact ? "size-(--target) shrink-0 self-end" : "size-7",
   );
   const primaryAction = canStop ? (
     <Button
@@ -1351,7 +1366,7 @@ export function Composer({
       size="icon"
       type="button"
     >
-      <IconPlayerStopFilled className="size-3" />
+      <IconPlayerStopFilled className={compact ? "size-3.5" : "size-3"} />
     </Button>
   ) : callAction ? (
     <Button
@@ -1369,7 +1384,7 @@ export function Composer({
       size="icon"
       type="button"
     >
-      <IconWaveform className="size-4" />
+      <IconWaveform className={compact ? "size-5" : "size-4"} />
     </Button>
   ) : (
     <Button
@@ -1380,7 +1395,7 @@ export function Composer({
       size="icon"
       type="submit"
     >
-      <IconArrowUp className="size-3.5" />
+      <IconArrowUp className={compact ? "size-5" : "size-3.5"} />
     </Button>
   );
 
@@ -1484,10 +1499,10 @@ export function Composer({
           data-slot="composer"
           className={cn(
             /*
-             * `py-3` IS LOAD-BEARING ONCE THE TEXT WRAPS. On one line `min-h-14` and the controls
-             * row's own `items-center` fake the vertical padding, so it read as correct for as long
-             * as nobody typed a paragraph. Past that the box grows to fit its content exactly and
-             * the glyphs sit against the border.
+             * THE PADDING IS LOAD-BEARING ONCE THE TEXT WRAPS. On one line the controls row's own
+             * `items-center` fakes the vertical padding, so it read as correct for as long as
+             * nobody typed a paragraph. Past that the box grows to fit its content exactly and the
+             * glyphs sit against the border.
              *
              * It goes on the form rather than on the editor because the editor scrolls internally
              * at COMPACT_MAX_HEIGHT_PX: padding inside that box would scroll away with the text, so
@@ -1499,7 +1514,12 @@ export function Composer({
              * started it 42px in from the frame's left edge with nothing under it. The strip is
              * its own row across the top now, and the three controls keep their row below it.
              */
-            "flex min-h-14 flex-col rounded-2xl border border-border bg-card px-3 py-3 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+            /*
+             * A pill on a soft shadow, 62px tall around its 44px controls.
+             * The border is there but clear, so a skin can draw it in a colour of its own, and it
+             * takes the ring colour, with the ring around it, while the caret is inside.
+             */
+            "flex min-h-[62px] flex-col rounded-[27px] border border-transparent bg-card p-2 shadow-(--shadow-float) focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
             className,
           )}
           onSubmit={handleFormSubmit}
@@ -1518,11 +1538,11 @@ export function Composer({
              * the middle of that block rather than sitting on the line the person is typing. Empty,
              * the row is exactly a button tall, so centred and bottom are the same pixel.
              */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               {attachmentsEnabled ? (
                 <Button
                   aria-label="Attach a file"
-                  className="self-end"
+                  className="size-(--target) self-end rounded-full text-muted-foreground"
                   data-slot="composer-attach"
                   // The button stays, and stays labelled: a conversation that cannot take another
                   // message has not lost the ability to attach, it has lost the message. Swapping it
@@ -1533,26 +1553,34 @@ export function Composer({
                   type="button"
                   variant="ghost"
                 >
-                  <IconPlus className="size-5" />
+                  <IconPlus className="size-5.5" />
                 </Button>
               ) : (
                 <Button
                   aria-label="More message options unavailable"
-                  className="self-end disabled:opacity-100"
+                  className="size-(--target) self-end rounded-full text-muted-foreground disabled:opacity-100"
                   disabled
                   size="icon"
                   type="button"
                   variant="ghost"
                 >
-                  <IconPlus className="size-5" />
+                  <IconPlus className="size-5.5" />
                 </Button>
               )}
               {/* The slot is ours: `PromptArea` passes no attribute through to its own box. */}
-              <div className="min-w-0 flex-1" data-slot="composer-input">
+              <div
+                className="min-w-0 flex-1 self-center"
+                data-slot="composer-input"
+              >
                 <PromptArea
                   aria-label="Message"
                   className={cn(
-                    "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+                    /*
+                     * `type-body`'s size, as the bubble it will be sent in, spelled out: PromptArea
+                     * merges its own `text-sm leading-relaxed` with a tailwind-merge that does not
+                     * know the `type-*` utilities, so one given here would lose to them.
+                     */
+                    "composer-editor w-full border-0 bg-transparent p-0 py-1.5 text-[1.0625rem] leading-[1.4375rem] tracking-[-0.011em] shadow-none",
                     editorClassName,
                   )}
                   disabled={disabled}
@@ -1561,13 +1589,14 @@ export function Composer({
                   onChange={handleChange}
                   onImagePaste={canAttach ? stagePastedImage : undefined}
                   onSubmit={submitDraft}
-                  placeholder="Ask anything"
+                  placeholder={placeholder}
                   ref={promptAreaRef}
                   triggers={triggers}
                   value={value}
                 />
               </div>
               <DictationButton
+                className="size-(--target) text-muted-foreground [&_svg]:size-5"
                 dictation={dictation}
                 disabled={disabled || voiceCall?.active === true}
               />
@@ -1621,7 +1650,7 @@ export function Composer({
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
-                placeholder="Ask anything"
+                placeholder={placeholder}
                 ref={promptAreaRef}
                 triggers={triggers}
                 value={value}

@@ -1,6 +1,22 @@
 import type { CSSProperties } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import type { AIState } from "@/components/agents/orb/ai-core";
 import { orbPalette } from "@/lib/orb-palette";
+
+/**
+ * What a Bot's orb shows: resting, working, waiting on the person, listening while they type, or
+ * done with what it was asked. Waiting rests too: the next move is the person's, not the Bot's.
+ */
+export type BotOrbState = "idle" | "working" | "waiting" | "listening" | "done";
+
+/** The live orb's state for each. */
+const AI_STATE: Record<BotOrbState, AIState> = {
+  idle: "idle",
+  working: "thinking",
+  waiting: "idle",
+  listening: "listening",
+  done: "done",
+};
 
 /** At this size and smaller, an idle orb is drawn still. */
 const STATIC_MAX_SIZE = 32;
@@ -34,7 +50,7 @@ export function BotOrb({
   seed: string;
   name: string;
   size?: number;
-  state?: "idle" | "working" | "waiting";
+  state?: BotOrbState;
 }) {
   const colors = orbPalette(seed);
 
@@ -68,14 +84,9 @@ export function BotOrb({
       className="bot-orb-live inline-flex shrink-0 rounded-full ring-1 ring-foreground/10"
       style={{ height: size, width: size }}
     >
-      {/* Hidden so the Bot is announced once, by name. A waiting Bot idles: the next move is the
-          person's, not the Bot's. */}
+      {/* Hidden so the Bot is announced once, by name. */}
       <span aria-hidden="true" className="contents">
-        <AgentOrb
-          colors={colors}
-          size={`${size}px`}
-          state={state === "working" ? "thinking" : "idle"}
-        />
+        <AgentOrb colors={colors} size={`${size}px`} state={AI_STATE[state]} />
       </span>
     </span>
   );

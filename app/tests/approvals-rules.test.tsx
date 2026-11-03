@@ -361,18 +361,27 @@ test("a pending change is drawn in the conversation where the action was, and de
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <InlineApproval toolCallId="pay-call" fallback={<p>Clicked on page</p>} />
+      <InlineApproval
+        toolCallId="pay-call"
+        fallback={<p>Clicked on the page</p>}
+      />
       <InlineApproval
         toolCallId="other-call"
-        fallback={<p>Filled in field</p>}
+        fallback={<p>Filled in a field</p>}
       />
     </QueryClientProvider>,
   );
-  await view.findByRole("region", { name: "Waiting for your approval" });
-  expect(view.getByText(/This needs you: click on shop.example/)).toBeTruthy();
+  // Named by its title, so two waiting cards are told apart.
+  await view.findByRole("region", {
+    name: "This needs you: Click on the page",
+  });
+  expect(view.getByText("shop.example")).toBeTruthy();
+  // A hand-off is the person's to do: nothing offers to let the Bot do it.
+  expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
+  expect(view.getByRole("button", { name: "Don't do it" })).toBeTruthy();
   // Another call's line is left to its own renderer.
-  expect(view.getByText("Filled in field")).toBeTruthy();
-  expect(view.queryByText("Clicked on page")).toBeNull();
+  expect(view.getByText("Filled in a field")).toBeTruthy();
+  expect(view.queryByText("Clicked on the page")).toBeNull();
   fireEvent.click(view.getByRole("button", { name: "I did it myself" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
@@ -434,10 +443,10 @@ test("in the real transcript shape a waiting click is folded into browser activi
       <ToolActivity group={group} active={false} />
     </QueryClientProvider>,
   );
-  await view.findByRole("region", { name: "Waiting for your approval" });
+  await view.findByRole("region", { name: /^This needs you: / });
   // Only the waiting call gets a card; the finished navigate does not.
   expect(
-    view.getAllByRole("region", { name: "Waiting for your approval" }),
+    view.getAllByRole("region", { name: /^This needs you: / }),
   ).toHaveLength(1);
   expect(view.getByRole("button", { name: "I did it myself" })).toBeTruthy();
 });

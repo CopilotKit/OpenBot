@@ -10,8 +10,8 @@ import { settleReactWork } from "./settle-react-work";
 /*
  * What an approval says it is waiting on. An app's tool is asked about as `<app>/<tool>` on the app,
  * and the card in the conversation once read "Waiting for your approval: requests/get request on
- * requests", the app's key twice and the tool's raw name, where a computer action reads "click on
- * example.com". Both places a person decides one in the browser: the card in the conversation, and
+ * requests", the app's key twice and the tool's raw name. The card is titled with the action in the
+ * words its step uses and names the app by its name. Both places a person decides one in the browser: the card in the conversation, and
  * the row on the Bot's page.
  */
 
@@ -111,27 +111,36 @@ test("in the conversation, an app's approval names the action in words and the a
       <InlineApproval toolCallId="call-computer" fallback={null} />
     </>,
   );
-  const cards = await view.findAllByRole("region", {
-    name: "Waiting for your approval",
-  });
+  await view.findAllByRole("button", { name: "Allow once" });
+  // Each card is named by its title, the action in the words its step uses.
+  const cards = view.getAllByRole("region");
   expect(cards.map((card) => card.querySelector("p")?.textContent)).toEqual([
-    "Waiting for your approval: get request on Requests",
-    "Waiting for your approval: send email on Gmail",
-    "Waiting for your approval: click on example.com",
+    "Get request",
+    "Send your email",
+    "Click on the page",
   ]);
+  // The app by its name, never its key; a computer action on the site it acts on.
+  expect(cards[0]?.textContent).toContain("Requests");
+  expect(cards[1]?.textContent).toContain("Gmail");
+  expect(cards[2]?.textContent).toContain("example.com");
+  for (const card of cards) {
+    expect(card.textContent).not.toContain("requests/");
+    expect(card.textContent).not.toContain("composio");
+  }
 });
 
-test("on the Bot's page, the row says what the Bot wants to do, over the app's name", async () => {
+test("on the Bot's page, the row says what the Bot wants to do, over the Bot and the app's name", async () => {
   serving();
   const view = draw(<WaitingForYou agentId="assistant" />);
-  const row = (await view.findByText("General Assistant wants to get request"))
-    .parentElement as HTMLElement;
-  expect(row.textContent).toContain("Requests");
+  const row = (await view.findByText("Get request")).closest(
+    "section",
+  ) as HTMLElement;
+  expect(row.textContent).toContain("General Assistant · Requests");
   expect(row.textContent).not.toContain("requests/");
   expect(
-    view.getByText("General Assistant wants to send email").parentElement
-      ?.textContent,
-  ).toContain("Gmail");
-  expect(view.getByText("General Assistant wants to click")).toBeTruthy();
+    (view.getByText("Send your email").closest("section") as HTMLElement)
+      .textContent,
+  ).toContain("General Assistant · Gmail");
+  expect(view.getByText("Click on the page")).toBeTruthy();
   expect(view.container.textContent).not.toContain("composio");
 });
