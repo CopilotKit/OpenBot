@@ -25,9 +25,11 @@ appearance, and a dark one is a black line around a light page.
 
 Its own command rather than the window plugin's `set_theme`: granted to this origin, that call was
 refused (the window stayed dark), and this one is ours to see.
+
+Async, like every command here: on Windows a sync one deadlocked the window (see the test below).
 */
 #[tauri::command]
-fn appearance(window: tauri::Window, dark: bool) -> Result<(), String> {
+async fn appearance(window: tauri::Window, dark: bool) -> Result<(), String> {
     window
         .set_theme(Some(if dark {
             tauri::Theme::Dark
@@ -55,7 +57,7 @@ async fn restart(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Stops everything, as the menu's Stop did. The page asking goes with it; the window shows setup.
 #[tauri::command]
-fn stop(app: tauri::AppHandle) {
+async fn stop(app: tauri::AppHandle) {
     crate::stop_openbot_from_status(app);
 }
 
@@ -90,4 +92,36 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             intelligence
         ])
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every command here is async. Tauri runs a plugin's command holding its plugin store, and a
+    /// sync one runs on the main thread: a window change made there (the theme, a size, focus) is
+    /// delivered on Windows as a window event before the call returns, and dispatching that event
+    /// takes the plugin store again. `appearance` was sync, and the window stopped responding the
+    /// first time OpenBot's page reported its theme. An async command runs on a worker, so the
+    /// window change is queued for the main thread instead.
+    #[test]
+    fn every_command_runs_off_the_main_thread() {
+        let source = include_str!("desktop_page.rs");
+        let mut lines = source.lines();
+        let mut commands = 0;
+        while let Some(line) = lines.next() {
+            if line.trim() != "#[tauri::command]" {
+                continue;
+            }
+            let signature = lines.next().unwrap_or_default().trim();
+            commands += 1;
+            assert!(
+                signature.starts_with("async fn ") || signature.starts_with("pub async fn "),
+                "a plugin command must be async: {signature}"
+            );
+        }
+        assert_eq!(
+            commands,
+            super::PERMISSIONS.len(),
+            "one command per permission"
+        );
+    }
 }
