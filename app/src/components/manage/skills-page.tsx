@@ -96,7 +96,7 @@ export function SkillsPage() {
       }
       description={
         personal
-          ? "Write instructions any of your Bots can run with /. A skill uses what a Bot can already do. Your own skills for one Bot are under Capabilities."
+          ? "Write instructions any of your Bots can run with /. A skill uses what a Bot can already do. Your own skills for one Bot are on the Bots page, under Skills."
           : "Create reusable instructions people can run with /. Skills use a Bot’s existing permissions and do not grant additional access."
       }
       title={personal ? "Skills for every Bot" : "Skills"}

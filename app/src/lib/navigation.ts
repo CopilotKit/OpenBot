@@ -106,15 +106,17 @@ export const NAVIGATION: readonly NavigationItem[] = [
 
 /**
  * The destinations this person may open, in order. The personal edition has no Admin: the team
- * features entry takes its place, for everybody, since nobody there administers anybody else.
+ * features entry takes its place, for everybody, since nobody there administers anybody else. It has
+ * no Capabilities either: a person's skills and what their Bots remember are on the Bots page, so
+ * there are three places to go rather than four.
  */
 export function navigationFor(
   role: string | undefined,
   edition: "team" | "personal" = "team",
 ): readonly NavigationItem[] {
   if (edition === "personal") {
-    return NAVIGATION.map((item) =>
-      item.id === "admin" ? TEAM_FEATURES_ITEM : item,
+    return NAVIGATION.filter((item) => item.id !== "capabilities").map(
+      (item) => (item.id === "admin" ? TEAM_FEATURES_ITEM : item),
     );
   }
   return NAVIGATION.filter(

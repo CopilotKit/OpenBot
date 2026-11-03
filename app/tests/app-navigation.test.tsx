@@ -215,16 +215,16 @@ test("Admin is in the list for admins only", () => {
   ]);
 });
 
-test("the personal edition has no Admin, and a feature list in its place", () => {
+test("the personal edition has no Admin or Capabilities, and a feature list in Admin's place", () => {
   const personal = navigationFor("admin", "personal");
   expect(
     personal.some((item) => item.kind !== "dialog" && item.to === "/admin"),
   ).toBe(false);
   const dialogs = personal.filter((item) => item.kind === "dialog");
   expect(dialogs.map((item) => item.id)).toEqual(["team-features"]);
+  // Skills and Memory open from the Bots page instead.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
-    "capabilities",
     "connections",
     "team-features",
     "settings",
