@@ -165,3 +165,81 @@
   [data-slot="switch-thumb"] {
   background: var(--latch-on-accent);
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * The front of the app: the home screen, the composer and the sidebar.
+ * ------------------------------------------------------------------------------------------- */
+
+/* Big headings in normal weight, as Latch draws them. */
+:root[data-skin="latch"] [data-slot="home-greeting"] {
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* "Explore Bots" becomes the same small caps label as every other card. */
+:root[data-skin="latch"] [data-slot="home-section-title"] {
+  padding-left: 0.25rem;
+  color: var(--latch-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The message box: a Latch card with soft corners and a hairline edge. */
+:root[data-skin="latch"] [data-slot="composer"] {
+  border: 0.5px solid var(--border);
+  border-radius: 1rem;
+  background: var(--card);
+}
+
+/* A Bot on the home screen: a Latch row on its own small card. */
+:root[data-skin="latch"] [data-slot="agent-row"] {
+  height: auto;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 0.5px solid var(--latch-card-border);
+  border-radius: 1rem;
+  background: var(--card);
+}
+
+:root[data-skin="latch"] [data-slot="agent-row"]:hover {
+  border-color: var(--latch-accent);
+}
+
+:root[data-skin="latch"]
+  [data-slot="agent-row"]
+  > div:last-child
+  > span:first-child {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+:root[data-skin="latch"]
+  [data-slot="agent-row"]
+  > div:last-child
+  > span:last-child {
+  font-size: 0.6875rem;
+}
+
+/* The sidebar's search box is a round pill on the raised grey, as Latch's search is. */
+:root[data-skin="latch"] [data-slot="sidebar"] [data-slot="input-group"] {
+  border-color: transparent;
+  border-radius: 9999px;
+  background: var(--latch-raised);
+}
+
+/* Sidebar rows: 14px names, icons in the accent, the open page tinted with the accent. */
+:root[data-skin="latch"]
+  [data-slot="sidebar-footer"]
+  [data-slot="sidebar-menu-button"]
+  svg {
+  color: var(--latch-accent);
+}
+
+:root[data-skin="latch"]
+  [data-slot="sidebar-menu-button"][data-status="active"],
+:root[data-skin="latch"]
+  [data-slot="sidebar-menu-button"][aria-current="page"] {
+  background: var(--sidebar-accent);
+}

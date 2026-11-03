@@ -49,7 +49,10 @@ function RouteComponent() {
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
         <div className="flex flex-col items-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-center">
+          <h1
+            className="text-2xl font-semibold tracking-tight text-center"
+            data-slot="home-greeting"
+          >
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
@@ -135,7 +138,12 @@ function RouteComponent() {
         <div className="mt-10 w-full max-w-2xl">
           {loading ? (
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <h2
+                className="font-semibold text-base"
+                data-slot="home-section-title"
+              >
+                Explore Bots
+              </h2>
               <Skeleton className="mt-4 h-[140px]" />
             </>
           ) : explore?.length ? (
@@ -147,6 +155,7 @@ function RouteComponent() {
                 <h2
                   id="explore-agents-heading"
                   className="font-semibold text-base"
+                  data-slot="home-section-title"
                 >
                   Explore Bots
                 </h2>
@@ -179,7 +188,12 @@ function RouteComponent() {
             // card there would say the opposite of what a populated composer beside it (still
             // working off that same, successfully loaded `agents`) proves.
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <h2
+                className="font-semibold text-base"
+                data-slot="home-section-title"
+              >
+                Explore Bots
+              </h2>
               <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
@@ -193,7 +207,12 @@ function RouteComponent() {
             // when it failed but `agents` is defined — a loaded, empty slice either way. Same
             // plain copy for both: an empty roster is a fact, not an error.
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
+              <h2
+                className="font-semibold text-base"
+                data-slot="home-section-title"
+              >
+                Explore Bots
+              </h2>
               <Empty className="mt-4 h-[140px] border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
