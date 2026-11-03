@@ -616,6 +616,29 @@ const failureResult = (text: string): McpCallResult => ({
 });
 
 /**
+ * ARCADE REFUSING THIS ACCOUNT THE ACTION, WHICH IS EITHER COMPOSIO'S LOST ACCOUNT OR ONE PERMISSION
+ * SHORT, AND ARCADE'S ANSWER DOES NOT SAY WHICH.
+ *
+ * A call reaches Arcade only once this deployment holds a connection row for the account (see
+ * `grantIsLocal` in `./arcade-adapter`). Arcade asking for an authorization then means one of two
+ * things: the grant is gone there (withdrawn at the provider, ended in Arcade's dashboard), or the
+ * account holds the app's other actions and not this one, because only those were approved one at a
+ * time. Both are put right the same way, by Connect, which asks for everything the app needs, so the
+ * store refuses both with the app card that offers Reconnect. But only the first ends the row: the
+ * second still runs every action that was approved, and ending its row would refuse them all. So
+ * `actionNotAllowed` hands the store the question rather than an answer, and the store asks the
+ * broker whether the account still holds anything for the app before it ends anything.
+ *
+ * It used to be a plain failure telling the model to authorize the action in Connections, which
+ * left the person with no button where they were. The sentence here reaches the trail only; what
+ * the person reads is the card's.
+ */
+const notAllowedResult = (toolName: string): McpCallResult => ({
+  ...failureResult(`Arcade does not allow ${toolName} on this account.`),
+  actionNotAllowed: true,
+});
+
+/**
  * Call one Arcade action as the connection's actor.
  *
  * THE ACTION IN THE REFUSAL COMES FROM THE CALL SITE, never from the error: `APIError` in
@@ -623,8 +646,9 @@ const failureResult = (text: string): McpCallResult => ({
  *
  * NO URL IS EVER IN THE SENTENCE, ON ANY PATH. The `authorization.url` is a bearer capability:
  * whoever opens it attaches an account to the identity the flow was minted for. It is never
- * returned to a model, logged, put in an error body or written to an audit row. The refusal names
- * the Settings page, where the link is minted by an authenticated request whose actor is known.
+ * returned to a model, logged, put in an error body or written to an audit row. An authorization
+ * Arcade asks for is answered with the Reconnect card ({@link notAllowedResult}), whose Connect mints
+ * a fresh link by an authenticated request whose actor is known.
  *
  * THE SUCCESS PATH IS COVERED BY THAT SAME PROMISE, and this is where it is easiest to break. A 200
  * is not a safe envelope: `ExecuteToolResponse.output.authorization` is the SAME
@@ -659,11 +683,7 @@ export async function callTool(
       input: args,
       user_id: connection.actorId,
     });
-    if (answer.output?.authorization) {
-      return failureResult(
-        `${toolName} has not been authorized on this account yet. Authorize it in Connections and ask again.`,
-      );
-    }
+    if (answer.output?.authorization) return notAllowedResult(toolName);
     if (answer.success === false || answer.output?.error) {
       return failureResult(`Arcade could not run ${toolName}.`);
     }
@@ -684,9 +704,7 @@ export async function callTool(
   } catch (thrown) {
     const failure = arcadeFailure(thrown);
     if (failure && isAuthorizationRequired(failure)) {
-      return failureResult(
-        `${toolName} has not been authorized on this account yet. Authorize it in Connections and ask again.`,
-      );
+      return notAllowedResult(toolName);
     }
     return failureResult(`Arcade could not run ${toolName}.`);
   }

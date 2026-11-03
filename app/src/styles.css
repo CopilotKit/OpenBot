@@ -13,6 +13,8 @@
  * of the spacing that makes it readable. The path is relative to this file.
  */
 @source "../node_modules/streamdown/dist/*.js";
+/* Its code plugin, which Streamdown's docs say to scan the same way. */
+@source "../node_modules/@streamdown/code/dist/*.js";
 
 /*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
@@ -179,6 +181,15 @@
   from {
     opacity: 0;
   }
+}
+
+/*
+ * A component a Bot draws keeps its reading width (max-w-2xl) wherever it is previewed, but in a
+ * conversation it fills the answer column, which is wider than the composer, so a chart or table
+ * lines up with the code and tool cards around it. Unlayered, so it outranks the utility.
+ */
+[data-transcript-column] [data-slot="gallery-frame"] {
+  max-width: none;
 }
 
 /*

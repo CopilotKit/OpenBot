@@ -52,6 +52,9 @@
     // `@ts-expect-error`s state that promise — a stub missing `grantIsLocal`, one missing
     // `authorizations`, and one whose `revokeAccount` answers the wrong type must each fail to
     // compile. Checked by `tsc` or by nothing at all.
-    "tests/stub-broker.test.ts"
+    "tests/stub-broker.test.ts",
+    "tests/product-telemetry.test.ts",
+    "tests/product-telemetry-routes.test.ts",
+    "tests/product-telemetry-boundaries.test.ts"
   ]
 }

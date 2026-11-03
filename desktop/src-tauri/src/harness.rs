@@ -509,7 +509,7 @@ mod tests {
             Some(&choice("crewai")),
             || async {
                 write_crewai_manifest(&root);
-                crate::deployment::record(&root, "v9.9.9")
+                crate::deployment::record(&root, "v9.9.9", false)
                     .map_err(|error| format!("could not record deployment: {error}"))
             },
         ));

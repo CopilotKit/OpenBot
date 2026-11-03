@@ -5,6 +5,7 @@ import {
 import { RESEARCH_TOOLS, type ResearchRole } from "@openbot/shared/research";
 import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { SEARCH_TOOLS, systemOf } from "../agents/tool-search";
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
 import { markUntrusted } from "../untrusted-content";
@@ -103,6 +104,15 @@ export function grantedToolGuidance(
    * connector existed, the Bot simply was not on it, and nothing said so.
    */
   connectedButNotHeld: readonly string[] = [],
+  /**
+   * Tools this run holds and is not shown until a search finds them. See `agents/tool-search.ts`.
+   *
+   * Counted per system rather than named, which is the point of holding them back: naming 239 Shopify
+   * tools here would put back in the prompt what search took out of the tool list. Their system is
+   * still listed as one this Bot reaches, so it is never told it holds nothing for an app it holds
+   * hundreds of tools for.
+   */
+  waiting: ReadonlySet<string> = new Set(),
 ): string {
   /*
    * THE CARD TOOL IS NOT A SYSTEM. It is offered to every Bot so a missing app can be put in front of
@@ -116,12 +126,16 @@ export function grantedToolGuidance(
     return "";
 
   const bySystem = new Map<string, string[]>();
+  const waitingBySystem = new Map<string, number>();
   for (const tool of reaching) {
     // `mcp__server__tool`, which is the shape the model is offered.
+    const system = systemOf(tool.name);
     const parts = tool.name.replace(/^mcp__/, "").split("__");
-    const system = parts.length > 1 ? (parts[0] as string) : "this deployment";
     const rest = parts.length > 1 ? parts.slice(1).join("__") : tool.name;
-    bySystem.set(system, [...(bySystem.get(system) ?? []), rest]);
+    if (!bySystem.has(system)) bySystem.set(system, []);
+    if (waiting.has(tool.name))
+      waitingBySystem.set(system, (waitingBySystem.get(system) ?? 0) + 1);
+    else bySystem.get(system)?.push(rest);
   }
 
   const held = [...bySystem.keys()];
@@ -137,9 +151,20 @@ export function grantedToolGuidance(
           "You can reach these systems directly, as the person asking, with their own access:",
         ]
       : []),
-    ...[...bySystem.entries()].map(
-      ([system, names]) => `- ${system}: ${names.join(", ")}`,
-    ),
+    ...[...bySystem.entries()].map(([system, names]) => {
+      const more = waitingBySystem.get(system) ?? 0;
+      if (more === 0) return `- ${system}: ${names.join(", ")}`;
+      const found = `${more} ${names.length > 0 ? "more " : ""}tools you find with ${SEARCH_TOOLS}`;
+      return `- ${system}: ${[...names, found].join(", ")}`;
+    }),
+    ...(waiting.size > 0
+      ? [
+          `Some of these systems have more tools than fit in front of you at once. Find them with ${SEARCH_TOOLS}:`,
+          "describe what you need in a few words, and the tools it returns can be called from your next step.",
+          `Search before deciding a system cannot do something. Only when ${SEARCH_TOOLS} finds nothing that fits is a`,
+          "tool missing.",
+        ]
+      : []),
     ...(reaching.length > 0
       ? [
           "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
@@ -301,6 +326,7 @@ export async function grantedTools(options: {
   return granted.tools.map((tool) => ({
     name: tool.toolName,
     ref: tool.ref,
+    searchable: true as const,
     initiator,
     description: tool.description,
     parameters: parametersFor(tool.inputSchema),

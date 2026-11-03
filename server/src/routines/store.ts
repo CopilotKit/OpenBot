@@ -151,6 +151,7 @@ export type RoutineInput = {
  * told whose they were would be a runner that could be told the wrong answer.
  */
 export type RoutineRunContext = {
+  source?: "schedule" | "run_now" | "trigger";
   routineId: string;
   ownerUserId: string;
   agentId: string;
@@ -838,6 +839,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       const [row] = await database
         .select({
           routineId: routines.id,
+          source: routineRuns.source,
           ownerUserId: routines.ownerUserId,
           agentId: routines.agentId,
           channelId: routines.channelId,

@@ -185,11 +185,15 @@ export type ApprovalPolicyStore = {
   /**
    * Close this person's pending requests that `match` selects without executing them: the waiting
    * conversation is resumed with `reason` as the result, and each is audited.
+   *
+   * `resume: false` closes them and carries nothing on, for a run that has already ended and been
+   * answered another way: a subagent's, which handed its action back to the Bot that started it.
    */
   withdrawPending(
     ownerUserId: string,
     reason: string,
     match: (action: ApprovalAction) => boolean,
+    options?: { resume?: boolean },
   ): Promise<string[]>;
   /** One audit row per settled action, so every verdict can be read back. */
   recordDecision(input: {

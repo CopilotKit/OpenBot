@@ -53,7 +53,12 @@ export function ToolLine({
       }`}
     >
       {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
-      <span className="shrink-0">
+      {/*
+       * Free to shrink, so a long label (a folded run's "Read 1 file, searched for 2 patterns and
+       * listed 1 directory") wraps in a phone-width column instead of running past it. The detail
+       * shrinks a hundred times faster, so it is truncated away before the label wraps.
+       */}
+      <span className="min-w-0">
         {refused
           ? `Blocked: ${label}`
           : failed
@@ -62,7 +67,11 @@ export function ToolLine({
               ? `${label}, not done yet`
               : label}
       </span>
-      {detail ? <span className="truncate opacity-70">{detail}</span> : null}
+      {detail ? (
+        <span className="min-w-0 shrink-[100] truncate opacity-70">
+          {detail}
+        </span>
+      ) : null}
     </span>
   );
 
