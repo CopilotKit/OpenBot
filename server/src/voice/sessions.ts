@@ -175,6 +175,9 @@ export function createVoiceSessionStore(
               (Date.parse(input.endedAt) - Date.parse(input.startedAt)) / 1000,
             ),
             transcript: input.transcript,
+            // A session is saved before it is summarised: the summary arrives with `summarize`.
+            summary: null,
+            summaryStatus: "failed",
           },
           writeKey("voice.save"),
         ));

@@ -38,6 +38,7 @@ export type ConversationChangeKind =
   | "activity"
   | "summary"
   | "member"
+  | "pin"
   | "deleted"
   | "restored"
   | "purged";
@@ -46,7 +47,7 @@ export type ConversationChange = {
   conversationId: string;
   version: number;
   change: ConversationChangeKind;
-  /** The member a `member` change was about. */
+  /** The member a `member` (added or removed) or `pin` change was about. */
   userId: string | null;
 };
 
@@ -56,6 +57,7 @@ const CHANGE_KINDS = new Set<string>([
   "activity",
   "summary",
   "member",
+  "pin",
   "deleted",
   "restored",
   "purged",

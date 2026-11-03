@@ -155,7 +155,10 @@ import {
   createConversationDirectory,
   installConversationDirectory,
 } from "./conversations/directory";
-import { writeKey } from "./conversations/http";
+import {
+  forgetPurgedBot,
+  sweepPurgedBotReferences,
+} from "./conversations/bot-purge";
 import { copyLocalConversationsToIntelligence } from "./conversations/upgrade";
 import {
   chooseOpenAIApi,
@@ -487,40 +490,19 @@ await copyLocalConversationsToIntelligence(
 await copyLocalDeliveryToIntelligence(database, deliveryDirectory);
 // A Bot deleted for good is forgotten in the conversations and bindings that named it, as the old
 // foreign keys removed its `channel_agents`, `bot_tasks` and `delivery_bindings` rows.
-botDirectory.onPurged(async (botId) => {
-  await conversationDirectory.client.purgeAgent(
-    botId,
-    writeKey("conversations.purge-agent"),
-  );
-  await deliveryDirectory.purgeAgent(botId);
-});
+botDirectory.onPurged((botId) =>
+  forgetPurgedBot(conversationDirectory, deliveryDirectory, botId),
+);
 // And any purged while no instance was running to hear it.
-{
-  const known = new Set(
+await sweepPurgedBotReferences(
+  conversationDirectory,
+  deliveryDirectory,
+  new Set(
     (await botDirectory.registry.all({ includeDeleted: true })).bots.map(
       (bot) => bot.id,
     ),
-  );
-  const named = new Set([
-    ...(await conversationDirectory.client.agentReferences()),
-    ...deliveryDirectory.bindings().map((binding) => binding.agentId),
-  ]);
-  for (const botId of named) {
-    if (known.has(botId)) continue;
-    await conversationDirectory.client.purgeAgent(
-      botId,
-      writeKey("conversations.purge-agent"),
-    );
-    await deliveryDirectory.purgeAgent(botId);
-    console.warn(
-      JSON.stringify({
-        type: "conversation-bot-references-swept",
-        botId,
-        note: "Conversations and bindings named a Bot Intelligence no longer has; it was removed from them as the old cascade would have.",
-      }),
-    );
-  }
-}
+  ),
+);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);

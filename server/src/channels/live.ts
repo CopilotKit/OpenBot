@@ -20,11 +20,28 @@ export function deliverConversationChanges(
   directory: ConversationDirectory,
   hub: ChannelEventHub,
 ): () => void {
+  /*
+   * The newest version of each conversation already told, per kind of event. Announcements say which
+   * version changed and the read returns the newest, so two changes close together can both read the
+   * second: the second announcement then has nothing new to say and says nothing.
+   */
+  const told = new Map<string, number>();
+  const firstTime = (kind: string, id: string, version: number) => {
+    const key = `${kind}:${id}`;
+    if ((told.get(key) ?? 0) >= version) return false;
+    told.delete(key);
+    told.set(key, version);
+    if (told.size > 20_000) {
+      const oldest = told.keys().next().value;
+      if (oldest !== undefined) told.delete(oldest);
+    }
+    return true;
+  };
   const deliver = async (change: ConversationChange) => {
     if (
       change.change !== "activity" &&
       change.change !== "summary" &&
-      change.change !== "member" &&
+      change.change !== "pin" &&
       change.change !== "deleted"
     )
       return;
@@ -34,6 +51,9 @@ export function deliverConversationChanges(
     if (!conversation) return;
     const memberIds = conversation.members.map((member) => member.userId);
     if (!memberIds.some((userId) => hub.connectionCount(userId) > 0)) return;
+    const kind =
+      change.change === "pin" ? `pin:${change.userId}` : change.change;
+    if (!firstTime(kind, conversation.id, conversation.version)) return;
     const quiet = {
       channelId: conversation.id,
       lastMessage: null,
@@ -56,7 +76,7 @@ export function deliverConversationChanges(
           return;
         hub.deliver({ ...quiet, memberIds, summary: conversation.summary });
         return;
-      case "member": {
+      case "pin": {
         // A pin is one member's: it goes to that member's own tabs and nobody else's.
         const member = conversation.members.find(
           (candidate) => candidate.userId === change.userId,

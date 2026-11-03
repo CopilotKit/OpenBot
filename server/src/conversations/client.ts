@@ -183,8 +183,15 @@ function taskFromWire(wire: WireTask): AgentTask {
   };
 }
 
-const iso = (value: Date | null | undefined) =>
-  value === undefined ? undefined : value === null ? null : value.toISOString();
+/** A timestamp as sent: a `Date` to the millisecond, or a string as given (to the microsecond). */
+const iso = (value: Date | string | null | undefined) =>
+  value === undefined
+    ? undefined
+    : value === null
+      ? null
+      : typeof value === "string"
+        ? value
+        : value.toISOString();
 
 /** Drop the keys whose value is undefined, so a strict body never sees them. */
 function defined<T extends Record<string, unknown>>(value: T): Partial<T> {

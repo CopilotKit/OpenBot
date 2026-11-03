@@ -100,8 +100,8 @@ export type ConversationDraft = {
     threadId: string;
     createdAt?: Date;
   }[];
-  /** For copying an existing record only. */
-  createdAt?: Date;
+  /** For copying an existing record only. A string is sent as given, to the microsecond. */
+  createdAt?: Date | string;
   deletedAt?: Date | null;
   summary?: string | null;
   summaryAt?: Date | null;
