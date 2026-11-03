@@ -52,6 +52,11 @@ import {
   sweepPurgedBotRows,
 } from "./agents/bot-registry/local-rows";
 import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
+import { createScheduleClient } from "./schedules/client";
+import {
+  createScheduleDirectory,
+  installScheduleDirectory,
+} from "./schedules/directory";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -447,6 +452,22 @@ await sweepPurgedBotRows(
   database,
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
 );
+/*
+ * Routines, check-ins and responsibilities, from Intelligence's agent schedules, held in memory on
+ * this instance and kept fresh by its change announcements (schedules/directory.ts). The sweeps that
+ * fire them read this, never Intelligence directly. Fatal when Intelligence cannot answer, like the
+ * Bots: a server with no routines would quietly stop firing everybody's.
+ */
+const scheduleDirectory = installScheduleDirectory(
+  createScheduleDirectory({
+    client: createScheduleClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await scheduleDirectory.start();
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
