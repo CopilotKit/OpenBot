@@ -42,6 +42,7 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
@@ -477,15 +478,11 @@ function ManageLink({
   appKey: string;
   title: string;
 }) {
+  const paths = useManagePaths();
   return (
     <Button
       aria-label={`Manage ${title} on this Bot`}
-      render={
-        <Link
-          params={{ agentId, key: appKey }}
-          to="/admin/plugins/$key/bots/$agentId"
-        />
-      }
+      render={<Link {...paths.pluginBot(appKey, agentId)} />}
       size="icon-sm"
       variant="ghost"
     >

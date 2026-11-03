@@ -12,6 +12,7 @@ import {
 } from "@/lib/app-access/mutations";
 import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { queryClient } from "@/query-client";
 
 /**
@@ -154,6 +155,7 @@ function AdminAction({
   agentId: string;
   access: AppAccess;
 }) {
+  const paths = useManagePaths();
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const approve = useMutation(approveBotAppMutationOptions(queryClient));
   const name = access.displayName;
@@ -214,14 +216,7 @@ function AdminAction({
         : ["Reconnect the team account", `Reconnect the team ${name} account`];
   return (
     <Button
-      render={
-        <Link
-          params={{ key: page }}
-          rel="noreferrer"
-          target="_blank"
-          to="/admin/plugins/$key"
-        />
-      }
+      render={<Link {...paths.plugin(page)} rel="noreferrer" target="_blank" />}
       aria-label={spoken}
       size="sm"
     >

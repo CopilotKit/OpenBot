@@ -40,6 +40,7 @@ import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminProactiveRouteImport } from './routes/_authed/admin/proactive'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
+import { Route as AuthedSettingsPersonalRouteImport } from './routes/_authed/settings/_personal'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
 import { Route as AuthedSettingsBrowsersRouteImport } from './routes/_authed/settings/browsers'
 import { Route as AuthedSettingsLearningRouteImport } from './routes/_authed/settings/learning'
@@ -68,6 +69,10 @@ import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/ad
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
+import { Route as AuthedSettingsPersonalActivityRouteImport } from './routes/_authed/settings/_personal/activity'
+import { Route as AuthedSettingsPersonalComputerRouteImport } from './routes/_authed/settings/_personal/computer'
+import { Route as AuthedSettingsPersonalCredentialsRouteImport } from './routes/_authed/settings/_personal/credentials'
+import { Route as AuthedSettingsPersonalSkillsRouteImport } from './routes/_authed/settings/_personal/skills'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
@@ -82,8 +87,15 @@ import { Route as AuthedAppBotsAgentIdResponsibilitiesRouteImport } from './rout
 import { Route as AuthedAppBotsAgentIdRoutinesRouteImport } from './routes/_authed/_app/bots.$agentId.routines'
 import { Route as AuthedAppBotsAgentIdSetupRouteImport } from './routes/_authed/_app/bots.$agentId.setup'
 import { Route as AuthedAppBotsAgentIdSharingRouteImport } from './routes/_authed/_app/bots.$agentId.sharing'
+import { Route as AuthedSettingsPersonalCredentialsNewRouteImport } from './routes/_authed/settings/_personal/credentials_.new'
+import { Route as AuthedSettingsPersonalPluginsIndexRouteImport } from './routes/_authed/settings/_personal/plugins/index'
+import { Route as AuthedSettingsPersonalPluginsKeyRouteImport } from './routes/_authed/settings/_personal/plugins/$key'
+import { Route as AuthedSettingsPersonalPluginsArcadeRouteImport } from './routes/_authed/settings/_personal/plugins/arcade'
+import { Route as AuthedSettingsPersonalPluginsComposioRouteImport } from './routes/_authed/settings/_personal/plugins/composio'
 import { Route as AuthedAdminPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/admin/plugins/$key_.bots.$agentId'
 import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
+import { Route as AuthedSettingsPersonalPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/settings/_personal/plugins/$key_.bots.$agentId'
+import { Route as AuthedSettingsPersonalPluginsKeyToolsToolRouteImport } from './routes/_authed/settings/_personal/plugins/$key_.tools.$tool'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -240,6 +252,10 @@ const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
+const AuthedSettingsPersonalRoute = AuthedSettingsPersonalRouteImport.update({
+  id: '/_personal',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
 const AuthedSettingsApprovalsRoute = AuthedSettingsApprovalsRouteImport.update({
   id: '/approvals',
   path: '/approvals',
@@ -393,6 +409,30 @@ const AuthedAdminPluginsComposioRoute =
     path: '/plugins/composio',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedSettingsPersonalActivityRoute =
+  AuthedSettingsPersonalActivityRouteImport.update({
+    id: '/activity',
+    path: '/activity',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalComputerRoute =
+  AuthedSettingsPersonalComputerRouteImport.update({
+    id: '/computer',
+    path: '/computer',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalCredentialsRoute =
+  AuthedSettingsPersonalCredentialsRouteImport.update({
+    id: '/credentials',
+    path: '/credentials',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalSkillsRoute =
+  AuthedSettingsPersonalSkillsRouteImport.update({
+    id: '/skills',
+    path: '/skills',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
 const AuthedSettingsComponentsGalleryIndexRoute =
   AuthedSettingsComponentsGalleryIndexRouteImport.update({
     id: '/components-gallery/',
@@ -477,6 +517,36 @@ const AuthedAppBotsAgentIdSharingRoute =
     path: '/bots/$agentId/sharing',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedSettingsPersonalCredentialsNewRoute =
+  AuthedSettingsPersonalCredentialsNewRouteImport.update({
+    id: '/credentials_/new',
+    path: '/credentials/new',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalPluginsIndexRoute =
+  AuthedSettingsPersonalPluginsIndexRouteImport.update({
+    id: '/plugins/',
+    path: '/plugins/',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalPluginsKeyRoute =
+  AuthedSettingsPersonalPluginsKeyRouteImport.update({
+    id: '/plugins/$key',
+    path: '/plugins/$key',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalPluginsArcadeRoute =
+  AuthedSettingsPersonalPluginsArcadeRouteImport.update({
+    id: '/plugins/arcade',
+    path: '/plugins/arcade',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalPluginsComposioRoute =
+  AuthedSettingsPersonalPluginsComposioRouteImport.update({
+    id: '/plugins/composio',
+    path: '/plugins/composio',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
 const AuthedAdminPluginsKeyBotsAgentIdRoute =
   AuthedAdminPluginsKeyBotsAgentIdRouteImport.update({
     id: '/plugins/$key_/bots/$agentId',
@@ -488,6 +558,18 @@ const AuthedAdminPluginsKeyToolsToolRoute =
     id: '/plugins/$key_/tools/$tool',
     path: '/plugins/$key/tools/$tool',
     getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
+const AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute =
+  AuthedSettingsPersonalPluginsKeyBotsAgentIdRouteImport.update({
+    id: '/plugins/$key_/bots/$agentId',
+    path: '/plugins/$key/bots/$agentId',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalPluginsKeyToolsToolRoute =
+  AuthedSettingsPersonalPluginsKeyToolsToolRouteImport.update({
+    id: '/plugins/$key_/tools/$tool',
+    path: '/plugins/$key/tools/$tool',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -542,6 +624,10 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
+  '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
+  '/settings/credentials': typeof AuthedSettingsPersonalCredentialsRoute
+  '/settings/skills': typeof AuthedSettingsPersonalSkillsRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/agents/': typeof AuthedAppAgentsIndexRoute
@@ -561,9 +647,16 @@ export interface FileRoutesByFullPath {
   '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/settings/credentials/new': typeof AuthedSettingsPersonalCredentialsNewRoute
+  '/settings/plugins/$key': typeof AuthedSettingsPersonalPluginsKeyRoute
+  '/settings/plugins/arcade': typeof AuthedSettingsPersonalPluginsArcadeRoute
+  '/settings/plugins/composio': typeof AuthedSettingsPersonalPluginsComposioRoute
   '/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
+  '/settings/plugins/': typeof AuthedSettingsPersonalPluginsIndexRoute
   '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
+  '/settings/plugins/$key/bots/$agentId': typeof AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute
+  '/settings/plugins/$key/tools/$tool': typeof AuthedSettingsPersonalPluginsKeyToolsToolRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
@@ -590,6 +683,7 @@ export interface FileRoutesByTo {
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/settings': typeof AuthedSettingsIndexRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
   '/settings/learning': typeof AuthedSettingsLearningRoute
@@ -598,7 +692,6 @@ export interface FileRoutesByTo {
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/admin': typeof AuthedAdminIndexRoute
-  '/settings': typeof AuthedSettingsIndexRoute
   '/capabilities/memory': typeof AuthedAppCapabilitiesMemoryRoute
   '/capabilities/skills': typeof AuthedAppCapabilitiesSkillsRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -614,6 +707,10 @@ export interface FileRoutesByTo {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
+  '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
+  '/settings/credentials': typeof AuthedSettingsPersonalCredentialsRoute
+  '/settings/skills': typeof AuthedSettingsPersonalSkillsRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/agents': typeof AuthedAppAgentsIndexRoute
@@ -633,9 +730,16 @@ export interface FileRoutesByTo {
   '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/settings/credentials/new': typeof AuthedSettingsPersonalCredentialsNewRoute
+  '/settings/plugins/$key': typeof AuthedSettingsPersonalPluginsKeyRoute
+  '/settings/plugins/arcade': typeof AuthedSettingsPersonalPluginsArcadeRoute
+  '/settings/plugins/composio': typeof AuthedSettingsPersonalPluginsComposioRoute
   '/bots/$agentId': typeof AuthedAppBotsAgentIdIndexRoute
+  '/settings/plugins': typeof AuthedSettingsPersonalPluginsIndexRoute
   '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
+  '/settings/plugins/$key/bots/$agentId': typeof AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute
+  '/settings/plugins/$key/tools/$tool': typeof AuthedSettingsPersonalPluginsKeyToolsToolRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -667,6 +771,7 @@ export interface FileRoutesById {
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/proactive': typeof AuthedAdminProactiveRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
+  '/_authed/settings/_personal': typeof AuthedSettingsPersonalRouteWithChildren
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/_authed/settings/browsers': typeof AuthedSettingsBrowsersRoute
   '/_authed/settings/learning': typeof AuthedSettingsLearningRoute
@@ -692,6 +797,10 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/_authed/settings/_personal/activity': typeof AuthedSettingsPersonalActivityRoute
+  '/_authed/settings/_personal/computer': typeof AuthedSettingsPersonalComputerRoute
+  '/_authed/settings/_personal/credentials': typeof AuthedSettingsPersonalCredentialsRoute
+  '/_authed/settings/_personal/skills': typeof AuthedSettingsPersonalSkillsRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/_authed/_app/agents/': typeof AuthedAppAgentsIndexRoute
@@ -711,9 +820,16 @@ export interface FileRoutesById {
   '/_authed/_app/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/_authed/_app/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/_authed/_app/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/_authed/settings/_personal/credentials_/new': typeof AuthedSettingsPersonalCredentialsNewRoute
+  '/_authed/settings/_personal/plugins/$key': typeof AuthedSettingsPersonalPluginsKeyRoute
+  '/_authed/settings/_personal/plugins/arcade': typeof AuthedSettingsPersonalPluginsArcadeRoute
+  '/_authed/settings/_personal/plugins/composio': typeof AuthedSettingsPersonalPluginsComposioRoute
   '/_authed/_app/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
+  '/_authed/settings/_personal/plugins/': typeof AuthedSettingsPersonalPluginsIndexRoute
   '/_authed/admin/plugins/$key_/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/_authed/admin/plugins/$key_/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
+  '/_authed/settings/_personal/plugins/$key_/bots/$agentId': typeof AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute
+  '/_authed/settings/_personal/plugins/$key_/tools/$tool': typeof AuthedSettingsPersonalPluginsKeyToolsToolRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -769,6 +885,10 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/settings/activity'
+    | '/settings/computer'
+    | '/settings/credentials'
+    | '/settings/skills'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/agents/'
@@ -788,9 +908,16 @@ export interface FileRouteTypes {
     | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/sharing'
+    | '/settings/credentials/new'
+    | '/settings/plugins/$key'
+    | '/settings/plugins/arcade'
+    | '/settings/plugins/composio'
     | '/bots/$agentId/'
+    | '/settings/plugins/'
     | '/admin/plugins/$key/bots/$agentId'
     | '/admin/plugins/$key/tools/$tool'
+    | '/settings/plugins/$key/bots/$agentId'
+    | '/settings/plugins/$key/tools/$tool'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -817,6 +944,7 @@ export interface FileRouteTypes {
     | '/admin/playground'
     | '/admin/proactive'
     | '/admin/skills'
+    | '/settings'
     | '/settings/approvals'
     | '/settings/browsers'
     | '/settings/learning'
@@ -825,7 +953,6 @@ export interface FileRouteTypes {
     | '/settings/passwords'
     | '/sign-in/$requestId'
     | '/admin'
-    | '/settings'
     | '/capabilities/memory'
     | '/capabilities/skills'
     | '/channel/$channelId'
@@ -841,6 +968,10 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/settings/activity'
+    | '/settings/computer'
+    | '/settings/credentials'
+    | '/settings/skills'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/agents'
@@ -860,9 +991,16 @@ export interface FileRouteTypes {
     | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/sharing'
+    | '/settings/credentials/new'
+    | '/settings/plugins/$key'
+    | '/settings/plugins/arcade'
+    | '/settings/plugins/composio'
     | '/bots/$agentId'
+    | '/settings/plugins'
     | '/admin/plugins/$key/bots/$agentId'
     | '/admin/plugins/$key/tools/$tool'
+    | '/settings/plugins/$key/bots/$agentId'
+    | '/settings/plugins/$key/tools/$tool'
   id:
     | '__root__'
     | '/_authed'
@@ -893,6 +1031,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/playground'
     | '/_authed/admin/proactive'
     | '/_authed/admin/skills'
+    | '/_authed/settings/_personal'
     | '/_authed/settings/approvals'
     | '/_authed/settings/browsers'
     | '/_authed/settings/learning'
@@ -918,6 +1057,10 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
+    | '/_authed/settings/_personal/activity'
+    | '/_authed/settings/_personal/computer'
+    | '/_authed/settings/_personal/credentials'
+    | '/_authed/settings/_personal/skills'
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
     | '/_authed/_app/agents/'
@@ -937,9 +1080,16 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/$agentId/routines'
     | '/_authed/_app/bots/$agentId/setup'
     | '/_authed/_app/bots/$agentId/sharing'
+    | '/_authed/settings/_personal/credentials_/new'
+    | '/_authed/settings/_personal/plugins/$key'
+    | '/_authed/settings/_personal/plugins/arcade'
+    | '/_authed/settings/_personal/plugins/composio'
     | '/_authed/_app/bots/$agentId/'
+    | '/_authed/settings/_personal/plugins/'
     | '/_authed/admin/plugins/$key_/bots/$agentId'
     | '/_authed/admin/plugins/$key_/tools/$tool'
+    | '/_authed/settings/_personal/plugins/$key_/bots/$agentId'
+    | '/_authed/settings/_personal/plugins/$key_/tools/$tool'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1166,6 +1316,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsIndexRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/_personal': {
+      id: '/_authed/settings/_personal'
+      path: ''
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthedSettingsPersonalRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/settings/approvals': {
       id: '/_authed/settings/approvals'
       path: '/approvals'
@@ -1362,6 +1519,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsComposioRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/settings/_personal/activity': {
+      id: '/_authed/settings/_personal/activity'
+      path: '/activity'
+      fullPath: '/settings/activity'
+      preLoaderRoute: typeof AuthedSettingsPersonalActivityRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/computer': {
+      id: '/_authed/settings/_personal/computer'
+      path: '/computer'
+      fullPath: '/settings/computer'
+      preLoaderRoute: typeof AuthedSettingsPersonalComputerRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/credentials': {
+      id: '/_authed/settings/_personal/credentials'
+      path: '/credentials'
+      fullPath: '/settings/credentials'
+      preLoaderRoute: typeof AuthedSettingsPersonalCredentialsRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/skills': {
+      id: '/_authed/settings/_personal/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof AuthedSettingsPersonalSkillsRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
     '/_authed/settings/components-gallery/': {
       id: '/_authed/settings/components-gallery/'
       path: '/components-gallery'
@@ -1460,6 +1645,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppBotsAgentIdSharingRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/settings/_personal/credentials_/new': {
+      id: '/_authed/settings/_personal/credentials_/new'
+      path: '/credentials/new'
+      fullPath: '/settings/credentials/new'
+      preLoaderRoute: typeof AuthedSettingsPersonalCredentialsNewRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/plugins/': {
+      id: '/_authed/settings/_personal/plugins/'
+      path: '/plugins'
+      fullPath: '/settings/plugins/'
+      preLoaderRoute: typeof AuthedSettingsPersonalPluginsIndexRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/plugins/$key': {
+      id: '/_authed/settings/_personal/plugins/$key'
+      path: '/plugins/$key'
+      fullPath: '/settings/plugins/$key'
+      preLoaderRoute: typeof AuthedSettingsPersonalPluginsKeyRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/plugins/arcade': {
+      id: '/_authed/settings/_personal/plugins/arcade'
+      path: '/plugins/arcade'
+      fullPath: '/settings/plugins/arcade'
+      preLoaderRoute: typeof AuthedSettingsPersonalPluginsArcadeRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/plugins/composio': {
+      id: '/_authed/settings/_personal/plugins/composio'
+      path: '/plugins/composio'
+      fullPath: '/settings/plugins/composio'
+      preLoaderRoute: typeof AuthedSettingsPersonalPluginsComposioRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
     '/_authed/admin/plugins/$key_/bots/$agentId': {
       id: '/_authed/admin/plugins/$key_/bots/$agentId'
       path: '/plugins/$key/bots/$agentId'
@@ -1473,6 +1693,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/plugins/$key/tools/$tool'
       preLoaderRoute: typeof AuthedAdminPluginsKeyToolsToolRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/settings/_personal/plugins/$key_/bots/$agentId': {
+      id: '/_authed/settings/_personal/plugins/$key_/bots/$agentId'
+      path: '/plugins/$key/bots/$agentId'
+      fullPath: '/settings/plugins/$key/bots/$agentId'
+      preLoaderRoute: typeof AuthedSettingsPersonalPluginsKeyBotsAgentIdRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/plugins/$key_/tools/$tool': {
+      id: '/_authed/settings/_personal/plugins/$key_/tools/$tool'
+      path: '/plugins/$key/tools/$tool'
+      fullPath: '/settings/plugins/$key/tools/$tool'
+      preLoaderRoute: typeof AuthedSettingsPersonalPluginsKeyToolsToolRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
     }
   }
 }
@@ -1534,7 +1768,50 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
 const AuthedAdminRouteRouteWithChildren =
   AuthedAdminRouteRoute._addFileChildren(AuthedAdminRouteRouteChildren)
 
+interface AuthedSettingsPersonalRouteChildren {
+  AuthedSettingsPersonalActivityRoute: typeof AuthedSettingsPersonalActivityRoute
+  AuthedSettingsPersonalComputerRoute: typeof AuthedSettingsPersonalComputerRoute
+  AuthedSettingsPersonalCredentialsRoute: typeof AuthedSettingsPersonalCredentialsRoute
+  AuthedSettingsPersonalSkillsRoute: typeof AuthedSettingsPersonalSkillsRoute
+  AuthedSettingsPersonalCredentialsNewRoute: typeof AuthedSettingsPersonalCredentialsNewRoute
+  AuthedSettingsPersonalPluginsKeyRoute: typeof AuthedSettingsPersonalPluginsKeyRoute
+  AuthedSettingsPersonalPluginsArcadeRoute: typeof AuthedSettingsPersonalPluginsArcadeRoute
+  AuthedSettingsPersonalPluginsComposioRoute: typeof AuthedSettingsPersonalPluginsComposioRoute
+  AuthedSettingsPersonalPluginsIndexRoute: typeof AuthedSettingsPersonalPluginsIndexRoute
+  AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute: typeof AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute
+  AuthedSettingsPersonalPluginsKeyToolsToolRoute: typeof AuthedSettingsPersonalPluginsKeyToolsToolRoute
+}
+
+const AuthedSettingsPersonalRouteChildren: AuthedSettingsPersonalRouteChildren =
+  {
+    AuthedSettingsPersonalActivityRoute: AuthedSettingsPersonalActivityRoute,
+    AuthedSettingsPersonalComputerRoute: AuthedSettingsPersonalComputerRoute,
+    AuthedSettingsPersonalCredentialsRoute:
+      AuthedSettingsPersonalCredentialsRoute,
+    AuthedSettingsPersonalSkillsRoute: AuthedSettingsPersonalSkillsRoute,
+    AuthedSettingsPersonalCredentialsNewRoute:
+      AuthedSettingsPersonalCredentialsNewRoute,
+    AuthedSettingsPersonalPluginsKeyRoute:
+      AuthedSettingsPersonalPluginsKeyRoute,
+    AuthedSettingsPersonalPluginsArcadeRoute:
+      AuthedSettingsPersonalPluginsArcadeRoute,
+    AuthedSettingsPersonalPluginsComposioRoute:
+      AuthedSettingsPersonalPluginsComposioRoute,
+    AuthedSettingsPersonalPluginsIndexRoute:
+      AuthedSettingsPersonalPluginsIndexRoute,
+    AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute:
+      AuthedSettingsPersonalPluginsKeyBotsAgentIdRoute,
+    AuthedSettingsPersonalPluginsKeyToolsToolRoute:
+      AuthedSettingsPersonalPluginsKeyToolsToolRoute,
+  }
+
+const AuthedSettingsPersonalRouteWithChildren =
+  AuthedSettingsPersonalRoute._addFileChildren(
+    AuthedSettingsPersonalRouteChildren,
+  )
+
 interface AuthedSettingsRouteRouteChildren {
+  AuthedSettingsPersonalRoute: typeof AuthedSettingsPersonalRouteWithChildren
   AuthedSettingsApprovalsRoute: typeof AuthedSettingsApprovalsRoute
   AuthedSettingsBrowsersRoute: typeof AuthedSettingsBrowsersRoute
   AuthedSettingsLearningRoute: typeof AuthedSettingsLearningRoute
@@ -1549,6 +1826,7 @@ interface AuthedSettingsRouteRouteChildren {
 }
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
+  AuthedSettingsPersonalRoute: AuthedSettingsPersonalRouteWithChildren,
   AuthedSettingsApprovalsRoute: AuthedSettingsApprovalsRoute,
   AuthedSettingsBrowsersRoute: AuthedSettingsBrowsersRoute,
   AuthedSettingsLearningRoute: AuthedSettingsLearningRoute,
