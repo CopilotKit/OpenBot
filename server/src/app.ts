@@ -90,6 +90,7 @@ import {
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
+import { createEditionGate } from "./edition-routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { identityRoutes } from "./identity/routes";
@@ -570,6 +571,8 @@ export function createApp(
         enterpriseControls()?.snapshot()?.settings.ssoRequired === true,
     }),
   );
+  // Ahead of every route it closes, the auth handler's SSO and SCIM routes included.
+  app.use("/api/*", createEditionGate(config.edition));
   /*
    * Registering an identity provider is an administrator's decision, not a signed-in one.
    *
