@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import type { NarrationProblem } from "@/lib/browser/narration";
+import { appConfig } from "@/lib/generated/application-config";
 import type { NarrationChoice } from "./narration-choice";
 import type { NarrationControls } from "./use-narration";
 
@@ -44,11 +45,11 @@ export function narrationProblemSentence(
     case "unsupported":
       return `Narration isn't available in this browser, so what you say isn't recorded. ${GOES_ON}`;
     case "on-device":
-      return `This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. ${GOES_ON}`;
+      return `This browser can't turn speech into text on your computer, and ${appConfig.brand.productName} sends your voice nowhere else, so narration is off. ${GOES_ON}`;
     case "speech-pack":
       return `Your browser has to download its ${languageName(language)} speech recognition to your computer first. Turn narration on to download it. ${GOES_ON}`;
     case "not-allowed":
-      return `OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. ${GOES_ON}`;
+      return `${appConfig.brand.productName} can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. ${GOES_ON}`;
     case "no-microphone":
       return `No microphone was found, or another app is using it. ${GOES_ON}`;
     case "service":
@@ -297,7 +298,7 @@ export function NarrationRow({
     (listening
       ? "Listening. Say what you're doing as you go."
       : narration.on
-        ? "On. OpenBot hears your microphone while you record and turns your speech into text on your computer, so say what you're doing as you go."
+        ? `On. ${appConfig.brand.productName} hears your microphone while you record and turns your speech into text on your computer, so say what you're doing as you go.`
         : choice === null
           ? "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes."
           : "Off. What you say isn't recorded.");

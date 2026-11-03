@@ -45,6 +45,7 @@ import { Separator } from "@/components/ui/separator";
 import { countLabel } from "@/lib/agents/bot-summaries";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   assignTeamBotMutationOptions,
   publishTeamBotMutationOptions,
@@ -158,7 +159,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
             }
           >
             {agent.visibility === "public"
-              ? "It's public, so everyone on OpenBot can already use it."
+              ? `It's public, so everyone on ${appConfig.brand.productName} can already use it.`
               : agent.mine
                 ? "Only you can use it."
                 : null}

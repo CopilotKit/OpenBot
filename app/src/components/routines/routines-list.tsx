@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { appConfig } from "@/lib/generated/application-config";
 import { relativeTime } from "@/lib/relative-time";
 import {
   deleteRoutineMutationOptions,
@@ -262,8 +263,8 @@ export function RoutinesList({
             Routines aren't running.
           </span>{" "}
           {sweep?.lastSweptAt
-            ? `OpenBot last checked them ${relativeTime(sweep.lastSweptAt)}. None will run until it starts again. Ask an admin if this keeps happening.`
-            : "OpenBot hasn't started running routines yet, so none of these will run. Ask an admin to set this up."}
+            ? `${appConfig.brand.productName} last checked them ${relativeTime(sweep.lastSweptAt)}. None will run until it starts again. Ask an admin if this keeps happening.`
+            : `${appConfig.brand.productName} hasn't started running routines yet, so none of these will run. Ask an admin to set this up.`}
         </p>
       ) : null}
 

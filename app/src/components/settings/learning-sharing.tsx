@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   setLearnedSkillOpenMutationOptions,
   setLearningSharingModeMutationOptions,
@@ -50,7 +51,7 @@ export const SHARING_CHOICES: {
     mode: "open",
     icon: IconUsersGroup,
     title: "Everyone's Bots",
-    description: "Every Bot on OpenBot draws on all of your Skills.",
+    description: `Every Bot on ${appConfig.brand.productName} draws on all of your Skills.`,
   },
   {
     mode: "choose",
@@ -161,7 +162,7 @@ export function LearningSharing() {
       {mode === "choose" ? (
         <PageSection
           title="Your Skills"
-          description="Open a Skill to let every Bot on OpenBot use it."
+          description={`Open a Skill to let every Bot on ${appConfig.brand.productName} use it.`}
         >
           {data.skills === null || data.skills.length === 0 ? (
             <PageEmpty>{emptySentence(data)}</PageEmpty>

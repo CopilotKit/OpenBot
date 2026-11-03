@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   createTriggerMutationOptions,
   type ResponsibilityRecord,
@@ -357,8 +358,8 @@ function TriggerRow({
             </div>
           ) : (
             <p className="text-amber-600 text-xs dark:text-amber-500">
-              Email isn't set up on OpenBot yet, so this address can't receive
-              mail. An admin has to turn it on.
+              Email isn't set up on {appConfig.brand.productName} yet, so this
+              address can't receive mail. An admin has to turn it on.
             </p>
           ))}
         {generated && (
@@ -531,7 +532,8 @@ function NewTriggerDialog({
         <DialogHeader>
           <DialogTitle>Add trigger</DialogTitle>
           <DialogDescription>
-            Something outside OpenBot that starts this responsibility.
+            Something outside {appConfig.brand.productName} that starts this
+            responsibility.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">

@@ -10,6 +10,7 @@ import {
   type ProposedBot,
   wasCreated,
 } from "@/lib/agents/proposal";
+import { appConfig } from "@/lib/generated/application-config";
 
 /**
  * The coworker a Bot has written, put in front of the person before it exists.
@@ -137,7 +138,7 @@ export function ProposedBotCard({
       action={<Badge tone="caution">Waiting on you</Badge>}
       caption={
         clashes
-          ? `There's already a ${clashes.title}, and it's ${clashes.ownership === "the deployment's" ? "built into OpenBot" : clashes.ownership}. Two Bots with the same name are hard to tell apart.`
+          ? `There's already a ${clashes.title}, and it's ${clashes.ownership === "the deployment's" ? `built into ${appConfig.brand.productName}` : clashes.ownership}. Two Bots with the same name are hard to tell apart.`
           : "Nothing is created until you press Create it."
       }
       title={titleFor(values.name, clashes)}

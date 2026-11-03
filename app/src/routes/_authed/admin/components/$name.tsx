@@ -60,6 +60,7 @@ import {
   dataFunctionsQueryOptions,
 } from "@/lib/components/queries";
 import { RENDERABLE_NAMES } from "@/lib/copilot/gallery-registry";
+import { appConfig } from "@/lib/generated/application-config";
 import { queryClient } from "@/query-client";
 
 /**
@@ -326,7 +327,8 @@ function ComponentDetail({
                 <ItemContent>
                   <ItemTitle>Not in this build</ItemTitle>
                   <ItemDescription>
-                    OpenBot can't draw it. The settings below have no effect.
+                    {appConfig.brand.productName} can't draw it. The settings
+                    below have no effect.
                   </ItemDescription>
                 </ItemContent>
               </Item>

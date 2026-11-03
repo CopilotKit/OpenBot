@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { appConfig } from "@/lib/generated/application-config";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
 import { SkinPicker } from "@/skins/skin-picker";
 
@@ -38,7 +39,7 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="Customize OpenBot’s appearance and message display. Your skin and message settings apply to your account; the theme applies only to this browser."
+      description={`Customize ${appConfig.brand.productName}’s appearance and message display. Your skin and message settings apply to your account; the theme applies only to this browser.`}
       title="Preferences"
     >
       <ProfileSettings />
@@ -48,7 +49,7 @@ function RouteComponent() {
             <ItemContent>
               <ItemTitle>Dark theme</ItemTitle>
               <ItemDescription>
-                Use the dark appearance across OpenBot.
+                Use the dark appearance across {appConfig.brand.productName}.
               </ItemDescription>
             </ItemContent>
             <ItemActions>

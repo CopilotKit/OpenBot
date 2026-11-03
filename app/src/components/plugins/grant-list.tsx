@@ -10,6 +10,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { appConfig } from "@/lib/generated/application-config";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
 import {
   authorizeActionMutationOptions,
@@ -66,7 +67,7 @@ export function GrantList({
     onSuccess: (authorizationUrl) => {
       if (authorizationUrl === null) {
         setNotice(
-          "OpenBot answered without a consent link, so nothing was authorized. Try again, or ask an admin if it keeps happening.",
+          `${appConfig.brand.productName} answered without a consent link, so nothing was authorized. Try again, or ask an admin if it keeps happening.`,
         );
         return;
       }

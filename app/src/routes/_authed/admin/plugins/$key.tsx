@@ -47,6 +47,7 @@ import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { storeMcpToken } from "@/lib/credentials/mutations";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   addCuratedServerMutationOptions,
   connectAccountMutationOptions,
@@ -337,7 +338,7 @@ function RouteComponent() {
           : null;
       if (authorizationUrl === null) {
         setError(
-          "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
+          `${appConfig.brand.productName} got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.`,
         );
         return;
       }
@@ -1055,7 +1056,8 @@ function RouteComponent() {
                 <p className="text-muted-foreground text-sm">
                   Add this to the client's authorised redirect URIs at the
                   vendor, exactly as written. One wrong character fails there,
-                  with an error that doesn't mention OpenBot.
+                  with an error that doesn't mention{" "}
+                  {appConfig.brand.productName}.
                 </p>
               )}
               {!plugins.data?.redirectUri ? (

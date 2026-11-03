@@ -27,13 +27,13 @@ import { Switch } from "@/components/ui/switch";
 import { ruleLabel } from "@/lib/boundaries/rules";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import { actionPolicyQueryOptions } from "@/lib/computers/queries";
+import { appConfig } from "@/lib/generated/application-config";
 
 export const Route = createFileRoute("/_authed/admin/boundaries")({
   component: BoundariesPage,
 });
 
-const DESCRIPTION =
-  "Define actions that Bots must never take. OpenBot checks these rules before a Bot acts on its computer or in a connected app.";
+const DESCRIPTION = `Define actions that Bots must never take. ${appConfig.brand.productName} checks these rules before a Bot acts on its computer or in a connected app.`;
 
 /**
  * The deployment's boundaries, read as a list of things Bots may never do.

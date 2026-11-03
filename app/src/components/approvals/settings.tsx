@@ -32,6 +32,7 @@ import {
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 
@@ -128,8 +129,9 @@ export function ApprovalSettings() {
                   >
                     {enforced ? "An admin requires this. " : ""}
                     Before a Bot does something that could affect your accounts
-                    or share information, OpenBot checks it against your request
-                    and your rules. If it can't tell, it asks you.
+                    or share information, {appConfig.brand.productName} checks
+                    it against your request and your rules. If it can't tell, it
+                    asks you.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

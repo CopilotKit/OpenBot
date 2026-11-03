@@ -1,4 +1,5 @@
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
+import { appConfig } from "@/lib/generated/application-config";
 
 /**
  * The answers a Bot can give, drawn rather than described.
@@ -117,8 +118,8 @@ function PreviewOf({ name }: { name: string }) {
      */
     return (
       <p className="text-muted-foreground text-sm">
-        Shows OpenBot's own records. There's nothing to show until a Bot asks
-        for it.
+        Shows {appConfig.brand.productName}'s own records. There's nothing to
+        show until a Bot asks for it.
       </p>
     );
   }

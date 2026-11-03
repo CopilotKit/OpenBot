@@ -14,6 +14,7 @@ import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { toast } from "@/components/ui/toast";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   CONFIRM_WINDOW_MS,
   canMessageExtensions,
@@ -230,7 +231,7 @@ const STORE_NAMES: Record<RecorderStore, string> = {
  * in: adding it there is what lets them record from here. Once it is added, the same click connects it.
  */
 export function storeTabSentence(store: RecorderStore): string {
-  return `The OpenBot Recorder's page is open in a new tab. Add it to ${STORE_NAMES[store]} to record from OpenBot.`;
+  return `The OpenBot Recorder's page is open in a new tab. Add it to ${STORE_NAMES[store]} to record from ${appConfig.brand.productName}.`;
 }
 
 /** The short note that waits in OpenBot for a person who opened the Recorder's store page in a new tab: one at a time,

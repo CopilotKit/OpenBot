@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   brokeredProvenance,
@@ -533,7 +534,7 @@ function AppConnectionPage() {
         >
           {entry
             ? "Bots use one shared account for this app, the same for everybody."
-            : "OpenBot has no app by that name."}
+            : `${appConfig.brand.productName} has no app by that name.`}
         </PageEmpty>
       </PageShell>
     );
@@ -606,7 +607,7 @@ function AppConnectionPage() {
                          * had not, which is the one outcome worse than not offering it.
                          */
                         setNotice(
-                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${entry.vendor} account's third-party access settings.`,
+                          `You can't disconnect here yet. To stop access now, remove ${appConfig.brand.productName} in your ${entry.vendor} account's third-party access settings.`,
                         )
                       }
                       className="whitespace-nowrap"
@@ -642,7 +643,7 @@ function AppConnectionPage() {
 
       {connection ? (
         <PageSection
-          description={`Review the permissions recorded by ${entry.vendor}. They may include fewer permissions than OpenBot requested.`}
+          description={`Review the permissions recorded by ${entry.vendor}. They may include fewer permissions than ${appConfig.brand.productName} requested.`}
           title="Access"
         >
           <PageRows>

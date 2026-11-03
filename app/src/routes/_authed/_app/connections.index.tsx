@@ -33,6 +33,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { type ConnectionRow, connectionRows } from "@/lib/connections/rows";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
@@ -133,7 +134,7 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   ],
   [
     "vendor-unavailable",
-    "The app didn't answer when OpenBot tried to finish that authorization, so nothing was recorded. Try the link again in a moment.",
+    `The app didn't answer when ${appConfig.brand.productName} tried to finish that authorization, so nothing was recorded. Try the link again in a moment.`,
   ],
   [
     "not-your-authorization",
@@ -153,7 +154,7 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   ],
   [
     "name-changed",
-    "That authorization was started before an update changed how OpenBot signs you in to the app, so nothing was recorded. Press Connect on the app's page to start again.",
+    `That authorization was started before an update changed how ${appConfig.brand.productName} signs you in to the app, so nothing was recorded. Press Connect on the app's page to start again.`,
   ],
   [
     "not-permitted",

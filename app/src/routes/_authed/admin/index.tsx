@@ -32,6 +32,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { appConfig } from "@/lib/generated/application-config";
 
 export const Route = createFileRoute("/_authed/admin/")({
   component: RouteComponent,
@@ -55,7 +56,7 @@ const SECTIONS: {
 }[] = [
   {
     title: "What Bots can reach",
-    description: "Control what Bots can access outside OpenBot.",
+    description: `Control what Bots can access outside ${appConfig.brand.productName}.`,
     items: [
       {
         title: "Credentials",
@@ -161,7 +162,7 @@ const SECTIONS: {
     items: [
       {
         title: "Audit",
-        description: "Review actions taken in OpenBot and who took them.",
+        description: `Review actions taken in ${appConfig.brand.productName} and who took them.`,
         icon: IconListDetails,
         linkOptions: { to: "/admin/audit" },
       },

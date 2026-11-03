@@ -59,6 +59,7 @@ import {
 } from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -926,8 +927,9 @@ function EndpointStep({
             />
           ) : (
             <FieldDescription>
-              Any agent that speaks AG-UI works. OpenBot connects to it, so it
-              has to be reachable from OpenBot's server.
+              Any agent that speaks AG-UI works. {appConfig.brand.productName}{" "}
+              connects to it, so it has to be reachable from{" "}
+              {appConfig.brand.productName}'s server.
             </FieldDescription>
           )}
         </Field>

@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
+import { appConfig } from "@/lib/generated/application-config";
 
 export type IntroScene = { id: string; label: string; content: ReactNode };
 
@@ -20,7 +21,7 @@ export function IntroAnimation({ scenes }: { scenes: IntroScene[] }) {
   if (reducedMotion) {
     return (
       <section
-        aria-label="Meet OpenBot"
+        aria-label={`Meet ${appConfig.brand.productName}`}
         className="flex w-full flex-col gap-12 py-8"
       >
         {scenes.map((item) => (
@@ -31,7 +32,10 @@ export function IntroAnimation({ scenes }: { scenes: IntroScene[] }) {
   }
 
   return (
-    <section aria-label="Meet OpenBot" className="w-full">
+    <section
+      aria-label={`Meet ${appConfig.brand.productName}`}
+      className="w-full"
+    >
       <div className="grid min-h-[440px] items-center">
         <AnimatePresence initial={false} mode="wait">
           <motion.div

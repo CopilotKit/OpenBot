@@ -62,6 +62,7 @@ import {
 } from "@/lib/agents/queries";
 import { isComposing } from "@/lib/composing";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { queryClient } from "@/query-client";
 
 type TextField = "name" | "title" | "roleDescription";
@@ -145,7 +146,8 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
                 <ItemContent>
                   <ItemTitle>System owned</ItemTitle>
                   <ItemDescription>
-                    Comes with OpenBot. It doesn't belong to a person.
+                    Comes with {appConfig.brand.productName}. It doesn't belong
+                    to a person.
                   </ItemDescription>
                 </ItemContent>
               </Item>
@@ -192,8 +194,8 @@ function VisibilityRow({
                 ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
                 : "Only you can see it and start conversations with it."
               : agent.isolationActive
-                ? `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
-                : "Everyone on OpenBot can find and use it.")}
+                ? `Everyone on ${appConfig.brand.productName} can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
+                : `Everyone on ${appConfig.brand.productName} can find and use it.`)}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -271,7 +273,7 @@ function IsolatedRow({
     (agent.isolated || (available && allowed));
 
   const summary = agent.systemOwned
-    ? "Comes with OpenBot, so it runs on the computer of whoever is using it."
+    ? `Comes with ${appConfig.brand.productName}, so it runs on the computer of whoever is using it.`
     : agent.isolated
       ? agent.isolationActive
         ? isolatedExplained(isPublic)
@@ -455,7 +457,7 @@ function ConnectionSection({ agent }: { agent: AgentProfile }) {
               }
             >
               {builtIn
-                ? "Runs inside OpenBot. There's nothing to connect."
+                ? `Runs inside ${appConfig.brand.productName}. There's nothing to connect.`
                 : agent.endpoint}
             </ItemDescription>
           </ItemContent>

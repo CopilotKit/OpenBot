@@ -25,6 +25,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { appConfig } from "@/lib/generated/application-config";
 import { revokeRecorderConnectionMutationOptions } from "@/lib/recorder/mutations";
 import { recorderConnectionsQueryOptions } from "@/lib/recorder/queries";
 import { relativeTime } from "@/lib/relative-time";
@@ -97,7 +98,7 @@ function ConnectedBrowserRow({
   const which = here
     ? "this browser"
     : connection.via === "openbot-browser"
-      ? "your OpenBot browser"
+      ? `your ${appConfig.brand.productName} browser`
       : connection.label;
   return (
     <>
@@ -109,13 +110,13 @@ function ConnectedBrowserRow({
           <ItemTitle>{name}</ItemTitle>
           <ItemDescription>
             {connection.via === "openbot-browser"
-              ? "Your OpenBot browser, connected "
+              ? `Your ${appConfig.brand.productName} browser, connected `
               : "Connected "}
             {connectedAt.format(new Date(connection.createdAt))}
             {connection.via === "desktop"
               ? " from OpenBot Desktop"
               : connection.via === "web"
-                ? " from OpenBot"
+                ? ` from ${appConfig.brand.productName}`
                 : ""}
             ,{" "}
             {/* A recording streams to the gateway, not to OpenBot, so its last use lags: it says so instead. */}
@@ -148,9 +149,9 @@ function ConnectedBrowserRow({
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
             <p>
-              OpenBot signs the Recorder in {which} out. It records nothing for
-              you until you connect it again, and a recording running there
-              stops.
+              {appConfig.brand.productName} signs the Recorder in {which} out.
+              It records nothing for you until you connect it again, and a
+              recording running there stops.
             </p>
             {revoke.error ? (
               <p className="mt-2 text-destructive" role="alert">

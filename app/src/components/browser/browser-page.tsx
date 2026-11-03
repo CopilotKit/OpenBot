@@ -25,6 +25,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import { queryClient } from "@/query-client";
 import { ScreenBrowser } from "./browser-screen";
 import { NativeNarrationRow } from "./narration";
@@ -72,7 +73,7 @@ export function BrowserPage() {
       <PageShell title={TITLE}>
         <PageEmpty>
           {state.data.note ??
-            "OpenBot isn't set up to run a browser for you. Ask an admin."}
+            `${appConfig.brand.productName} isn't set up to run a browser for you. Ask an admin.`}
         </PageEmpty>
       </PageShell>
     );

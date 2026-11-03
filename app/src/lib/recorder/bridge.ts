@@ -11,6 +11,7 @@ import {
   type RecorderPageState,
 } from "@openbot/shared/recorder-page";
 import { z } from "zod";
+import { appConfig } from "@/lib/generated/application-config";
 
 // The browser's extension messaging API, with no server traffic. The app has no @types/chrome, so the members used
 // are declared here. `webview` is not an extension's: it is how WebView2 (OpenBot Desktop's own app window on
@@ -158,16 +159,13 @@ export async function askConnectWait(id: string): Promise<ConnectWait> {
 }
 
 const CONNECT_REFUSALS: Record<string, string> = {
-  "not-https": "The Recorder only connects to OpenBot over HTTPS.",
-  "pinned-elsewhere": "Your organization set the Recorder to another OpenBot.",
-  "policy-invalid":
-    "Your organization's Recorder policy names an OpenBot address the Recorder can't use. Ask your IT team.",
+  "not-https": `The Recorder only connects to ${appConfig.brand.productName} over HTTPS.`,
+  "pinned-elsewhere": `Your organization set the Recorder to another ${appConfig.brand.productName}.`,
+  "policy-invalid": `Your organization's Recorder policy names an address for ${appConfig.brand.productName} that the Recorder can't use. Ask your IT team.`,
   busy: "The Recorder is finishing another connect request. Try again in a moment.",
   // A trusted OpenBot's connect, which the Recorder completes itself with OpenBot, with no Connect page.
-  "exchange-refused":
-    "OpenBot didn't accept the Recorder's connect request. Try again.",
-  "openbot-unreachable":
-    "The Recorder couldn't reach OpenBot to connect. Check your connection and try again.",
+  "exchange-refused": `${appConfig.brand.productName} didn't accept the Recorder's connect request. Try again.`,
+  "openbot-unreachable": `The Recorder couldn't reach ${appConfig.brand.productName} to connect. Check your connection and try again.`,
 };
 /** The Recorder can also answer `unreachable` or `invalid`, which have no sentence of their own. */
 const CONNECT_REFUSAL_FALLBACK =

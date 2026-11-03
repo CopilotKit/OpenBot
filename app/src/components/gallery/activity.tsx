@@ -5,6 +5,7 @@ import { callComponentFunction } from "@/lib/components/queries";
 import { useActiveBotId } from "@/lib/copilot/active-bot";
 import { useConversation } from "@/lib/copilot/conversation";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import { appConfig } from "@/lib/generated/application-config";
 import { keyedLookup } from "@/lib/lookup";
 import { GalleryFrame } from "./frame";
 import { seriesColour } from "./palette";
@@ -110,7 +111,10 @@ export function ActivityReportCard({
 
   if (state.status === "reading") {
     return (
-      <GalleryFrame caption="Reading from OpenBot" title={title ?? "Report"}>
+      <GalleryFrame
+        caption={`Reading from ${appConfig.brand.productName}`}
+        title={title ?? "Report"}
+      >
         <p className="text-sm text-muted-foreground">Reading…</p>
       </GalleryFrame>
     );
@@ -180,7 +184,7 @@ function ActivityChart({
           </Button>
         ) : undefined
       }
-      caption={`Counted from OpenBot's audit trail, last ${data.days} days`}
+      caption={`Counted from ${appConfig.brand.productName}'s audit trail, last ${data.days} days`}
       title={title ?? "Bot activity"}
     >
       <ul className="flex flex-col gap-2">
@@ -223,7 +227,7 @@ function RefusalList({
     return (
       <GalleryFrame title={title ?? "Recent refusals"}>
         <p className="text-sm text-muted-foreground">
-          OpenBot hasn't refused anything.
+          {appConfig.brand.productName} hasn't refused anything.
         </p>
       </GalleryFrame>
     );
@@ -246,7 +250,7 @@ function RefusalList({
           </Button>
         ) : undefined
       }
-      caption="Read from OpenBot's audit trail"
+      caption={`Read from ${appConfig.brand.productName}'s audit trail`}
       title={title ?? "Recent refusals"}
     >
       <ul className="flex flex-col gap-2">

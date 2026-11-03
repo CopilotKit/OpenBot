@@ -1,3 +1,4 @@
+import { appConfig } from "@/lib/generated/application-config";
 /**
  * The current answer each "Settings for this Bot" row states, computed from its query on every
  * render so it updates itself when the page behind it changes something.
@@ -60,7 +61,9 @@ export function reachSummary(transports: readonly string[]): string {
   const places = [...new Set(transports)]
     .map((transport) => TRANSPORT_LABEL[transport] ?? transport)
     .sort((a, b) => a.localeCompare(b));
-  return places.length ? places.join(", ") : "Only in OpenBot";
+  return places.length
+    ? places.join(", ")
+    : `Only in ${appConfig.brand.productName}`;
 }
 
 /** The apps feeding this Bot facts, and whether it checks in on them. */

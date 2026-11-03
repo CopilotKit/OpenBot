@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { authKeys, currentUserQueryOptions } from "@/lib/auth/queries";
 import { client } from "@/lib/client";
+import { appConfig } from "@/lib/generated/application-config";
 
 export function ProfileNameForm({
   initialName = "",
@@ -83,7 +84,7 @@ export function ProfileSettings() {
   return (
     <PageSection
       title="Profile"
-      description="Choose the name OpenBot displays for you."
+      description={`Choose the name ${appConfig.brand.productName} displays for you.`}
     >
       {user && (
         <ProfileNameForm

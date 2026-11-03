@@ -8,6 +8,7 @@ import {
   PopoverHeader,
   PopoverTitle,
 } from "@/components/ui/popover";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   actionCount,
   elapsed,
@@ -198,7 +199,7 @@ export type ConnectProgress =
 function connectSentence(progress: ConnectProgress): string {
   switch (progress.state) {
     case "idle":
-      return "The OpenBot Recorder in this browser isn't connected to OpenBot.";
+      return `The OpenBot Recorder in this browser isn't connected to ${appConfig.brand.productName}.`;
     case "sending":
       return "Connecting this browser…";
     case "awaiting":

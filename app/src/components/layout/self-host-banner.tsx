@@ -2,6 +2,7 @@ import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { appConfig } from "@/lib/generated/application-config";
 import {
   dismissSelfHostBannerMutationOptions,
   useUserPreferences,
@@ -32,7 +33,7 @@ export function SelfHostBanner() {
 
   return (
     <aside
-      aria-label="Self-host OpenBot"
+      aria-label={`Self-host ${appConfig.brand.productName}`}
       className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
     >
       {/*
@@ -44,7 +45,7 @@ export function SelfHostBanner() {
        * together and drop to the next line as one, which keeps Dismiss on the left there too.
        */}
       <p className="text-foreground">
-        Self-host OpenBot for your organization.
+        Self-host {appConfig.brand.productName} for your organization.
       </p>
       <span className="flex items-center gap-2">
         {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
