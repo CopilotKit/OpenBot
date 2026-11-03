@@ -30,12 +30,7 @@ export function mountOAuthCallbackRoute({
    * one, and spelling out which is which tells anybody probing this endpoint how far they got.
    */
   routes.get("/oauth/callback", async (context) => {
-    /*
-     * Where a failure lands. The list until the state is read, because an unreadable state names no
-     * screen; after that, the screen the flow started on, so a failed connect from onboarding
-     * returns to its step rather than to a page onboarding would bounce them out of.
-     */
-    let failed = connectedAccountsUrlFor(connect?.appUrl, {
+    const failed = connectedAccountsUrlFor(connect?.appUrl, {
       failed: true,
     });
     if (!connect?.publicUrl) return context.redirect(failed);
@@ -73,20 +68,7 @@ export function mountOAuthCallbackRoute({
         context.req.query("state") ?? "",
         connect.encryptionKey,
       );
-      if (!state) return context.redirect(failed);
-      /*
-       * The screen the flow started on, as soon as the state names it, and before the code is
-       * asked for. A person who presses Cancel on the vendor's consent comes back with the state and
-       * an `error=access_denied` in place of a code. Sent to the list, somebody mid-onboarding was
-       * bounced by the onboarding gate to its first step with no word about what happened. Sent
-       * here, they land on the step they pressed Connect on, which says it didn't connect.
-       */
-      failed = connectedAccountsUrlFor(
-        connect.appUrl,
-        { failed: true },
-        state.returnTo,
-      );
-      if (!code) return context.redirect(failed);
+      if (!code || !state) return context.redirect(failed);
 
       /*
        * Is the person in the state still somebody here?

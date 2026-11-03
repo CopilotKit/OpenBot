@@ -21,7 +21,6 @@ import {
   type ConnectOrigin,
   challengeFor,
   connectedAccountsUrlFor,
-  connectOriginFrom,
   createVerifier,
   redirectUriFor,
   sealConnectState,
@@ -720,13 +719,12 @@ export function mountConnectionRoutes({
        * chooses where somebody lands holding a just-completed consent. A url taken from the body,
        * the query or a header would therefore be an open redirect with a consent screen in front
        * of it — the exact thing {@link ConnectOrigin} exists to stop on the OAuth flow below, and
-       * it is narrowed here in the same way: the caller may name one of a few PAGES, and the origin
-       * underneath them is this deployment's configured app URL in every case.
+       * it is narrowed here in the same way: the caller may name one of two PAGES, and the origin
+       * underneath them is this deployment's configured app URL in both cases.
        *
-       * Every one of them confirms on load, which is what makes it a correct destination: the
+       * Both pages confirm on load, which is what makes either of them a correct destination: the
        * return trip carries nothing signed, so arriving proves nothing, and the page asks Composio
-       * whether the account is really attached before anything here says it is. Onboarding's
-       * Connect your apps step confirms the app it left for, which it noted before leaving.
+       * whether the account is really attached before anything here says it is.
        *
        * FORCED TO "admin" FOR A DEPLOYMENT ACCOUNT, AND NOT LEFT TO THE QUERY. A Shared app's
        * settings page shows nobody's own connection — the account the consent is about belongs to
@@ -737,7 +735,9 @@ export function mountConnectionRoutes({
       const returnTo: ConnectOrigin =
         account.holder === "deployment"
           ? "admin"
-          : connectOriginFrom(context.req.query("returnTo"));
+          : context.req.query("returnTo") === "admin"
+            ? "admin"
+            : "settings";
 
       /*
        * THE VENDOR ALREADY HOLDS THIS ACCOUNT, AND THIS DEPLOYMENT HAS NO ROW FOR IT: RECORD IT,
@@ -944,13 +944,14 @@ export function mountConnectionRoutes({
     }
 
     /*
-     * Where to come back to, as one of a few names rather than a URL the caller chose.
+     * Where to come back to, as one of two names rather than a URL the caller chose.
      *
      * Read from the query and narrowed immediately, so an unrecognised value is the default rather
      * than something carried into a sealed state. See {@link ConnectOrigin}: a destination that could
      * name another origin is an open redirect with a consent screen in front of it.
      */
-    const returnTo = connectOriginFrom(context.req.query("returnTo"));
+    const returnTo =
+      context.req.query("returnTo") === "admin" ? "admin" : "settings";
 
     const verifier = createVerifier();
     return context.json({
@@ -1881,9 +1882,8 @@ export function mountConnectionRoutes({
         503,
       );
     }
-    const returnTo: ConnectOrigin = connectOriginFrom(
-      context.req.query("returnTo"),
-    );
+    const returnTo: ConnectOrigin =
+      context.req.query("returnTo") === "admin" ? "admin" : "settings";
     const back = consentReturnUrl(
       connect.appUrl,
       serverId,
