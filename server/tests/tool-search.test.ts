@@ -773,3 +773,96 @@ describe("the pre-flight count", () => {
     }
   });
 });
+
+describe("tool-search capacity regressions", () => {
+  test("client tools enable search even when the Bot alone is below the floor", async () => {
+    process.env.OPENAI_BASE_URL = "https://gateway.example.com/v1";
+    const recorded: Parameters<RecordToolLimitRefusal>[] = [];
+    const script = scriptedProvider("chat", [{ text: "Hello." }]);
+    const granted = [remember, ...(await heldTools([])).slice(1, 41)];
+    const client = Array.from({ length: 100 }, (_, index) => ({
+      name: `client_${index}`,
+      description: "",
+      parameters: { type: "object", properties: {} },
+    }));
+    try {
+      const seen = await events(
+        await assistant(
+          granted,
+          { provider: "openai", defaultModel: "gpt-5.5" },
+          recorded,
+        ),
+        input([asked], client),
+      );
+      expect(seen.map((event) => event.type)).not.toContain(
+        EventType.RUN_ERROR,
+      );
+      expect(script.sent[0]).toContain(SEARCH_TOOLS);
+      expect(script.sent[0]?.length).toBeLessThanOrEqual(MODEL_TOOL_LIMIT);
+      expect(recorded).toEqual([]);
+    } finally {
+      script.restore();
+    }
+  });
+
+  test("the largest search response fits exactly at the request budget", async () => {
+    process.env.OPENAI_BASE_URL = "https://gateway.example.com/v1";
+    const script = scriptedProvider("chat", [
+      { call: SEARCH_TOOLS, args: { query: "resource", limit: 20 } },
+      { text: "Found the tools." },
+    ]);
+    const own = Array.from({ length: 105 }, (_, index) => ({
+      ...remember,
+      name: `own_${index}`,
+    }));
+    try {
+      const seen = await events(
+        await assistant([...own, ...(await heldTools([])).slice(1)], {
+          provider: "openai",
+          defaultModel: "gpt-5.5",
+        }),
+        input([asked]),
+      );
+      expect(seen.map((event) => event.type)).not.toContain(
+        EventType.RUN_ERROR,
+      );
+      expect(script.sent).toHaveLength(2);
+      expect(script.sent[1]).toHaveLength(MODEL_TOOL_LIMIT);
+      expect(
+        script.sent[1]?.filter((name) => name.startsWith("SHOPIFY_")),
+      ).toHaveLength(20);
+    } finally {
+      script.restore();
+    }
+  });
+
+  for (const provider of PROVIDERS) {
+    test(`${provider.name}: refuses when search results have no room`, async () => {
+      if (provider.baseUrl) process.env.OPENAI_BASE_URL = provider.baseUrl;
+      const recorded: Parameters<RecordToolLimitRefusal>[] = [];
+      const script = scriptedProvider(provider.wire, [{ text: "Hello." }]);
+      const own = Array.from({ length: 125 }, (_, index) => ({
+        ...remember,
+        name: `own_${index}`,
+      }));
+      try {
+        const seen = await events(
+          await assistant(
+            [...own, ...(await heldTools([])).slice(1)],
+            provider.model,
+            recorded,
+          ),
+          input([asked]),
+        );
+        expect(seen.map((event) => event.type)).toEqual([
+          EventType.RUN_STARTED,
+          EventType.RUN_ERROR,
+        ]);
+        expect(script.sent).toEqual([]);
+        expect(recorded).toHaveLength(1);
+      } finally {
+        script.restore();
+      }
+    });
+  }
+});

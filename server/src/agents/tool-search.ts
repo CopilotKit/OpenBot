@@ -54,6 +54,9 @@ export const TOOL_SEARCH_FLOOR = 50;
 /** How many tools one search returns unless the model asks for another number. */
 const SEARCH_RESULTS = 8;
 
+/** Reserve enough room to load even the largest search response. */
+export const SEARCH_RESULTS_LIMIT = 20;
+
 // Use the model contract of the runtime we actually ship, without a second AI SDK version.
 type SearchingModel = Extract<
   BuiltInAgentClassicConfig["model"],
@@ -238,7 +241,7 @@ export function searchToolsTool(waiting: readonly GrantedTool[]): GrantedTool {
         .number()
         .int()
         .min(1)
-        .max(20)
+        .max(SEARCH_RESULTS_LIMIT)
         .optional()
         .describe(`How many tools to return. ${SEARCH_RESULTS} when left out.`),
     }),

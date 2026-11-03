@@ -21,6 +21,7 @@ import {
   defaultModelFor,
   requiresResponsesApi,
 } from "@openbot/shared/model-providers";
+import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
@@ -52,6 +53,7 @@ import { toolLimitFor, toolLimitRefusal } from "./agents/tool-limit";
 import {
   isSearchingModel,
   planToolSearch,
+  SEARCH_RESULTS_LIMIT,
   searchToolsTool,
   withToolSearch,
 } from "./agents/tool-search";
@@ -1135,38 +1137,52 @@ async function buildAgent(
    *
    * Per run rather than per Bot, because the count is only known then: narrowing may have cut the
    * grants down, a handoff may have added to them, and the client's own tools arrive with the
-   * request. Tools waiting behind search are not counted, because they are not sent. A plan model is
-   * not an OpenAI request, so it is not held to OpenAI's number.
+   * request. Search reserves room for its largest result batch under our per-step budget, on every
+   * provider. Without search, only Chat Completions has a count limit.
    *
    * The refusal is the person's answer; the log line and the audit row are the admin's, because a Bot
    * over the limit fails on every message until somebody removes some of its apps, and nobody removes
    * what they cannot see. Ported from #948, with the limit read from the API the runtime resolves.
    */
   const limit = model.plan ? null : toolLimitFor(model, apiKey ?? undefined);
-  const admitTools = limit
-    ? (names: readonly string[]) => {
-        if (names.length <= limit.limit) return undefined;
-        const refused = {
-          tools: names.length,
-          limit: limit.limit,
-          provider: limit.provider,
-        };
+  const admitTools = (waiting: ReadonlySet<string>) => {
+    // Search must be able to deliver every tool it promises on the next step, on every provider.
+    const capacity =
+      limit ??
+      (waiting.size > 0
+        ? {
+            provider: model.provider === "openai" ? "OpenAI" : "Anthropic",
+            limit: MODEL_TOOL_LIMIT,
+          }
+        : null);
+    if (!capacity) return undefined;
+    const reserved = Math.min(waiting.size, SEARCH_RESULTS_LIMIT);
+    return (names: readonly string[]) => {
+      const count = names.length + reserved;
+      if (count <= capacity.limit) return undefined;
+      const refused = {
+        tools: count,
+        limit: capacity.limit,
+        provider: capacity.provider,
+      };
+      console.error({
+        error: "tool_limit_exceeded",
+        context: { operation: "admitTools", agentId: agent.id, ...refused },
+        timestamp: new Date().toISOString(),
+      });
+      void recordToolLimitRefusal?.(agent.id, refused).catch(() => {
+        // Never log the thrown value: database errors can contain connection details.
         console.error({
-          error: "tool_limit_exceeded",
-          context: { operation: "admitTools", agentId: agent.id, ...refused },
+          error: "tool_limit_record_failed",
+          context: { operation: "recordToolLimitRefusal", agentId: agent.id },
           timestamp: new Date().toISOString(),
         });
-        void recordToolLimitRefusal?.(agent.id, refused).catch(() => {
-          // Never log the thrown value: database errors can contain connection details.
-          console.error({
-            error: "tool_limit_record_failed",
-            context: { operation: "recordToolLimitRefusal", agentId: agent.id },
-            timestamp: new Date().toISOString(),
-          });
-        });
-        return toolLimitRefusal(agent.name, names.length, limit);
-      }
-    : undefined;
+      });
+      if (reserved > 0 && names.length <= capacity.limit)
+        return `${agent.name} can't answer. Its ${names.length} always-visible tools leave fewer than ${reserved} slots for tool search under the ${capacity.limit}-tool request budget. An admin can remove some of its apps on the Bot's page.`;
+      return toolLimitRefusal(agent.name, count, capacity);
+    };
+  };
 
   const withTools = (
     tools: GrantedTool[],
@@ -1187,6 +1203,7 @@ async function buildAgent(
         (input?.tools.length ?? 0) +
         RUNTIME_STATE_TOOLS.length,
     });
+    const admit = admitTools(waiting);
     return new BuiltInAgentWithSaneHistory(
       builtInAgentConfiguration(
         agent,
@@ -1210,7 +1227,7 @@ async function buildAgent(
       ),
       {
         observe: observeModelConnection,
-        ...(admitTools ? { admitTools } : {}),
+        ...(admit ? { admitTools: admit } : {}),
         ...(waiting.size > 0 ? { waiting } : {}),
         ...(loadAttachment
           ? {
@@ -1228,7 +1245,14 @@ async function buildAgent(
   };
 
   const whole = withTools(granted);
-  if (!narrowing && !handoff && !model.plan && !acquireLearnedSkills)
+  // Even a small app grant may need search once the client's tools arrive with the run.
+  if (
+    !narrowing &&
+    !handoff &&
+    !model.plan &&
+    !acquireLearnedSkills &&
+    !granted.some((tool) => tool.searchable)
+  )
     return whole;
 
   return new RunBuiltAgent(
@@ -1268,7 +1292,8 @@ async function buildAgent(
         !learnedSkills &&
         tools.length === granted.length &&
         passing.length === 0 &&
-        pinned.size === 0
+        pinned.size === 0 &&
+        input.tools.length === 0
         ? whole
         : withTools(tools, input, signal, learnedSkills, pinned);
     },
