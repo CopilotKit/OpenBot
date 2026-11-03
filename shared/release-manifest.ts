@@ -74,7 +74,7 @@ function string(
   if (
     typeof value !== "string" ||
     !pattern.test(value) ||
-    /[\u0000-\u001f]/.test(value)
+    [...value].some((character) => character.charCodeAt(0) < 32)
   )
     throw new Error(`${path}: invalid string`);
   return value;

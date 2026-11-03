@@ -1,0 +1,122 @@
+name: Propose upstream upgrade
+
+# Forks explicitly opt in. This creates a candidate and PR; it never deploys or merges one.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact upstream release tag (for example v0.3.0)
+        required: true
+        type: string
+      commit:
+        description: Independently verified 40-character commit of that upstream release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openbot-upstream-upgrade
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: vars.OPENBOT_UPSTREAM_UPGRADES == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      UPSTREAM_REPOSITORY: ${{ vars.OPENBOT_UPSTREAM_REPOSITORY || 'CopilotKit/openbot' }}
+      UPSTREAM_BASELINE: ${{ vars.OPENBOT_UPSTREAM_COMMIT }}
+      UPSTREAM_TAG: ${{ inputs.tag }}
+      UPSTREAM_COMMIT: ${{ inputs.commit }}
+      UPGRADE_CHECKS: ${{ vars.OPENBOT_UPGRADE_CHECKS || '[["bun","install","--frozen-lockfile"],["bun","test"],["bun","run","typecheck"]]' }}
+      CANDIDATE: ${{ runner.temp }}/openbot-upstream-candidate
+      UPGRADE_BRANCH: upgrade/upstream-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Resolve recorded upstream baseline
+        run: |
+          set -euo pipefail
+          [[ "$UPSTREAM_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          if [ -z "$UPSTREAM_BASELINE" ] && [ -f .openbot-upstream.json ]; then
+            recorded_repository="$(jq -r .upstreamRepository .openbot-upstream.json)"
+            if [ "$recorded_repository" != "$UPSTREAM_REPOSITORY" ] && [ "$recorded_repository" != "https://github.com/$UPSTREAM_REPOSITORY.git" ]; then
+              echo "::error::Recorded upstream repository differs from configured upstream."
+              exit 1
+            fi
+            UPSTREAM_BASELINE="$(jq -r .upstreamCommit .openbot-upstream.json)"
+          fi
+          [[ "$UPSTREAM_BASELINE" =~ ^[0-9a-f]{40}$ ]]
+          echo "UPSTREAM_BASELINE=$UPSTREAM_BASELINE" >> "$GITHUB_ENV"
+      - id: integrate
+        name: Integrate in isolated clone and run fork regression commands
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          bun scripts/integrate-upstream.ts \
+            --repository "$GITHUB_WORKSPACE" --output "$CANDIDATE" \
+            --branch "$UPGRADE_BRANCH" --base refs/heads/main \
+            --baseline "$UPSTREAM_BASELINE" \
+            --upstream "https://github.com/$UPSTREAM_REPOSITORY.git" \
+            --tag "refs/tags/$UPSTREAM_TAG" --commit "$UPSTREAM_COMMIT" \
+            --checks "$UPGRADE_CHECKS" --report "$RUNNER_TEMP/upstream-report.json"
+      - name: Preserve conflict and regression evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/upstream-report.json" ]; then
+            cat "$RUNNER_TEMP/upstream-report.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -d "$CANDIDATE" ]; then
+            tar --exclude=node_modules --exclude=target --exclude='.venv*' \
+              -czf "$RUNNER_TEMP/upstream-candidate.tar.gz" \
+              -C "$RUNNER_TEMP" openbot-upstream-candidate
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: upstream-integration-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/upstream-report.json
+            ${{ runner.temp }}/upstream-candidate.tar.gz
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Publish reviewable integration branch and PR
+        if: steps.integrate.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r .status "$RUNNER_TEMP/upstream-report.json")" = ready
+          git -C "$CANDIDATE" -c 'credential.helper=!gh auth git-credential' \
+            push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$UPGRADE_BRANCH"
+          {
+            echo "Integrates upstream $UPSTREAM_TAG at $UPSTREAM_COMMIT."
+            echo
+            echo "Previous upstream baseline: $UPSTREAM_BASELINE."
+            echo "Candidate remains unaccepted until review and distribution CI pass. Deployment is a separate action."
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/upstream-report.json"
+            echo '```'
+            echo
+            echo "Review migration/configuration changes and declare downtime and recovery in OPENBOT_RELEASE_POLICY before publishing."
+          } > "$RUNNER_TEMP/upstream-pr.md"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$UPGRADE_BRANCH" \
+            --title "Integrate upstream $UPSTREAM_TAG" --body-file "$RUNNER_TEMP/upstream-pr.md"
+      - name: Refuse conflicted or failed candidate
+        if: steps.integrate.outcome != 'success'
+        run: |
+          echo "::error::Integration was not accepted. Inspect the retained candidate and report artifact; original main and deployments are unchanged."
+          exit 1
