@@ -53,6 +53,7 @@ import { recorderConnections } from "../src/db/schema/recorder";
 import { createRecorderConnectionStore } from "../src/recorder/connections";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { directoryFor } from "./support/directory";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -1002,7 +1003,7 @@ describe("Browser on OpenBot Desktop, with the person's own browser", () => {
 
 describe("OpenBot Desktop as it runs, for its one person", () => {
   beforeAll(async () => {
-    await initializeDevActorUser(database, true);
+    await initializeDevActorUser(database, true, directoryFor(database));
   });
   afterAll(async () => {
     await removeConnections(DEV_ACTOR.id);

@@ -80,7 +80,9 @@ describe("production server loader boundary", () => {
     expect(result.exitCode).not.toBe(0);
     expect(output).not.toContain("require() async module");
     expect(output).not.toContain("OPENBOT_SERVER_LOADER_SMOKE");
-    expect(output).toContain("Failed query: insert into");
+    // Whichever statement boot sends first: since people moved into Intelligence's directory, the
+    // projection's first read rather than the single-user administrator's insert.
+    expect(output).toContain("Failed query: ");
     expect(output).toMatch(
       /Connection closed|Failed to connect|ERR_POSTGRES_CONNECTION_REFUSED/,
     );

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { identityLinkChallenges, identityLinks } from "../src/db/schema";
+import { identityLinkChallenges } from "../src/db/schema";
 import { createIdentityStore, identityUserLock } from "../src/identity/store";
 import {
   type Identity,
@@ -13,26 +13,35 @@ import {
   type IdentityProvider,
 } from "../src/identity/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeDirectoryPeople,
+  seedDirectoryPerson,
+  useTestPeople,
+} from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store = createIdentityStore(database, createCredentialStore(database));
 const realm = `test-${randomUUID()}`;
 const users: string[] = [];
+// Links live in Intelligence's organization directory, and belong to people it holds.
+useTestPeople();
 
 afterAll(async () => {
   if (users.length)
     await database
       .delete(identityLinkChallenges)
       .where(inArray(identityLinkChallenges.userId, users));
-  await database.delete(identityLinks).where(eq(identityLinks.realm, realm));
+  // Purging a person takes their links with them.
+  await purgeDirectoryPeople(users);
   await database.$client.close();
 });
 
-const user = () => {
-  const id = `user-${randomUUID()}`;
+/** A person the directory holds, for a code to be issued to and a link to belong to. */
+async function user() {
+  const { id } = await seedDirectoryPerson();
   users.push(id);
   return id;
-};
+}
 const slack = (subject = randomUUID()): Identity => ({
   provider: "slack",
   realm,
@@ -63,7 +72,7 @@ const dbNow = async () => {
 };
 
 test("a code is a UUID, only its hash is stored, and it lasts ten minutes", async () => {
-  const owner = user();
+  const owner = await user();
   const before = await dbNow();
   const { code, expiresAt } = await store.issueChallenge(owner, "slack");
   const after = await dbNow();
@@ -83,11 +92,11 @@ test("a code is a UUID, only its hash is stored, and it lasts ten minutes", asyn
 });
 
 test("a provider that does not accept challenges cannot issue a code", async () => {
-  await expect(store.issueChallenge(user(), "github")).rejects.toThrow(
+  await expect(store.issueChallenge(await user(), "github")).rejects.toThrow(
     IdentityInputError,
   );
   await expect(
-    store.issueChallenge(user(), "myspace" as IdentityProvider),
+    store.issueChallenge(await user(), "myspace" as IdentityProvider),
   ).rejects.toThrow(IdentityInputError);
   await expect(store.issueChallenge(" ", "slack")).rejects.toThrow(
     IdentityInputError,
@@ -96,7 +105,7 @@ test("a provider that does not accept challenges cannot issue a code", async () 
 
 test("redeeming links the chat account to the person the code was issued to", async () => {
   // The fixation regression: whoever sends the code, the link belongs to the issuer.
-  const owner = user();
+  const owner = await user();
   const sender = slack();
   const { code } = await store.issueChallenge(owner, "slack");
   const link = await store.redeemChallenge(code, sender, "dana");
@@ -111,14 +120,14 @@ test("redeeming links the chat account to the person the code was issued to", as
 });
 
 test("extra properties on the chat identity cannot redirect the link", async () => {
-  const owner = user();
+  const owner = await user();
   const sender = { ...slack(), userId: "forged-user" };
   const { code } = await store.issueChallenge(owner, "slack");
   expect((await store.redeemChallenge(code, sender)).userId).toBe(owner);
 });
 
 test("a code is consumed once", async () => {
-  const { code } = await store.issueChallenge(user(), "slack");
+  const { code } = await store.issueChallenge(await user(), "slack");
   await store.redeemChallenge(code, slack());
   const other = slack();
   await expect(store.redeemChallenge(code, other)).rejects.toThrow(
@@ -128,7 +137,7 @@ test("a code is consumed once", async () => {
 });
 
 test("a code from another provider is refused without consuming it", async () => {
-  const owner = user();
+  const owner = await user();
   const { code } = await store.issueChallenge(owner, "slack");
   const wrong: Identity = { provider: "github", realm, subject: randomUUID() };
   await expect(store.redeemChallenge(code, wrong)).rejects.toThrow(
@@ -140,7 +149,7 @@ test("a code from another provider is refused without consuming it", async () =>
 });
 
 test("an expired code is refused", async () => {
-  const { code } = await store.issueChallenge(user(), "slack");
+  const { code } = await store.issueChallenge(await user(), "slack");
   await expire(code);
   const sender = slack();
   await expect(store.redeemChallenge(code, sender)).rejects.toThrow(
@@ -168,7 +177,7 @@ test("an unknown but well-formed code is refused", async () => {
 });
 
 test("issuing again invalidates the person's previous code for that provider", async () => {
-  const owner = user();
+  const owner = await user();
   const first = await store.issueChallenge(owner, "slack");
   const second = await store.issueChallenge(owner, "slack");
   expect(await rowFor(first.code)).toBeUndefined();
@@ -181,27 +190,27 @@ test("issuing again invalidates the person's previous code for that provider", a
 });
 
 test("issuing for one person leaves other people's codes alone", async () => {
-  const mine = await store.issueChallenge(user(), "slack");
-  await store.issueChallenge(user(), "slack");
+  const mine = await store.issueChallenge(await user(), "slack");
+  await store.issueChallenge(await user(), "slack");
   expect(await rowFor(mine.code)).toBeDefined();
 });
 
 test("issuing sweeps codes expired over a day ago and keeps recently expired ones", async () => {
-  const staleOwner = user();
-  const recentOwner = user();
+  const staleOwner = await user();
+  const recentOwner = await user();
   const stale = await store.issueChallenge(staleOwner, "slack");
   const recent = await store.issueChallenge(recentOwner, "slack");
   await expire(stale.code, "2 days");
   await expire(recent.code, "1 hour");
-  await store.issueChallenge(user(), "slack");
+  await store.issueChallenge(await user(), "slack");
   expect(await rowFor(stale.code)).toBeUndefined();
   expect(await rowFor(recent.code)).toBeDefined();
 });
 
 test("a chat account linked to somebody else is refused and the code stays unused", async () => {
   const sender = slack();
-  const first = user();
-  const second = user();
+  const first = await user();
+  const second = await user();
   const one = await store.issueChallenge(first, "slack");
   await store.redeemChallenge(one.code, sender);
   const two = await store.issueChallenge(second, "slack");
@@ -214,7 +223,7 @@ test("a chat account linked to somebody else is refused and the code stays unuse
 });
 
 test("redeeming a second code in the same realm replaces the person's older link", async () => {
-  const owner = user();
+  const owner = await user();
   const first = slack();
   const second = slack();
   await store.redeemChallenge(
@@ -230,7 +239,7 @@ test("redeeming a second code in the same realm replaces the person's older link
 });
 
 test("concurrent requests still leave one live code per person and provider", async () => {
-  const owner = user();
+  const owner = await user();
   const issued = await Promise.all(
     Array.from({ length: 10 }, () => store.issueChallenge(owner, "slack")),
   );
@@ -253,7 +262,7 @@ test("concurrent requests still leave one live code per person and provider", as
 });
 
 test("redeeming again without a handle keeps the stored one; an explicit null clears it", async () => {
-  const owner = user();
+  const owner = await user();
   const sender = slack();
   const issue = async () => (await store.issueChallenge(owner, "slack")).code;
   await store.redeemChallenge(await issue(), sender, "dana");
@@ -269,7 +278,7 @@ test("redeeming again without a handle keeps the stored one; an explicit null cl
 });
 
 test("a redeemed handle is capped at 256 code points without splitting a pair", async () => {
-  const owner = user();
+  const owner = await user();
   const link = await store.redeemChallenge(
     (await store.issueChallenge(owner, "slack")).code,
     slack(),
@@ -280,7 +289,7 @@ test("a redeemed handle is capped at 256 code points without splitting a pair", 
 });
 
 test("a blank redeemed handle is stored as none, and a non-string one is refused", async () => {
-  const owner = user();
+  const owner = await user();
   const link = await store.redeemChallenge(
     (await store.issueChallenge(owner, "slack")).code,
     slack(),
@@ -295,7 +304,7 @@ test("a blank redeemed handle is stored as none, and a non-string one is refused
 });
 
 test("issuing a code waits for the person's identity lock, which removal holds", async () => {
-  const owner = user();
+  const owner = await user();
   let release = () => {};
   const released = new Promise<void>((resolve) => {
     release = resolve;
@@ -324,7 +333,7 @@ test("issuing a code waits for the person's identity lock, which removal holds",
 });
 
 test("an uppercase code redeems", async () => {
-  const owner = user();
+  const owner = await user();
   const { code } = await store.issueChallenge(owner, "slack");
   expect(
     (await store.redeemChallenge(code.toUpperCase(), slack())).userId,
@@ -341,7 +350,7 @@ test.each([42, undefined, " user-padded", "user-padded "])(
 );
 
 test("discarding a live code removes it, so it can no longer link", async () => {
-  const { code } = await store.issueChallenge(user(), "slack");
+  const { code } = await store.issueChallenge(await user(), "slack");
   expect(await store.discardChallenge(code.toUpperCase(), "slack")).toBe(true);
   expect(await rowFor(code)).toBeUndefined();
   const sender = slack();
@@ -355,13 +364,13 @@ test("discarding a live code removes it, so it can no longer link", async () => 
 test("discarding an unknown, malformed or expired code finds nothing", async () => {
   expect(await store.discardChallenge(randomUUID(), "slack")).toBe(false);
   expect(await store.discardChallenge("not-a-code", "slack")).toBe(false);
-  const { code } = await store.issueChallenge(user(), "slack");
+  const { code } = await store.issueChallenge(await user(), "slack");
   await expire(code);
   expect(await store.discardChallenge(code, "slack")).toBe(false);
 });
 
 test("discarding for another provider leaves the code working", async () => {
-  const owner = user();
+  const owner = await user();
   const { code } = await store.issueChallenge(owner, "slack");
   expect(await store.discardChallenge(code, "github" as IdentityProvider)).toBe(
     false,

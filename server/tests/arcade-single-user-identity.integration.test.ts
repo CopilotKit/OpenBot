@@ -39,6 +39,7 @@ import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { directoryFor } from "./support/directory";
 import { seedPeople } from "./support/people";
 
 /**
@@ -594,7 +595,11 @@ async function boot(
   { named = true }: { named?: boolean } = {},
 ) {
   const database = open(url);
-  await initializeDevActorUser(database, signedIn === undefined);
+  await initializeDevActorUser(
+    database,
+    signedIn === undefined,
+    directoryFor(database),
+  );
   if (signedIn) await seedPeople(database, [signedIn]);
   const actor = signedIn ?? DEV_ACTOR.id;
   const settled = named

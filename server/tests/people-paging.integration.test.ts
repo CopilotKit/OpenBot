@@ -4,6 +4,7 @@ import { createDatabase } from "../src/db/client";
 import { sessions, users } from "../src/db/schema";
 import { createPeopleStore } from "../src/people/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
 
 /**
  * The people list has to stop growing with the company.
@@ -19,6 +20,8 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// Who on a page was removed is asked of Intelligence's organization directory.
+useTestPeople();
 
 const store = createPeopleStore(database, []);
 const PREFIX = "paging-test-";

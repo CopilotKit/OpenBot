@@ -43,7 +43,6 @@ import {
   proactiveRuns,
   proactiveSettings,
   proactiveSuggestions,
-  userRoles,
   users,
   workItems,
 } from "../src/db/schema";
@@ -117,7 +116,11 @@ beforeAll(async () => {
     { ...seller, name: "Seller", groups: [`sales-${suite}`] },
     { ...member, name: "Member" },
   ]);
-  await database.insert(userRoles).values({ userId: admin.id, role: "admin" });
+  // The role is on the person's row, this deployment's copy of Intelligence's directory.
+  await database
+    .update(users)
+    .set({ role: "admin" })
+    .where(eq(users.id, admin.id));
   await seedBot({
     id: inboxBot,
     name: "Inbox Bot",

@@ -30,7 +30,6 @@ import {
   enterpriseSettings,
   modelUsage,
   networkPolicies,
-  revokedAccess,
   scimGroups,
   sessions,
   ssoProviders,
@@ -40,6 +39,11 @@ import {
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  liftRemovals,
+  purgeDirectoryPeople,
+  useTestPeople,
+} from "./support/directory";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
@@ -134,9 +138,6 @@ afterAll(async () => {
   await controls?.stop();
   await clean();
   await removeBots([bot]);
-  await database
-    .delete(revokedAccess)
-    .where(like(revokedAccess.email, `%${suite}%`));
   await database
     .delete(scimGroups)
     .where(like(scimGroups.displayName, `%${suite}%`));
@@ -871,6 +872,10 @@ describe("SCIM 2.0 through Better Auth", () => {
   let auth: ReturnType<typeof createAuth>;
   const scimEmail = `ent-scim-${suite}@acme.test`;
 
+  // People, their groups and who the directory deactivated live in Intelligence's organization
+  // directory; the SCIM plugin's writes reach it once each request's transaction commits.
+  const directory = useTestPeople();
+
   beforeAll(() => {
     process.env.SCIM_BEARER_TOKEN = token;
     auth = createAuth(
@@ -890,8 +895,14 @@ describe("SCIM 2.0 through Better Auth", () => {
       auditStore,
     );
   });
-  afterAll(() => {
+  afterAll(async () => {
     delete process.env.SCIM_BEARER_TOKEN;
+    await liftRemovals([scimEmail]);
+    const [person] = await database
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, scimEmail));
+    if (person) await purgeDirectoryPeople([person.id]);
   });
 
   const scim = (method: string, path: string, body?: unknown, bearer = token) =>
@@ -926,6 +937,11 @@ describe("SCIM 2.0 through Better Auth", () => {
       .from(users)
       .where(eq(users.email, scimEmail));
     expect(person).toBeDefined();
+    // The person the directory provisioned is Intelligence's, as a plain user.
+    expect(await directory.client.getPerson(person?.id ?? "")).toMatchObject({
+      email: scimEmail,
+      role: "user",
+    });
 
     const group = await scim("POST", "/Groups", {
       schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
@@ -938,26 +954,24 @@ describe("SCIM 2.0 through Better Auth", () => {
       .from(users)
       .where(eq(users.email, scimEmail));
     expect(grouped?.groups).toEqual([`engineering-${suite}`]);
+    expect(
+      (await directory.client.getPerson(person?.id ?? ""))?.groups,
+    ).toEqual([`engineering-${suite}`]);
 
     const deactivated = await scim("PATCH", `/Users/${createdBody.id}`, {
       schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
       Operations: [{ op: "replace", path: "active", value: false }],
     });
     expect(deactivated.status, await deactivated.clone().text()).toBe(200);
-    const [denied] = await database
-      .select()
-      .from(revokedAccess)
-      .where(eq(revokedAccess.email, scimEmail));
-    expect(denied?.revokedBy).toBe("scim:directory");
+    // Deny-listed in Intelligence before the directory was answered.
+    expect((await directory.client.getRemoval(scimEmail))?.removedBy).toBe(
+      "scim:directory",
+    );
 
     await scim("PATCH", `/Users/${createdBody.id}`, {
       schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
       Operations: [{ op: "replace", path: "active", value: true }],
     });
-    const after = await database
-      .select()
-      .from(revokedAccess)
-      .where(eq(revokedAccess.email, scimEmail));
-    expect(after).toEqual([]);
+    expect(await directory.client.getRemoval(scimEmail)).toBeNull();
   });
 });
