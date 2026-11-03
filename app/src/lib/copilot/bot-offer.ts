@@ -1,8 +1,5 @@
 import type { RunAgentInput, Tool } from "@ag-ui/core";
-import {
-  type ReactFrontendTool,
-  useCopilotKit,
-} from "@copilotkit/react-core/v2";
+import { type AbstractAgent, useCopilotKit } from "@copilotkit/react-core/v2";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect } from "react";
 import { defer, from, mergeMap } from "rxjs";
@@ -31,9 +28,10 @@ import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
  * knows the run's Bot can see it when `available` is false (`buildFrontendTools`), so every tool
  * whose offer depends on the Bot is now registered as available, with a rule here saying who is
  * offered it. Each agent narrows its own run's list with those rules and the facts of its own Bot,
- * in the browser, before the run leaves (`offerItsOwnTools`, given to every agent by `BotOffers`).
- * The agent outlives the screen that made it, so the narrowing goes on for the steps of a turn the
- * person has left.
+ * in the browser, before the run leaves (`offerItsOwnTools`). It is given to an agent where the agent
+ * is made or found: by the conversation that makes it, and by `BotOffers` for every agent the SDK
+ * holds or runs. The agent outlives the screen that made it, so the narrowing goes on for the steps
+ * of a turn the person has left.
  *
  * This decides what the model is told it can do. It is not the boundary: the server still checks the
  * component grant, the computer route and the person's access to the Bot on every call.
@@ -64,10 +62,18 @@ export const heldComponent: OfferRule = (bot, name) => {
 };
 
 /**
- * The rules of every tool registered now, by name. A tool without one is offered to every run: its
- * offer does not depend on the Bot.
+ * The rule of every tool registered now, by name, kept per registrant. A tool without one is offered
+ * to every run: its offer does not depend on the Bot.
+ *
+ * PER REGISTRANT, NOT PER NAME. The gallery and the browser-authored components both declare the
+ * same rule for a component's name, and a name could be declared by both. Kept as one entry per
+ * name, the first of them to leave took the rule with it, and the component it named was then
+ * offered to every Bot. Each registration is its own entry now, and only its own leaves with it.
  */
-const rules = new Map<string, OfferRule>();
+const registered = new Map<string, { rule: OfferRule }[]>();
+
+const ruleOf = (name: string): OfferRule | undefined =>
+  registered.get(name)?.at(-1)?.rule;
 
 /**
  * Declare who is offered these tools, for as long as the component registering them is mounted.
@@ -79,11 +85,19 @@ export function useOfferedTo(
   offered: Readonly<Record<string, OfferRule>>,
 ): void {
   useLayoutEffect(() => {
-    const entries = Object.entries(offered);
-    for (const [name, rule] of entries) rules.set(name, rule);
+    const mine = Object.entries(offered).map(
+      ([name, rule]) => [name, { rule }] as const,
+    );
+    for (const [name, entry] of mine)
+      registered.set(name, [...(registered.get(name) ?? []), entry]);
     return () => {
-      for (const [name, rule] of entries)
-        if (rules.get(name) === rule) rules.delete(name);
+      for (const [name, entry] of mine) {
+        const left = (registered.get(name) ?? []).filter(
+          (other) => other !== entry,
+        );
+        if (left.length > 0) registered.set(name, left);
+        else registered.delete(name);
+      }
     };
   }, [offered]);
 }
@@ -92,7 +106,7 @@ export function useOfferedTo(
 export function offerFor(
   tools: readonly Tool[],
   bot: BotFacts,
-  ruleFor: (name: string) => OfferRule | undefined = (name) => rules.get(name),
+  ruleFor: (name: string) => OfferRule | undefined = ruleOf,
 ): Tool[] {
   return tools.flatMap((tool) => {
     const rule = ruleFor(tool.name);
@@ -105,75 +119,78 @@ export function offerFor(
   });
 }
 
-/** How long a fact read for one step is reused by the next, the same as the screen's own poll. */
+/** How long a fact is fresh enough not to be fetched again behind a step, as the screen's own poll. */
 const FRESH_MS = 5_000;
+
+/**
+ * One fact: what is already known, at once, with a fresher copy fetched quietly for the next step.
+ * Only a fact never read before is waited for.
+ *
+ * WITH THE SCREEN'S OWN RETRIES. These are the very queries the screen observes, so a read here that
+ * gave up on its first failure put the shared query into an error state: one transient failure, and
+ * the cards on screen said the grant could not be checked.
+ */
+async function fact<T>(
+  known: T | undefined,
+  refresh: () => Promise<void>,
+  fetch: () => Promise<T>,
+): Promise<T | undefined> {
+  if (known !== undefined) {
+    void refresh();
+    return known;
+  }
+  return fetch().catch(() => undefined);
+}
 
 /**
  * The facts of one Bot, read through the same queries the screen reads them with.
  *
  * Never throws. A fact that cannot be read is undefined, and each rule says what undefined means:
- * no components and no skills, and the computer left to the server, as the screen always did while
- * they loaded.
+ * no components, no skills and no computer.
  */
 export async function factsFor(
   queries: QueryClient,
   botId: string,
 ): Promise<BotFacts> {
-  const read = <T>(promise: Promise<T>) =>
-    promise.then(
-      (value) => value,
-      () => undefined,
-    );
-  const [components, profile, mine, plugins] = await Promise.all([
-    read(
-      queries.fetchQuery({
-        ...agentComponentsQueryOptions(botId),
-        staleTime: FRESH_MS,
-        retry: false,
-      }),
+  const components = agentComponentsQueryOptions(botId);
+  const profile = agentQueryOptions(botId);
+  const mine = myCapabilitiesQueryOptions();
+  const plugins = agentPluginsQueryOptions(botId);
+  const [held, owner, allowed, granted] = await Promise.all([
+    fact(
+      queries.getQueryData(components.queryKey),
+      () => queries.prefetchQuery({ ...components, staleTime: FRESH_MS }),
+      () => queries.fetchQuery(components),
     ),
-    read(
-      queries.fetchQuery({
-        ...agentQueryOptions(botId),
-        staleTime: FRESH_MS,
-        retry: false,
-      }),
+    fact(
+      queries.getQueryData(profile.queryKey),
+      () => queries.prefetchQuery({ ...profile, staleTime: FRESH_MS }),
+      () => queries.fetchQuery(profile),
     ),
-    read(
-      queries.fetchQuery({
-        ...myCapabilitiesQueryOptions(),
-        staleTime: FRESH_MS,
-        retry: false,
-      }),
+    fact(
+      queries.getQueryData(mine.queryKey),
+      () => queries.prefetchQuery({ ...mine, staleTime: FRESH_MS }),
+      () => queries.fetchQuery(mine),
     ),
-    read(
-      queries.fetchQuery({
-        ...agentPluginsQueryOptions(botId),
-        staleTime: FRESH_MS,
-        retry: false,
-      }),
+    fact(
+      queries.getQueryData(plugins.queryKey),
+      () => queries.prefetchQuery({ ...plugins, staleTime: FRESH_MS }),
+      () => queries.fetchQuery(plugins),
     ),
   ]);
   return {
-    components: components
+    components: held
       ? new Map(
-          components.map((component) => [
-            component.name,
-            component.description,
-          ]),
+          held.map((component) => [component.name, component.description]),
         )
       : undefined,
-    profile,
-    capabilities: mine?.capabilities,
-    skills: new Set((plugins?.skills ?? []).map((skill) => skill.slug)),
+    profile: owner,
+    capabilities: allowed?.capabilities,
+    skills: new Set((granted?.skills ?? []).map((skill) => skill.slug)),
   };
 }
 
-type Agent = NonNullable<
-  Parameters<NonNullable<ReactFrontendTool["handler"]>>[1]["agent"]
->;
-
-/** No Bot to ask about: nothing that depends on one is offered, and the computer is the server's. */
+/** No Bot to ask about: nothing that depends on one is offered, the computer included. */
 const NO_BOT: BotFacts = {
   components: undefined,
   profile: undefined,
@@ -181,53 +198,67 @@ const NO_BOT: BotFacts = {
   skills: new Set(),
 };
 
-/** The Bot each agent's runs belong to, for the one middleware each agent is given. */
-const botOf = new WeakMap<Agent, string | undefined>();
+/** The agents already given the offer. */
+const given = new WeakSet<AbstractAgent>();
+
+/**
+ * Lists a narrowing has already produced. A copy of an agent (`AbstractAgent.clone()`) carries the
+ * middlewares of the agent it was copied from, so a copy given the offer as well holds two; the
+ * second sees a list the first already narrowed and passes it on, rather than reading the facts and
+ * narrowing again. Both name the same Bot: a copy keeps the ids its Bot is read from.
+ */
+const narrowed = new WeakSet<readonly Tool[]>();
 
 /**
  * Narrow every run of this agent to its own Bot's offer.
  *
  * On the agent, not on the screen, because the agent is what outlives the screen: a channel's agent
- * carries on with a turn after the channel has closed. Installed once per agent; a second call only
- * updates the Bot. Nothing takes it off again, and nothing needs to: it goes when the agent does.
- * An agent that names no Bot is offered nothing that depends on one.
+ * carries on with a turn after the channel has closed. Given once per agent, for the Bot it was given
+ * for; nothing takes it off again, and nothing needs to: it goes when the agent does. An agent that
+ * names no Bot is offered nothing that depends on one.
  */
 export function offerItsOwnTools(
-  agent: Agent,
+  agent: AbstractAgent,
   botId: string | undefined,
   queries: QueryClient,
 ): void {
-  const installed = botOf.has(agent);
-  botOf.set(agent, botId);
-  if (installed) return;
-  agent.use((input: RunAgentInput, next: Agent) =>
-    defer(() => {
-      const bot = botOf.get(agent);
-      return from(bot ? factsFor(queries, bot) : Promise.resolve(NO_BOT));
-    }).pipe(
-      mergeMap((bot) =>
-        next.run({ ...input, tools: offerFor(input.tools, bot) }),
-      ),
-    ),
-  );
+  if (given.has(agent)) return;
+  given.add(agent);
+  agent.use((input: RunAgentInput, next: AbstractAgent) => {
+    if (narrowed.has(input.tools)) return next.run(input);
+    return defer(() =>
+      from(botId ? factsFor(queries, botId) : Promise.resolve(NO_BOT)),
+    ).pipe(
+      mergeMap((bot) => {
+        const tools = offerFor(input.tools, bot);
+        narrowed.add(tools);
+        return next.run({ ...input, tools });
+      }),
+    );
+  });
 }
 
 /**
- * Give every agent its Bot's offer before its first run, on every surface.
+ * Give every agent the SDK holds or runs its Bot's offer.
  *
- * The SDK announces a turn (`onAgentRunStarted`) and waits for its subscribers before the agent runs,
- * so this sees every agent a turn runs on: a channel's, a Bot's own page's, and any per-thread copy
- * the SDK makes, which never appears among its registered agents. The steps that follow in the same
- * turn run on the same agent and keep what it was given. Mounted once, beside the tools.
+ * WHERE THE AGENT IS FOUND, NOT ONLY WHEN IT RUNS. Every agent the SDK holds (a Bot's own page's, a
+ * channel's once registered) is given it as it arrives, and every agent a turn runs on is given it as
+ * the turn is announced, which also reaches a per-thread copy the SDK never registers. A channel gives
+ * its own agent the offer as it makes it (`ChannelChat`), before either. Mounted once, beside the
+ * tools.
  */
 export function BotOffers(): null {
   const { copilotkit } = useCopilotKit();
   const queries = useQueryClient();
   useEffect(() => {
+    const give = (agent: AbstractAgent) =>
+      offerItsOwnTools(agent, botOfAgent(agent), queries);
+    for (const agent of Object.values(copilotkit.agents)) give(agent);
     const subscription = copilotkit.subscribe({
-      onAgentRunStarted: ({ agent }) => {
-        offerItsOwnTools(agent, botOfAgent(agent), queries);
+      onAgentsChanged: ({ agents }) => {
+        for (const agent of Object.values(agents)) give(agent);
       },
+      onAgentRunStarted: ({ agent }) => give(agent),
     });
     return () => subscription.unsubscribe();
   }, [copilotkit, queries]);

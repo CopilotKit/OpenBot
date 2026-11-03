@@ -6,7 +6,7 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
@@ -36,7 +36,11 @@ import {
   turnFinishedAway,
 } from "@/lib/channels/turns-finished-away";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
-import { observeApprovalAgent } from "@/lib/copilot/approval-context";
+import {
+  observeApprovalAgent,
+  whileObserved,
+} from "@/lib/copilot/approval-context";
+import { offerItsOwnTools } from "@/lib/copilot/bot-offer";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
@@ -345,15 +349,20 @@ export function ChannelChat({
     ],
   });
   /*
-   * FOR THE AGENT'S LIFE, NOT THE SCREEN'S. A turn goes on after the person leaves this conversation,
-   * and a step a rule asks about is still sent to the gate with this conversation, which needs the
-   * run's input captured. The observer used to stop when this screen unmounted, and a gated step the
-   * Bot took after its person had left was sent to the computer with no conversation to ask in. It
-   * is not taken off: it goes when the agent does, after its last run.
+   * FOR THE AGENT'S TURNS, NOT THE SCREEN'S. A turn goes on after the person leaves this
+   * conversation, and a step a rule asks about is still sent to the gate with this conversation,
+   * which needs the run's input captured. Leaving lets the observer go, and it stops once the last
+   * turn started here (`whileObserved`, below) is over. It used to stop on leaving, and a run that
+   * started after that went to the gate under the previous run's id.
+   *
+   * And the agent is given its own Bot's offer as it is made, so its runs, here or after the person
+   * has left, are offered this Bot's tools and never the screen's (`bot-offer.ts`).
    */
+  const queries = useQueryClient();
   useEffect(() => {
-    observeApprovalAgent(agent);
-  }, [agent]);
+    offerItsOwnTools(agent, runtimeAgentId, queries);
+    return observeApprovalAgent(agent);
+  }, [agent, runtimeAgentId, queries]);
 
   /**
    * First-message seed from the compose screen. It is taken once per mount and retained until the
@@ -437,7 +446,10 @@ export function ChannelChat({
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
         await joinWithin({
-          connect: copilotkit.connectAgent({ agent }),
+          // A turn too: restoring a thread can run the calls it left unanswered.
+          connect: whileObserved(agent, () =>
+            copilotkit.connectAgent({ agent }),
+          ),
           deadline: afterMs(JOIN_DEADLINE_MS),
           detach: () => agent.detachActiveRun(),
         });
@@ -855,7 +867,7 @@ export function ChannelChat({
     setRunsInFlight((count) => count + 1);
     try {
       await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
-        copilotkit.runAgent({ agent: target }),
+        whileObserved(target, () => copilotkit.runAgent({ agent: target })),
       );
     } finally {
       watching.unsubscribe();
@@ -1130,7 +1142,9 @@ export function ChannelChat({
                   run={async () => {
                     setRunsInFlight((count) => count + 1);
                     try {
-                      await copilotkit.runAgent({ agent });
+                      await whileObserved(agent, () =>
+                        copilotkit.runAgent({ agent }),
+                      );
                     } finally {
                       setRunsInFlight((count) => count - 1);
                     }

@@ -1,3 +1,4 @@
+import type { FrontendToolHandlerContext } from "@copilotkit/react-core/v2";
 import {
   createContext,
   type ReactNode,
@@ -88,6 +89,13 @@ export function useActiveBotHolder(): BotHolder {
 
 /** What a handler is told about the agent that made its call. Only the ids are read. */
 export type CallingAgent = { agentId?: string; runtimeAgentId?: string };
+
+/**
+ * What the SDK hands a frontend tool's handler, taken from the SDK's own type so the handlers here
+ * cannot drift from it. Every part optional: a handler is also called by tests and by the approval
+ * gate's wrapper, which pass only what they have.
+ */
+export type ToolCallContext = Partial<FrontendToolHandlerContext>;
 
 /**
  * The Bot a tool call was made by, which is not always the Bot on screen.

@@ -19,7 +19,7 @@ import {
   passwordKeys,
   pendingSignInRequestsQueryOptions,
 } from "@/lib/passwords/queries";
-import { type CallingAgent, useBotOfCall } from "./active-bot";
+import { type ToolCallContext, useBotOfCall } from "./active-bot";
 import { useFrontendTool } from "./approval-tools";
 import { type OfferRule, useOfferedTo } from "./bot-offer";
 import { offeredBrowser } from "./computer-available";
@@ -88,15 +88,7 @@ export function SignInTool() {
     }),
     handler: async (
       input: { site: string; reason?: string },
-      {
-        signal,
-        toolCall,
-        agent,
-      }: {
-        signal?: AbortSignal;
-        toolCall?: { id?: string };
-        agent?: CallingAgent;
-      } = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => {
       const asked = await requestSignIn(
         {

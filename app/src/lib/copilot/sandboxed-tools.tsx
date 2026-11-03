@@ -13,7 +13,7 @@ import {
   type GrantedComponent,
 } from "@/lib/components/queries";
 import {
-  type CallingAgent,
+  type ToolCallContext,
   useBotOfCall,
   useDeclaredBotId,
 } from "@/lib/copilot/active-bot";
@@ -149,10 +149,7 @@ function SandboxedTool({
       description ??
       `A component authored in this deployment: ${component.name}.`,
     parameters: parametersFor(component.argumentSchema),
-    handler: async (
-      _args: unknown,
-      context: { toolCall?: { id?: string }; agent?: CallingAgent } = {},
-    ) => {
+    handler: async (_args: unknown, context: ToolCallContext = {}) => {
       // The Bot that drew it, not the one on screen; see `botOfCall`.
       const decision = await decideComponent(
         component.name,

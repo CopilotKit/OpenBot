@@ -13,7 +13,7 @@ import {
   runNavigation,
 } from "@/lib/computers/handoff";
 import {
-  type CallingAgent,
+  type ToolCallContext,
   useActiveBotHolder,
   useBotOfCall,
 } from "./active-bot";
@@ -59,16 +59,6 @@ async function waitForSecret(
   }
   return "gave up";
 }
-
-/**
- * What the SDK hands a computer tool's handler, as far as these read it: Stop, the call, and the
- * agent that made the call, which is how a handler knows whose computer it is (see `botOfCall`).
- */
-type CallContext = {
-  signal?: AbortSignal;
-  toolCall?: { id?: string };
-  agent?: CallingAgent;
-};
 
 /** What a computer tool's render can read back out of its own result. */
 type ComputerOutcome = {
@@ -274,7 +264,7 @@ export function ComputerTools() {
     handler: async (
       { url }: { url: string },
       // Context is optional in the SDK.
-      { signal, toolCall, agent }: CallContext = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => {
       const computerId = botOf(agent);
       const result = await runNavigation(computerId, url, toolCall?.id, signal);
@@ -335,7 +325,7 @@ export function ComputerTools() {
     parameters: z.object({}),
     handler: async (
       _input: Record<string, never>,
-      { signal, toolCall, agent }: CallContext = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => runBrowserRead(botOf(agent), "/read", toolCall?.id, signal),
     render: () => null,
   });
@@ -350,7 +340,7 @@ export function ComputerTools() {
     parameters: z.object({}),
     handler: async (
       _input: Record<string, never>,
-      { signal, toolCall, agent }: CallContext = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => runBrowserRead(botOf(agent), "/snapshot", toolCall?.id, signal),
     // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
@@ -394,7 +384,7 @@ export function ComputerTools() {
         text: string;
         submit?: boolean;
       },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -436,7 +426,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { ref: string; snapshotId: number },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -487,7 +477,7 @@ export function ComputerTools() {
         ref?: string;
         snapshotId?: number;
       },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),
@@ -534,7 +524,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
       const botId = botOf(agent);
       const asked = await callComputer(
@@ -588,7 +578,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string; request?: string },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
       try {
         const response = await tryClient(
@@ -625,7 +615,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string },
-      { signal, toolCall, agent }: CallContext = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => runHelpRequest(botOf(agent), input.reason, toolCall?.id, signal),
     // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
     render: ({ args, result, toolCallId }) => (
@@ -650,7 +640,10 @@ export function ComputerTools() {
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
-    handler: async (input: { path?: string }, { agent }: CallContext = {}) => {
+    handler: async (
+      input: { path?: string },
+      { agent }: ToolCallContext = {},
+    ) => {
       const computerId = botOf(agent);
       const result = await callComputer(computerId, "/files/list", {
         method: "POST",
@@ -697,7 +690,10 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }, { agent }: CallContext = {}) => {
+    handler: async (
+      input: { path: string },
+      { agent }: ToolCallContext = {},
+    ) => {
       const computerId = botOf(agent);
       const result = await callComputer(computerId, "/files/read", {
         method: "POST",
@@ -753,7 +749,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { command: string },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
       const computerId = botOf(agent);
       const result = await callComputer(
@@ -844,7 +840,7 @@ export function ComputerTools() {
         contents: string;
         append?: boolean;
       },
-      { agent }: CallContext = {},
+      { agent }: ToolCallContext = {},
     ) => {
       const computerId = botOf(agent);
       const result = await callComputer(computerId, "/files/write", {
@@ -903,7 +899,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { deltaY?: number },
-      { signal, agent }: CallContext = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
         botOf(agent),

@@ -34,12 +34,13 @@ export function computerToolsOffered({
   profile,
   capabilities,
 }: {
-  /** Undefined while it loads: the server is the one that decides, so unresolved offers. */
+  /** Undefined when it could not be read, or the run names no Bot: then nothing is offered. */
   profile: { visibility: string; canManage: boolean } | undefined;
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
 }): ComputerToolsOffered {
   const mine = computerDrivable(profile);
-  // An unresolved switch reads as allowed, for the same reason an unresolved profile does.
+  // An unresolved switch reads as allowed: the switches are the deployment's, and the computer
+  // boundary refuses on every call anyway.
   const allows = (capability: CapabilityKey) =>
     capabilities?.[capability] !== false;
   const browser = mine && allows("cloudBrowser");
@@ -60,7 +61,13 @@ export function computerToolsOffered({
 export function computerDrivable(
   profile: { visibility: string; canManage: boolean } | undefined,
 ): boolean {
-  return !profile || profile.visibility === "public" || profile.canManage;
+  /*
+   * UNKNOWN IS NO. A computer belongs to a Bot, and a Bot nobody could read may be a Team Bot whose
+   * computer this person may not drive; a run that names no Bot at all has no computer, and its call
+   * would fall back to whichever Bot is on screen. Both used to be offered every computer tool.
+   */
+  if (!profile) return false;
+  return profile.visibility === "public" || profile.canManage;
 }
 
 /**

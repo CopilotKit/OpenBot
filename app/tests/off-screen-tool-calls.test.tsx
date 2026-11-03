@@ -8,6 +8,7 @@ import {
 } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
+import { useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
@@ -157,7 +158,13 @@ function runEvents(input: RunAgentInput): unknown[] {
   const step = input.messages.filter(
     (message) => message.role === "assistant" && message.toolCalls?.length,
   ).length;
-  const making = step === 0 ? call : then[step - 1];
+  // The other Bot only ever answers in words.
+  const making =
+    input.threadId === otherChannel.threadId
+      ? undefined
+      : step === 0
+        ? call
+        : then[step - 1];
   if (making) {
     const id = callId(step);
     const assistant = {
@@ -380,7 +387,11 @@ beforeAll(() => {
       if (url.pathname.endsWith("/run")) {
         const body = RunAgentInputSchema.parse(await request.json());
         runs.push(body);
-        if (body.messages.at(-1)?.role !== "tool") await arrive;
+        if (
+          body.threadId === channel.threadId &&
+          body.messages.at(-1)?.role !== "tool"
+        )
+          await arrive;
         return sse(runEvents(body));
       }
       if (url.pathname === `/api/threads/${channel.threadId}/messages`)
@@ -453,6 +464,7 @@ function app(place: Place) {
   return (
     <QueryClientProvider client={queryClient}>
       <CopilotProvider>
+        <Capture />
         {place === "conversation" ? (
           <ChannelChat
             channel={channel}
@@ -473,12 +485,24 @@ function app(place: Place) {
   );
 }
 
+/** The CopilotKit core the app runs, to reach a conversation's agent from outside the screen. */
+let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
+function Capture() {
+  core = useCopilotKit().copilotkit;
+  return null;
+}
+
 /**
  * Ask the crm Bot for something, go to `place` while it is working, and only then let its call
  * arrive. Resolves once the Bot's next run, the one carrying the call's result, has been asked for,
  * and the runs for every call in `then` after it.
  */
-async function leaveBeforeTheCall(place: Place) {
+async function leaveBeforeTheCall(
+  place: Place,
+  meanwhile: (
+    view: ReturnType<typeof render>,
+  ) => Promise<void> = async () => {},
+) {
   let release = () => {};
   arrive = new Promise((resolve) => {
     release = resolve;
@@ -491,6 +515,7 @@ async function leaveBeforeTheCall(place: Place) {
   );
   await user.click(view.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(runs).toHaveLength(1), { timeout: 5000 });
+  const agent = core?.getAgent(`channel:${channel.id}`);
 
   view.rerender(app(place));
   if (place === "elsewhere") await view.findByText("Settings");
@@ -498,11 +523,13 @@ async function leaveBeforeTheCall(place: Place) {
     await waitFor(() =>
       expect(view.queryByRole("textbox", { name: "Message" })).toBeTruthy(),
     );
+  await meanwhile(view);
+  const before = runs.length;
   release();
-  await waitFor(() => expect(runs).toHaveLength(2 + then.length), {
+  await waitFor(() => expect(runs).toHaveLength(before + 1 + then.length), {
     timeout: 5000,
   });
-  return view;
+  return { view, agent };
 }
 
 /** What the Bot was told a call came to, from the run that carried it. */
@@ -517,7 +544,7 @@ function result(id = CALL_ID): string {
 
 test("a record the Bot draws after its person has left the conversation is checked for that Bot, and is there when they come back", async () => {
   call = { name: "showRecord", args: RECORD_ARGS };
-  const view = await leaveBeforeTheCall("elsewhere");
+  const { view } = await leaveBeforeTheCall("elsewhere");
 
   expect(decisions).toEqual([{ agentId: BOT, functions: [] }]);
   expect(result()).toBe(RECORD.confirmation);
@@ -641,4 +668,62 @@ test("a step a rule asks about, in a run that starts after its person has left, 
   // Nothing went to the computer without its conversation.
   expect(computerCalls.filter((path) => path.endsWith("/click"))).toEqual([]);
   expect(JSON.parse(result(callId(1)))).toMatchObject({ ok: true });
+});
+
+/*
+ * THE OFFER IS GIVEN WHERE THE AGENT IS MADE. It used to be given only when the SDK announced a
+ * turn, and the SDK announces only a turn's first run; a Bot's first run starting while another
+ * Bot's turn was still going had to rely on that announcement reaching it.
+ */
+test("a Bot's first run, started while another Bot's turn is still going, is offered its own tools", async () => {
+  call = {
+    name: "computer_navigate",
+    args: { url: "https://crm.example/accounts/northwind" },
+  };
+  await leaveBeforeTheCall("another Bot", async (view) => {
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.type(
+      await view.findByRole("textbox", { name: "Message" }),
+      "What changed today?",
+    );
+    await user.click(view.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expect(runs.some((run) => run.threadId === otherChannel.threadId)).toBe(
+        true,
+      ),
+    );
+  });
+
+  const theirs = offered(
+    runs.find((run) => run.threadId === otherChannel.threadId),
+  );
+  expect(theirs.names).toContain("showMetrics");
+  expect(theirs.names).toContain("list_bots");
+  expect(theirs.names).not.toContain("showRecord");
+  // A teammate on a Team Bot does not drive its computer.
+  expect(theirs.names.filter((name) => name.startsWith("computer_"))).toEqual(
+    [],
+  );
+});
+
+/*
+ * KEPT WHILE ITS TURN RUNS, LET GO AFTER. The observer outlives the screen so a turn's gated steps
+ * still go with their conversation, and then it went on holding the agent and its last input for the
+ * rest of the session, for every conversation visited.
+ */
+test("a conversation's approval observer lets its agent go once the person has left and its turn is over", async () => {
+  call = {
+    name: "computer_navigate",
+    args: { url: "https://crm.example/accounts/northwind" },
+  };
+  const { agent } = await leaveBeforeTheCall("elsewhere");
+  const observers = () =>
+    (agent?.subscribers ?? []).filter(
+      (subscriber) =>
+        Object.keys(subscriber).sort().join() ===
+        "onRunInitialized,onRunStartedEvent",
+    );
+  expect(agent).toBeDefined();
+
+  await waitFor(() => expect(observers()).toEqual([]), { timeout: 3000 });
 });

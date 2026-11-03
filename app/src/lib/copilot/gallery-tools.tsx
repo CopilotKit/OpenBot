@@ -24,7 +24,7 @@ import {
   type GrantedComponent,
 } from "@/lib/components/queries";
 import {
-  type CallingAgent,
+  type ToolCallContext,
   useBotOfCall,
   useDeclaredBotId,
 } from "@/lib/copilot/active-bot";
@@ -138,7 +138,7 @@ function GrantedTool({
     parameters: spec.parameters,
     handler: async (
       args: Record<string, unknown>,
-      context: { toolCall?: { id?: string }; agent?: CallingAgent },
+      context: ToolCallContext = {},
     ) => {
       /*
        * Asked about the Bot that drew it, which is not always the one on screen: a turn carries on
@@ -273,8 +273,15 @@ function useHumanInTheLoopTool(tool: FrontendTool) {
  * human-in-the-loop hook wraps the render in a component of its own that is rebuilt whenever the
  * tool's description changes (1.83.0: a `useCallback` over `tool.description`). Ours changes from
  * the built-in words to the published ones exactly when the grants load, so a decision on screen was
- * torn down at that moment, and again on a revoke. This is that hook's answer-and-wait handler, kept
- * as it is, with our render created once.
+ * torn down at that moment, and again on a revoke. This is that hook's answer-and-wait handler, with
+ * our render created once.
+ *
+ * ONE WAITING CALL PER TOOL CALL, NOT ONE PER TOOL. The SDK's hook keeps a single answer slot, which
+ * is enough while only the conversation on screen is offered a decision. Every run of a Bot holding
+ * it is offered one now (`bot-offer.ts`), on screen or not, so two can wait at once: a second call
+ * took the slot, the first never heard back, and the answer given on one card went to whichever call
+ * had asked last, which could be another conversation's. Each call waits under its own id, and each
+ * card answers its own.
  *
  * `register` is the SDK hook (with its unmount cleanup) in the app and a recorder in the tests. Exported for its tests.
  */
@@ -285,36 +292,38 @@ export function useDecisionTool(
   register: (tool: FrontendTool) => void = useHumanInTheLoopTool,
 ) {
   const description = held.get(spec.name);
-  const resolveRef = useRef<((result: unknown) => void) | null>(null);
-  const stopListeningRef = useRef<(() => void) | null>(null);
+  // The calls waiting for an answer, by tool call id: how to answer each, and how to stop listening.
+  const waitingRef = useRef(
+    new Map<string, { resolve: (result: unknown) => void; stop: () => void }>(),
+  );
 
-  const respond = useCallback(async (result: unknown) => {
-    if (!resolveRef.current) return;
-    stopListeningRef.current?.();
-    stopListeningRef.current = null;
-    resolveRef.current(result);
-    resolveRef.current = null;
+  const respond = useCallback(async (result: unknown, toolCallId = "") => {
+    const waiting = waitingRef.current.get(toolCallId);
+    if (!waiting) return;
+    waitingRef.current.delete(toolCallId);
+    waiting.stop();
+    waiting.resolve(result);
   }, []);
 
   const handler = useCallback(
-    async (_args: unknown, context?: { signal?: AbortSignal }) =>
+    async (_args: unknown, context: ToolCallContext = {}) =>
       new Promise<unknown>((resolve, reject) => {
-        const signal = context?.signal;
+        const signal = context.signal;
         if (signal?.aborted) {
           reject(new Error("Human-in-the-loop interaction aborted"));
           return;
         }
-        resolveRef.current = resolve;
-        if (signal) {
-          const onAbort = () => {
-            stopListeningRef.current = null;
-            resolveRef.current = null;
-            reject(new Error("Human-in-the-loop interaction aborted"));
-          };
-          signal.addEventListener("abort", onAbort, { once: true });
-          stopListeningRef.current = () =>
-            signal.removeEventListener("abort", onAbort);
-        }
+        const id = context.toolCall?.id ?? "";
+        const onAbort = () => {
+          if (waitingRef.current.get(id)?.resolve === resolve)
+            waitingRef.current.delete(id);
+          reject(new Error("Human-in-the-loop interaction aborted"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        waitingRef.current.set(id, {
+          resolve,
+          stop: () => signal?.removeEventListener("abort", onAbort),
+        });
       }),
     [],
   );
@@ -343,7 +352,7 @@ export function useDecisionTool(
 export function makeDecisionRender(
   spec: GalleryComponent,
   store: GrantStore,
-  respond: (result: unknown) => Promise<void>,
+  respond: (result: unknown, toolCallId?: string) => Promise<void>,
 ) {
   const Component = spec.Component;
   return function DecisionRender(props: Record<string, unknown>) {
@@ -352,7 +361,14 @@ export function makeDecisionRender(
       store.get,
       store.get,
     );
-    const answer = props.status === "executing" ? respond : undefined;
+    // This card answers its own call, and only that one.
+    const toolCallId =
+      typeof props.toolCallId === "string" ? props.toolCallId : "";
+    const answerThisCall = useCallback(
+      (result: unknown) => respond(result, toolCallId),
+      [toolCallId],
+    );
+    const answer = props.status === "executing" ? answerThisCall : undefined;
     const state = cardState(snapshot, spec.name, spec.title);
     if (state === "draw") return <Component {...props} respond={answer} />;
     if (state === "wait-for-grant") {
