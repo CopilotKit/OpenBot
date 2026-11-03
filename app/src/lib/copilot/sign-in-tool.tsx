@@ -19,7 +19,7 @@ import {
   passwordKeys,
   pendingSignInRequestsQueryOptions,
 } from "@/lib/passwords/queries";
-import { useActiveBotHolder } from "./active-bot";
+import { type CallingAgent, useBotOfCall } from "./active-bot";
 import { useFrontendTool } from "./approval-tools";
 import { useComputerToolsOffered } from "./computer-available";
 
@@ -64,7 +64,7 @@ function parse(result: string | undefined): Outcome {
  * in state never reached the card, and it waited with no way to open the form.
  */
 export function SignInTool() {
-  const bot = useActiveBotHolder();
+  const botOf = useBotOfCall();
   // Stable for the provider's life, so the SDK's once-registered handler may keep it.
   const queryClient = useQueryClient();
   // A sign-in is typed into the Bot's browser; see computerToolsOffered.
@@ -87,11 +87,17 @@ export function SignInTool() {
       {
         signal,
         toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+        agent,
+      }: {
+        signal?: AbortSignal;
+        toolCall?: { id?: string };
+        agent?: CallingAgent;
+      } = {},
     ) => {
       const asked = await requestSignIn(
         {
-          botId: bot.current,
+          // Into the browser of the Bot that asked, which need not be the one on screen.
+          botId: botOf(agent),
           site: input.site,
           ...(input.reason ? { reason: input.reason } : {}),
           ...(toolCall?.id ? { toolCallId: toolCall.id } : {}),

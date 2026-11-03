@@ -57,7 +57,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         ? { openGenerativeUI: { designSkill: GENERATIVE_UI_DESIGN_SKILL } }
         : {})}
     >
-      {/* Computer tools target the Bot declared by the mounted surface. */}
+      {/* Computer tools act on the Bot that made the call, which is usually the one on screen. */}
       <ActiveBotProvider>
         <ComputerTools />
         {/* The private sign-in request: a card whose form posts to the server, never to the Bot. */}
@@ -72,7 +72,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         <EscalationTool />
         {/* A coding harness Bot's own tools, which it runs itself: commands, diffs and its plan. */}
         <CodingTools />
-        {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
+        {/* Gallery tools are registered once; their handlers ask about the Bot that made the call (see botOfCall). */}
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}
         <SandboxedTools />

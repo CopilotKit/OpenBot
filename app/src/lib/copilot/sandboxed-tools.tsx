@@ -12,7 +12,11 @@ import {
   decideComponent,
   type GrantedComponent,
 } from "@/lib/components/queries";
-import { useActiveBotId, useDeclaredBotId } from "@/lib/copilot/active-bot";
+import {
+  type CallingAgent,
+  useBotOfCall,
+  useDeclaredBotId,
+} from "@/lib/copilot/active-bot";
 import {
   type PublishedSandboxed,
   publishedSandboxedQueryOptions,
@@ -23,7 +27,6 @@ import {
  * render published runtime markup in the SDK sandbox.
  */
 export function SandboxedTools() {
-  const botId = useActiveBotId();
   // Grants are fetched only once a surface has declared its Bot; the placeholder is not one the
   // server knows, and asking would 404 on every poll.
   const declared = useDeclaredBotId();
@@ -41,7 +44,6 @@ export function SandboxedTools() {
     <>
       {(published ?? []).map((component) => (
         <SandboxedTool
-          botId={botId}
           component={component}
           description={held.get(component.name)}
           key={component.name}
@@ -65,14 +67,13 @@ function parametersFor(schema: Record<string, unknown>) {
 function SandboxedTool({
   component,
   description,
-  botId,
 }: {
   component: PublishedSandboxed;
   description: string | undefined;
-  botId: string;
 }) {
   const [refusals, setRefusals] = useState<Map<string, string>>(new Map());
   const isHeld = description !== undefined;
+  const botOf = useBotOfCall();
 
   const render = useCallback(
     // `toolCallId`, not `toolCall.id`: a renderer's props carry the id flat,
@@ -140,9 +141,13 @@ function SandboxedTool({
     available: isHeld,
     handler: async (
       _args: unknown,
-      context: { toolCall?: { id?: string } } = {},
+      context: { toolCall?: { id?: string }; agent?: CallingAgent } = {},
     ) => {
-      const decision = await decideComponent(component.name, botId);
+      // The Bot that drew it, not the one on screen; see `botOfCall`.
+      const decision = await decideComponent(
+        component.name,
+        botOf(context?.agent),
+      );
       if (!decision.allowed) {
         const reason = decision.reason ?? "That component is not allowed here.";
         const id = context?.toolCall?.id;

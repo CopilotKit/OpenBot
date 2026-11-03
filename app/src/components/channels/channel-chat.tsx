@@ -35,7 +35,7 @@ import {
   onTurnFinishedAway,
   turnFinishedAway,
 } from "@/lib/channels/turns-finished-away";
-import { useActiveBot } from "@/lib/copilot/active-bot";
+import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
@@ -334,9 +334,9 @@ export function ChannelChat({
   const botProfile = agentProfiles?.find(
     (profile) => profile.id === runtimeAgentId,
   );
-  const channelAgentId = `channel:${channel.id}`;
+  const localAgentId = channelAgentId(channel.id);
   const { agent, isReady } = useAgent({
-    agentId: channelAgentId,
+    agentId: localAgentId,
     runtimeAgentId,
     threadId: channel.threadId,
     updates: [
@@ -1061,7 +1061,7 @@ export function ChannelChat({
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's
     // channel instance so an action continues this thread instead of looking for a default agent.
     <CopilotChatConfigurationProvider
-      agentId={channelAgentId}
+      agentId={localAgentId}
       threadId={channel.threadId}
     >
       <ConversationProvider ask={askFromComponent}>

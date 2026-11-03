@@ -12,7 +12,11 @@ import {
   runHelpRequest,
   runNavigation,
 } from "@/lib/computers/handoff";
-import { useActiveBotHolder } from "./active-bot";
+import {
+  type CallingAgent,
+  useActiveBotHolder,
+  useBotOfCall,
+} from "./active-bot";
 import { useFrontendTool } from "./approval-tools";
 import {
   useComputerAvailable,
@@ -52,6 +56,16 @@ async function waitForSecret(
   }
   return "gave up";
 }
+
+/**
+ * What the SDK hands a computer tool's handler, as far as these read it: Stop, the call, and the
+ * agent that made the call, which is how a handler knows whose computer it is (see `botOfCall`).
+ */
+type CallContext = {
+  signal?: AbortSignal;
+  toolCall?: { id?: string };
+  agent?: CallingAgent;
+};
 
 /** What a computer tool's render can read back out of its own result. */
 type ComputerOutcome = {
@@ -211,6 +225,13 @@ function stillStarting(outcome: ComputerOutcome): boolean {
 }
 
 export function ComputerTools() {
+  /*
+   * WHOSE COMPUTER, ASKED TWO WAYS. A handler acts for the Bot that made the call, which a turn the
+   * person walked away from keeps making while another screen, or another Bot, is in front of them;
+   * acting on the screen's Bot there opened pages and ran commands on the wrong computer. A renderer
+   * draws a call in the conversation on screen, whose Bot is the screen's, so it reads the holder.
+   */
+  const botOf = useBotOfCall();
   const bot = useActiveBotHolder();
   /*
    * Not offered to a Team Bot's teammates, and not offered where this deployment's capability
@@ -234,12 +255,9 @@ export function ComputerTools() {
     handler: async (
       { url }: { url: string },
       // Context is optional in the SDK.
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+      { signal, toolCall, agent }: CallContext = {},
     ) => {
-      const computerId = bot.current;
+      const computerId = botOf(agent);
       const result = await runNavigation(computerId, url, toolCall?.id, signal);
       if (result.ok) noteBrowsed(computerId);
       return result;
@@ -299,11 +317,8 @@ export function ComputerTools() {
     parameters: z.object({}),
     handler: async (
       _input: Record<string, never>,
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => runBrowserRead(bot.current, "/read", toolCall?.id, signal),
+      { signal, toolCall, agent }: CallContext = {},
+    ) => runBrowserRead(botOf(agent), "/read", toolCall?.id, signal),
     render: () => null,
   });
 
@@ -318,11 +333,8 @@ export function ComputerTools() {
     parameters: z.object({}),
     handler: async (
       _input: Record<string, never>,
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => runBrowserRead(bot.current, "/snapshot", toolCall?.id, signal),
+      { signal, toolCall, agent }: CallContext = {},
+    ) => runBrowserRead(botOf(agent), "/snapshot", toolCall?.id, signal),
     // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -366,10 +378,10 @@ export function ComputerTools() {
         text: string;
         submit?: boolean;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/type",
         {
           method: "POST",
@@ -409,10 +421,10 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/click",
         {
           method: "POST",
@@ -461,10 +473,10 @@ export function ComputerTools() {
         ref?: string;
         snapshotId?: number;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/key",
         {
           method: "POST",
@@ -509,9 +521,9 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) => {
-      const botId = bot.current;
+      const botId = botOf(agent);
       const asked = await callComputer(
         botId,
         "/control/secret",
@@ -564,11 +576,11 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string; request?: string },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) => {
       try {
         const response = await tryClient(
-          `/api/agents/${encodeURIComponent(bot.current)}/declined`,
+          `/api/agents/${encodeURIComponent(botOf(agent))}/declined`,
           { method: "POST", body: input, signal },
         );
         return response.ok
@@ -602,11 +614,8 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string },
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => runHelpRequest(bot.current, input.reason, toolCall?.id, signal),
+      { signal, toolCall, agent }: CallContext = {},
+    ) => runHelpRequest(botOf(agent), input.reason, toolCall?.id, signal),
     // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
     render: ({ args, result, toolCallId }) => (
       <HelpRequestCard
@@ -631,8 +640,8 @@ export function ComputerTools() {
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
-    handler: async (input: { path?: string }) => {
-      const computerId = bot.current;
+    handler: async (input: { path?: string }, { agent }: CallContext = {}) => {
+      const computerId = botOf(agent);
       const result = await callComputer(computerId, "/files/list", {
         method: "POST",
         body: input ?? {},
@@ -679,8 +688,8 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }) => {
-      const computerId = bot.current;
+    handler: async (input: { path: string }, { agent }: CallContext = {}) => {
+      const computerId = botOf(agent);
       const result = await callComputer(computerId, "/files/read", {
         method: "POST",
         body: input,
@@ -736,9 +745,9 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { command: string },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) => {
-      const computerId = bot.current;
+      const computerId = botOf(agent);
       const result = await callComputer(
         computerId,
         "/exec",
@@ -822,12 +831,15 @@ export function ComputerTools() {
         .optional()
         .describe("Add to the end of the file instead of replacing it"),
     }),
-    handler: async (input: {
-      path: string;
-      contents: string;
-      append?: boolean;
-    }) => {
-      const computerId = bot.current;
+    handler: async (
+      input: {
+        path: string;
+        contents: string;
+        append?: boolean;
+      },
+      { agent }: CallContext = {},
+    ) => {
+      const computerId = botOf(agent);
       const result = await callComputer(computerId, "/files/write", {
         method: "POST",
         body: input,
@@ -885,10 +897,10 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { deltaY?: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: CallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/scroll",
         {
           method: "POST",

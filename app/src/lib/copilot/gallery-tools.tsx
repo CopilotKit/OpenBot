@@ -23,7 +23,11 @@ import {
   decideComponent,
   type GrantedComponent,
 } from "@/lib/components/queries";
-import { useActiveBotId, useDeclaredBotId } from "@/lib/copilot/active-bot";
+import {
+  type CallingAgent,
+  useBotOfCall,
+  useDeclaredBotId,
+} from "@/lib/copilot/active-bot";
 import {
   GALLERY_COMPONENTS,
   type GalleryComponent,
@@ -40,7 +44,8 @@ import { settledArgs } from "@/lib/copilot/settled-args";
 
 /**
  * Register compiled gallery components once per name, scoped to the active Bot with `available`.
- * Handlers still recheck grants at call time because a run's offered tool list is only a snapshot.
+ * Handlers still recheck grants at call time because a run's offered tool list is only a snapshot,
+ * and they recheck them for the Bot that made the call, which the screen may no longer be showing.
  */
 export function GalleryTools() {
   const queryClient = useQueryClient();
@@ -52,8 +57,6 @@ export function GalleryTools() {
     });
   }, [queryClient]);
 
-  // Active Bot comes from the route/channel surface currently driving the provider.
-  const grantsFor = useActiveBotId();
   // See sandboxed-tools: the placeholder Bot is not fetchable, so the grant query waits for a
   // surface to declare a real one.
   const declared = useDeclaredBotId();
@@ -92,13 +95,7 @@ export function GalleryTools() {
             store={store}
           />
         ) : (
-          <GrantedTool
-            grantsFor={grantsFor}
-            held={held}
-            key={spec.name}
-            spec={spec}
-            store={store}
-          />
+          <GrantedTool held={held} key={spec.name} spec={spec} store={store} />
         ),
       )}
     </>
@@ -106,12 +103,10 @@ export function GalleryTools() {
 }
 
 function GrantedTool({
-  grantsFor,
   spec,
   held,
   store,
 }: {
-  grantsFor: string;
   spec: GalleryComponent;
   held: Map<string, string>;
   store: GrantStore;
@@ -120,6 +115,7 @@ function GrantedTool({
   const isHeld = description !== undefined;
   // Created ONCE: the SDK rebuilds a card whenever this identity changes. See `makeGalleryRender`.
   const [render] = useState(() => makeGalleryRender(spec, store));
+  const botOf = useBotOfCall();
 
   useFrontendTool({
     name: spec.name,
@@ -130,11 +126,15 @@ function GrantedTool({
     available: isHeld,
     handler: async (
       args: Record<string, unknown>,
-      context: { toolCall?: { id?: string } },
+      context: { toolCall?: { id?: string }; agent?: CallingAgent },
     ) => {
+      /*
+       * Asked about the Bot that drew it, which is not always the one on screen: a turn carries on
+       * after its person leaves the conversation. See `botOfCall`.
+       */
       const decision = await decideComponent(
         spec.name,
-        grantsFor,
+        botOf(context?.agent),
         spec.reads?.(args ?? {}) ?? [],
       );
       if (!decision.allowed) {
