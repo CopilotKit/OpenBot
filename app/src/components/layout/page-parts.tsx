@@ -129,14 +129,19 @@ export function PageSection({
   title?: string;
 }) {
   return (
-    <section className={cn("mt-12", className)}>
+    <section data-slot="page-section" className={cn("mt-12", className)}>
       {title ? (
         <div className="flex min-h-8 flex-row items-center justify-between gap-4">
           {/*
            * Close to body size and lighter than the page title, so the sections read as parts of
            * the page rather than as a second row of titles competing with it.
            */}
-          <h2 className="font-semibold text-base">{title}</h2>
+          <h2
+            data-slot="page-section-title"
+            className="font-semibold text-base"
+          >
+            {title}
+          </h2>
           {action}
         </div>
       ) : null}
@@ -175,6 +180,7 @@ export function PageRows({
      * that wraps to a second line still grows the row rather than being clipped.
      */
     <div
+      data-slot="page-rows"
       className={cn(
         "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
         "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
@@ -208,6 +214,7 @@ export function PageCard({
 }) {
   return (
     <div
+      data-slot="page-card"
       className={cn(
         "rounded-lg border border-border bg-card p-4 dark:border-transparent",
         className,

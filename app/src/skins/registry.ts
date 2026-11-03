@@ -1,4 +1,5 @@
 import { appConfig } from "@/lib/generated/application-config";
+import { latch } from "./latch";
 import { opendots } from "./opendots";
 import { openduet } from "./openduet";
 import { openmuse } from "./openmuse";
@@ -22,6 +23,7 @@ export const SKINS: Record<SkinId, Skin> = {
   openduet,
   opendots,
   openmuse,
+  latch,
 };
 
 export function useActiveSkin(): Skin {

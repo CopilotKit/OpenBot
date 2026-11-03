@@ -217,7 +217,7 @@ test("a skin OpenBot does not ship is refused with the skins it does", async () 
   );
   expect(refused.status).toBe(400);
   expect(((await refused.json()) as { error: string }).error).toContain(
-    "openbot, openduet, opendots, openmuse",
+    "openbot, openduet, opendots, openmuse, latch",
   );
 });
 

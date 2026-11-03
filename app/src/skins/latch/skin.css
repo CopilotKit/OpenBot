@@ -1,0 +1,167 @@
+/*
+ * Latch: the compact, card-based look of Jack's Latch browser (see Latch-look-and-feel.md).
+ *
+ * - Calm greys, white cards on a light grey page (dark grey cards on near-black in dark), one accent
+ *   colour (Ocean Blue) for icons, section labels and switches. Everything else stays neutral.
+ * - The system sans-serif, small text: 14px row names, 11px grey line under them.
+ * - Every group of rows sits on a 16px-rounded card with a hairline border; rows are split by faint
+ *   lines inset 16px; a tiny bold ALL-CAPS label in the accent sits above each card.
+ *
+ * Light is `:root[data-skin="latch"]` and dark is `:root[data-skin="latch"].dark`, and every token is
+ * set in both, because the skin's selector outranks OpenBot's own `.dark`.
+ */
+
+:root[data-skin="latch"] {
+  color-scheme: light;
+
+  --background: #f8f9fa;
+  --foreground: #202124;
+  --card: #ffffff;
+  --card-foreground: #202124;
+  --popover: #ffffff;
+  --popover-foreground: #202124;
+  --primary: #202124;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f3f4;
+  --secondary-foreground: #202124;
+  --muted: #f1f3f4;
+  --muted-foreground: #5f6368;
+  --accent: #f1f3f4;
+  --accent-foreground: #202124;
+  --destructive: #d93025;
+  --success: #1e8e3e;
+  --border: #dadce0;
+  --input: #dadce0;
+  --ring: #0b57d0;
+  --radius: 1rem;
+  --sidebar: #f8f9fa;
+  --sidebar-foreground: #202124;
+  --sidebar-primary: #202124;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(11 87 208 / 10%);
+  --sidebar-accent-foreground: #202124;
+  --sidebar-border: #dadce0;
+  --sidebar-ring: #0b57d0;
+
+  /* Latch's own roles. */
+  --latch-accent: #0b57d0;
+  --latch-on-accent: #ffffff;
+  --latch-raised: #f1f3f4;
+  --latch-card-border: rgb(218 220 224 / 40%);
+  --latch-row-line: rgb(218 220 224 / 20%);
+  --latch-badge: #ff9500;
+}
+
+:root[data-skin="latch"].dark {
+  color-scheme: dark;
+
+  --background: #131314;
+  --foreground: #e3e3e3;
+  --card: #1e1e1e;
+  --card-foreground: #e3e3e3;
+  --popover: #1e1e1e;
+  --popover-foreground: #e3e3e3;
+  --primary: #e3e3e3;
+  --primary-foreground: #131314;
+  --secondary: #28292a;
+  --secondary-foreground: #e3e3e3;
+  --muted: #28292a;
+  --muted-foreground: #9aa0a6;
+  --accent: #28292a;
+  --accent-foreground: #e3e3e3;
+  --destructive: #f2b8b5;
+  --success: #81c995;
+  --border: #444746;
+  --input: #444746;
+  --ring: #a8c7fa;
+  --radius: 1rem;
+  --sidebar: #131314;
+  --sidebar-foreground: #e3e3e3;
+  --sidebar-primary: #e3e3e3;
+  --sidebar-primary-foreground: #131314;
+  --sidebar-accent: rgb(168 199 250 / 12%);
+  --sidebar-accent-foreground: #e3e3e3;
+  --sidebar-border: #444746;
+  --sidebar-ring: #a8c7fa;
+
+  --latch-accent: #a8c7fa;
+  --latch-on-accent: #131314;
+  --latch-raised: #28292a;
+  --latch-card-border: rgb(68 71 70 / 40%);
+  --latch-row-line: rgb(68 71 70 / 20%);
+  --latch-badge: #ff9500;
+}
+
+/* The phone's own font, as Latch uses, instead of Inter. */
+:root[data-skin="latch"] body {
+  font-family:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+}
+
+/* Sections sit closer together: 20px between them rather than 48px. */
+:root[data-skin="latch"] [data-slot="page-section"] {
+  margin-top: 1.25rem;
+}
+
+/* The small label above every card: 11px, bold, ALL CAPS, in the accent. */
+:root[data-skin="latch"] [data-slot="page-section-title"] {
+  padding-left: 0.25rem;
+  color: var(--latch-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The card: 16px corners, a hairline border in dark mode too, 4px above and below the rows. */
+:root[data-skin="latch"] [data-slot="page-rows"],
+:root[data-skin="latch"] [data-slot="page-card"] {
+  border: 0.5px solid var(--latch-card-border);
+  border-radius: 1rem;
+  background: var(--card);
+}
+
+:root[data-skin="latch"] [data-slot="page-rows"] {
+  margin-top: 0.25rem;
+  padding-block: 0.25rem;
+}
+
+/* One row style: 16px sides, 12px top and bottom, 12px between icon and text. */
+:root[data-skin="latch"] [data-slot="page-rows"] [data-slot="item"] {
+  min-height: 0;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+:root[data-skin="latch"] [data-slot="page-rows"] [data-slot="item-title"] {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+:root[data-skin="latch"] [data-slot="item-description"] {
+  font-size: 0.6875rem;
+}
+
+/* Row icons wear the accent. */
+:root[data-skin="latch"] [data-slot="item-media"] svg {
+  color: var(--latch-accent);
+}
+
+/* The faint line between rows, inset 16px from both sides. */
+:root[data-skin="latch"]
+  [data-slot="page-rows"]
+  [data-slot="separator"][data-orientation="horizontal"] {
+  background: var(--latch-row-line);
+}
+
+/* Switches are on in the accent. */
+:root[data-skin="latch"] [data-slot="switch"][data-checked] {
+  background: var(--latch-accent);
+}
+
+:root[data-skin="latch"]
+  [data-slot="switch"][data-checked]
+  [data-slot="switch-thumb"] {
+  background: var(--latch-on-accent);
+}
