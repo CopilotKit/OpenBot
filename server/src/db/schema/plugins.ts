@@ -784,6 +784,10 @@ export const mcpUserCredentials = pgTable(
  * already granted, and every one of those calls is still decided, policy-checked and audited. The
  * firewall is at the tool call, not at the prose, which is why anybody may write a skill while
  * adding an MCP server stays an administrator's decision.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const skills = pgTable(
   "skills",
@@ -845,6 +849,10 @@ export const skills = pgTable(
  * parsing the other's format. The cost is a ref that can outlive the tool it names, which is the
  * price grants already pay, and is why a missing tool must read as "load nothing" rather than as an
  * error at run time.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const skillTools = pgTable(
   "skill_tools",
@@ -876,6 +884,10 @@ export const skillTools = pgTable(
  * One table for both kinds. `kind` says which, and `ref` names it: `<serverId>/<toolName>` for an
  * MCP tool, the slug for a skill. A second table would mean two code paths asking the same question
  * and two chances for them to disagree.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const pluginGrants = pgTable(
   "plugin_grants",
@@ -923,6 +935,10 @@ export const pluginGrants = pgTable(
  *
  * The two share the grant surface and the publish gate, because an operator deciding what a Bot may
  * answer with should not have to know which of the two they are looking at.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const sandboxedComponents = pgTable("sandboxed_components", {
   /** The tool name the model calls. Namespaced on save so it can never collide with a compiled one. */

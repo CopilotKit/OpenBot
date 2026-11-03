@@ -2,20 +2,19 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { parse } from "yaml";
 import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
+import {
+  ConfigurationConflictError,
+  configurationKey,
+} from "./configuration/client";
+import { botConfiguration } from "./configuration/directory";
+import type { BotAccessChange, SkillEntry } from "./configuration/types";
 import type { Database } from "./db/client";
 import { bots } from "./agents/bot-registry/directory";
 import type { Bot } from "./agents/bot-registry/types";
-import {
-  channelAgents,
-  channels as channelTable,
-  deploymentPackages,
-  pluginGrants,
-  skills as skillTable,
-  skillTools,
-} from "./db/schema";
+import { channelAgents, channels as channelTable } from "./db/schema";
 
 const approvedThemeVariables = new Set([
   "--background",
@@ -166,7 +165,7 @@ export type TenantSkill = {
 };
 
 /**
- * The mark a grant this package made carries, in `plugin_grants.granted_by`.
+ * The mark a grant this package made carries, in the grant's `grantedBy`.
  *
  * Every other value there is the id of the person who pressed the button, so this cannot collide
  * with one, and it is what lets a redeploy take back only what the package gave.
@@ -832,11 +831,10 @@ export async function synchronizeTenantPackage(
   // The package's own Bots are checked before anything is written, against the package row this
   // tenant already has; a tenant seen for the first time owns no Bot yet, so any Bot of a declared
   // id is somebody else's.
-  const [existingPackage] = await database
-    .select({ id: deploymentPackages.id })
-    .from(deploymentPackages)
-    .where(eq(deploymentPackages.tenantId, tenantPackage.tenantId))
-    .limit(1);
+  const configuration = botConfiguration();
+  const existingPackage = await configuration.client.packages.get(
+    tenantPackage.tenantId,
+  );
   const current = await refusePackageBotCollisions(
     tenantPackage,
     existingPackage?.id ?? null,
@@ -859,26 +857,24 @@ export async function synchronizeTenantPackage(
     }
   }
 
-  const [deploymentPackage] = await database
-    .insert(deploymentPackages)
-    .values({
-      tenantId: tenantPackage.tenantId,
-      sourcePath: tenantPackage.sourcePath,
-      checksum: tenantPackage.checksum,
-    })
-    .onConflictDoUpdate({
-      target: deploymentPackages.tenantId,
-      set: {
-        sourcePath: tenantPackage.sourcePath,
-        checksum: tenantPackage.checksum,
-        loadedAt: new Date(),
-      },
-    })
-    .returning();
-
-  if (!deploymentPackage) {
-    throw new Error("Tenant package could not be synchronized");
-  }
+  /*
+   * The record of this package, in Intelligence beside the Bots it manages: its id is what every one
+   * of them names in `managedBy`, so it must survive this deployment losing its own database. The
+   * first record of a tenant fixes the id for good; two replicas recording a new one at once get the
+   * same id. The package's files stay on this deployment's disk.
+   */
+  const recorded = await configuration.client.packages.record(
+    tenantPackage.tenantId,
+    { source: tenantPackage.sourcePath, checksum: tenantPackage.checksum },
+    configurationKey("package-record"),
+  );
+  const deploymentPackage = {
+    id: recorded.id,
+    tenantId: recorded.name,
+    sourcePath: recorded.source,
+    checksum: recorded.checksum,
+    loadedAt: recorded.appliedAt,
+  };
 
   /*
    * The package's Bots, in Intelligence, before the local rows that name them.
@@ -894,7 +890,7 @@ export async function synchronizeTenantPackage(
     .filter((bot) => bot.packageId === deploymentPackage.id)
     .map((bot) => bot.id);
 
-  return database.transaction(async (transaction) => {
+  await database.transaction(async (transaction) => {
     for (const channel of tenantPackage.channels) {
       const [ownedChannel] = await transaction
         .insert(channelTable)
@@ -936,136 +932,166 @@ export async function synchronizeTenantPackage(
         );
       }
     }
-
-    /*
-     * The skills the package ships, and what each one declares it needs.
-     *
-     * A DEPLOYMENT SKILL, not a person's: `owner_user_id` is null, so everybody sees it in their `/`
-     * menu, the same as one an administrator wrote. `origin` says where it came from, which is the
-     * only thing distinguishing it from an administrator's own on the Skills page.
-     *
-     * The declared refs are NOT checked against `mcp_tools` here, unlike the API path, which refuses
-     * a tool this deployment has never seen. A package is written before anybody connects anything,
-     * so it necessarily names tools for connectors that may not be added yet — and that is the point
-     * of shipping it. An unknown ref sits inert until its connector exists, because the run-time
-     * intersection only ever offers what the Bot was granted.
-     */
-    /*
-     * Which coworkers asked for each skill, so the loop below can pair them as it seeds.
-     *
-     * Written wholesale under one marker: every grant this package made last time is removed first,
-     * so a package that stops giving a Bot a skill takes it back. Only its own, though. A grant an
-     * administrator made through the Skills page carries their id and survives, because retracting
-     * somebody's deliberate decision is not something a redeploy should do quietly.
-     */
-    const wantedBy = new Map<string, string[]>();
-    for (const agent of tenantPackage.agents) {
-      for (const slug of agent.skills) {
-        wantedBy.set(slug, [...(wantedBy.get(slug) ?? []), agent.id]);
-      }
-    }
-    await transaction
-      .delete(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.kind, "skill"),
-          eq(pluginGrants.grantedBy, PACKAGE_GRANT),
-          inArray(pluginGrants.agentId, packageBotIds),
-        ),
-      );
-
-    for (const skill of tenantPackage.skills) {
-      const [seeded] = await transaction
-        .insert(skillTable)
-        .values({
-          id: skill.slug,
-          ownerUserId: null,
-          slug: skill.slug,
-          title: skill.title,
-          summary: skill.summary,
-          instructions: skill.instructions,
-          origin: "catalogue",
-          installedBy: null,
-        })
-        .onConflictDoUpdate({
-          target: skillTable.slug,
-          /*
-           * Only ever a package skill. The `/` namespace is shared and first to take a name keeps
-           * it, so a person who wrote their own skill under this slug keeps theirs and the package
-           * loses one — rather than the package silently replacing something somebody wrote.
-           *
-           * A collision is skipped rather than thrown, unlike the agent case above. Anybody signed
-           * in may write a skill, so throwing would let one person stop the deployment booting by
-           * choosing a name.
-           */
-          setWhere: eq(skillTable.origin, "catalogue"),
-          set: {
-            title: skill.title,
-            summary: skill.summary,
-            instructions: skill.instructions,
-            updatedAt: new Date(),
-          },
-        })
-        .returning({ id: skillTable.id });
-
-      if (!seeded) {
-        console.warn(
-          JSON.stringify({
-            type: "package-skill-skipped",
-            slug: skill.slug,
-            reason:
-              "a skill written in this deployment already answers to that name, and it keeps it",
-          }),
-        );
-        continue;
-      }
-
-      // Replaced wholesale, so a tool the package stopped declaring stops being declared. The same
-      // rule the API path applies, and the reason the table is keyed on (skill, ref).
-      await transaction
-        .delete(skillTools)
-        .where(eq(skillTools.skillId, seeded.id));
-      if (skill.tools.length > 0) {
-        await transaction.insert(skillTools).values(
-          skill.tools.map((ref) => ({
-            skillId: seeded.id,
-            ref,
-            declaredBy: null,
-          })),
-        );
-      }
-
-      /*
-       * Paired only with the skill this package actually owns.
-       *
-       * Inside this branch on purpose: the seed above skips a slug a person had already taken, and
-       * granting there would hand the package's Bots an instruction somebody else wrote under a name
-       * the package expected to be its own. Skipped, it keeps the existing warning and grants
-       * nothing, which is the safe half of the same decision.
-       */
-      const agentIds = wantedBy.get(skill.slug) ?? [];
-      if (agentIds.length > 0) {
-        await transaction
-          .insert(pluginGrants)
-          .values(
-            agentIds.map((agentId) => ({
-              kind: "skill",
-              ref: seeded.id,
-              agentId,
-              grantedBy: PACKAGE_GRANT,
-            })),
-          )
-          .onConflictDoUpdate({
-            target: [pluginGrants.kind, pluginGrants.ref, pluginGrants.agentId],
-            // An administrator who granted this by hand keeps the credit; the package only ever
-            // adds what was missing, and the delete above already took back what it owned.
-            set: { updatedAt: new Date() },
-          });
-      }
-    }
-
-    return deploymentPackage;
   });
+
+  /*
+   * The skills the package ships, and what each one declares it needs, then which of the package's
+   * Bots hold them: both in Intelligence, after the channels here, because no OpenBot transaction
+   * waits on Intelligence. Every write is keyed on the package checksum, so replicas booting together
+   * send the same requests, and a boot that stops part way is finished by the next one: the skills
+   * are written before the grants that name them, and the grants are replaced in one change.
+   */
+  const seeded = await seedPackageSkills(tenantPackage);
+  await grantPackageSkills(tenantPackage, packageBotIds, seeded);
+  return deploymentPackage;
+}
+
+/**
+ * The package's skills in Intelligence. A DEPLOYMENT SKILL, not a person's: `ownerUserId` is null,
+ * so everybody sees it in their `/` menu, the same as one an administrator wrote. `origin` says where
+ * it came from, which is the only thing distinguishing it from an administrator's own on the Skills
+ * page.
+ *
+ * The declared refs are NOT checked against `mcp_tools` here, unlike the API path, which refuses a
+ * tool this deployment has never seen. A package is written before anybody connects anything, so it
+ * necessarily names tools for connectors that may not be added yet, and that is the point of shipping
+ * it. An unknown ref sits inert until its connector exists, because the run-time intersection only
+ * ever offers what the Bot was granted.
+ *
+ * Returns the slugs the package owns: a slug somebody in this deployment wrote first keeps their
+ * skill, and the package loses that one rather than silently replacing something somebody wrote.
+ * A collision is skipped rather than thrown, unlike the agent case: anybody signed in may write a
+ * skill, so throwing would let one person stop the deployment booting by choosing a name.
+ */
+async function seedPackageSkills(
+  tenantPackage: LoadedTenantPackage,
+): Promise<Set<string>> {
+  const configuration = botConfiguration();
+  const key = (slug: string, operation: string, version: number) =>
+    `openbot-package:${createHash("sha256")
+      .update(`${tenantPackage.checksum}:skill:${slug}:${operation}:${version}`)
+      .digest("hex")}`;
+  const owned = new Set<string>();
+  for (const skill of tenantPackage.skills) {
+    const wanted = {
+      ownerUserId: null,
+      title: skill.title,
+      summary: skill.summary,
+      instructions: skill.instructions,
+      origin: "catalogue",
+      installedBy: null,
+      // Replaced wholesale, so a tool the package stopped declaring stops being declared.
+      tools: skill.tools.map((ref) => ({ ref, declaredBy: null })),
+    };
+    for (let attempt = 1; ; attempt++) {
+      const current: SkillEntry | null =
+        configuration.skills.get(skill.slug) ??
+        (await configuration.skills.refresh(skill.slug));
+      try {
+        if (!current) {
+          configuration.skills.apply(
+            await configuration.client.skills.create(
+              skill.slug,
+              wanted,
+              key(skill.slug, "create", 0),
+            ),
+          );
+        } else if (current.origin !== "catalogue") {
+          console.warn(
+            JSON.stringify({
+              type: "package-skill-skipped",
+              slug: skill.slug,
+              reason:
+                "a skill written in this deployment already answers to that name, and it keeps it",
+            }),
+          );
+          break;
+        } else if (
+          current.title !== wanted.title ||
+          current.summary !== wanted.summary ||
+          current.instructions !== wanted.instructions ||
+          !sameRefs(
+            current.tools.map((tool) => tool.ref),
+            skill.tools,
+          )
+        ) {
+          configuration.skills.apply(
+            await configuration.client.skills.replace(
+              skill.slug,
+              current.version,
+              {
+                ...wanted,
+                // A package skill an administrator granted by hand keeps who installed it.
+                installedBy: current.installedBy,
+              },
+              key(skill.slug, "update", current.version),
+            ),
+          );
+        }
+        owned.add(skill.slug);
+        break;
+      } catch (error) {
+        if (!(error instanceof ConfigurationConflictError) || attempt >= 3)
+          throw error;
+        await configuration.skills.refresh(skill.slug);
+      }
+    }
+  }
+  return owned;
+}
+
+/**
+ * Which of the package's Bots hold which of its skills, written wholesale under one marker: every
+ * grant this package made last time is taken back and the ones it makes now are given, in one change,
+ * so a package that stops giving a Bot a skill takes it back and no Bot is ever left between the two.
+ * Only its own, though. A grant an administrator made through the Skills page carries their id and
+ * survives, and keeps its credit when the package gives the same: the package only ever adds what was
+ * missing.
+ *
+ * Paired only with a skill this package owns: granting one a person had already taken would hand the
+ * package's Bots an instruction somebody else wrote under a name the package expected to be its own.
+ */
+async function grantPackageSkills(
+  tenantPackage: LoadedTenantPackage,
+  packageBotIds: string[],
+  owned: Set<string>,
+) {
+  const changes: BotAccessChange[] = [];
+  if (packageBotIds.length > 0)
+    changes.push({
+      op: "revokeMatching",
+      kind: "skill",
+      grantedBy: PACKAGE_GRANT,
+      botIds: packageBotIds,
+    });
+  for (const agent of tenantPackage.agents) {
+    for (const slug of agent.skills) {
+      if (!owned.has(slug)) continue;
+      changes.push({
+        op: "grant",
+        botId: agent.id,
+        kind: "skill",
+        ref: slug,
+        grantedBy: PACKAGE_GRANT,
+        grantedAs: "admin",
+        ifGranted: "keep",
+      });
+    }
+  }
+  if (changes.length === 0) return;
+  await botConfiguration().changeAccess(changes, {
+    key: `openbot-package:${createHash("sha256")
+      .update(`${tenantPackage.checksum}:grants:${JSON.stringify(changes)}`)
+      .digest("hex")}`,
+  });
+}
+
+/** Whether two lists of refs name the same refs, in whatever order. */
+function sameRefs(left: readonly string[], right: readonly string[]) {
+  const wanted = new Set(right);
+  return (
+    new Set(left).size === wanted.size && left.every((ref) => wanted.has(ref))
+  );
 }
 
 /** Whether two JSON values are the same, whatever order their keys are in. */
@@ -1196,22 +1222,20 @@ async function synchronizePackageBots(
   }
 }
 
-export function createPackageStatusReader(
-  database: Database,
-): PackageStatusReader {
+export function createPackageStatusReader(): PackageStatusReader {
   return {
+    /** The package this deployment applied last, from its record in Intelligence. */
     active: async () => {
-      const [tenantPackage] = await database
-        .select()
-        .from(deploymentPackages)
-        .orderBy(desc(deploymentPackages.loadedAt))
-        .limit(1);
-      return tenantPackage
+      const recorded = await botConfiguration().client.packages.all();
+      const latest = recorded.sort(
+        (left, right) => right.appliedAt.getTime() - left.appliedAt.getTime(),
+      )[0];
+      return latest
         ? {
-            tenantId: tenantPackage.tenantId,
-            sourcePath: tenantPackage.sourcePath,
-            checksum: tenantPackage.checksum,
-            loadedAt: tenantPackage.loadedAt.toISOString(),
+            tenantId: latest.name,
+            sourcePath: latest.source,
+            checksum: latest.checksum,
+            loadedAt: latest.appliedAt.toISOString(),
           }
         : null;
     },

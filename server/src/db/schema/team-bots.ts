@@ -18,7 +18,11 @@ import { users } from "./core";
 const at = (name: string) =>
   timestamp(name, { withTimezone: true }).notNull().defaultNow();
 
-/** One row per published Team Bot. No row is not published. */
+/** One row per published Team Bot. No row is not published.  *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
+ */
 export const teamBotPublications = pgTable(
   "team_bot_publications",
   {
@@ -38,7 +42,11 @@ export const teamBotPublications = pgTable(
   ],
 );
 
-/** Who a `people` publication reaches: a person by id, or everybody in a named group. */
+/** Who a `people` publication reaches: a person by id, or everybody in a named group.  *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
+ */
 export const teamBotAudience = pgTable(
   "team_bot_audience",
   {
@@ -59,6 +67,10 @@ export const teamBotAudience = pgTable(
 /**
  * An administrator's assignment of a published Team Bot to a group (`*` is the whole team). An
  * assigned Bot is in those people's sidebars and they cannot hide it.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const teamBotAssignments = pgTable(
   "team_bot_assignments",
@@ -76,6 +88,10 @@ export const teamBotAssignments = pgTable(
 /**
  * A teammate's answer to "may this Team Bot use your own account on this server". `always` stands
  * until cleared; `once` is spent by the next call that uses it. Skip is no row.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const teamBotConsents = pgTable(
   "team_bot_consents",
@@ -100,6 +116,10 @@ export const teamBotConsents = pgTable(
 /**
  * "Always allow for all Team Bots": a teammate's standing consent for every Team Bot to use their own
  * account on this server. Cleared with the rest of their connector preferences.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const teamBotConsentDefaults = pgTable(
   "team_bot_consent_defaults",

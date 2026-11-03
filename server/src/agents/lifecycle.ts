@@ -13,10 +13,18 @@
  *
  * A process that never wired it (a unit test of some other module) answers "not paused", because
  * there is nobody who could have paused anything.
+ *
+ * WHERE IT IS KEPT. A person's pauses, notification levels and routing are their preferences in
+ * Intelligence, held in memory on every instance (configuration/directory.ts). So the question every
+ * dispatch asks is answered from memory, and a pause made on another replica arrives with its
+ * announcement; the watcher below then stops what is running here.
  */
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
-import type { Database } from "../db/client";
-import { botLifecycle, updateRoutingPreferences } from "../db/schema/lifecycle";
+import { type AnyColumn, type SQL, sql } from "drizzle-orm";
+import {
+  botConfiguration,
+  botConfigurationInstalled,
+} from "../configuration/directory";
+import type { PersonBotPreference } from "../configuration/types";
 
 /** The sentence every skipped dispatch records, so the trail and the run rows say the same thing. */
 export const BOT_PAUSED_REASON = "The Bot is paused, so it did not run.";
@@ -63,12 +71,34 @@ const CROSS_REPLICA_CHECK_MS = 5_000;
 /**
  * How many checks in a row may fail before the watcher stops a pair's turns. A turn never STARTS
  * on an unreadable pause, but one slow query must not stop every turn on the replica, for every
- * person and Bot. Three checks is fifteen seconds of a database that stays unreadable.
+ * person and Bot. Three checks is fifteen seconds of pauses that stay unreadable.
  */
 const UNREADABLE_CHECKS_BEFORE_STOP = 3;
 
+/**
+ * Where pauses are read. `pausedAt` answers null for a running Bot, the time it was paused, or
+ * `undefined` when it cannot say (the preferences have not been read yet), which counts as paused.
+ */
+export type PauseReader = {
+  pausedAt(ownerUserId: string, agentId: string): Date | null | undefined;
+};
+
+/** The pauses the Bot configuration holds, once it has been read. */
+export const configuredPauses: PauseReader = {
+  pausedAt(ownerUserId, agentId) {
+    if (!botConfigurationInstalled()) return undefined;
+    const configuration = botConfiguration();
+    if (!configuration.preferences.loaded()) return undefined;
+    return (
+      configuration
+        .preferencesOf(ownerUserId)
+        .bots.find((entry) => entry.botId === agentId)?.pausedAt ?? null
+    );
+  },
+};
+
 const state: {
-  database?: Database;
+  pauses?: PauseReader;
   running: Map<string, Set<RunningTurn>>;
   /** Consecutive failed pause reads per pair, reset by the next read that answers. */
   unreadable: Map<string, number>;
@@ -78,9 +108,9 @@ const state: {
 const keyOf = (ownerUserId: string, agentId: string) =>
   JSON.stringify([ownerUserId, agentId]);
 
-/** Wire the pause switch to the deployment's database. Called once at start-up. */
-export function configureBotLifecycle(options: { database: Database }) {
-  state.database = options.database;
+/** Wire the pause switch to where pauses are kept. Called once at start-up. */
+export function configureBotLifecycle(options: { pauses: PauseReader }) {
+  state.pauses = options.pauses;
 }
 
 /** For tests: run the cross-replica check now instead of waiting for its interval. */
@@ -88,31 +118,32 @@ export const checkRunningTurnsForTests = () => checkRunningTurns();
 
 /** For tests: forget the wiring and every tracked turn. */
 export function resetBotLifecycleForTests() {
-  state.database = undefined;
+  state.pauses = undefined;
   state.running.clear();
   state.unreadable.clear();
   if (state.watcher) clearInterval(state.watcher);
   state.watcher = undefined;
 }
 
-/** Whether this person has paused this Bot, or `undefined` when the read failed (and is logged). */
-async function readPause(
-  database: Database,
+/** Whether this person has paused this Bot, or `undefined` when it cannot be said (and is logged). */
+function readPause(
+  pauses: PauseReader,
   ownerUserId: string,
   agentId: string,
-): Promise<boolean | undefined> {
+): boolean | undefined {
   try {
-    const [row] = await database
-      .select({ pausedAt: botLifecycle.pausedAt })
-      .from(botLifecycle)
-      .where(
-        and(
-          eq(botLifecycle.ownerUserId, ownerUserId),
-          eq(botLifecycle.agentId, agentId),
-        ),
-      )
-      .limit(1);
-    return Boolean(row?.pausedAt);
+    const pausedAt = pauses.pausedAt(ownerUserId, agentId);
+    if (pausedAt === undefined) {
+      console.error(
+        JSON.stringify({
+          type: "bot-pause-check-failed",
+          agentId,
+          error: "This instance has not read people's preferences yet.",
+        }),
+      );
+      return undefined;
+    }
+    return pausedAt !== null;
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -134,9 +165,9 @@ export async function isBotPaused(
   ownerUserId: string,
   agentId: string,
 ): Promise<boolean> {
-  const database = state.database;
-  if (!database) return false;
-  return (await readPause(database, ownerUserId, agentId)) ?? true;
+  const pauses = state.pauses;
+  if (!pauses) return false;
+  return readPause(pauses, ownerUserId, agentId) ?? true;
 }
 
 /**
@@ -207,11 +238,11 @@ async function checkRunningTurns() {
     state.watcher = undefined;
     return;
   }
-  const database = state.database;
-  if (!database) return;
+  const pauses = state.pauses;
+  if (!pauses) return;
   for (const key of [...state.running.keys()]) {
     const [ownerUserId, agentId] = JSON.parse(key) as [string, string];
-    const paused = await readPause(database, ownerUserId, agentId);
+    const paused = readPause(pauses, ownerUserId, agentId);
     if (paused === undefined) {
       const failures = (state.unreadable.get(key) ?? 0) + 1;
       state.unreadable.set(key, failures);
@@ -223,6 +254,42 @@ async function checkRunningTurns() {
   }
 }
 
+/**
+ * Every (person, Bot) pair whose setting passes `test`, from the preferences this instance holds.
+ * Empty before they have been read: the pause each run checks again before it starts still fails
+ * closed then.
+ */
+export function lifecyclePairs(
+  test: (entry: PersonBotPreference) => boolean,
+): { ownerUserId: string; agentId: string }[] {
+  if (!botConfigurationInstalled()) return [];
+  const configuration = botConfiguration();
+  return configuration.preferences
+    .all()
+    .flatMap((record) =>
+      record.bots
+        .filter(test)
+        .map((entry) => ({ ownerUserId: record.userId, agentId: entry.botId })),
+    );
+}
+
+/**
+ * A SQL condition true for rows whose (person, Bot) is NOT one of `pairs`: how a query in this
+ * deployment's database leaves out what a person paused or silenced, now that the setting lives in
+ * Intelligence and the query cannot join it.
+ */
+export function notAmongPairs(
+  ownerColumn: AnyColumn,
+  agentColumn: AnyColumn,
+  pairs: readonly { ownerUserId: string; agentId: string }[],
+): SQL {
+  if (pairs.length === 0) return sql`true`;
+  return sql`(${ownerColumn} || chr(31) || ${agentColumn}) <> ALL(ARRAY[${sql.join(
+    pairs.map((pair) => sql`${`${pair.ownerUserId}\u001f${pair.agentId}`}`),
+    sql`, `,
+  )}]::text[])`;
+}
+
 export type BotLifecycleState = {
   agentId: string;
   paused: boolean;
@@ -232,56 +299,45 @@ export type BotLifecycleState = {
 
 export type BotLifecycleStore = ReturnType<typeof createBotLifecycleStore>;
 
-/** The per-person rows, read and written. Authorization (may this person reach the Bot) is the caller's. */
-export function createBotLifecycleStore(database: Database) {
-  const upsert = (
+/**
+ * One person's settings for their Bots, read from the Bot configuration this instance holds and
+ * written to Intelligence. Authorization (may this person reach the Bot) is the caller's.
+ */
+export function createBotLifecycleStore() {
+  const entryOf = (ownerUserId: string, agentId: string) =>
+    botConfiguration()
+      .preferencesOf(ownerUserId)
+      .bots.find((entry) => entry.botId === agentId);
+
+  const setBot = (
     ownerUserId: string,
     agentId: string,
     values: { pausedAt?: Date | null; notify?: BotNotify },
   ) =>
-    database
-      .insert(botLifecycle)
-      .values({ ownerUserId, agentId, ...values })
-      .onConflictDoUpdate({
-        target: [botLifecycle.ownerUserId, botLifecycle.agentId],
-        set: { ...values, updatedAt: sql`now()` },
-      });
+    botConfiguration().changePreferences(ownerUserId, [
+      { op: "setBot", botId: agentId, ...values },
+    ]);
 
   return {
     async get(
       ownerUserId: string,
       agentId: string,
     ): Promise<BotLifecycleState> {
-      const [row] = await database
-        .select()
-        .from(botLifecycle)
-        .where(
-          and(
-            eq(botLifecycle.ownerUserId, ownerUserId),
-            eq(botLifecycle.agentId, agentId),
-          ),
-        )
-        .limit(1);
+      const entry = entryOf(ownerUserId, agentId);
       return {
         agentId,
-        paused: Boolean(row?.pausedAt),
-        pausedAt: row?.pausedAt ?? null,
-        notify: row?.notify ?? "all",
+        paused: Boolean(entry?.pausedAt),
+        pausedAt: entry?.pausedAt ?? null,
+        notify: entry?.notify ?? "all",
       };
     },
 
     /** Every Bot this person has paused, for the roster's badges. */
     async pausedFor(ownerUserId: string): Promise<string[]> {
-      const rows = await database
-        .select({ agentId: botLifecycle.agentId })
-        .from(botLifecycle)
-        .where(
-          and(
-            eq(botLifecycle.ownerUserId, ownerUserId),
-            isNotNull(botLifecycle.pausedAt),
-          ),
-        );
-      return rows.map((row) => row.agentId);
+      return botConfiguration()
+        .preferencesOf(ownerUserId)
+        .bots.filter((entry) => entry.pausedAt !== null)
+        .map((entry) => entry.botId);
     },
 
     async notifyFor(
@@ -289,29 +345,26 @@ export function createBotLifecycleStore(database: Database) {
       agentIds: string[],
     ): Promise<Record<string, BotNotify>> {
       if (agentIds.length === 0) return {};
-      const rows = await database
-        .select({ agentId: botLifecycle.agentId, notify: botLifecycle.notify })
-        .from(botLifecycle)
-        .where(
-          and(
-            eq(botLifecycle.ownerUserId, ownerUserId),
-            inArray(botLifecycle.agentId, agentIds),
-          ),
-        );
-      return Object.fromEntries(rows.map((row) => [row.agentId, row.notify]));
+      const wanted = new Set(agentIds);
+      return Object.fromEntries(
+        botConfiguration()
+          .preferencesOf(ownerUserId)
+          .bots.filter((entry) => wanted.has(entry.botId))
+          .map((entry) => [entry.botId, entry.notify]),
+      );
     },
 
     /**
      * Pause, and stop what this replica is running for the pair right now. Other replicas stop
-     * theirs on their next check. Returns how many running turns were stopped here.
+     * theirs once the change reaches them. Returns how many running turns were stopped here.
      */
     async pause(ownerUserId: string, agentId: string): Promise<number> {
-      await upsert(ownerUserId, agentId, { pausedAt: new Date() });
+      await setBot(ownerUserId, agentId, { pausedAt: new Date() });
       return stopRunningTurns(keyOf(ownerUserId, agentId));
     },
 
     async resume(ownerUserId: string, agentId: string): Promise<void> {
-      await upsert(ownerUserId, agentId, { pausedAt: null });
+      await setBot(ownerUserId, agentId, { pausedAt: null });
     },
 
     async setNotify(
@@ -319,18 +372,21 @@ export function createBotLifecycleStore(database: Database) {
       agentId: string,
       notify: BotNotify,
     ): Promise<void> {
-      await upsert(ownerUserId, agentId, { notify });
+      await setBot(ownerUserId, agentId, { notify });
     },
 
-    /** Where each kind of update goes. A kind with no row goes everywhere the person is reachable. */
+    /** Where each kind of update goes. A kind with no route goes everywhere the person is reachable. */
     async routing(
       ownerUserId: string,
     ): Promise<Record<UpdateKind, UpdateTransport[] | "all">> {
-      const rows = await database
-        .select()
-        .from(updateRoutingPreferences)
-        .where(eq(updateRoutingPreferences.ownerUserId, ownerUserId));
-      const byKind = new Map(rows.map((row) => [row.kind, row.transports]));
+      const byKind = new Map(
+        botConfiguration()
+          .preferencesOf(ownerUserId)
+          .routes.map((route) => [
+            route.kind,
+            route.transports as UpdateTransport[],
+          ]),
+      );
       return Object.fromEntries(
         UPDATE_KINDS.map((kind) => [kind, byKind.get(kind) ?? "all"]),
       ) as Record<UpdateKind, UpdateTransport[] | "all">;
@@ -341,28 +397,13 @@ export function createBotLifecycleStore(database: Database) {
       kind: UpdateKind,
       transports: UpdateTransport[] | "all",
     ): Promise<void> {
-      if (transports === "all") {
-        await database
-          .delete(updateRoutingPreferences)
-          .where(
-            and(
-              eq(updateRoutingPreferences.ownerUserId, ownerUserId),
-              eq(updateRoutingPreferences.kind, kind),
-            ),
-          );
-        return;
-      }
-      const unique = [...new Set(transports)];
-      await database
-        .insert(updateRoutingPreferences)
-        .values({ ownerUserId, kind, transports: unique })
-        .onConflictDoUpdate({
-          target: [
-            updateRoutingPreferences.ownerUserId,
-            updateRoutingPreferences.kind,
-          ],
-          set: { transports: unique, updatedAt: sql`now()` },
-        });
+      await botConfiguration().changePreferences(ownerUserId, [
+        {
+          op: "setRoute",
+          kind,
+          transports: transports === "all" ? null : [...new Set(transports)],
+        },
+      ]);
     },
   };
 }
@@ -419,10 +460,9 @@ export async function resolveUpdateRoute(
 ): Promise<UpdateRoute> {
   const kind = KIND_OF_DELIVERY[input.kind];
   const everything: UpdateRoute = { kind, notify: true, allows: () => true };
-  const database = state.database;
-  if (!database) return everything;
+  if (!state.pauses || !botConfigurationInstalled()) return everything;
   try {
-    const store = createBotLifecycleStore(database);
+    const store = createBotLifecycleStore();
     const [level, routing] = await Promise.all([
       input.agentId
         ? store.get(input.ownerUserId, input.agentId).then((row) => row.notify)

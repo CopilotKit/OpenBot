@@ -5,20 +5,19 @@
  * reaches them: published, described well enough for a teammate to recognise, and published to the
  * whole team, to them by name, to a group they are in, or assigned by an administrator to such a group.
  *
- * Publication, audience and assignment are this deployment's tables; the Bot itself is in Intelligence.
- * So the rule is two halves: which publications reach this person (SQL, here), and whether the Bot is
- * described for the team (its name and role, from the Bot directory). Kept free of anything heavier
- * than the schema so the profile store and the runtime loader can import it without a cycle.
+ * Publication, audience and assignment are part of each Bot's access in Intelligence, and the Bot
+ * itself is in its agent registry; both are held in memory on this instance. The person's groups are
+ * this deployment's (`users.groups`, from the identity provider). So the rule is: which publications
+ * reach this person (from memory, against their groups), and whether the Bot is described for the
+ * team (its name and role). Kept free of anything heavier so the profile store and the runtime loader
+ * can import it without a cycle.
  */
-import { type SQL, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Bot } from "../agents/bot-registry/types";
+import { botConfiguration } from "../configuration/directory";
+import type { BotAccess as AccessRecord } from "../configuration/types";
 import type { Database } from "../db/client";
 import { users } from "../db/schema/core";
-import {
-  teamBotAssignments,
-  teamBotAudience,
-  teamBotPublications,
-} from "../db/schema/team-bots";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /** The pool, or a caller's open transaction. */
@@ -27,8 +26,17 @@ export type AccessExecutor =
   | Pick<Transaction, "select">;
 
 /** This person's groups, as the identity provider last said. */
-const groupsOf = (actorId: string) =>
-  sql`coalesce((select ${users.groups} from ${users} where ${users.id} = ${actorId}), '{}'::text[])`;
+export async function groupsOf(
+  executor: AccessExecutor,
+  actorId: string,
+): Promise<string[]> {
+  const [row] = await executor
+    .select({ groups: users.groups })
+    .from(users)
+    .where(eq(users.id, actorId))
+    .limit(1);
+  return row?.groups ?? [];
+}
 
 /**
  * Names a Bot has before anybody named it on purpose. A Team Bot still called one of these, or with
@@ -54,48 +62,66 @@ export function describedForTeam(
   );
 }
 
+/** Whether an administrator has put this published Bot in the sidebar of somebody in `groups`. */
+function assignedTo(
+  access: AccessRecord,
+  groups: ReadonlySet<string>,
+): boolean {
+  return (
+    access.publication !== null &&
+    access.assignments.some(
+      (assignment) => assignment.group === "*" || groups.has(assignment.group),
+    )
+  );
+}
+
+/** Whether this published Bot reaches somebody with this id and these groups. */
+function reachesPerson(
+  access: AccessRecord,
+  actorId: string,
+  groups: ReadonlySet<string>,
+): boolean {
+  const publication = access.publication;
+  if (!publication) return false;
+  return (
+    publication.audience === "team" ||
+    publication.members.some(
+      (member) =>
+        (member.kind === "user" && member.value === actorId) ||
+        (member.kind === "group" && groups.has(member.value)),
+    ) ||
+    assignedTo(access, groups)
+  );
+}
+
 /** Whether an administrator has put this published Bot in this person's sidebar. */
-export function assignedCondition(actorId: string): SQL {
-  return sql`exists (
-    select 1 from ${teamBotAssignments}
-    where ${teamBotAssignments.agentId} = ${teamBotPublications.agentId}
-      and (${teamBotAssignments.groupName} = '*' or ${teamBotAssignments.groupName} = any(${groupsOf(actorId)}))
-  )`;
+export async function isAssignedTo(
+  executor: AccessExecutor,
+  actorId: string,
+  botId: string,
+): Promise<boolean> {
+  const access = botConfiguration().access.get(botId);
+  if (!access?.publication) return false;
+  return assignedTo(access, new Set(await groupsOf(executor, actorId)));
 }
 
 /**
  * Which published Bots reach this person, and which of those an administrator assigned to them.
  *
  * Publications only: whether each Bot is also described for the team is the caller's half, through
- * {@link describedForTeam} or {@link botAccessFor}, because the name and role are not in this database.
+ * {@link describedForTeam} or {@link botAccessFor}, because that needs the Bot's name and role.
  */
 export async function teamBotReach(
   executor: AccessExecutor,
   actorId: string,
 ): Promise<{ reaches: Set<string>; assigned: Set<string> }> {
-  const rows = await executor
-    .select({
-      agentId: teamBotPublications.agentId,
-      assigned: sql<boolean>`${assignedCondition(actorId)}`,
-      reaches: sql<boolean>`(
-        ${teamBotPublications.audience} = 'team'
-        or exists (
-          select 1 from ${teamBotAudience}
-          where ${teamBotAudience.agentId} = ${teamBotPublications.agentId}
-            and (
-              (${teamBotAudience.kind} = 'user' and ${teamBotAudience.value} = ${actorId})
-              or (${teamBotAudience.kind} = 'group' and ${teamBotAudience.value} = any(${groupsOf(actorId)}))
-            )
-        )
-        or ${assignedCondition(actorId)}
-      )`,
-    })
-    .from(teamBotPublications);
+  const groups = new Set(await groupsOf(executor, actorId));
   const reaches = new Set<string>();
   const assigned = new Set<string>();
-  for (const row of rows) {
-    if (row.reaches) reaches.add(row.agentId);
-    if (row.assigned) assigned.add(row.agentId);
+  for (const access of botConfiguration().access.all()) {
+    if (!access.publication) continue;
+    if (reachesPerson(access, actorId, groups)) reaches.add(access.botId);
+    if (assignedTo(access, groups)) assigned.add(access.botId);
   }
   return { reaches, assigned };
 }

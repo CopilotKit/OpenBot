@@ -39,6 +39,7 @@ import { startHandoffDelivery } from "./agents/handoff-wiring";
 import { runsIsolated } from "./agents/isolation";
 import {
   configureBotLifecycle,
+  configuredPauses,
   createBotLifecycleStore,
 } from "./agents/lifecycle";
 import { createBotReset } from "./agents/lifecycle-reset";
@@ -52,6 +53,16 @@ import {
   sweepPurgedBotRows,
 } from "./agents/bot-registry/local-rows";
 import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
+import { createConfigurationClient } from "./configuration/client";
+import {
+  createBotConfiguration,
+  installBotConfiguration,
+} from "./configuration/directory";
+import {
+  sweepRemovedPeople,
+  sweepRemovedPeopleEvery,
+} from "./configuration/people-sweep";
+import { copyLocalConfigurationToIntelligence } from "./configuration/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -322,8 +333,9 @@ clearLearningRevisionFallback();
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
 const profileStore = createProfileStore(database);
-// Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
-configureBotLifecycle({ database });
+// Every dispatch point asks whether its person paused the Bot, from the preferences this instance
+// holds of Intelligence's. See agents/lifecycle.ts.
+configureBotLifecycle({ pauses: configuredPauses });
 const learningSettingsStore = createLearningSettingsStore(
   database,
   config.learning,
@@ -447,6 +459,33 @@ await sweepPurgedBotRows(
   database,
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
 );
+/*
+ * Everything Intelligence holds beside the Bots: each Bot's grants, publication and assignments, each
+ * person's preferences, the component catalogue and the skills, in memory on this instance and kept
+ * fresh by Intelligence's change announcements (configuration/directory.ts). Fatal when Intelligence
+ * cannot answer, as the Bots are: no grants would look like a deployment where nobody was ever given
+ * anything.
+ */
+const botConfigurationHub = installBotConfiguration(
+  createBotConfiguration({
+    client: createConfigurationClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    registry: botDirectory.registry,
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+// A Bot deleted for good takes what this instance holds about it, before Intelligence's announcements.
+botDirectory.onPurged((botId) => botConfigurationHub.botPurged(botId));
+await botConfigurationHub.start();
+// An upgraded deployment's configuration, copied from the local tables once (configuration/upgrade.ts).
+await copyLocalConfigurationToIntelligence(database, botConfigurationHub, () =>
+  botDirectory.cached(),
+);
+// What Intelligence holds about people this deployment no longer has, as the old cascades removed it.
+await sweepRemovedPeople(database, botConfigurationHub);
+sweepRemovedPeopleEvery(database, botConfigurationHub);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -1597,7 +1636,7 @@ const loadToolsForActor =
   ];
 
 /** One person's standing instructions, for both the /api/settings routes and every run they start. */
-const userInstructionsStore = createUserInstructionsStore(database);
+const userInstructionsStore = createUserInstructionsStore();
 
 /*
  * What this person has told every built-in coworker they run.
@@ -2684,7 +2723,7 @@ const app = createApp(
     credentialStore,
     createAuditStore(database),
   ),
-  createPackageStatusReader(database),
+  createPackageStatusReader(),
   // The runtime call: the model, per-actor agent loading, and the two identity
   // functions are how a run is attributed to a person.
   copilotRuntime.handler,
@@ -2914,7 +2953,7 @@ const app = createApp(
     groups: groupConversations,
     teamBots,
     lifecycle: {
-      lifecycle: createBotLifecycleStore(database),
+      lifecycle: createBotLifecycleStore(),
       reset: createBotReset({
         database,
         softDeleteChannel: (actor, channelId) =>

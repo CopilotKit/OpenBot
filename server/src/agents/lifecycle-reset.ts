@@ -40,7 +40,11 @@ import {
   routines,
   workItems,
 } from "../db/schema";
-import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
+import {
+  lockDefaults,
+  recordOptOuts,
+  sourceServerId,
+} from "../memory/defaults";
 import { PROACTIVE_RUN_KIND } from "../proactive/engine";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
@@ -238,7 +242,51 @@ export function createBotReset(options: {
       for (const channelId of found.mine)
         await softDeleteChannel(actor, channelId);
 
-      return database.transaction(async (transaction) => {
+      /*
+       * What this person had switched off, turned down for good, said in Intelligence BEFORE the
+       * deletes below: no adoption on any replica can then bring one back once its row is gone
+       * (memory/defaults.ts), and no transaction here waits on Intelligence.
+       */
+      const optOutsOf = (
+        sources: { toolRef: string; enabled: boolean }[],
+        settings: { enabled: boolean }[],
+      ) => [
+        ...sources
+          .filter((source) => !source.enabled)
+          .map((source) => ({
+            agentId,
+            feature: "memory_source" as const,
+            scope: sourceServerId(source.toolRef),
+          })),
+        ...(settings.some((setting) => !setting.enabled)
+          ? [{ agentId, feature: "proactive_research" as const }]
+          : []),
+      ];
+      const sayKey = (optOut: { feature: string; scope?: string }) =>
+        `${optOut.feature}\u001f${optOut.scope ?? ""}`;
+      const before = optOutsOf(
+        await database
+          .select({
+            toolRef: memorySources.toolRef,
+            enabled: memorySources.enabled,
+          })
+          .from(memorySources)
+          .where(
+            and(
+              eq(memorySources.ownerUserId, ownerUserId),
+              eq(memorySources.agentId, agentId),
+            ),
+          ),
+        await database
+          .select({ enabled: proactiveSettings.enabled })
+          .from(proactiveSettings)
+          .where(research(ownerUserId, agentId)),
+      );
+      await recordOptOuts(ownerUserId, before);
+      const said = new Set(before.map(sayKey));
+      let late: ReturnType<typeof optOutsOf> = [];
+
+      const result = await database.transaction(async (transaction) => {
         // The lock defaults adoption takes, so no default is adopted between these reads and the deletes.
         await lockDefaults(transaction, ownerUserId, agentId);
         const sources = await transaction
@@ -254,14 +302,6 @@ export function createBotReset(options: {
               eq(memorySources.agentId, agentId),
             ),
           );
-        for (const source of sources)
-          if (!source.enabled)
-            await recordOptOut(transaction, {
-              ownerUserId,
-              agentId,
-              feature: "memory_source",
-              scope: sourceServerId(source.toolRef),
-            });
         const memories =
           sources.length === 0
             ? []
@@ -327,12 +367,10 @@ export function createBotReset(options: {
           })
           .from(proactiveSettings)
           .where(research(ownerUserId, agentId));
-        if (settings.some((setting) => !setting.enabled))
-          await recordOptOut(transaction, {
-            ownerUserId,
-            agentId,
-            feature: "proactive_research",
-          });
+        // Switched off between the read above and this one: said once the transaction is done.
+        late = optOutsOf(sources, settings).filter(
+          (optOut) => !said.has(sayKey(optOut)),
+        );
         if (settings.length > 0) {
           const ids = settings.map((setting) => setting.id);
           // A run already queued for the setting would find it gone; cancel it rather than fail it.
@@ -378,6 +416,8 @@ export function createBotReset(options: {
           standingApprovals: revoked.length,
         };
       });
+      await recordOptOuts(ownerUserId, late);
+      return result;
     },
   };
 }

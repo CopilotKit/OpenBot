@@ -3,8 +3,14 @@
  *
  * WHO SEES IT. `botAccessFor` (access.ts) is the one rule, the same gate that already admits public
  * Bots and a person's own (`profile-store.ts`, `runtime-agents.ts`), so the roster, the runtime,
- * handoffs and groups all see a Team Bot exactly where its publication says. No publication row, no
- * access: unpublishing is one delete.
+ * handoffs and groups all see a Team Bot exactly where its publication says. No publication, no
+ * access: unpublishing is one change.
+ *
+ * WHERE IT IS KEPT. A publication, its audience and its assignments are part of the Bot's access in
+ * Intelligence; a teammate's consents are their preferences there. Both are held in memory on this
+ * instance (configuration/directory.ts), so the checks on every tool call never wait on Intelligence.
+ * A one-time consent is spent in Intelligence, in one statement, so exactly one call on any replica
+ * gets to use it.
  *
  * PRIVATE CHATS. A teammate's conversation is an ordinary channel of their own, and channels are
  * membership-scoped, so the owner cannot read it and it cannot read theirs. Nothing here changes that.
@@ -15,28 +21,46 @@
  * only with their consent: Allow once, Always allow for this Bot, or Skip. Everything else about the
  * call (grant, policy, approvals, audit) is still decided as the teammate who is asking.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { capabilityRefusal } from "../admin/capabilities";
 import { enterpriseControls } from "../admin/controls";
 import { bots } from "../agents/bot-registry/directory";
 import type { AgentActor } from "../agents/profile-types";
+import { ConfigurationMissingError } from "../configuration/client";
+import { botConfiguration } from "../configuration/directory";
 import type { Database } from "../db/client";
 import { users } from "../db/schema/core";
-import { pluginGrants } from "../db/schema/plugins";
-import {
-  teamBotAssignments,
-  teamBotAudience,
-  teamBotConsentDefaults,
-  teamBotConsents,
-  teamBotPublications,
-} from "../db/schema/team-bots";
 import { PluginRefusedError } from "../plugins/store";
 import {
-  assignedCondition,
   describedForTeam,
+  isAssignedTo,
   PLACEHOLDER_BOT_NAMES,
   teamBotReach,
 } from "./access";
+
+/** Whose grant a Bot's grant of this tool is: `owner` when the owner gave it their own app. */
+function grantedAsFor(botId: string, ref: string) {
+  return botConfiguration()
+    .accessOf(botId)
+    .grants.find((grant) => grant.kind === "mcp" && grant.ref === ref)
+    ?.grantedAs;
+}
+
+/** This person's standing answer about this Bot on this server, from their preferences. */
+function consentFor(userId: string, botId: string, serverId: string) {
+  return botConfiguration()
+    .preferencesOf(userId)
+    .consents.find(
+      (consent) => consent.botId === botId && consent.serverId === serverId,
+    )?.decision;
+}
+
+/** Whether this person allowed every Team Bot their own account on this server. */
+function allowsEveryBot(userId: string, serverId: string) {
+  return botConfiguration()
+    .preferencesOf(userId)
+    .consentDefaults.some((consent) => consent.serverId === serverId);
+}
 
 /** Prefix a consent refusal carries, so a chat can draw the card instead of the sentence. */
 export const TEAM_BOT_CONSENT_MARKER = "[team-bot-consent]";
@@ -104,18 +128,15 @@ export function createTeamBots(options: {
 
   /** The live, published Bot and who owns it, or null. */
   async function publication(botId: string) {
-    const [row] = await database
-      .select({
-        agentId: teamBotPublications.agentId,
-        audience: teamBotPublications.audience,
-      })
-      .from(teamBotPublications)
-      .where(eq(teamBotPublications.agentId, botId))
-      .limit(1);
-    if (!row) return null;
+    const published = botConfiguration().access.get(botId)?.publication;
+    if (!published) return null;
     const bot = await bots().find(botId);
     if (!bot || bot.deletedAt !== null) return null;
-    return { ...row, ownerUserId: bot.ownerUserId };
+    return {
+      agentId: botId,
+      audience: published.audience,
+      ownerUserId: bot.ownerUserId,
+    };
   }
 
   /** The Bot as its owner, for owner-only acts; administrators may unpublish and assign. */
@@ -149,60 +170,20 @@ export function createTeamBots(options: {
         const owner = published?.ownerUserId;
         if (!owner || owner === actorId) return actorId;
         const serverId = ref.split("/")[0] ?? "";
-        const [grant] = await database
-          .select({ grantedAs: pluginGrants.grantedAs })
-          .from(pluginGrants)
-          .where(
-            and(
-              eq(pluginGrants.kind, "mcp"),
-              eq(pluginGrants.ref, ref),
-              eq(pluginGrants.agentId, botId),
-            ),
-          )
-          .limit(1);
         if (
-          grant?.grantedAs !== "owner" &&
+          grantedAsFor(botId, ref) !== "owner" &&
           (await connectedServers(owner)).has(serverId)
         )
           return owner;
         if (!(await connectedServers(actorId)).has(serverId)) return actorId;
-        const [consent] = await database
-          .select({ decision: teamBotConsents.decision })
-          .from(teamBotConsents)
-          .where(
-            and(
-              eq(teamBotConsents.userId, actorId),
-              eq(teamBotConsents.agentId, botId),
-              eq(teamBotConsents.serverId, serverId),
-            ),
-          )
-          .limit(1);
-        if (consent?.decision === "always") return actorId;
-        const [everyBot] = await database
-          .select({ serverId: teamBotConsentDefaults.serverId })
-          .from(teamBotConsentDefaults)
-          .where(
-            and(
-              eq(teamBotConsentDefaults.userId, actorId),
-              eq(teamBotConsentDefaults.serverId, serverId),
-            ),
-          )
-          .limit(1);
-        if (everyBot) return actorId;
-        if (consent?.decision === "once") {
-          // Spent by exactly one call: whichever call deletes it is the one that may go.
-          const spent = await database
-            .delete(teamBotConsents)
-            .where(
-              and(
-                eq(teamBotConsents.userId, actorId),
-                eq(teamBotConsents.agentId, botId),
-                eq(teamBotConsents.serverId, serverId),
-                eq(teamBotConsents.decision, "once"),
-              ),
-            )
-            .returning({ serverId: teamBotConsents.serverId });
-          if (spent.length) return actorId;
+        const consent = consentFor(actorId, botId, serverId);
+        if (consent === "always") return actorId;
+        if (allowsEveryBot(actorId, serverId)) return actorId;
+        if (consent === "once") {
+          // Spent by exactly one call, on any replica: whichever call Intelligence lets spend it is
+          // the one that may go.
+          if (await botConfiguration().consumeConsent(actorId, botId, serverId))
+            return actorId;
         }
         const message = `This Team Bot wants to use your own ${serverId} account. Choose Allow once, Always allow, or Skip, then ask again.`;
         listening
@@ -233,45 +214,13 @@ export function createTeamBots(options: {
       if (!owner || owner === actorId) return null;
       return async (ref) => {
         const serverId = ref.split("/")[0] ?? "";
-        const [grant] = await database
-          .select({ grantedAs: pluginGrants.grantedAs })
-          .from(pluginGrants)
-          .where(
-            and(
-              eq(pluginGrants.kind, "mcp"),
-              eq(pluginGrants.ref, ref),
-              eq(pluginGrants.agentId, botId),
-            ),
-          )
-          .limit(1);
         if (
-          grant?.grantedAs !== "owner" &&
+          grantedAsFor(botId, ref) !== "owner" &&
           (await connectedServers(owner)).has(serverId)
         )
           return false;
-        const [consent] = await database
-          .select({ decision: teamBotConsents.decision })
-          .from(teamBotConsents)
-          .where(
-            and(
-              eq(teamBotConsents.userId, actorId),
-              eq(teamBotConsents.agentId, botId),
-              eq(teamBotConsents.serverId, serverId),
-            ),
-          )
-          .limit(1);
-        if (consent?.decision === "always") return true;
-        const [everyBot] = await database
-          .select({ serverId: teamBotConsentDefaults.serverId })
-          .from(teamBotConsentDefaults)
-          .where(
-            and(
-              eq(teamBotConsentDefaults.userId, actorId),
-              eq(teamBotConsentDefaults.serverId, serverId),
-            ),
-          )
-          .limit(1);
-        return everyBot !== undefined;
+        if (consentFor(actorId, botId, serverId) === "always") return true;
+        return allowsEveryBot(actorId, serverId);
       };
     },
 
@@ -303,45 +252,39 @@ export function createTeamBots(options: {
       serverId: string,
       decision: TeamBotConsentDecision,
     ) {
-      const scope = and(
-        eq(teamBotConsents.userId, actor.id),
-        eq(teamBotConsents.agentId, botId),
-        eq(teamBotConsents.serverId, serverId),
-      );
       if (decision === "skip") {
-        await database.delete(teamBotConsents).where(scope);
+        try {
+          await botConfiguration().changePreferences(actor.id, [
+            { op: "setConsent", botId, serverId, decision: null },
+          ]);
+        } catch (error) {
+          // A Bot Intelligence no longer has holds no consent to clear.
+          if (!(error instanceof ConfigurationMissingError)) throw error;
+        }
         return;
       }
       if (!(await publication(botId))) throw new TeamBotNotFoundError();
       if (decision === "allow_all_team_bots") {
-        await database
-          .insert(teamBotConsentDefaults)
-          .values({ userId: actor.id, serverId })
-          .onConflictDoNothing();
+        await botConfiguration().changePreferences(actor.id, [
+          { op: "setConsentDefault", serverId, allowed: true },
+        ]);
         return;
       }
-      const value = decision === "allow_always" ? "always" : "once";
-      await database
-        .insert(teamBotConsents)
-        .values({ userId: actor.id, agentId: botId, serverId, decision: value })
-        .onConflictDoUpdate({
-          target: [
-            teamBotConsents.userId,
-            teamBotConsents.agentId,
-            teamBotConsents.serverId,
-          ],
-          set: { decision: value, updatedAt: new Date() },
-        });
+      await botConfiguration().changePreferences(actor.id, [
+        {
+          op: "setConsent",
+          botId,
+          serverId,
+          decision: decision === "allow_always" ? "always" : "once",
+        },
+      ]);
     },
 
     /** Settings: forget every consent this person has given any Team Bot. */
     async clearConsents(actor: AgentActor) {
-      await database
-        .delete(teamBotConsents)
-        .where(eq(teamBotConsents.userId, actor.id));
-      await database
-        .delete(teamBotConsentDefaults)
-        .where(eq(teamBotConsentDefaults.userId, actor.id));
+      await botConfiguration().changePreferences(actor.id, [
+        { op: "clearConsents" },
+      ]);
     },
 
     async publish(
@@ -397,44 +340,34 @@ export function createTeamBots(options: {
         throw new TeamBotRefusedError(
           "Name at least one person or group, or publish to the whole team.",
         );
-      await database.transaction(async (tx) => {
-        await tx
-          .insert(teamBotPublications)
-          .values({
-            agentId: botId,
-            publishedBy: actor.id,
-            audience: input.audience,
-          })
-          .onConflictDoUpdate({
-            target: teamBotPublications.agentId,
-            set: { audience: input.audience, publishedBy: actor.id },
-          });
-        await tx
-          .delete(teamBotAudience)
-          .where(eq(teamBotAudience.agentId, botId));
-        const rows = [
-          ...people.map((person) => ({
-            agentId: botId,
-            kind: "user" as const,
-            value: person.id,
-          })),
-          ...groups.map((group) => ({
-            agentId: botId,
-            kind: "group" as const,
-            value: group,
-          })),
-        ];
-        if (input.audience === "people" && rows.length)
-          await tx.insert(teamBotAudience).values(rows);
-      });
+      // The publication and its audience together, in one change: a teammate never sees a Bot
+      // published to the team for a moment on its way to being published to three people.
+      await botConfiguration().changeAccess([
+        {
+          op: "publish",
+          botId,
+          audience: input.audience,
+          members:
+            input.audience === "people"
+              ? [
+                  ...[...new Set(people.map((person) => person.id))].map(
+                    (id) => ({ kind: "user" as const, value: id }),
+                  ),
+                  ...groups.map((group) => ({
+                    kind: "group" as const,
+                    value: group,
+                  })),
+                ]
+              : [],
+          publishedBy: actor.id,
+        },
+      ]);
     },
 
     /** Teammates lose access until it is published again. Assignments wait, inert. */
     async unpublish(actor: AgentActor, botId: string) {
       await owned(actor, botId, true);
-      await database
-        .delete(teamBotPublications)
-        .where(eq(teamBotPublications.agentId, botId));
+      await botConfiguration().changeAccess([{ op: "unpublish", botId }]);
     },
 
     async assign(actor: AgentActor, botId: string, groupName: string) {
@@ -444,23 +377,22 @@ export function createTeamBots(options: {
         throw new TeamBotRefusedError("Publish this Bot before assigning it.");
       const group = groupName.trim();
       if (!group) throw new TeamBotRefusedError("Name a group, or * for all.");
-      await database
-        .insert(teamBotAssignments)
-        .values({ agentId: botId, groupName: group, assignedBy: actor.id })
-        .onConflictDoNothing();
+      await botConfiguration().changeAccess([
+        { op: "assign", botId, group, assignedBy: actor.id },
+      ]);
     },
 
     async unassign(actor: AgentActor, botId: string, groupName: string) {
       if (actor.role !== "admin")
         throw new TeamBotRefusedError("Only an admin can assign Team Bots.");
-      await database
-        .delete(teamBotAssignments)
-        .where(
-          and(
-            eq(teamBotAssignments.agentId, botId),
-            eq(teamBotAssignments.groupName, groupName),
-          ),
-        );
+      try {
+        await botConfiguration().changeAccess([
+          { op: "unassign", botId, group: groupName },
+        ]);
+      } catch (error) {
+        // A Bot Intelligence no longer has is assigned nowhere.
+        if (!(error instanceof ConfigurationMissingError)) throw error;
+      }
     },
 
     /** Whether this is a Team Bot somebody else published, where this person's accounts need their consent. */
@@ -471,28 +403,26 @@ export function createTeamBots(options: {
 
     /** Whether this Bot is in this person's sidebar by assignment, which they cannot hide. */
     async isAssignedTo(actorId: string, botId: string): Promise<boolean> {
-      const [row] = await database
-        .select({ agentId: teamBotPublications.agentId })
-        .from(teamBotPublications)
-        .where(
-          and(
-            eq(teamBotPublications.agentId, botId),
-            assignedCondition(actorId),
-          ),
-        )
-        .limit(1);
-      return Boolean(row);
+      return isAssignedTo(database, actorId, botId);
     },
 
     /** The Team Bots this person may use, their own publications, and each one's settings. */
     async list(actor: AgentActor) {
-      const publications = await database
-        .select({
-          agentId: teamBotPublications.agentId,
-          audience: teamBotPublications.audience,
-          publishedAt: teamBotPublications.publishedAt,
-        })
-        .from(teamBotPublications);
+      const publications = botConfiguration()
+        .access.all()
+        .flatMap((access) =>
+          access.publication
+            ? [
+                {
+                  agentId: access.botId,
+                  audience: access.publication.audience,
+                  publishedAt: access.publication.publishedAt,
+                  members: access.publication.members,
+                  assignments: access.assignments,
+                },
+              ]
+            : [],
+        );
       const { reaches, assigned } = await teamBotReach(database, actor.id);
       const live = await bots().findMany(
         publications.map((publication) => publication.agentId),
@@ -518,35 +448,32 @@ export function createTeamBots(options: {
               publishedAt: publication.publishedAt,
               assigned: assigned.has(bot.id),
               described,
+              members: publication.members,
+              assignments: publication.assignments,
             },
           ];
         })
         .sort((left, right) => left.name.localeCompare(right.name));
-      const ids = rows.map((row) => row.id);
-      const [audience, assignments] = ids.length
-        ? await Promise.all([
-            database
-              .select({
-                agentId: teamBotAudience.agentId,
-                kind: teamBotAudience.kind,
-                value: teamBotAudience.value,
-                email: users.email,
-              })
-              .from(teamBotAudience)
-              .leftJoin(
-                users,
-                and(
-                  eq(teamBotAudience.kind, "user"),
-                  eq(users.id, teamBotAudience.value),
-                ),
-              )
-              .where(inArray(teamBotAudience.agentId, ids)),
-            database
-              .select()
-              .from(teamBotAssignments)
-              .where(inArray(teamBotAssignments.agentId, ids)),
-          ])
-        : [[], []];
+      // The people in an audience by their address, which is what an owner typed and recognises.
+      const memberIds = [
+        ...new Set(
+          rows.flatMap((row) =>
+            row.members
+              .filter((member) => member.kind === "user")
+              .map((member) => member.value),
+          ),
+        ),
+      ];
+      const emails = new Map(
+        memberIds.length
+          ? (
+              await database
+                .select({ id: users.id, email: users.email })
+                .from(users)
+                .where(inArray(users.id, memberIds))
+            ).map((row) => [row.id, row.email])
+          : [],
+      );
       return rows.map((row) => {
         const manages = row.ownerUserId === actor.id || actor.role === "admin";
         return {
@@ -563,15 +490,15 @@ export function createTeamBots(options: {
           // Who it reaches is the owner's and administrators' business, not every teammate's.
           ...(manages
             ? {
-                people: audience
-                  .filter((a) => a.agentId === row.id && a.kind === "user")
-                  .map((a) => a.email ?? a.value),
-                groups: audience
-                  .filter((a) => a.agentId === row.id && a.kind === "group")
-                  .map((a) => a.value),
-                assignments: assignments
-                  .filter((a) => a.agentId === row.id)
-                  .map((a) => a.groupName),
+                people: row.members
+                  .filter((member) => member.kind === "user")
+                  .map((member) => emails.get(member.value) ?? member.value),
+                groups: row.members
+                  .filter((member) => member.kind === "group")
+                  .map((member) => member.value),
+                assignments: row.assignments.map(
+                  (assignment) => assignment.group,
+                ),
               }
             : {}),
         };
@@ -581,11 +508,10 @@ export function createTeamBots(options: {
     /** The owner's own Bots that could be published, for the publish list. */
     async publishable(actor: AgentActor) {
       const published = new Set(
-        (
-          await database
-            .select({ agentId: teamBotPublications.agentId })
-            .from(teamBotPublications)
-        ).map((row) => row.agentId),
+        botConfiguration()
+          .access.all()
+          .filter((access) => access.publication !== null)
+          .map((access) => access.botId),
       );
       return bots()
         .live()

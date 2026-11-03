@@ -11,16 +11,14 @@
  * is open. Where a Bot's key is involved, the vault write and the registry write are two steps in a
  * fixed order, and the second failing undoes or reports the first; see `create` and `update`.
  */
-import { and, eq, inArray } from "drizzle-orm";
 import { capabilityRefusal } from "../admin/capabilities";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
-import { agentPreferences } from "../db/schema";
-import { teamBotPublications } from "../db/schema/team-bots";
+import { botConfiguration } from "../configuration/directory";
 import {
   type AccessExecutor,
-  assignedCondition,
   botAccessFor,
+  isAssignedTo,
 } from "../team-bots/access";
 import {
   type AgentAuth,
@@ -311,31 +309,25 @@ export function runForDuplicate(
 
 type Preferences = { hiddenAt: Date | null; pinnedAt: Date | null };
 
-/** This person's hidden and pinned marks, for the Bots asked about or for all of them. */
+/**
+ * This person's hidden and pinned marks, for the Bots asked about or for all of them. Their
+ * preferences in Intelligence, from the copy this instance holds: the sidebar never waits on it.
+ */
 async function preferencesOf(
-  executor: AccessExecutor,
+  _executor: AccessExecutor,
   actorId: string,
   botIds?: readonly string[],
 ): Promise<Map<string, Preferences>> {
   if (botIds && botIds.length === 0) return new Map();
-  const rows = await executor
-    .select({
-      agentId: agentPreferences.agentId,
-      hiddenAt: agentPreferences.hiddenAt,
-      pinnedAt: agentPreferences.pinnedAt,
-    })
-    .from(agentPreferences)
-    .where(
-      and(
-        eq(agentPreferences.userId, actorId),
-        botIds ? inArray(agentPreferences.agentId, [...botIds]) : undefined,
-      ),
-    );
+  const wanted = botIds ? new Set(botIds) : null;
   return new Map(
-    rows.map((row) => [
-      row.agentId,
-      { hiddenAt: row.hiddenAt, pinnedAt: row.pinnedAt },
-    ]),
+    botConfiguration()
+      .preferencesOf(actorId)
+      .bots.filter((entry) => !wanted || wanted.has(entry.botId))
+      .map((entry) => [
+        entry.botId,
+        { hiddenAt: entry.hiddenAt, pinnedAt: entry.pinnedAt },
+      ]),
   );
 }
 
@@ -683,62 +675,28 @@ export function createAgentProfileStore(
 
     async setHidden(actor, id, hidden) {
       const bot = await bots().find(id);
-      await database.transaction(async (transaction) => {
-        const profile = await accessibleProfile(transaction, actor, bot);
-        if (!profile) throw new AgentNotFoundError(id);
-        // An administrator put this Team Bot in this person's sidebar; it stays there.
-        if (hidden) {
-          const [assigned] = await transaction
-            .select({ agentId: teamBotPublications.agentId })
-            .from(teamBotPublications)
-            .where(
-              and(
-                eq(teamBotPublications.agentId, id),
-                assignedCondition(actor.id),
-              ),
-            )
-            .limit(1);
-          if (assigned) throw new AgentAssignedError(id);
-        }
-
-        await transaction
-          .insert(agentPreferences)
-          .values({
-            userId: actor.id,
-            agentId: id,
-            hiddenAt: hidden ? new Date() : null,
-          })
-          .onConflictDoUpdate({
-            target: [agentPreferences.userId, agentPreferences.agentId],
-            set: { hiddenAt: hidden ? new Date() : null },
-          });
-      });
+      const profile = await accessibleProfile(database, actor, bot);
+      if (!profile) throw new AgentNotFoundError(id);
+      // An administrator put this Team Bot in this person's sidebar; it stays there.
+      if (hidden && (await isAssignedTo(database, actor.id, id)))
+        throw new AgentAssignedError(id);
+      await botConfiguration().changePreferences(actor.id, [
+        { op: "setBot", botId: id, hiddenAt: hidden ? new Date() : null },
+      ]);
     },
 
     /*
-     * The same row as hiding, one column over, and the upsert sets only its own column: pinning a
-     * hidden coworker keeps it hidden, and it comes back pinned when it is unhidden. Two people, or
-     * two tabs, pinning at once meet on the (user, agent) primary key, so the second write updates
-     * the row the first one made instead of failing.
+     * The same entry as hiding, one field over, and the change sets only its own field: pinning a
+     * hidden coworker keeps it hidden, and it comes back pinned when it is unhidden. Two tabs pinning
+     * at once are two changes to the same entry in Intelligence, applied one after the other.
      */
     async setPinned(actor, id, pinned) {
       const bot = await bots().find(id);
-      await database.transaction(async (transaction) => {
-        const profile = await accessibleProfile(transaction, actor, bot);
-        if (!profile) throw new AgentNotFoundError(id);
-
-        await transaction
-          .insert(agentPreferences)
-          .values({
-            userId: actor.id,
-            agentId: id,
-            pinnedAt: pinned ? new Date() : null,
-          })
-          .onConflictDoUpdate({
-            target: [agentPreferences.userId, agentPreferences.agentId],
-            set: { pinnedAt: pinned ? new Date() : null },
-          });
-      });
+      const profile = await accessibleProfile(database, actor, bot);
+      if (!profile) throw new AgentNotFoundError(id);
+      await botConfiguration().changePreferences(actor.id, [
+        { op: "setBot", botId: id, pinnedAt: pinned ? new Date() : null },
+      ]);
     },
 
     async softDelete(actor, id) {

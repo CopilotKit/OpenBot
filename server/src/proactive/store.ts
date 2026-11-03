@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { auditEvents, users } from "../db/schema/core";
-import { botLifecycle } from "../db/schema/lifecycle";
+import {
+  configuredPauses,
+  lifecyclePairs,
+  notAmongPairs,
+} from "../agents/lifecycle";
 import {
   proactivePings,
   proactiveRuns,
@@ -151,11 +155,16 @@ function violates(error: unknown, constraint: string): boolean {
  * or a Run now), where it records why it stopped; here they keep a turned-off person's settings from
  * being claimed, and so from costing even a ledger row, every hour.
  */
-const claimable = and(
-  eq(proactiveSettings.enabled, true),
-  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
-  sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
-);
+const claimable = () =>
+  and(
+    eq(proactiveSettings.enabled, true),
+    sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
+    notAmongPairs(
+      proactiveSettings.ownerUserId,
+      proactiveSettings.agentId,
+      lifecyclePairs((entry) => entry.pausedAt !== null),
+    ),
+  );
 
 /** A new item as a check-in raises it. Its id, status and normalized title are the store's. */
 export type NewSuggestion = Omit<
@@ -404,6 +413,12 @@ export function createProactiveStore(database: Database) {
     /** Removing research is turning it down for this Bot: OpenBot never switches it back on. */
     async remove(owner: string, id: string) {
       const { agentId } = await get(owner, id);
+      // Said in Intelligence before the setting goes, so no adoption brings it back in between.
+      await recordOptOut({
+        ownerUserId: owner,
+        agentId,
+        feature: "proactive_research",
+      });
       await database.transaction(async (transaction) => {
         await lockDefaults(transaction, owner, agentId);
         const rows = await transaction
@@ -411,11 +426,6 @@ export function createProactiveStore(database: Database) {
           .where(owned(owner, id))
           .returning({ id: proactiveSettings.id });
         if (!rows.length) throw new ProactiveNotFoundError();
-        await recordOptOut(transaction, {
-          ownerUserId: owner,
-          agentId,
-          feature: "proactive_research",
-        });
       });
     },
     /**
@@ -426,7 +436,7 @@ export function createProactiveStore(database: Database) {
       const due = await database
         .select({ id: proactiveSettings.id })
         .from(proactiveSettings)
-        .where(and(claimable, lte(proactiveSettings.nextRunAt, new Date())))
+        .where(and(claimable(), lte(proactiveSettings.nextRunAt, new Date())))
         .limit(Math.min(limit, 10));
       const claimed: ProactiveSetting[] = [];
       for (const { id } of due) {
@@ -581,17 +591,9 @@ export function createProactiveStore(database: Database) {
     },
     /** Whether this person paused this Bot. */
     async paused(owner: string, agentId: string): Promise<boolean> {
-      const [row] = await database
-        .select({ pausedAt: botLifecycle.pausedAt })
-        .from(botLifecycle)
-        .where(
-          and(
-            eq(botLifecycle.ownerUserId, owner),
-            eq(botLifecycle.agentId, agentId),
-          ),
-        )
-        .limit(1);
-      return Boolean(row?.pausedAt);
+      // Unknown counts as paused, as every dispatch's check does.
+      const pausedAt = configuredPauses.pausedAt(owner, agentId);
+      return pausedAt === undefined || pausedAt !== null;
     },
 
     /* --------------------------------------------------------------------------------------------

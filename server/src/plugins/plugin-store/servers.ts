@@ -1,5 +1,6 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
+import { botConfiguration } from "../../configuration/directory";
 import {
   databaseComplaint,
   isQueryFailure,
@@ -11,7 +12,6 @@ import {
   credentials as credentialRows,
   mcpServers,
   mcpTools,
-  pluginGrants,
 } from "../../db/schema";
 import {
   accessFor,
@@ -1436,19 +1436,21 @@ export function serverMethods(context: StoreContext) {
         if (rowBroker) await rowBroker.deleteAuthConfig(toolkit);
       }
 
-      const released = await database.transaction(async (transaction) => {
-        const removed = await transaction
-          .delete(pluginGrants)
-          .where(
-            and(
-              eq(pluginGrants.kind, "mcp"),
-              eq(sql`split_part(${pluginGrants.ref}, '/', 1)`, serverId),
-            ),
-          )
-          .returning({ ref: pluginGrants.ref, agentId: pluginGrants.agentId });
-        await transaction.delete(mcpServers).where(eq(mcpServers.id, serverId));
-        return removed.sort((left, right) => left.ref.localeCompare(right.ref));
-      });
+      /*
+       * Every Bot's grants on this server first, in one change in Intelligence, then the server row
+       * here. They were one transaction when both were in this database; now a failure between the
+       * two leaves the server with fewer grants than it had, never a grant on a server that is gone,
+       * and removing it again finishes the job.
+       */
+      const results = await botConfiguration().changeAccess([
+        { op: "revokeMatching", kind: "mcp", refPrefix: `${serverId}/` },
+        { op: "revokeMatching", kind: "mcp", ref: serverId },
+      ]);
+      const released = results
+        .flatMap((result) => result.revoked ?? [])
+        .map((grant) => ({ ref: grant.ref, agentId: grant.botId }))
+        .sort((left, right) => left.ref.localeCompare(right.ref));
+      await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",

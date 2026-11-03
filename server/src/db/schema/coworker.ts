@@ -80,6 +80,11 @@ export const agentProfiles = pgTable(
   ],
 );
 
+/**
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
+ */
 export const agentPreferences = pgTable(
   "agent_preferences",
   {
