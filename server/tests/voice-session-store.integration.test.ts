@@ -7,8 +7,6 @@ import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channelMemberships,
   channels,
   intelligenceChannelMappings,
@@ -16,6 +14,7 @@ import {
   voiceSessions,
 } from "../src/db/schema";
 import { createVoiceSessionStore } from "../src/voice/sessions";
+import { deleteBot, removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -37,6 +36,7 @@ let channelId: string;
 let agentId: string;
 
 beforeAll(async () => {
+  await useTestBots();
   for (const actor of [owner, member, outsider])
     await database.insert(users).values({
       id: actor.id,
@@ -63,7 +63,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (channelId)
     await database.delete(channels).where(eq(channels.id, channelId));
-  if (agentId) await database.delete(agents).where(eq(agents.id, agentId));
+  if (agentId) await removeBots([agentId]);
   await database
     .delete(users)
     .where(inArray(users.id, [owner.id, member.id, outsider.id]));
@@ -139,10 +139,7 @@ test("pagination handles equal timestamps without missing or repeating sessions"
 });
 
 test("deleted agents make voice writes inactive while existing history stays readable", async () => {
-  await database
-    .update(agentProfiles)
-    .set({ deletedAt: new Date() })
-    .where(eq(agentProfiles.agentId, agentId));
+  await deleteBot(agentId);
   await expect(store.save(owner, input())).rejects.toThrow("no longer active");
   expect((await store.list(owner, channelId)).sessions.length).toBeGreaterThan(
     0,

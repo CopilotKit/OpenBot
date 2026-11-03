@@ -1,8 +1,15 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import type { AuditEventInput } from "../src/audit";
@@ -19,8 +26,6 @@ import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channels,
   intelligenceChannelMappings,
   users,
@@ -29,6 +34,7 @@ import {
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { createWorkQueue } from "../src/work/queue";
+import { changeBot, removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -51,15 +57,12 @@ afterEach(async () => {
       .where(eq(intelligenceChannelMappings.channelId, id));
     await database.delete(channels).where(eq(channels.id, id));
   }
-  if (createdAgents.length) {
-    const ids = createdAgents.splice(0);
-    await database
-      .delete(agentProfiles)
-      .where(inArray(agentProfiles.agentId, ids));
-    await database.delete(agents).where(inArray(agents.id, ids));
-  }
+  await removeBots(createdAgents.splice(0));
   for (const id of createdUsers.splice(0))
     await database.delete(users).where(eq(users.id, id));
+});
+beforeAll(async () => {
+  await useTestBots();
 });
 afterAll(async () => {
   await database.$client.close();
@@ -694,10 +697,8 @@ describe("group conversations in PostgreSQL", () => {
     const ada = await bot(owner, "Ada");
     const grace = await bot(owner, "Grace");
     // Bots the teammate may use too, so the teammate can address them in the group.
-    await database
-      .update(agentProfiles)
-      .set({ visibility: "public" })
-      .where(inArray(agentProfiles.agentId, [ada, grace]));
+    for (const id of [ada, grace])
+      await changeBot(id, { visibility: "public" });
     const privateShare = createPrivateShareCheck({
       approvals: {
         open: async () =>
@@ -806,10 +807,7 @@ describe("group conversations in PostgreSQL", () => {
       connectedServers: async (userId) =>
         new Set(userId === teammate.id ? ["gmail"] : []),
     });
-    await database
-      .update(agentProfiles)
-      .set({ roleDescription: "Sends mail." })
-      .where(eq(agentProfiles.agentId, teamBot));
+    await changeBot(teamBot, { roleDescription: "Sends mail." });
     await teamBots.publish(owner, teamBot, {
       audience: "team",
       emails: [],

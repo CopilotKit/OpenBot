@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
   type BaseEvent,
@@ -28,8 +28,6 @@ import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   approvalRequests,
   botTasks,
   channelAgents,
@@ -49,6 +47,7 @@ import { PROACTIVE_TASK_KIND } from "../src/tasks/state";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -422,6 +421,10 @@ async function conversation(channelId: string) {
   return row;
 }
 
+beforeAll(async () => {
+  await useTestBots();
+});
+
 afterAll(async () => {
   await tasks.idle();
   const theirs = await database
@@ -445,10 +448,7 @@ afterAll(async () => {
       ),
     );
   await database.delete(users).where(inArray(users.id, people));
-  await database
-    .delete(agentProfiles)
-    .where(inArray(agentProfiles.agentId, bots));
-  await database.delete(agents).where(inArray(agents.id, bots));
+  await removeBots(bots);
   await database.$client.close();
 });
 

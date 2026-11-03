@@ -6,7 +6,6 @@ import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   mcpServers,
   mcpTools,
@@ -14,6 +13,7 @@ import {
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -54,13 +54,9 @@ const mock = new MCPMock();
 const received: unknown[] = [];
 
 beforeAll(async () => {
-  // Both Bots must exist: a grant is a row against a real agent, which is what keeps a grant from
-  // outliving the Bot it was given to.
+  // Both Bots must exist: a grant names a real Bot, and purging that Bot takes its grants with it.
   for (const id of [holderId, strangerId]) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
+    await seedBot({ id, name: id, type: "remote_ag_ui" });
   }
 
   mock.addTool({
@@ -112,8 +108,7 @@ afterAll(async () => {
   await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
   await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
   await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
-  await database.delete(agents).where(eq(agents.id, holderId));
-  await database.delete(agents).where(eq(agents.id, strangerId));
+  await removeBots([holderId, strangerId]);
   await mock.stop();
 });
 

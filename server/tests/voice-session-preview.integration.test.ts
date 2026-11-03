@@ -14,10 +14,11 @@ import {
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import { agents, channels, users } from "../src/db/schema";
+import { channels, users } from "../src/db/schema";
 import { createVoiceSessionRoutes } from "../src/voice/session-routes";
 import { createVoiceSessionStore } from "../src/voice/sessions";
 import type { VoiceSummarizer } from "../src/voice/summary";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -47,6 +48,7 @@ hub.register(owner.id, (payload) => {
 });
 
 beforeAll(async () => {
+  await useTestBots();
   await database.insert(users).values({
     id: owner.id,
     email: `${owner.id}@example.test`,
@@ -66,7 +68,7 @@ afterAll(async () => {
   await listener?.stop();
   if (channelIds.length)
     await database.delete(channels).where(inArray(channels.id, channelIds));
-  if (agentId) await database.delete(agents).where(eq(agents.id, agentId));
+  if (agentId) await removeBots([agentId]);
   await database.delete(users).where(eq(users.id, owner.id));
   await database.$client.close();
 });

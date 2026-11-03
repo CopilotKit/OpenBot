@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import {
@@ -12,13 +19,8 @@ import {
 } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+import { channels, intelligenceChannelMappings, users } from "../src/db/schema";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -45,15 +47,14 @@ afterEach(async () => {
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {

@@ -31,7 +31,6 @@ import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   approvalPreferences,
   approvalRequests,
   mcpServers,
@@ -42,6 +41,7 @@ import {
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -466,9 +466,12 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: person, email: `${person}@example.test`, name: "Dana" });
-  await database
-    .insert(agents)
-    .values({ id: botId, name: "Notes", type: "built_in", configuration: {} });
+  await seedBot({
+    id: botId,
+    name: "Notes",
+    type: "built_in",
+    configuration: { systemPrompt: ROLE },
+  });
   await database.insert(mcpServers).values({
     id: SERVER,
     title: "Notes",
@@ -583,7 +586,7 @@ afterAll(async () => {
   await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
   await database.delete(mcpTools).where(eq(mcpTools.serverId, SERVER));
   await database.delete(mcpServers).where(eq(mcpServers.id, SERVER));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
   await database.delete(users).where(eq(users.id, person));
   await database.$client.close();
 });

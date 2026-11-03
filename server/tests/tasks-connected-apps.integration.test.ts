@@ -29,8 +29,6 @@ import type { RegisteredAgent } from "../src/copilot";
 import { createCredentialStore, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   approvalRequests,
   channelMemberships,
   channels,
@@ -60,6 +58,7 @@ import { createTaskRunner } from "../src/tasks/runner";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -269,6 +268,7 @@ const realFetch = globalThis.fetch;
 let environmentBefore: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
+  await useTestBots();
   llm.on({ predicate: () => true }, (request) => script(request));
   const model = await llm.start();
   relay = Bun.serve({
@@ -731,10 +731,7 @@ afterAll(async () => {
     .where(inArray(pluginGrants.agentId, bots));
   await fixtures.remove();
   await database.delete(users).where(inArray(users.id, people));
-  await database
-    .delete(agentProfiles)
-    .where(inArray(agentProfiles.agentId, bots));
-  await database.delete(agents).where(inArray(agents.id, bots));
+  await removeBots(bots);
   await database.$client.close();
 });
 

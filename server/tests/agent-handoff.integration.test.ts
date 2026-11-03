@@ -1,18 +1,20 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { createHandoffDesk, HANDOFF_KIND } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  auditEvents,
-  pluginGrants,
-  workItems,
-} from "../src/db/schema";
+import { auditEvents, pluginGrants, workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -60,37 +62,35 @@ async function clean() {
     .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
   for (const id of [ASKER, TARGET]) {
     await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
-    await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));
-    await database.delete(agents).where(eq(agents.id, id));
   }
 }
 
-beforeEach(async () => {
-  await clean();
+// Made once: every test reads the same two Bots and changes neither.
+beforeAll(async () => {
   for (const [id, name] of [
     [ASKER, "Asker"],
     [TARGET, "Target"],
-  ]) {
-    await database
-      .insert(agents)
-      .values({ id, name, type: "built_in", configuration: {} })
-      .onConflictDoNothing();
-    await database
-      .insert(agentProfiles)
-      .values({
-        agentId: id,
-        name,
-        title: "",
-        roleDescription: "",
-        avatarSeed: id,
-        visibility: "public",
-      })
-      .onConflictDoNothing();
+  ] as const) {
+    await seedBot({
+      id,
+      name,
+      type: "built_in",
+      configuration: { systemPrompt: "" },
+      title: "",
+      roleDescription: "",
+      avatarSeed: id,
+      visibility: "public",
+    });
   }
+});
+
+beforeEach(async () => {
+  await clean();
 });
 
 afterAll(async () => {
   await clean();
+  await removeBots([ASKER, TARGET]);
   await database.$client.end({ timeout: 5 });
 });
 

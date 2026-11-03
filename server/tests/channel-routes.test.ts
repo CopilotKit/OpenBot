@@ -1,13 +1,14 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -32,8 +33,6 @@ import { createThreadIdentity } from "../src/channels/thread-identity";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channelAgents,
   channelMemberships,
   channels,
@@ -41,6 +40,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { deleteBot, removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
@@ -902,15 +902,14 @@ afterEach(async () => {
       .delete(deploymentPackages)
       .where(eq(deploymentPackages.id, packageId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {
@@ -939,21 +938,18 @@ async function createPersistentAgent(options: {
   visibility?: "public" | "private";
 }) {
   const agentId = options.id ?? persistentId("agent");
-  await database.insert(agents).values({
+  await seedBot({
     id: agentId,
     name: options.name,
     type: "remote_ag_ui",
     configuration: { endpoint: "https://agent.example.test/ag-ui" },
-  });
-  createdAgentIds.push(agentId);
-  await database.insert(agentProfiles).values({
-    agentId,
     ownerUserId: options.owner.id,
     title: `${options.name} title`,
     roleDescription: `${options.name} role description`,
     avatarSeed: agentId,
     visibility: options.visibility ?? "private",
   });
+  createdAgentIds.push(agentId);
   return agentId;
 }
 
@@ -1214,17 +1210,22 @@ describe("channel store integration", () => {
 
   test("truncates derived names to 120 Unicode code points with an ellipsis", async () => {
     const actor = await createPersistentUser();
-    const longName = "😀".repeat(121);
-    const agentId = await createPersistentAgent({
-      name: longName,
-      owner: actor,
-    });
+    // Three Bots at the longest name a Bot may have (80 UTF-16 units, so 40 of these), which is how
+    // a channel's name runs past 120: one Bot's name never can, and Intelligence refuses one that
+    // long. Each emoji is two UTF-16 units and one code point, so a cut by length would differ.
+    const longName = "😀".repeat(40);
+    const agentIds: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      agentIds.push(
+        await createPersistentAgent({ name: longName, owner: actor }),
+      );
+    }
 
-    const created = await persistentStore.create(actor, [agentId]);
+    const created = await persistentStore.create(actor, agentIds);
     createdChannelIds.push(created.id);
 
     expect(Array.from(created.name)).toHaveLength(120);
-    expect(created.name).toBe(`${"😀".repeat(119)}…`);
+    expect(created.name).toBe(`${longName}, ${longName}, ${"😀".repeat(35)}…`);
     expect((await persistedChannel(created.id)).channelRow?.name).toBe(
       created.name,
     );
@@ -1694,10 +1695,11 @@ describe("channel soft delete", () => {
 });
 
 /**
- * Channel creation validates each selected agent through the profile store while its own
- * transaction is open. If that read runs on a second pooled connection it is both a deadlock (the
- * transaction holds a connection while waiting for one) and a time-of-check race (the read sees a
- * different snapshot and takes no lock, so a concurrent deletion lands between check and insert).
+ * Channel creation validates each selected agent while its own transaction is open. The person's own
+ * rows are read on the connection that transaction holds: a read on a second pooled connection would
+ * deadlock a one-connection pool, since the transaction holds a connection while waiting for one.
+ * The Bot is read from this instance's memory, warmed before the transaction opens, because a
+ * transaction must not wait on Intelligence.
  */
 describe("channel store concurrency", () => {
   test("creates a channel without borrowing a second connection", async () => {
@@ -1726,51 +1728,62 @@ describe("channel store concurrency", () => {
     }
   });
 
-  test("refuses an agent whose deletion commits mid-creation", async () => {
+  /*
+   * A Bot lives in Intelligence, so no row lock in this database can hold its deletion off until a
+   * channel commits, and the check and the insert cannot be made one. What has to hold instead is
+   * that a Bot deleted after the check never leaves a live channel: the channel reads back inactive,
+   * exactly as one whose Bot was deleted a moment after it was made.
+   */
+  test("a Bot deleted while its channel is being made leaves that channel inactive", async () => {
     const owner = await createPersistentUser();
     const agentId = await createPersistentAgent({
       name: "Concurrently deleted agent",
       owner,
     });
 
-    let markDeleted: () => void = () => {};
-    let releaseDeletion: () => void = () => {};
-    const deletionApplied = new Promise<void>((resolve) => {
-      markDeleted = resolve;
-    });
-    const deletionHeld = new Promise<void>((resolve) => {
-      releaseDeletion = resolve;
-    });
-    const deletion = database.transaction(async (transaction) => {
-      await transaction
-        .update(agentProfiles)
-        .set({ deletedAt: new Date() })
-        .where(eq(agentProfiles.agentId, agentId));
-      markDeleted();
-      await deletionHeld;
-    });
+    // Holds the creation inside its transaction: its membership row names the person, whose row this
+    // connection has locked, so it waits there, after the Bot was checked and before anything commits.
+    const holder = createDatabase(databaseUrl, { max: 1 });
+    let outcome: Promise<AgentChannel | unknown> = Promise.resolve();
+    try {
+      await holder.transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select id from users where id = ${owner.id} for update`,
+        );
+        outcome = persistentStore.create(owner, [agentId]).then(
+          (created) => {
+            createdChannelIds.push(created.id);
+            return created;
+          },
+          (error: unknown) => error,
+        );
+        // Until the creation is waiting behind this connection's lock.
+        for (let attempt = 0; ; attempt += 1) {
+          const [row] = await transaction.execute<{ waiting: number }>(
+            sql`select count(*)::int as waiting from pg_stat_activity where pg_backend_pid() = any(pg_blocking_pids(pid))`,
+          );
+          if ((row?.waiting ?? 0) > 0) break;
+          if (attempt === 500)
+            throw new Error("The creation never reached the held lock.");
+          await Bun.sleep(10);
+        }
+        await deleteBot(agentId);
+      });
+    } finally {
+      await holder.$client.close();
+    }
 
-    await deletionApplied;
-    const creation = persistentStore.create(owner, [agentId]);
-    // Long enough for a correct implementation to reach the row lock and block on it.
-    await Bun.sleep(250);
-    releaseDeletion();
-    await deletion;
-
-    const outcome = await creation.then(
-      (created) => {
-        createdChannelIds.push(created.id);
-        return created;
-      },
-      (error: unknown) => error,
+    const created = await outcome;
+    if (created instanceof Error) throw created;
+    const channel = created as AgentChannel;
+    expect(channel.agentIds).toEqual([agentId]);
+    expect(await persistentStore.get(owner, channel.id)).toEqual({
+      ...channel,
+      active: false,
+    });
+    const listed = (await persistentStore.list(owner)).channels.find(
+      (entry) => entry.id === channel.id,
     );
-
-    expect(outcome).toBeInstanceOf(AgentNotFoundError);
-    expect(
-      await database
-        .select({ channelId: channelAgents.channelId })
-        .from(channelAgents)
-        .where(eq(channelAgents.agentId, agentId)),
-    ).toEqual([]);
+    expect(listed?.active).toBe(false);
   });
 });

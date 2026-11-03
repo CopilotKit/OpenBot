@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { FIRING_FRAME, frameFiring } from "@openbot/shared/routine-firing";
 import { eq, sql } from "drizzle-orm";
@@ -20,8 +27,6 @@ import {
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channelMemberships,
   channels,
   intelligenceChannelMappings,
@@ -29,6 +34,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -57,15 +63,14 @@ afterEach(async () => {
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {

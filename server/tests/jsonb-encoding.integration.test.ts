@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { agents } from "../src/db/schema";
+import { channels } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -19,28 +19,30 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
-const agentId = `agent_jsonb_${suite}`;
+const channelId = `channel_jsonb_${suite}`;
 
 afterAll(async () => {
-  await database.delete(agents).where(eq(agents.id, agentId));
+  await database.delete(channels).where(eq(channels.id, channelId));
 });
 
 describe("what a jsonb column actually stores", () => {
   test("an object written through the schema is stored as an object", async () => {
-    await database.insert(agents).values({
-      id: agentId,
-      name: agentId,
-      type: "remote_ag_ui",
-      configuration: {
+    // Every jsonb column goes through the same type, so any table's will do. This one wrote a Bot's
+    // configuration until Bots moved to Intelligence; a channel's override holds the same shape.
+    await database.insert(channels).values({
+      id: channelId,
+      name: channelId,
+      description: "A jsonb test.",
+      override: {
         endpoint: "https://example.test/ag-ui",
         nested: { a: 1 },
       },
     });
 
     const [row] = await database.execute<{ shape: string; endpoint: string }>(
-      sql`select jsonb_typeof(configuration) as shape,
-                 configuration->>'endpoint' as endpoint
-          from agents where id = ${agentId}`,
+      sql`select jsonb_typeof(override) as shape,
+                 override->>'endpoint' as endpoint
+          from channels where id = ${channelId}`,
     );
 
     expect(row?.shape).toBe("object");

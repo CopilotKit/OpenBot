@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
@@ -18,14 +25,13 @@ import {
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channelMemberships,
   channels,
   deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 function event(overrides: Partial<ChannelActivityEvent> = {}) {
@@ -163,15 +169,14 @@ afterEach(async () => {
       .delete(deploymentPackages)
       .where(eq(deploymentPackages.id, packageId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {

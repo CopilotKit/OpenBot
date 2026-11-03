@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { ExchangeResponse } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
-import { count, eq, inArray } from "drizzle-orm";
+import { count, inArray } from "drizzle-orm";
 import { GATED_ROUTES, runtimeRun } from "../src/admin/gate";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createApp } from "../src/app";
@@ -13,7 +13,7 @@ import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
 import {
   learningOpenSkills,
@@ -24,6 +24,7 @@ import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 
@@ -165,6 +166,14 @@ async function counts() {
 let token = "";
 
 beforeAll(async () => {
+  // Made before every fetch is refused below: the Bot is in Intelligence, and this process holds it
+  // from here on without asking again.
+  await seedBot({
+    id: BOT,
+    name: "Bot",
+    type: "built_in",
+    configuration: { systemPrompt: "Work." },
+  });
   spies.push(
     spyOn(
       CopilotKitIntelligence.prototype,
@@ -196,9 +205,6 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test`, name: "The Owner" });
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: "Bot", type: "built_in", configuration: {} });
   const minted = await call("/api/recorder/connect-codes", {
     method: "POST",
     headers: COOKIE,
@@ -216,7 +222,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
-  await database.delete(agents).where(eq(agents.id, BOT));
+  await removeBots([BOT]);
   await database.delete(users).where(inArray(users.id, [owner]));
   await database.$client.close();
 });
