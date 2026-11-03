@@ -3,7 +3,6 @@ import type * as React from "react";
 import { useEffect, useSyncExternalStore } from "react";
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -13,59 +12,23 @@ import type { NavigationItem } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 /**
- * What the team edition has and the personal edition does not.
+ * What the team edition has and the personal edition does not, one short line each.
  *
  * Shown where Admin would be. A list and nothing else: no links, no buttons beyond closing it, so
  * the place Admin used to be says what there is without sending anybody anywhere.
  */
-export const TEAM_FEATURES: readonly { title: string; description: string }[] =
-  [
-    {
-      title: "Sign-in for your team",
-      description:
-        "People sign in with Google, Microsoft, Okta, or your company's own provider.",
-    },
-    {
-      title: "People and roles",
-      description:
-        "See who has signed in, make someone an admin, or remove their access.",
-    },
-    {
-      title: "Controls for everyone",
-      description:
-        "Choose what people may use, which models and apps are allowed, and where Bot computers can connect.",
-    },
-    {
-      title: "Boundaries",
-      description: "Write rules that every Bot follows before it acts.",
-    },
-    {
-      title: "Team approvals",
-      description:
-        "Set approval rules for everyone, and approve the use of shared accounts.",
-    },
-    {
-      title: "Team Bots",
-      description: "Share a Bot with your whole team.",
-    },
-    {
-      title: "Slack and Microsoft Teams",
-      description: "Add Bots to your team's conversations in Slack and Teams.",
-    },
-    {
-      title: "A computer for each Bot",
-      description: "Give a Bot a computer of its own.",
-    },
-    {
-      title: "Learning across the team",
-      description:
-        "Bots learn from everyone's recordings, and an admin decides what is shared.",
-    },
-    {
-      title: "Full audit trail",
-      description: "Review and export everything every Bot did for anyone.",
-    },
-  ];
+export const TEAM_FEATURES: readonly { title: string }[] = [
+  { title: "Sign-in with Google, Microsoft or Okta" },
+  { title: "People, roles and admins" },
+  { title: "Controls over models, apps and networks" },
+  { title: "Rules every Bot follows" },
+  { title: "Approval rules for everyone" },
+  { title: "Bots shared with your whole team" },
+  { title: "Bots in Slack and Microsoft Teams" },
+  { title: "A computer for each Bot" },
+  { title: "Learning shared across the team" },
+  { title: "A full audit trail, with export" },
+];
 
 /*
  * Open or closed, for the one dialog the signed-in layout mounts. Module state so any navigation
@@ -94,25 +57,28 @@ export function TeamFeaturesDialog() {
   useEffect(() => () => setOpen(false), []);
   return (
     <Dialog onOpenChange={setOpen} open={isOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>OpenBot for Business</DialogTitle>
-          <DialogDescription>
-            These features come with OpenBot for Business.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="mt-4">
-          <ul className="flex flex-col gap-3">
-            {TEAM_FEATURES.map((feature) => (
-              <li key={feature.title}>
-                <p className="font-medium text-sm">{feature.title}</p>
-                <p className="text-muted-foreground text-sm">
-                  {feature.description}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </DialogBody>
+      <DialogContent className="max-w-2xl p-6">
+        <div className="grid gap-6 sm:grid-cols-[minmax(0,15rem)_1fr]">
+          {/* The illustration's place, until there is one. Beside the list only where there is room. */}
+          <div
+            aria-hidden="true"
+            className="hidden aspect-square w-full rounded-lg bg-muted sm:block"
+            data-testid="business-illustration"
+          />
+          <div className="flex min-w-0 flex-col gap-3">
+            <DialogHeader>
+              <DialogTitle>OpenBot for Business</DialogTitle>
+              <DialogDescription className="sr-only">
+                These features come with OpenBot for Business.
+              </DialogDescription>
+            </DialogHeader>
+            <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm">
+              {TEAM_FEATURES.map((feature) => (
+                <li key={feature.title}>{feature.title}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
