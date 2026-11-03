@@ -363,7 +363,7 @@ describe("release workflow invariants", () => {
       expect(() => Bun.YAML.parse(source)).not.toThrow();
       for (const match of source.matchAll(/^\s+(?:- )?uses: (\S+)/gm))
         expect(match[1]).toMatch(
-          /^(?:\.\/\.github\/workflows\/[A-Za-z0-9_.-]+\.yml|[A-Za-z0-9_./-]+@[0-9a-f]{40})$/,
+          /^(?:\$\/\.github\/workflows\/[A-Za-z0-9_.-]+\.yml|[A-Za-z0-9_./-]+@[0-9a-f]{40})$/,
         );
     },
   );
@@ -373,6 +373,7 @@ describe("release workflow invariants", () => {
       "utf8",
     );
     expect(source).not.toContain("ghcr.io/copilotkit/");
+    expect(source).toContain("uses: $/.github/workflows/ci.yml");
     expect(source).toContain(
       "run: bun scripts/release-manifest.ts --validate-policy",
     );
