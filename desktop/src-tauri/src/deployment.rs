@@ -594,7 +594,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(images_path(&root), "{}").unwrap();
-        record(&root, "v0.0.15").unwrap();
+        record(&root, "v0.0.15", false).unwrap();
         assert!(predates_containers(&root));
         assert!(needs_fetch(&root, "v0.0.15"));
 

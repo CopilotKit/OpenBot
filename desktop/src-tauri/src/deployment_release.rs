@@ -98,8 +98,8 @@ mod tests {
         )
         .unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
-        deployment::record(&root, "v0.0.15").unwrap();
-        let version = resolve_version_with(&root, || Ok("v0.0.16".into())).unwrap();
+        deployment::record(&root, "v0.0.15", false).unwrap();
+        let version = resolve_version_with(&root, None, || Ok("v0.0.16".into())).unwrap();
         assert_eq!(version, "v0.0.16");
         assert!(deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
