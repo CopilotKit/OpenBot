@@ -220,6 +220,21 @@ echo
 echo "OpenBot"
 echo "======="
 
+# Provision the installation's Composio project with the existing CLI sign-in, independently of
+# Learning. The helper preserves supplied keys and Arcade. A failure names the action to take and
+# stops startup before any services are changed. The server reads the resulting .env on launch.
+# Bun preserves exported values over .env, including empty strings. A child cannot change this
+# shell's environment, so clear only blank overrides before setup and later server processes.
+if [[ "${COMPOSIO_API_KEY:-}" != *[![:space:]]* ]]; then
+  unset COMPOSIO_API_KEY
+fi
+COMPOSIO_BEFORE="$(setting COMPOSIO_API_KEY "")"
+COMPOSIO_LINE="$(bun scripts/setup-composio.ts)"
+info "  $COMPOSIO_LINE"
+if [ -z "$COMPOSIO_BEFORE" ] && [ -n "$(setting COMPOSIO_API_KEY "")" ]; then
+  SECRETS_ROTATED=true
+fi
+
 info "1/4  Docker services"
 SERVICES=(postgres)
 if [ "$ONE_COMPUTER_EACH" = "true" ]; then

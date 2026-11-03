@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 async function writeExecutable(path: string, contents: string) {
   await writeFile(path, contents);
@@ -25,6 +25,8 @@ type Run = {
   settings?: Record<string, string>;
   processEnvironment?: Record<string, string>;
   unavailableHealthPorts?: readonly number[];
+  composioSetup?: "configured" | "failed" | "real-helper";
+  probeBrokerEnvironment?: { composioKey?: string; arcadeKey?: string };
 };
 
 async function runStartWithStaleServerProbe(
@@ -35,6 +37,8 @@ async function runStartWithStaleServerProbe(
     settings = {},
     processEnvironment = {},
     unavailableHealthPorts = [],
+    composioSetup,
+    probeBrokerEnvironment,
   }: Run = {},
 ) {
   const root =
@@ -45,6 +49,7 @@ async function runStartWithStaleServerProbe(
   const logPath = join(directory, "pkill.log");
   const dockerLogPath = join(directory, "docker.log");
   const curlLogPath = join(directory, "curl.log");
+  const brokerEnvironmentPath = join(directory, "broker-environment.log");
   await mkdir(fakeBin, { recursive: true });
   await mkdir(scripts, { recursive: true });
   const environment = [
@@ -86,6 +91,27 @@ async function runStartWithStaleServerProbe(
   await writeFile(
     join(scripts, "processes.sh"),
     await readFile("scripts/processes.sh"),
+  );
+  await writeFile(
+    join(scripts, "setup-composio.ts"),
+    `
+import { writeFile, readFile } from "node:fs/promises";
+import { setupComposio } from ${JSON.stringify(resolve("scripts/setup-composio.ts"))};
+const result = await setupComposio({ runCli: async (args) => {
+  await writeFile(".env", (await readFile(".env", "utf8")) + "\\nCOMPOSIO_API_KEY=synthetic-project-key\\n");
+  return { exitCode: 0, stdout: JSON.stringify({type: "completed", installation_id: args[4], project_id: "project-synthetic", environment_file_written: true, reused: false}) };
+} });
+console.log(result === "configured" ? "COMPOSIO-CONFIGURED" : "COMPOSIO-PRESERVED");
+`,
+  );
+  await writeFile(
+    join(scripts, "probe-broker-environment.ts"),
+    `
+await Bun.write(process.env.BROKER_ENVIRONMENT_PROBE, [
+  "composio=" + (process.env.COMPOSIO_API_KEY === process.env.EXPECTED_COMPOSIO_KEY),
+  "arcade=" + (process.env.ARCADE_API_KEY === process.env.EXPECTED_ARCADE_KEY),
+].join("\\n"));
+`,
   );
 
   await writeExecutable(
@@ -142,7 +168,7 @@ exit 0
   // The Learning container check answers with one line, which start.sh relays.
   await writeExecutable(
     join(fakeBin, "bun"),
-    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then exec "$REAL_BUN" "$@"; fi\nif [ "$1" = scripts/setup-learning.ts ]; then echo "noise"; echo "LEARNING-CHECK $*"; fi\nexit 0\n',
+    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then\n  if [ -n "$BROKER_ENVIRONMENT_PROBE" ]; then "$REAL_BUN" --env-file=.env scripts/probe-broker-environment.ts; fi\n  exec "$REAL_BUN" "$@"\nfi\nif [ "$1" = scripts/setup-learning.ts ]; then echo "noise"; echo "LEARNING-CHECK $*"; fi\nif [ "$1" = scripts/setup-composio.ts ]; then\n  if [ "$TEST_COMPOSIO_SETUP" = real-helper ]; then exec "$REAL_BUN" "$@"; fi\n  if [ "$TEST_COMPOSIO_SETUP" = failed ]; then echo "Composio setup failed. Sign in and retry." >&2; exit 1; fi\n  if [ "$TEST_COMPOSIO_SETUP" = configured ]; then printf "COMPOSIO_API_KEY=synthetic-project-key\\n" >> .env; echo "COMPOSIO-CONFIGURED"; fi\nfi\nexit 0\n',
   );
   // What `python3` is on a stock Windows machine: the Microsoft Store alias, which runs nothing. A
   // script that still needed it would stop at the health check in every test in this file.
@@ -161,6 +187,14 @@ exit 0
         PKILL_LOG: logPath,
         DOCKER_LOG: dockerLogPath,
         CURL_LOG: curlLogPath,
+        TEST_COMPOSIO_SETUP: composioSetup ?? "preserved",
+        ...(probeBrokerEnvironment
+          ? {
+              BROKER_ENVIRONMENT_PROBE: brokerEnvironmentPath,
+              EXPECTED_COMPOSIO_KEY: probeBrokerEnvironment.composioKey,
+              EXPECTED_ARCADE_KEY: probeBrokerEnvironment.arcadeKey,
+            }
+          : {}),
         ...processEnvironment,
       },
       stdout: "pipe",
@@ -180,7 +214,18 @@ exit 0
     const curlLog = await Bun.file(curlLogPath)
       .text()
       .catch(() => "");
-    return { exitCode, stdout, stderr, pkillLog, dockerLog, curlLog };
+    const brokerEnvironment = await Bun.file(brokerEnvironmentPath)
+      .text()
+      .catch(() => "");
+    return {
+      exitCode,
+      stdout,
+      stderr,
+      pkillLog,
+      dockerLog,
+      curlLog,
+      brokerEnvironment,
+    };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -204,6 +249,81 @@ describe("start.sh server restart guard", () => {
       expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
     },
   );
+});
+
+describe("start.sh automatic Composio setup", () => {
+  test.each(["", " \t "])(
+    "a blank exported Composio key (%j) lets a later real Bun child load the provisioned key",
+    async (value) => {
+      const result = await runStartWithStaleServerProbe(401, {
+        composioSetup: "real-helper",
+        processEnvironment: { COMPOSIO_API_KEY: value },
+        probeBrokerEnvironment: { composioKey: "synthetic-project-key" },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("COMPOSIO-CONFIGURED");
+      expect(result.brokerEnvironment).toBe("composio=true\narcade=true");
+      expect(result.stdout + result.stderr).not.toContain(
+        "synthetic-project-key",
+      );
+    },
+  );
+
+  test.each([
+    [
+      "supplied Composio",
+      { COMPOSIO_API_KEY: "existing-composio" },
+      {},
+      { composioKey: "existing-composio" },
+    ],
+    [
+      "saved Composio behind a blank export",
+      { COMPOSIO_API_KEY: "   " },
+      { COMPOSIO_API_KEY: "saved-composio" },
+      { composioKey: "saved-composio" },
+    ],
+    [
+      "Arcade",
+      { COMPOSIO_API_KEY: "" },
+      { ARCADE_API_KEY: "existing-arcade", OPENBOT_BROKER_PROVIDER: "arcade" },
+      { arcadeKey: "existing-arcade" },
+    ],
+  ] as const)(
+    "real child startup preserves %s",
+    async (_, processEnvironment, settings, probeBrokerEnvironment) => {
+      const result = await runStartWithStaleServerProbe(401, {
+        composioSetup: "real-helper",
+        processEnvironment,
+        settings,
+        probeBrokerEnvironment,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("COMPOSIO-PRESERVED");
+      expect(result.brokerEnvironment).toBe("composio=true\narcade=true");
+    },
+  );
+
+  test("provisions without Learning configuration and restarts a server to reload its environment", async () => {
+    const result = await runStartWithStaleServerProbe(401, {
+      composioSetup: "configured",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("COMPOSIO-CONFIGURED");
+    expect(result.stdout).toContain(
+      "a secret was generated this run, so the server is restarted",
+    );
+    expect(result.stdout).not.toContain("LEARNING-CHECK");
+  });
+
+  test("stops before starting services when provisioning cannot complete", async () => {
+    const result = await runStartWithStaleServerProbe(401, {
+      composioSetup: "failed",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("Sign in and retry");
+    expect(result.dockerLog).toBe("");
+    expect(result.pkillLog).toBe("");
+  });
 });
 
 describe("start.sh runtime health", () => {
