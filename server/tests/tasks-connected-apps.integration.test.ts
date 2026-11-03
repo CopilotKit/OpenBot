@@ -30,8 +30,6 @@ import { createCredentialStore, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   approvalRequests,
-  channelMemberships,
-  channels,
   credentials,
   mcpServers,
   mcpTools,
@@ -59,6 +57,10 @@ import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  conversationClient,
+  purgeConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -706,10 +708,6 @@ afterAll(async () => {
       else process.env[name] = value;
     }
   }
-  const theirs = await database
-    .select({ id: channelMemberships.channelId })
-    .from(channelMemberships)
-    .where(inArray(channelMemberships.userId, people));
   const approvals = await database
     .select({ id: approvalRequests.id })
     .from(approvalRequests)
@@ -719,13 +717,16 @@ afterAll(async () => {
     .where(
       sql`${workItems.payload}->>'ownerUserId' in ${people} or (${workItems.kind} = 'approval.resume' and ${workItems.key} in ${approvals.length ? approvals.map((row) => row.id) : [""]})`,
     );
-  if (theirs.length)
-    await database.delete(channels).where(
-      inArray(
-        channels.id,
-        theirs.map((row) => row.id),
-      ),
-    );
+  // Their conversations, and the tasks that own them, in Intelligence.
+  const client = await conversationClient();
+  const theirs = new Set<string>();
+  for (const userId of people)
+    for (const found of await client.all({
+      memberUserId: userId,
+      includeDeleted: true,
+    }))
+      theirs.add(found.id);
+  await purgeConversations([...theirs]);
   await database
     .delete(pluginGrants)
     .where(inArray(pluginGrants.agentId, bots));

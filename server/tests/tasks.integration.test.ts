@@ -29,10 +29,6 @@ import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
   approvalRequests,
-  botTasks,
-  channelAgents,
-  channelMemberships,
-  channels,
   proactiveSettings,
   proactiveSuggestions,
   users,
@@ -48,6 +44,14 @@ import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  conversationClient,
+  maybeConversation,
+  purgeConversations,
+  storedConversation,
+  storedTask,
+  storedTasks,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -413,12 +417,20 @@ async function start(owner: AgentActor, itemId: string) {
   return tasks.startFromItem({ ownerUserId: owner.id, item });
 }
 
-async function conversation(channelId: string) {
-  const [row] = await database
-    .select()
-    .from(channels)
-    .where(eq(channels.id, channelId));
-  return row;
+/** The conversation as Intelligence holds it now. */
+const conversation = (channelId: string) => maybeConversation(channelId);
+
+/** Every conversation these people are in, deleted ones too. */
+async function conversationsOf(userIds: readonly string[]): Promise<string[]> {
+  const client = await conversationClient();
+  const ids = new Set<string>();
+  for (const userId of userIds)
+    for (const found of await client.all({
+      memberUserId: userId,
+      includeDeleted: true,
+    }))
+      ids.add(found.id);
+  return [...ids];
 }
 
 beforeAll(async () => {
@@ -427,10 +439,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await tasks.idle();
-  const theirs = await database
-    .select({ id: channelMemberships.channelId })
-    .from(channelMemberships)
-    .where(inArray(channelMemberships.userId, people));
   const approvals = await database
     .select({ id: approvalRequests.id })
     .from(approvalRequests)
@@ -440,13 +448,8 @@ afterAll(async () => {
     .where(
       sql`${workItems.payload}->>'ownerUserId' in ${people} or (${workItems.kind} = 'approval.resume' and ${workItems.key} in ${approvals.length ? approvals.map((row) => row.id) : [""]})`,
     );
-  if (theirs.length)
-    await database.delete(channels).where(
-      inArray(
-        channels.id,
-        theirs.map((row) => row.id),
-      ),
-    );
+  // Their conversations, and the tasks that own them, in Intelligence.
+  await purgeConversations(await conversationsOf(people));
   await database.delete(users).where(inArray(users.id, people));
   await removeBots(bots);
   await database.$client.close();
@@ -467,20 +470,17 @@ describe("Start on an item", () => {
 
     // A conversation of its own, with this Bot alone, and not the one the person chats in.
     expect(task.channelId).not.toBe(own.id);
-    const roster = await database
-      .select({ agentId: channelAgents.agentId })
-      .from(channelAgents)
-      .where(eq(channelAgents.channelId, task.channelId));
-    expect(roster).toEqual([{ agentId: botId }]);
-    const [row] = await database
-      .select()
-      .from(botTasks)
-      .where(eq(botTasks.id, task.id));
-    expect(row).toMatchObject({
-      ownerUserId: owner.id,
+    const opened = await storedConversation(task.channelId);
+    expect(opened.agents.map(({ agentId }) => ({ agentId }))).toEqual([
+      { agentId: botId },
+    ]);
+    // The conversation says which task it is for, written with the task.
+    expect(opened.taskId).toBe(task.id);
+    expect(await storedTask(task.id)).toMatchObject({
+      userId: owner.id,
       agentId: botId,
-      channelId: task.channelId,
-      suggestionId: item.id,
+      conversationId: task.channelId,
+      originRef: item.id,
       title: "Reply to Sam about the spec",
       why: "Sam asked for the spec by Friday.",
       sourceApp: "Gmail",
@@ -517,12 +517,7 @@ describe("Start on an item", () => {
       "already started or dismissed",
     );
     expect(asked.length - from).toBe(1);
-    expect(
-      await database
-        .select({ id: botTasks.id })
-        .from(botTasks)
-        .where(eq(botTasks.ownerUserId, owner.id)),
-    ).toHaveLength(1);
+    expect(await storedTasks(owner.id)).toHaveLength(1);
 
     // The person's own conversation with the Bot is still the one anything else finds, though the
     // task's is newer.
@@ -548,21 +543,14 @@ describe("Start on an item", () => {
     await tasks.idle();
 
     expect(second).toEqual(first);
-    const conversations = await database
-      .select({ id: channelAgents.channelId })
-      .from(channelAgents)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channelAgents.channelId),
-      )
-      .where(
-        and(
-          eq(channelAgents.agentId, botId),
-          eq(channelMemberships.userId, owner.id),
-        ),
-      );
-    // Their own conversation and the task's: the losing Start's conversation was rolled back.
+    const conversations = await (await conversationClient()).all({
+      memberUserId: owner.id,
+      agentId: botId,
+      includeDeleted: true,
+    });
+    // Their own conversation and the task's: the losing Start's conversation was never made.
     expect(conversations).toHaveLength(2);
+    expect(await storedTasks(owner.id)).toHaveLength(1);
     expect(asked.length - from).toBe(1);
   });
 });
@@ -991,22 +979,24 @@ describe("where a task stands", () => {
   test("a task whose turn never reached the queue reads failed after a minute, and Try again runs its ask", async () => {
     const { owner, botId, item } = await seed();
     await proactive.resolveSuggestion(owner.id, item.id, "started");
-    // The task committed, and the process stopped before its turn was queued.
-    const opened = await channelStore.create(owner, [botId]);
-    const id = randomUUID();
-    await database.insert(botTasks).values({
-      id,
-      ownerUserId: owner.id,
-      agentId: botId,
-      channelId: opened.id,
-      suggestionId: item.id,
-      title: item.title,
-      why: "Sam asked for the spec by Friday.",
-      sourceApp: "Gmail",
-      sourceLink: item.sourceLink,
-      origin: "check_in",
-      createdAt: new Date(Date.now() - 2 * 60_000),
-    });
+    // The task committed two minutes ago, with its conversation, and the process stopped before
+    // its turn was queued.
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60_000);
+    const { id } = await createTaskStore(database, {
+      now: () => twoMinutesAgo,
+    }).create(
+      {
+        ownerUserId: owner.id,
+        agentId: botId,
+        suggestionId: item.id,
+        title: item.title,
+        why: "Sam asked for the spec by Friday.",
+        sourceApp: "Gmail",
+        sourceLink: item.sourceLink,
+        origin: "check_in",
+      },
+      await channelStore.draft(owner, [botId]),
+    );
     expect(await taskStore.get(owner.id, id)).toMatchObject({
       status: "failed",
       failure: "it never started",

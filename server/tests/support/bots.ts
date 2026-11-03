@@ -23,6 +23,7 @@ import type {
   BotChanges,
   BotType,
 } from "../../src/agents/bot-registry/types";
+import { forgetPurgedBot } from "../../src/conversations/bot-purge";
 import { createDatabase } from "../../src/db/client";
 import { startTestConversationDirectories } from "./conversations";
 import { testDatabaseUrl } from "./database";
@@ -77,7 +78,12 @@ export function useTestBots(): Promise<BotDirectory> {
     await directory.start();
     // Conversations and delivery bindings are in Intelligence too, and every store that names a Bot
     // reads them through directories of their own: started with the Bots, as the server starts them.
-    await startTestConversationDirectories();
+    const { conversations, delivery } =
+      await startTestConversationDirectories();
+    // And, as the server wires it, a purged Bot is forgotten in conversations and bindings.
+    directory.onPurged((botId) =>
+      forgetPurgedBot(conversations, delivery, botId),
+    );
     return directory;
   })();
   return started;

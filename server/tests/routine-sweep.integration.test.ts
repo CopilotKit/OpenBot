@@ -16,8 +16,6 @@ import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import {
-  channels,
-  intelligenceChannelMappings,
   routineRuns,
   routineSweeps,
   routines,
@@ -34,6 +32,7 @@ import {
 } from "../src/routines/sweep";
 import { createWorkQueue, DEFAULT_MAX_ATTEMPTS } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
+import { purgeConversations } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -114,12 +113,7 @@ afterEach(async () => {
   for (const userId of createdUserIds) {
     await database.delete(routines).where(eq(routines.ownerUserId, userId));
   }
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));

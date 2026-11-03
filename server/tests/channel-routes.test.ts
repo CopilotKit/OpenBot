@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -31,16 +31,19 @@ import {
 } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { loadConfig } from "../src/config";
+import { writeKey } from "../src/conversations/http";
+import type { Conversation } from "../src/conversations/types";
 import { createDatabase } from "../src/db/client";
-import {
-  channelAgents,
-  channelMemberships,
-  channels,
-  deploymentPackages,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+import { deploymentPackages, users } from "../src/db/schema";
 import { deleteBot, removeBots, seedBot, useTestBots } from "./support/bots";
+import {
+  addConversationMember,
+  conversationClient,
+  purgeConversations,
+  seedConversation,
+  storedConversation,
+  useTestConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
@@ -891,12 +894,7 @@ const createdChannelIds: string[] = [];
 const createdPackageIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   for (const packageId of createdPackageIds.splice(0)) {
     await database
       .delete(deploymentPackages)
@@ -953,63 +951,74 @@ async function createPersistentAgent(options: {
   return agentId;
 }
 
+/**
+ * The channel as Intelligence holds it now, past this process's memory: the conversation header
+ * (what the `channels` row held), its members, its Bots, and its thread pointers (a member's own
+ * thread is what `intelligence_channel_mappings` held).
+ */
 async function persistedChannel(channelId: string) {
-  const [channelRow] = await database
-    .select()
-    .from(channels)
-    .where(eq(channels.id, channelId));
-  const memberships = await database
-    .select()
-    .from(channelMemberships)
-    .where(eq(channelMemberships.channelId, channelId));
-  const linkedAgents = await database
-    .select()
-    .from(channelAgents)
-    .where(eq(channelAgents.channelId, channelId));
-  const mappings = await database
-    .select()
-    .from(intelligenceChannelMappings)
-    .where(eq(intelligenceChannelMappings.channelId, channelId));
-  return { channelRow, memberships, linkedAgents, mappings };
+  const conversation = await storedConversation(channelId);
+  return {
+    channelRow: conversation,
+    memberships: conversation.members,
+    linkedAgents: conversation.agents,
+    mappings: conversation.threads,
+  };
 }
 
-async function channelTableSnapshot() {
+/** One member's own state in a channel (pin, read marker) as Intelligence holds it now. */
+async function membershipOf(channelId: string, userId: string) {
+  return (await storedConversation(channelId)).members.find(
+    (member) => member.userId === userId,
+  );
+}
+
+/**
+ * Everything a channel creation by these people with these Bots could have written, as Intelligence
+ * holds it: every conversation, deleted ones included, that names one of the people as a member or
+ * one of the Bots, with its members, Bots and thread pointers.
+ *
+ * Scoped to those people and Bots rather than the whole project, unlike the snapshot of every
+ * channel table it replaces, because the test Intelligence is shared by every suite running at the
+ * same time; a conversation another suite makes meanwhile is not a write this creation made.
+ */
+async function channelTableSnapshot(
+  userIds: readonly string[],
+  agentIds: readonly string[],
+) {
+  const client = await conversationClient();
+  const found = new Map<string, Conversation>();
+  for (const userId of userIds)
+    for (const conversation of await client.all({
+      memberUserId: userId,
+      includeDeleted: true,
+    }))
+      found.set(conversation.id, conversation);
+  for (const agentId of agentIds)
+    for (const conversation of await client.all({
+      agentId,
+      includeDeleted: true,
+    }))
+      found.set(conversation.id, conversation);
+  const all = [...found.values()];
   return {
-    channels: (await database.select({ id: channels.id }).from(channels))
-      .map(({ id }) => id)
+    channels: all.map(({ id }) => id).sort(),
+    memberships: all
+      .flatMap(({ id, members }) =>
+        members.map(({ userId }) => `${id}:${userId}`),
+      )
       .sort(),
-    memberships: (
-      await database
-        .select({
-          channelId: channelMemberships.channelId,
-          userId: channelMemberships.userId,
-        })
-        .from(channelMemberships)
-    )
-      .map(({ channelId, userId }) => `${channelId}:${userId}`)
+    agents: all
+      .flatMap(({ id, agents }) =>
+        agents.map(({ agentId }) => `${id}:${agentId}`),
+      )
       .sort(),
-    agents: (
-      await database
-        .select({
-          agentId: channelAgents.agentId,
-          channelId: channelAgents.channelId,
-        })
-        .from(channelAgents)
-    )
-      .map(({ agentId, channelId }) => `${channelId}:${agentId}`)
-      .sort(),
-    mappings: (
-      await database
-        .select({
-          channelId: intelligenceChannelMappings.channelId,
-          threadId: intelligenceChannelMappings.threadId,
-          userId: intelligenceChannelMappings.userId,
-        })
-        .from(intelligenceChannelMappings)
-    )
-      .map(
-        ({ channelId, threadId, userId }) =>
-          `${channelId}:${threadId}:${userId}`,
+    mappings: all
+      .flatMap(({ id, threads }) =>
+        threads.map(
+          ({ threadId, userId, agentId }) =>
+            `${id}:${threadId}:${userId}:${agentId ?? ""}`,
+        ),
       )
       .sort(),
   };
@@ -1110,9 +1119,30 @@ describe("channel store integration", () => {
     });
     const created = await persistentStore.create(actor, [agentId]);
     createdChannelIds.push(created.id);
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, created.id));
+    /*
+     * A thread pointer is never changed or removed on its own in Intelligence; removing a member
+     * removes theirs, and adding them back without a thread leaves them a member with none. That is
+     * the state the deleted mapping row used to stand for: a member of the channel with no thread of
+     * their own in it. Kept in this process's directory, which `get` reads.
+     */
+    const { conversations } = await useTestConversations();
+    conversations.apply(
+      await conversations.client.removeMember(
+        created.id,
+        actor.id,
+        writeKey("test.member.remove"),
+      ),
+    );
+    const unmapped = conversations.apply(
+      await conversations.client.addMember(
+        created.id,
+        actor.id,
+        {},
+        writeKey("test.member"),
+      ),
+    );
+    expect(unmapped.members.map(({ userId }) => userId)).toEqual([actor.id]);
+    expect(unmapped.threads).toEqual([]);
 
     expect(await persistentStore.get(actor, created.id)).toBeNull();
   });
@@ -1148,29 +1178,32 @@ describe("channel store integration", () => {
 
     for (const created of [first, second]) {
       const persisted = await persistedChannel(created.id);
+      // `managedBy` is what `package_id` was. The row's `override` column has no counterpart: nothing
+      // ever wrote it, and a conversation has no such field.
       expect(persisted.channelRow).toMatchObject({
         id: created.id,
         name: "Solo Agent",
         description: "Private agent channel.",
         suggestedPrompts: [],
         allowedGroups: [],
-        packageId: null,
-        override: null,
+        managedBy: null,
+        taskId: null,
       });
       expect(persisted.memberships).toHaveLength(1);
       expect(persisted.memberships[0]).toMatchObject({
-        channelId: created.id,
         userId: actor.id,
       });
       expect(persisted.linkedAgents).toHaveLength(1);
       expect(persisted.linkedAgents[0]).toMatchObject({
-        channelId: created.id,
         agentId,
       });
+      // Every thread pointer, not only own ones: a person's channel holds their own thread and no
+      // Bot's thread, so exactly the one the mapping row held.
       expect(persisted.mappings).toHaveLength(1);
       expect(persisted.mappings[0]).toMatchObject({
         userId: actor.id,
-        channelId: created.id,
+        conversationId: created.id,
+        agentId: null,
         threadId: created.threadId,
       });
     }
@@ -1250,13 +1283,15 @@ describe("channel store integration", () => {
       if (scenario === "soft-deleted") {
         await profileStore.softDelete(actor, agentId);
       }
-      const before = await channelTableSnapshot();
+      const people = [actor.id, owner.id];
+      const bots = [accessibleAgentId, agentId];
+      const before = await channelTableSnapshot(people, bots);
 
       await expect(
         persistentStore.create(actor, [accessibleAgentId, agentId].sort()),
       ).rejects.toBeInstanceOf(AgentNotFoundError);
 
-      expect(await channelTableSnapshot()).toEqual(before);
+      expect(await channelTableSnapshot(people, bots)).toEqual(before);
     },
   );
 });
@@ -1272,27 +1307,11 @@ describe("channel pinning", () => {
     createdChannelIds.push(created.id);
 
     await persistentStore.setPinned(actor, created.id, true);
-    let [row] = await database
-      .select({ pinnedAt: channelMemberships.pinnedAt })
-      .from(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, created.id),
-          eq(channelMemberships.userId, actor.id),
-        ),
-      );
+    let row = await membershipOf(created.id, actor.id);
     expect(row?.pinnedAt).not.toBeNull();
 
     await persistentStore.setPinned(actor, created.id, false);
-    [row] = await database
-      .select({ pinnedAt: channelMemberships.pinnedAt })
-      .from(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, created.id),
-          eq(channelMemberships.userId, actor.id),
-        ),
-      );
+    row = await membershipOf(created.id, actor.id);
     expect(row?.pinnedAt).toBeNull();
   });
 
@@ -1343,19 +1362,9 @@ describe("channel pinning", () => {
     });
     const created = await persistentStore.create(pinner, [agentId]);
     createdChannelIds.push(created.id);
-    // The store only creates the creator's membership; give the other user one directly,
-    // plus the thread mapping the list join requires.
-    await database.insert(channelMemberships).values({
-      channelId: created.id,
-      userId: other.id,
-    });
-    await database.insert(intelligenceChannelMappings).values({
-      userId: other.id,
-      channelId: created.id,
-      // thread_id is globally unique; the pinner's own mapping row already claimed
-      // created.threadId, so the other member's row needs one of its own.
-      threadId: randomUUID(),
-    });
+    // The store only makes the creator a member; add the other user directly, with the thread of
+    // their own the list requires (thread ids are unique across the project, so a new one).
+    await addConversationMember(created.id, other.id);
 
     await persistentStore.setPinned(pinner, created.id, true);
 
@@ -1394,19 +1403,9 @@ describe("channel read markers", () => {
     });
     const created = await persistentStore.create(reader, [agentId]);
     createdChannelIds.push(created.id);
-    // The store only creates the creator's membership; give the other user one directly,
-    // plus the thread mapping the list join requires.
-    await database.insert(channelMemberships).values({
-      channelId: created.id,
-      userId: other.id,
-    });
-    await database.insert(intelligenceChannelMappings).values({
-      userId: other.id,
-      channelId: created.id,
-      // thread_id is globally unique; the reader's own mapping row already claimed
-      // created.threadId, so the other member's row needs one of its own.
-      threadId: randomUUID(),
-    });
+    // The store only makes the creator a member; add the other user directly, with the thread of
+    // their own the list requires (thread ids are unique across the project, so a new one).
+    await addConversationMember(created.id, other.id);
     return { reader, other, channelId: created.id };
   }
 
@@ -1415,13 +1414,7 @@ describe("channel read markers", () => {
 
     await persistentStore.markRead(reader, channelId);
 
-    const rows = await database
-      .select({
-        userId: channelMemberships.userId,
-        lastReadAt: channelMemberships.lastReadAt,
-      })
-      .from(channelMemberships)
-      .where(eq(channelMemberships.channelId, channelId));
+    const rows = (await storedConversation(channelId)).members;
     expect(
       rows.find((row) => row.userId === reader.id)?.lastReadAt,
     ).not.toBeNull();
@@ -1458,22 +1451,23 @@ describe("channel read markers", () => {
     // last_message_at is written from the reporting browser's clock and is not bounded; simulate
     // one running ahead of the server so a plain "now" stamp would still read as unseen.
     const future = new Date(Date.now() + 60_000);
-    await database
-      .update(channels)
-      .set({ lastMessageAt: future })
-      .where(eq(channels.id, channelId));
+    const { applied } = await (await conversationClient()).activity(
+      channelId,
+      {
+        userId: reader.id,
+        text: "Said by a clock running ahead.",
+        at: future,
+        agentId: null,
+        sourceId: null,
+        enrichFrom: null,
+      },
+      writeKey("test.activity"),
+    );
+    expect(applied).toBe(true);
 
     await persistentStore.markRead(reader, channelId);
 
-    const [row] = await database
-      .select({ lastReadAt: channelMemberships.lastReadAt })
-      .from(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, channelId),
-          eq(channelMemberships.userId, reader.id),
-        ),
-      );
+    const row = await membershipOf(channelId, reader.id);
     expect(row?.lastReadAt).not.toBeNull();
     expect(row?.lastReadAt?.getTime() ?? 0).toBeGreaterThanOrEqual(
       future.getTime(),
@@ -1489,16 +1483,8 @@ describe("channel read markers", () => {
       persistentStore.markRead(reader, channelId),
     ).rejects.toBeInstanceOf(ChannelNotFoundError);
 
-    const [row] = await database
-      .select({ lastReadAt: channelMemberships.lastReadAt })
-      .from(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, channelId),
-          eq(channelMemberships.userId, reader.id),
-        ),
-      );
-    // The membership row outlives the channel, but its marker was never stamped.
+    const row = await membershipOf(channelId, reader.id);
+    // The membership outlives the channel, but its marker was never stamped.
     expect(row?.lastReadAt).toBeNull();
   });
 });
@@ -1514,19 +1500,9 @@ describe("channel soft delete", () => {
     });
     const created = await persistentStore.create(actor, [agentId]);
     createdChannelIds.push(created.id);
-    // The store only creates the creator's membership; give the other user one directly,
-    // plus the thread mapping the list join requires.
-    await database.insert(channelMemberships).values({
-      channelId: created.id,
-      userId: other.id,
-    });
-    await database.insert(intelligenceChannelMappings).values({
-      userId: other.id,
-      channelId: created.id,
-      // thread_id is globally unique; the actor's own mapping row already claimed
-      // created.threadId, so the other member's row needs one of its own.
-      threadId: randomUUID(),
-    });
+    // The store only makes the creator a member; add the other user directly, with the thread of
+    // their own the list requires (thread ids are unique across the project, so a new one).
+    await addConversationMember(created.id, other.id);
 
     await persistentStore.softDelete(actor, created.id);
 
@@ -1554,12 +1530,9 @@ describe("channel soft delete", () => {
 
     await persistentStore.softDelete(actor, created.id);
 
-    // Soft: the row is still there, stamped rather than gone.
-    const [row] = await database
-      .select({ deletedAt: channels.deletedAt })
-      .from(channels)
-      .where(eq(channels.id, created.id));
-    expect(row?.deletedAt).not.toBeNull();
+    // Soft: the conversation is still there, stamped rather than gone.
+    const row = await storedConversation(created.id);
+    expect(row.deletedAt).not.toBeNull();
   });
 
   test("deleting again is a no-op, not an error", async () => {
@@ -1627,14 +1600,8 @@ describe("channel soft delete", () => {
     ).rejects.toBeInstanceOf(ChannelNotFoundError);
 
     // Same answer `get` gives, and the row the roster would have shown is untouched.
-    const [row] = await database
-      .select({
-        lastMessage: channels.lastMessage,
-        lastMessageAt: channels.lastMessageAt,
-      })
-      .from(channels)
-      .where(eq(channels.id, created.id));
-    expect(row?.lastMessage).toBe("Said before the delete.");
+    const row = await storedConversation(created.id);
+    expect(row.lastMessage).toBe("Said before the delete.");
   });
 
   test("refuses to pin a deleted channel and leaves the membership alone", async () => {
@@ -1651,15 +1618,8 @@ describe("channel soft delete", () => {
       persistentStore.setPinned(actor, created.id, true),
     ).rejects.toBeInstanceOf(ChannelNotFoundError);
 
-    const [row] = await database
-      .select({ pinnedAt: channelMemberships.pinnedAt })
-      .from(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, created.id),
-          eq(channelMemberships.userId, actor.id),
-        ),
-      );
+    const row = await membershipOf(created.id, actor.id);
+    expect(row).toBeDefined();
     expect(row?.pinnedAt).toBeNull();
   });
 
@@ -1676,16 +1636,15 @@ describe("channel soft delete", () => {
     if (!pkg) throw new Error("package row was not created");
     createdPackageIds.push(pkg.id);
     const channelId = persistentId("package-channel");
-    await database.insert(channels).values({
+    createdChannelIds.push(channelId);
+    // Owned by the package as tenant-package.ts marks one: `managedBy` names the package. A member
+    // with no thread of their own, as the bare membership row was.
+    await seedConversation({
       id: channelId,
       name: "Package channel",
       description: "Defined by the tenant package.",
-      packageId: pkg.id,
-    });
-    createdChannelIds.push(channelId);
-    await database.insert(channelMemberships).values({
-      channelId,
-      userId: actor.id,
+      managedBy: pkg.id,
+      members: [{ userId: actor.id, threadId: null }],
     });
 
     await expect(
@@ -1695,11 +1654,10 @@ describe("channel soft delete", () => {
 });
 
 /**
- * Channel creation validates each selected agent while its own transaction is open. The person's own
- * rows are read on the connection that transaction holds: a read on a second pooled connection would
- * deadlock a one-connection pool, since the transaction holds a connection while waiting for one.
- * The Bot is read from this instance's memory, warmed before the transaction opens, because a
- * transaction must not wait on Intelligence.
+ * Channel creation validates each selected agent, reading the person's own rows from this database
+ * and the Bot from this instance's memory, and then writes the conversation to Intelligence. It must
+ * not need a second pooled connection while holding one, which would deadlock a one-connection pool,
+ * and no transaction here may wait on Intelligence.
  */
 describe("channel store concurrency", () => {
   test("creates a channel without borrowing a second connection", async () => {
@@ -1730,9 +1688,16 @@ describe("channel store concurrency", () => {
 
   /*
    * A Bot lives in Intelligence, so no row lock in this database can hold its deletion off until a
-   * channel commits, and the check and the insert cannot be made one. What has to hold instead is
+   * channel is written, and the check and the write cannot be made one. What has to hold instead is
    * that a Bot deleted after the check never leaves a live channel: the channel reads back inactive,
    * exactly as one whose Bot was deleted a moment after it was made.
+   *
+   * The channel is written to Intelligence now, with no transaction here for a lock to hold open, so
+   * the creation is parked inside its check instead: after it has read the Bot as live, at its last
+   * step, which reads this person's preferences for that Bot. This connection holds that table
+   * exclusively, so the creation waits there; the Bot is deleted; and then the check finishes on the
+   * Bot as it read it and the channel is written. A store of its own on one connection, so the wait
+   * found below is this creation's and not another suite's on the same database.
    */
   test("a Bot deleted while its channel is being made leaves that channel inactive", async () => {
     const owner = await createPersistentUser();
@@ -1741,16 +1706,28 @@ describe("channel store concurrency", () => {
       owner,
     });
 
-    // Holds the creation inside its transaction: its membership row names the person, whose row this
-    // connection has locked, so it waits there, after the Bot was checked and before anything commits.
+    const creating = createDatabase(databaseUrl, { max: 1 });
     const holder = createDatabase(databaseUrl, { max: 1 });
     let outcome: Promise<AgentChannel | unknown> = Promise.resolve();
     try {
+      const store = createChannelStore(
+        creating,
+        createAgentProfileStore(
+          creating,
+          new URL("https://managed.example.test/ag-ui"),
+        ),
+        createThreadIdentity("test-deployment"),
+      );
+      const [session] = await creating.execute<{ pid: number }>(
+        sql`select pg_backend_pid() as pid`,
+      );
+      if (!session) throw new Error("The creating connection has no session.");
+
       await holder.transaction(async (transaction) => {
         await transaction.execute(
-          sql`select id from users where id = ${owner.id} for update`,
+          sql`lock table agent_preferences in access exclusive mode`,
         );
-        outcome = persistentStore.create(owner, [agentId]).then(
+        outcome = store.create(owner, [agentId]).then(
           (created) => {
             createdChannelIds.push(created.id);
             return created;
@@ -1759,10 +1736,10 @@ describe("channel store concurrency", () => {
         );
         // Until the creation is waiting behind this connection's lock.
         for (let attempt = 0; ; attempt += 1) {
-          const [row] = await transaction.execute<{ waiting: number }>(
-            sql`select count(*)::int as waiting from pg_stat_activity where pg_backend_pid() = any(pg_blocking_pids(pid))`,
+          const [row] = await transaction.execute<{ waiting: boolean }>(
+            sql`select pg_backend_pid() = any(pg_blocking_pids(${session.pid}::int)) as waiting`,
           );
-          if ((row?.waiting ?? 0) > 0) break;
+          if (row?.waiting) break;
           if (attempt === 500)
             throw new Error("The creation never reached the held lock.");
           await Bun.sleep(10);
@@ -1771,6 +1748,8 @@ describe("channel store concurrency", () => {
       });
     } finally {
       await holder.$client.close();
+      await outcome;
+      await creating.$client.close();
     }
 
     const created = await outcome;

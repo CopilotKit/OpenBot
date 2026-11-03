@@ -458,11 +458,22 @@ test("two replicas copying at once, and a second boot, copy nothing twice", asyn
     copyLocalConversationsToIntelligence(database, client()),
     copyLocalConversationsToIntelligence(database, client()),
   ]);
-  // Between them, each item was made once.
-  const made =
-    (left.kind === "copied" ? left.created : 0) +
-    (right.kind === "copied" ? right.created : 0);
-  expect(made).toBe(3 + 3 + 1 + 1);
+  // Both finished; what Intelligence holds is one of each, not two. (Two replicas send the same
+  // batch under the same key, so each may report the first's answer: count what is there instead.)
+  expect([left.kind, right.kind]).toEqual(["copied", "copied"]);
+  const group = await client().get(legacy.ids.group);
+  expect(group?.members).toHaveLength(2);
+  expect(group?.agents).toHaveLength(2);
+  expect(group?.threads).toHaveLength(4);
+  expect(
+    (await client().messages.latest(legacy.ids.group, 200)).messages,
+  ).toHaveLength(3);
+  expect(
+    (await client().voice.page(legacy.ids.group, null, 50)).sessions,
+  ).toHaveLength(1);
+  expect(await client().tasks.upTo({ userId: legacy.owner }, 100)).toHaveLength(
+    1,
+  );
 
   // Done, so a later boot does not run it, even after a conversation is purged in Intelligence.
   await client().purge(legacy.ids.deleted, writeKey("test.purge"));

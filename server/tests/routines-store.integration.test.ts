@@ -13,13 +13,7 @@ import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  channels,
-  intelligenceChannelMappings,
-  routineRuns,
-  routines,
-  users,
-} from "../src/db/schema";
+import { routineRuns, routines, users } from "../src/db/schema";
 import {
   createRoutineStore,
   MAX_ENABLED_ROUTINES,
@@ -29,6 +23,11 @@ import {
   RoutineRefusedError,
 } from "../src/routines/store";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  purgeConversations,
+  storedConversation,
+  useTestConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -59,12 +58,7 @@ afterEach(async () => {
   for (const userId of createdUserIds) {
     await database.delete(routines).where(eq(routines.ownerUserId, userId));
   }
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -105,6 +99,14 @@ async function createChannel(owner: AgentActor, agentIds: string[]) {
   const channel = await channelStore.create(owner, agentIds);
   createdChannelIds.push(channel.id);
   return channel;
+}
+
+/** Rename a channel in Intelligence, where it lives, as an edit to its name does. */
+async function renameChannel(id: string, name: string) {
+  const { conversations } = await useTestConversations();
+  await conversations.update(id, (await storedConversation(id)).version, {
+    name,
+  });
 }
 
 /** A person, a Bot and the one channel they share: the ordinary starting point. */
@@ -569,19 +571,10 @@ describe("resolving the channel to post into", () => {
     const twinTwo = await createChannel(owner, [agentId]);
     // channelStore.create names channels itself, so force the collision directly rather than
     // trusting default naming to produce two identical names.
-    await database
-      .update(channels)
-      .set({ name: "General Assistant" })
-      .where(eq(channels.id, twinOne.id));
-    await database
-      .update(channels)
-      .set({ name: "General Assistant" })
-      .where(eq(channels.id, twinTwo.id));
+    await renameChannel(twinOne.id, "General Assistant");
+    await renameChannel(twinTwo.id, "General Assistant");
     const distinct = await createChannel(owner, [agentId]);
-    await database
-      .update(channels)
-      .set({ name: "Marketing Bot" })
-      .where(eq(channels.id, distinct.id));
+    await renameChannel(distinct.id, "Marketing Bot");
 
     const failure = await store
       .create({

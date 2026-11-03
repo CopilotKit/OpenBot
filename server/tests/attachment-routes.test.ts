@@ -1,4 +1,12 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
   attachmentUrl,
@@ -6,7 +14,7 @@ import {
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
 } from "@openbot/shared/attachments";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { createApp, UPLOAD_BODY_LIMIT_BYTES } from "../src/app";
@@ -23,13 +31,14 @@ import {
 import { loadConfig } from "../src/config";
 import type { Database } from "../src/db/client";
 import { createDatabase } from "../src/db/client";
+import { writeKey } from "../src/conversations/http";
+import { attachments, users } from "../src/db/schema";
 import {
-  attachments,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+  deleteConversation,
+  purgeConversations,
+  seedConversation,
+  useTestConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
@@ -41,13 +50,23 @@ const createdChannelIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
-  // Cascades attachments and memberships tied to the channel.
-  for (const id of createdChannelIds.splice(0)) {
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  // A channel is a conversation in Intelligence now, so nothing here cascades from it: its
+  // attachments go by their channel id, and the conversation with its members and threads by purge.
+  const channelIds = createdChannelIds.splice(0);
+  if (channelIds.length > 0)
+    await database
+      .delete(attachments)
+      .where(inArray(attachments.channelId, channelIds));
+  await purgeConversations(channelIds);
   for (const id of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, id));
   }
+});
+
+beforeAll(async () => {
+  // Every route and loader here asks the conversation directory whether a channel is live and who
+  // is in it, so the process needs the real one, against the test Intelligence.
+  await useTestConversations();
 });
 
 afterAll(async () => {
@@ -79,22 +98,13 @@ async function harness() {
   createdUserIds.push(memberId, strangerId);
 
   const channelId = `${testPrefix}-channel-${randomUUID()}`;
-  await database.insert(channels).values({
-    id: channelId,
-    name: "Attachment Route Test Channel",
-    description: "A channel to upload files into.",
-  });
   createdChannelIds.push(channelId);
-
-  await database
-    .insert(channelMemberships)
-    .values({ channelId, userId: memberId });
 
   /*
    * The thread this channel's conversation runs in, because in production a channel never exists
-   * without one: `makeChannel` writes the membership row and the mapping row in a single
-   * transaction, so membership and mapping are 1:1 and a member with no mapping cannot even see the
-   * channel (`get` and `list` inner-join it).
+   * without one: creating a channel makes the conversation with its creator as a member holding a
+   * thread of their own, in one write, so membership and own thread are 1:1 and a member with no
+   * thread cannot even see the channel (`get` and `list` require it).
    *
    * It is here rather than in the two tests that care because the turn path is now scoped to the
    * conversation as well as to the actor, and a fixture with no mapping would put every test in
@@ -102,9 +112,12 @@ async function harness() {
    * not for a channel. Tests would then agree with each other and with nothing that ships.
    */
   const threadId = `${testPrefix}-thread-${randomUUID()}`;
-  await database
-    .insert(intelligenceChannelMappings)
-    .values({ channelId, userId: memberId, threadId });
+  await seedConversation({
+    id: channelId,
+    name: "Attachment Route Test Channel",
+    description: "A channel to upload files into.",
+    members: [{ userId: memberId, threadId }],
+  });
 
   const member = actorMiddleware(memberId);
   const stranger = actorMiddleware(strangerId);
@@ -122,6 +135,35 @@ async function harness() {
     strangerId,
     threadId,
   };
+}
+
+/**
+ * Put a second person in a channel, as a membership on its own (no thread of their own), the way
+ * the `channel_memberships` insert these tests used to make did. Kept in this process's directory
+ * too, so the next membership check sees them at once.
+ */
+async function joinChannel(channelId: string, userId: string) {
+  const { conversations } = await useTestConversations();
+  conversations.apply(
+    await conversations.client.addMember(
+      channelId,
+      userId,
+      {},
+      writeKey("test.member"),
+    ),
+  );
+}
+
+/** Take a person out of a channel in Intelligence, as removing them from a group does. */
+async function leaveChannel(channelId: string, userId: string) {
+  const { conversations } = await useTestConversations();
+  conversations.apply(
+    await conversations.client.removeMember(
+      channelId,
+      userId,
+      writeKey("test.member.remove"),
+    ),
+  );
 }
 
 function upload(
@@ -741,15 +783,13 @@ describe("POST /:channelId/attachments", () => {
     const { app, database: db, channelId, memberId } = await harness();
 
     const elsewhere = `${testPrefix}-channel-${randomUUID()}`;
-    await db.insert(channels).values({
+    createdChannelIds.push(elsewhere);
+    await seedConversation({
       id: elsewhere,
       name: "Another Channel Entirely",
       description: "Where this person has already staged their limit.",
+      members: [{ userId: memberId, threadId: null }],
     });
-    createdChannelIds.push(elsewhere);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId: elsewhere, userId: memberId });
 
     await db.insert(attachments).values(
       Array.from({ length: MAX_STAGED_ATTACHMENTS_PER_UPLOADER }, (_, i) => ({
@@ -966,14 +1006,7 @@ describe("POST /:channelId/attachments", () => {
           await waitForBlockedSession(applicationName, () => settled),
         ).toBe(true);
 
-        await db
-          .delete(channelMemberships)
-          .where(
-            and(
-              eq(channelMemberships.channelId, channelId),
-              eq(channelMemberships.userId, memberId),
-            ),
-          );
+        await leaveChannel(channelId, memberId);
 
         releaseLock.resolve();
         await holder;
@@ -1435,9 +1468,7 @@ describe("GET /:id", () => {
       .insert(users)
       .values({ id: colleagueId, email: `${colleagueId}@example.test` });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
     const id = await uploadText(db, {
       channelId,
       uploadedBy: memberId,
@@ -1469,9 +1500,7 @@ describe("GET /:id", () => {
       .insert(users)
       .values({ id: colleagueId, email: `${colleagueId}@example.test` });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
     const id = await uploadText(db, {
       channelId,
       uploadedBy: memberId,
@@ -1524,10 +1553,7 @@ describe("GET /:id", () => {
     // Fetchable first, so the 404 below is the deletion and not a broken fixture.
     expect((await app.request(`http://test/${id}`)).status).toBe(200);
 
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
 
     const response = await app.request(`http://test/${id}`);
 
@@ -1719,10 +1745,7 @@ describe("GET /:id", () => {
 
     // And once the channel is gone the member's own revalidation goes the same way, which is the
     // other half of what the join is there for.
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
     expect(
       (
         await attachmentApp(db, member).request(
@@ -1904,9 +1927,7 @@ describe("GET /:id", () => {
       .insert(users)
       .values({ id: colleagueId, email: `${colleagueId}@example.test` });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
 
     const sent = await uploadText(db, {
       channelId,
@@ -2258,9 +2279,7 @@ describe("DELETE /:id", () => {
       email: `${otherMemberId}@example.test`,
     });
     createdUserIds.push(otherMemberId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: otherMemberId });
+    await joinChannel(channelId, otherMemberId);
     const otherMember = actorMiddleware(otherMemberId);
 
     const id = await uploadText(db, {
@@ -2304,14 +2323,7 @@ describe("DELETE /:id", () => {
       text: "not sent yet",
     });
 
-    await db
-      .delete(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, channelId),
-          eq(channelMemberships.userId, memberId),
-        ),
-      );
+    await leaveChannel(channelId, memberId);
 
     const app = attachmentApp(db, member);
     const response = await app.request(`http://test/${id}`, {
@@ -2340,10 +2352,7 @@ describe("DELETE /:id", () => {
       name: "draft.txt",
       text: "not sent yet",
     });
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
     const app = attachmentApp(db, member);
 
     const response = await app.request(`http://test/${id}`, {
@@ -2592,28 +2601,24 @@ describe("the upload route's body limit", () => {
 /**
  * A SECOND channel belonging to the same person, with its own conversation.
  *
- * This is the production shape, not a contrivance: `makeChannel` gives every channel exactly one
- * membership row and exactly one mapping row, both for its creator, so one person with two channels
- * has two threads and is a member of both. That is all it takes to reach the cross-channel case —
+ * This is the production shape, not a contrivance: creating a channel gives it exactly one member
+ * holding exactly one thread of their own, both the creator's, so one person with two channels has
+ * two threads and is a member of both. That is all it takes to reach the cross-channel case —
  * no second person and no shared channel, which is why it survived three rounds of review looking
  * like somebody else's problem.
  */
 async function secondChannelFor(
-  db: Database,
   memberId: string,
 ): Promise<{ channelId: string; threadId: string }> {
   const channelId = `${testPrefix}-channel-${randomUUID()}`;
-  await db.insert(channels).values({
+  createdChannelIds.push(channelId);
+  const threadId = `${testPrefix}-thread-${randomUUID()}`;
+  await seedConversation({
     id: channelId,
     name: "The Other Channel",
     description: "A second conversation the same person is in.",
+    members: [{ userId: memberId, threadId }],
   });
-  createdChannelIds.push(channelId);
-  await db.insert(channelMemberships).values({ channelId, userId: memberId });
-  const threadId = `${testPrefix}-thread-${randomUUID()}`;
-  await db
-    .insert(intelligenceChannelMappings)
-    .values({ channelId, userId: memberId, threadId });
   return { channelId, threadId };
 }
 
@@ -2635,7 +2640,7 @@ describe("loadAttachmentForTurn", () => {
    */
   test("a file from another channel of the same person's is not loaded into this turn", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
-    const other = await secondChannelFor(db, memberId);
+    const other = await secondChannelFor(memberId);
 
     const id = await uploadText(db, {
       channelId,
@@ -2849,9 +2854,7 @@ describe("loadAttachmentForTurn", () => {
       email: `${otherMemberId}@example.test`,
     });
     createdUserIds.push(otherMemberId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: otherMemberId });
+    await joinChannel(channelId, otherMemberId);
 
     const id = await uploadText(db, {
       channelId,
@@ -2936,10 +2939,7 @@ describe("loadAttachmentForTurn", () => {
       await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
     ).not.toBeNull();
 
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
 
     expect(
       await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
@@ -3020,7 +3020,7 @@ describe("markAttachmentsSent", () => {
    */
   test("a send in another channel does not stamp a row that lives in this one", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
-    const other = await secondChannelFor(db, memberId);
+    const other = await secondChannelFor(memberId);
 
     const id = await uploadText(db, {
       channelId,
@@ -3336,9 +3336,7 @@ describe("markAttachmentsSent", () => {
       email: `${colleagueId}@example.test`,
     });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
 
     const theirs = await uploadText(db, {
       channelId,

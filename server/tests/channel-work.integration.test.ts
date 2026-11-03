@@ -19,16 +19,13 @@ import {
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  routineRuns,
-  routines,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { routineRuns, routines, users, workItems } from "../src/db/schema";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  addConversationMember,
+  newThreadId,
+  purgeConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -65,12 +62,7 @@ afterEach(async () => {
   for (const routineId of createdRoutineIds.splice(0)) {
     await database.delete(routines).where(eq(routines.id, routineId));
   }
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -166,13 +158,8 @@ async function workFor(
 /** A second person in the channel, with a thread of their own in it, as `group.ts` adds one. */
 async function addMember(channelId: string) {
   const member = await createUser();
-  const threadId = `${testPrefix}-thread-${randomUUID()}`;
-  await database
-    .insert(channelMemberships)
-    .values({ channelId, userId: member.id });
-  await database
-    .insert(intelligenceChannelMappings)
-    .values({ userId: member.id, channelId, threadId });
+  const threadId = newThreadId();
+  await addConversationMember(channelId, member.id, threadId);
   return { member, channel: { id: channelId, threadId } };
 }
 

@@ -16,9 +16,6 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
 import {
-  channelAgents,
-  channelMemberships,
-  channels,
   deploymentPackages,
   pluginGrants,
   skills as skillsTable,
@@ -42,6 +39,12 @@ import {
   storedBot,
   useTestBots,
 } from "./support/bots";
+import {
+  maybeConversation,
+  purgeConversations,
+  seedConversation,
+  storedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -52,9 +55,7 @@ const createdTenantIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const packageId of createdPackageIds.splice(0)) {
     await database
@@ -861,25 +862,19 @@ describe("tenant package agent profile synchronization", () => {
       (await synchronizeTenantPackage(database, packageA)).id,
     );
 
-    const snapshot = async () => ({
-      channel: (
-        await database
-          .select({
-            id: channels.id,
-            name: channels.name,
-            description: channels.description,
-            packageId: channels.packageId,
-          })
-          .from(channels)
-          .where(eq(channels.id, channelId))
-      )[0],
-      agents: (
-        await database
-          .select({ agentId: channelAgents.agentId })
-          .from(channelAgents)
-          .where(eq(channelAgents.channelId, channelId))
-      ).map((row) => row.agentId),
-    });
+    // The channel as Intelligence holds it, where a package's channels are written.
+    const snapshot = async () => {
+      const channel = await maybeConversation(channelId);
+      return {
+        channel: channel && {
+          id: channel.id,
+          name: channel.name,
+          description: channel.description,
+          packageId: channel.managedBy,
+        },
+        agents: (channel?.agents ?? []).map((agent) => agent.agentId),
+      };
+    };
 
     const beforePackageB = await snapshot();
     await expect(synchronizeTenantPackage(database, packageB)).rejects.toThrow(
@@ -891,20 +886,13 @@ describe("tenant package agent profile synchronization", () => {
       await (await useTestBots()).registry.get(packageBAgent.id),
     ).toBeNull();
 
-    await database
-      .delete(channelAgents)
-      .where(eq(channelAgents.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-    await database.insert(channels).values({
+    await purgeConversations([channelId]);
+    await seedConversation({
       id: channelId,
       name: "User Channel",
       description: "Owned by a user.",
-      allowedGroups: [],
-      packageId: null,
-    });
-    await database.insert(channelAgents).values({
-      channelId,
-      agentId: packageAAgent.id,
+      managedBy: null,
+      agentIds: [packageAAgent.id],
     });
 
     const beforeUserChannel = await snapshot();
@@ -954,16 +942,8 @@ describe("tenant package agent profile synchronization", () => {
       (await synchronizeTenantPackage(database, secondPackage)).id,
     );
 
-    const [channel] = await database
-      .select()
-      .from(channels)
-      .where(eq(channels.id, channelId));
-    const permittedAgents = (
-      await database
-        .select({ agentId: channelAgents.agentId })
-        .from(channelAgents)
-        .where(eq(channelAgents.channelId, channelId))
-    ).map((row) => row.agentId);
+    const channel = await storedConversation(channelId);
+    const permittedAgents = channel.agents.map((agent) => agent.agentId);
 
     expect(channel).toMatchObject({
       name: "Second Name",
@@ -1079,13 +1059,13 @@ describe("tenant package agent profile synchronization", () => {
     createdPackageIds.push(deploymentPackage.id);
     const before = await storedBot(agent.id);
     const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
-    await database
-      .insert(channels)
-      .values({ id: channelId, name: "Kept", description: "" });
     createdChannelIds.push(channelId);
-    await database
-      .insert(channelAgents)
-      .values({ channelId, agentId: agent.id });
+    await seedConversation({
+      id: channelId,
+      name: "Kept",
+      description: "",
+      agentIds: [agent.id],
+    });
 
     await synchronizeTenantPackage(database, {
       ...tenantPackage,
@@ -1116,10 +1096,9 @@ describe("tenant package agent profile synchronization", () => {
     });
     expect(after.createdAt.toISOString()).toBe(before.createdAt.toISOString());
     expect(
-      await database
-        .select({ agentId: channelAgents.agentId })
-        .from(channelAgents)
-        .where(eq(channelAgents.channelId, channelId)),
+      (await storedConversation(channelId)).agents.map((one) => ({
+        agentId: one.agentId,
+      })),
     ).toEqual([{ agentId: agent.id }]);
 
     // And it runs as what it now is.
@@ -1767,18 +1746,13 @@ test("blank package endpoint disables only its owned agent and restores it when 
       .values({ id: actor.id, email: `${suffix}@example.test` });
     const target = rename("risk-analyst");
     const picked = rename("picked-harness");
-    await database.insert(channels).values({
+    await seedConversation({
       id: historyId,
       name: "Historical conversation",
       description: "Preserved",
-      allowedGroups: [],
+      agentIds: [target],
+      members: [{ userId: actor.id, threadId: null }],
     });
-    await database
-      .insert(channelAgents)
-      .values({ channelId: historyId, agentId: target });
-    await database
-      .insert(channelMemberships)
-      .values({ channelId: historyId, userId: actor.id });
     const profiles = createAgentProfileStore(database, undefined);
     const runtime = createRuntimeAgentLoader(database);
     expect((await profiles.get(actor, target))?.deletedAt).toBeNull();
@@ -1831,14 +1805,7 @@ test("blank package endpoint disables only its owned agent and restores it when 
     expect(
       (await runtime(actor)).find((agent) => agent.id === target)?.type,
     ).toBe("unavailable");
-    expect(
-      (
-        await database
-          .select()
-          .from(channelAgents)
-          .where(eq(channelAgents.channelId, historyId))
-      ).length,
-    ).toBe(1);
+    expect((await storedConversation(historyId)).agents.length).toBe(1);
     // Deleted, not removed: the Bot stays in Intelligence so its conversation stays readable.
     expect((await storedBot(target)).deletedAt).toBeInstanceOf(Date);
     expect((await profiles.get(actor, picked))?.deletedAt).toBeNull();
@@ -1854,7 +1821,7 @@ test("blank package endpoint disables only its owned agent and restores it when 
     else process.env.MANAGED_AGENT_AG_UI_URL = original;
     if (originalPicked === undefined) delete process.env.PICKED_HARNESS_URL;
     else process.env.PICKED_HARNESS_URL = originalPicked;
-    await database.delete(channels).where(eq(channels.id, historyId));
+    await purgeConversations([historyId]);
     await removeBots(ownedIds);
     if (packageId)
       await database

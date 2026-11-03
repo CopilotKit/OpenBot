@@ -24,15 +24,13 @@ import type {
 } from "../src/agents/profile-types";
 import { DEPLOYMENT_ROUTES } from "../src/computer/deployment-routes";
 import { createDatabase } from "../src/db/client";
-import {
-  agentPreferences,
-  channelAgents,
-  channels,
-  deploymentPackages,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+import { agentPreferences, deploymentPackages, users } from "../src/db/schema";
 import { removeBots, seedBot, useTestBots } from "./support/bots";
+import {
+  conversationClient,
+  purgeConversations,
+  seedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -49,9 +47,7 @@ const createdChannelIds: string[] = [];
 const createdPackageIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   // For good, with this deployment's rows that named them, as deleting the agents row used to.
   await removeBots(createdAgentIds.splice(0));
   for (const packageId of createdPackageIds.splice(0)) {
@@ -617,45 +613,33 @@ describe("agent profile store integration", () => {
     const owner = await createUser();
     const source = await createProfileFixture({ owner, visibility: "public" });
     const channelId = id("channel");
-    await database.insert(channels).values({
+    createdChannelIds.push(channelId);
+    await seedConversation({
       id: channelId,
       name: "Source channel",
       description: "Links source agent to Intelligence.",
+      agentIds: [source.agentId],
+      members: [{ userId: owner.id, threadId: id("thread") }],
     });
-    await database.insert(channelAgents).values({
-      channelId,
-      agentId: source.agentId,
-    });
-    await database.insert(intelligenceChannelMappings).values({
-      userId: owner.id,
-      channelId,
-      threadId: id("thread"),
-    });
-    createdChannelIds.push(channelId);
 
     const duplicate = await store.duplicate(owner, source.agentId);
     createdAgentIds.push(duplicate.id);
 
-    const sourceMappings = await database
-      .select()
-      .from(channelAgents)
-      .innerJoin(
-        intelligenceChannelMappings,
-        eq(channelAgents.channelId, intelligenceChannelMappings.channelId),
-      )
-      .where(eq(channelAgents.agentId, source.agentId));
-    const duplicateMappings = await database
-      .select()
-      .from(channelAgents)
-      .innerJoin(
-        intelligenceChannelMappings,
-        eq(channelAgents.channelId, intelligenceChannelMappings.channelId),
-      )
-      .where(eq(channelAgents.agentId, duplicate.id));
-    const duplicateChannelAgents = await database
-      .select()
-      .from(channelAgents)
-      .where(eq(channelAgents.agentId, duplicate.id));
+    // Every conversation, deleted ones included, that has this Bot in it, as Intelligence holds them.
+    const conversationsWith = async (agentId: string) =>
+      (await conversationClient()).all({ agentId, includeDeleted: true });
+    // And each member's own thread in them: what `intelligence_channel_mappings` held.
+    const ownThreadsIn = (
+      found: Awaited<ReturnType<typeof conversationsWith>>,
+    ) =>
+      found.flatMap((conversation) =>
+        conversation.threads.filter((thread) => thread.agentId === null),
+      );
+    const sourceMappings = ownThreadsIn(
+      await conversationsWith(source.agentId),
+    );
+    const duplicateChannelAgents = await conversationsWith(duplicate.id);
+    const duplicateMappings = ownThreadsIn(duplicateChannelAgents);
     expect(sourceMappings).not.toHaveLength(0);
     expect(duplicateChannelAgents).toHaveLength(0);
     expect(duplicateMappings).toHaveLength(0);

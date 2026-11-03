@@ -16,14 +16,12 @@ import { createThreadIdentity } from "../src/channels/thread-identity";
 import { standingRoleMessage } from "../src/copilot";
 import { type CredentialSecretReader, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  purgeConversations,
+  storedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -50,12 +48,7 @@ const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -113,6 +106,21 @@ async function setAgentRun(
 /** When Intelligence says this Bot was deleted, or null while it is live. */
 async function deletedAtOf(id: string) {
   return (await (await useTestBots()).registry.get(id))?.deletedAt ?? null;
+}
+
+/**
+ * A channel as Intelligence keeps it, one row per member and Bot: what joining `channels`,
+ * `channel_memberships` and `channel_agents` returned.
+ */
+async function retainedRows(channelId: string) {
+  const channel = await storedConversation(channelId);
+  return channel.members.flatMap((member) =>
+    channel.agents.map((agent) => ({
+      channelDeletedAt: channel.deletedAt,
+      memberUserId: member.userId,
+      agentId: agent.agentId,
+    })),
+  );
 }
 
 function idsOf(loaded: Awaited<ReturnType<typeof loadAgents>>) {
@@ -312,19 +320,7 @@ describe("runtime agent loading", () => {
     await channelStore.softDelete(owner, deletedOnlyChannel.id);
     await channelStore.softDelete(owner, deletedPreservedChannel.id);
 
-    const retainedDeletedOnlyRows = await database
-      .select({
-        channelDeletedAt: channels.deletedAt,
-        memberUserId: channelMemberships.userId,
-        agentId: channelAgents.agentId,
-      })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channels.id),
-      )
-      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .where(eq(channels.id, deletedOnlyChannel.id));
+    const retainedDeletedOnlyRows = await retainedRows(deletedOnlyChannel.id);
     expect(retainedDeletedOnlyRows).toHaveLength(1);
     expect(retainedDeletedOnlyRows[0]).toMatchObject({
       memberUserId: owner.id,
@@ -335,19 +331,9 @@ describe("runtime agent loading", () => {
       (await deletedAtOf(deletedOnlyProfile.id)) ?? undefined,
     ).toBeInstanceOf(Date);
 
-    const retainedLivePreservedRows = await database
-      .select({
-        channelDeletedAt: channels.deletedAt,
-        memberUserId: channelMemberships.userId,
-        agentId: channelAgents.agentId,
-      })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channels.id),
-      )
-      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .where(eq(channels.id, livePreservedChannel.id));
+    const retainedLivePreservedRows = await retainedRows(
+      livePreservedChannel.id,
+    );
     expect(retainedLivePreservedRows).toHaveLength(1);
     expect(retainedLivePreservedRows[0]).toMatchObject({
       channelDeletedAt: null,

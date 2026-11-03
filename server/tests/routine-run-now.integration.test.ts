@@ -3,20 +3,14 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createDatabase } from "../src/db/client";
-import {
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  routines,
-  users,
-} from "../src/db/schema";
+import { routines, users } from "../src/db/schema";
 import {
   createRoutineStore,
   RoutineNotFoundError,
   RoutineRefusedError,
 } from "../src/routines/store";
 import { removeBots, seedBot } from "./support/bots";
+import { purgeConversations, seedConversation } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -38,12 +32,7 @@ afterEach(async () => {
   for (const userId of createdUserIds) {
     await database.delete(routines).where(eq(routines.ownerUserId, userId));
   }
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -65,8 +54,8 @@ async function createUser(): Promise<AgentActor> {
   return { id, role: "user" };
 }
 
-// The channel is seeded directly: this suite only needs the rows the routine store's own channel
-// check joins on.
+// The channel is seeded directly: this suite only needs what the routine store's own channel check
+// reads, a live conversation with the owner as a member and the Bot in it.
 async function createAgent(owner: AgentActor) {
   const id = `${testPrefix}-agent-${randomUUID()}`;
   createdAgentIds.push(id);
@@ -81,15 +70,14 @@ async function createAgent(owner: AgentActor) {
 
 async function createChannel(owner: AgentActor, agentIds: string[]) {
   const id = `${testPrefix}-channel-${randomUUID()}`;
-  await database
-    .insert(channels)
-    .values({ id, name: "Run now", description: "" });
-  await database
-    .insert(channelMemberships)
-    .values({ channelId: id, userId: owner.id });
-  for (const agentId of agentIds)
-    await database.insert(channelAgents).values({ channelId: id, agentId });
   createdChannelIds.push(id);
+  await seedConversation({
+    id,
+    name: "Run now",
+    description: "",
+    agentIds,
+    members: [{ userId: owner.id, threadId: null }],
+  });
   return { id };
 }
 

@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { writeKey } from "../src/conversations/http";
+import type { ConversationDraft } from "../src/conversations/types";
 import { createDatabase } from "../src/db/client";
-import { channels, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import {
   proactivePeople,
   proactivePings,
@@ -10,13 +12,21 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
-import { botTasks } from "../src/db/schema/tasks";
+import { createTaskStore } from "../src/tasks/store";
 import { removeBots, seedBot } from "./support/bots";
+import {
+  conversationClient,
+  maybeConversation,
+  newThreadId,
+  purgeConversations,
+  storedTask,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
  * The database half of check-ins: the backstops that hold when two replicas race, which no code
- * path can promise on its own. Each test drives the real tables through real SQL.
+ * path can promise on its own. Each test drives the real tables through real SQL, and a task's
+ * backstops, which live with the task in Intelligence now, through the real Intelligence.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -204,48 +214,83 @@ test("a ping is the person's, and its items outlive it", async () => {
 test("starting an item opens one task, in a conversation of its own", async () => {
   const started = item({ status: "started", resolvedAt: new Date() });
   await database.insert(proactiveSuggestions).values(started);
-  const [first, second] = [next(), next()];
-  await database.insert(channels).values(
-    [first, second].map((id) => ({
-      id,
-      name: "Reply to Dana",
-      description: "",
-    })),
-  );
-  const task = (channelId: string, suggestionId: string | null) => ({
-    id: next(),
+  const [first, second] = [`channel_${next()}`, `channel_${next()}`];
+  const draft = (id: string): ConversationDraft => ({
+    id,
+    name: "Reply to Dana",
+    description: "",
+    agents: [{ agentId: bot }],
+    members: [{ userId: owner, threadId: newThreadId() }],
+  });
+  const store = createTaskStore(database);
+  const task = {
     ownerUserId: owner,
     agentId: bot,
-    channelId,
-    suggestionId,
+    suggestionId: started.id,
     title: started.title,
     why: started.detail,
     origin: "check_in" as const,
-  });
-  await database.insert(botTasks).values(task(first, started.id));
-  // A second Start of the same item finds the first task.
-  await rejects(
-    database.insert(botTasks).values(task(second, started.id)),
-    /bot_tasks_suggestion_idx/,
-  );
-  await rejects(
-    database.insert(botTasks).values(task(first, null)),
-    /bot_tasks_channel_idx/,
-  );
-  await rejects(
-    database
-      .insert(botTasks)
-      .values({ ...task(second, null), origin: "asked" as never }),
-    /bot_tasks_origin_check/,
-  );
-  // The item going away leaves its task, unlinked.
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.id, started.id));
-  const [row] = await database
-    .select({ suggestionId: botTasks.suggestionId })
-    .from(botTasks)
-    .where(eq(botTasks.channelId, first));
-  expect(row).toEqual({ suggestionId: null });
-  await database.delete(channels).where(inArray(channels.id, [first, second]));
+    sourceApp: null,
+    sourceLink: null,
+  };
+  const client = await conversationClient();
+  try {
+    const opened = await store.create(task, draft(first));
+    expect(opened.channelId).toBe(first);
+    // A second Start of the same item finds the first task, and makes no conversation for it.
+    expect(await store.create(task, draft(second))).toEqual(opened);
+    expect(await maybeConversation(second)).toBeNull();
+    // A conversation holds one task.
+    await rejects(
+      client.tasks.create(
+        {
+          id: next(),
+          userId: owner,
+          agentId: bot,
+          conversationId: first,
+          originRef: null,
+          origin: "check_in",
+          title: started.title,
+          why: started.detail,
+          sourceApp: null,
+          sourceLink: null,
+        },
+        writeKey("test.task"),
+      ),
+      /409 AGENT_TASK_CONVERSATION_TAKEN/,
+    );
+    // An origin Intelligence cannot hold is refused; what OpenBot opens is a check-in's.
+    await rejects(
+      client.tasks.create(
+        {
+          id: next(),
+          userId: owner,
+          agentId: bot,
+          conversation: draft(second),
+          originRef: null,
+          origin: "",
+          title: started.title,
+          why: started.detail,
+          sourceApp: null,
+          sourceLink: null,
+        },
+        writeKey("test.task"),
+      ),
+      /400/,
+    );
+    expect(await maybeConversation(second)).toBeNull();
+    expect((await storedTask(opened.id))?.origin).toBe("check_in");
+    // The item going away leaves its task, and its conversation, where they were.
+    await database
+      .delete(proactiveSuggestions)
+      .where(eq(proactiveSuggestions.id, started.id));
+    expect(await storedTask(opened.id)).toMatchObject({
+      id: opened.id,
+      conversationId: first,
+      originRef: started.id,
+    });
+    expect((await maybeConversation(first))?.taskId).toBe(opened.id);
+  } finally {
+    await purgeConversations([first, second]);
+  }
 });
