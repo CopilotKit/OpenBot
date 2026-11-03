@@ -845,7 +845,11 @@ fn copy_file(source: &Path, destination: &Path) -> Result<(), String> {
         return Err("refusing to replace a symlink".into());
     }
     std::fs::copy(source, destination).map_err(io)?;
-    std::fs::File::open(destination)
+    // Windows FlushFileBuffers (sync_all) requires GENERIC_WRITE. File::open is read-only;
+    // reopening without truncation preserves the copied bytes while making the flush valid.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(destination)
         .map_err(io)?
         .sync_all()
         .map_err(io)
@@ -1017,6 +1021,25 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn updates_vendor_copy_overwrites_and_durably_syncs_the_destination() {
+        let root = temp_root("updates-copy-sync");
+        std::fs::create_dir_all(&root).unwrap();
+        let (source, destination) = (root.join("source"), root.join("destination"));
+        std::fs::write(&destination, b"previous vendor").unwrap();
+        for contents in [
+            b"candidate vendor".as_slice(),
+            b"restored vendor".as_slice(),
+        ] {
+            std::fs::write(&source, contents).unwrap();
+            copy_file(&source, &destination)
+                .expect("copied file flush requires a writable handle on Windows");
+            assert_eq!(std::fs::read(&destination).unwrap(), contents);
+        }
+        std::fs::rename(&destination, root.join("retained-copy")).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn updates_native_inventory_keys_are_portable_and_round_trip() {
         let root = temp_root("updates-portable-keys");
