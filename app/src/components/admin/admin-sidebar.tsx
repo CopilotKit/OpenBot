@@ -1,4 +1,5 @@
 import {
+  IconCpu,
   IconArrowLeft,
   IconBuildingBank,
   IconBulb,
@@ -93,6 +94,11 @@ const GROUPS: {
         title: "Check-ins",
         icon: IconRadar,
         linkOptions: { to: "/admin/proactive" },
+      },
+      {
+        title: "AI: online or offline",
+        icon: IconCpu,
+        linkOptions: { to: "/admin/local-ai" },
       },
       {
         title: "UI components",

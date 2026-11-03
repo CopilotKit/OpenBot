@@ -1,4 +1,4 @@
-import { ImapFlow, type FetchMessageObject } from "imapflow";
+import { type FetchMessageObject, ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import type {
@@ -140,7 +140,7 @@ export const imapMailClient: MailClient = {
           { uid: true, envelope: true, flags: true, source: true },
           { uid: true },
         );
-        if (!message?.source) return null;
+        if (message === false || !message.source) return null;
         const parsed = await simpleParser(message.source);
         const text = (parsed.text ?? "").trim();
         return {

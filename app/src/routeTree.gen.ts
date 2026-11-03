@@ -35,6 +35,7 @@ import { Route as AuthedAdminCredentialsRouteImport } from './routes/_authed/adm
 import { Route as AuthedAdminEnterpriseRouteImport } from './routes/_authed/admin/enterprise'
 import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_authed/admin/identity-providers'
 import { Route as AuthedAdminLearningRouteImport } from './routes/_authed/admin/learning'
+import { Route as AuthedAdminLocalAiRouteImport } from './routes/_authed/admin/local-ai'
 import { Route as AuthedAdminPeopleRouteImport } from './routes/_authed/admin/people'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
 import { Route as AuthedAdminProactiveRouteImport } from './routes/_authed/admin/proactive'
@@ -213,6 +214,11 @@ const AuthedAdminIdentityProvidersRoute =
 const AuthedAdminLearningRoute = AuthedAdminLearningRouteImport.update({
   id: '/learning',
   path: '/learning',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminLocalAiRoute = AuthedAdminLocalAiRouteImport.update({
+  id: '/local-ai',
+  path: '/local-ai',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedAdminPeopleRoute = AuthedAdminPeopleRouteImport.update({
@@ -514,6 +520,7 @@ export interface FileRoutesByFullPath {
   '/admin/enterprise': typeof AuthedAdminEnterpriseRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/learning': typeof AuthedAdminLearningRoute
+  '/admin/local-ai': typeof AuthedAdminLocalAiRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/proactive': typeof AuthedAdminProactiveRoute
@@ -586,6 +593,7 @@ export interface FileRoutesByTo {
   '/admin/enterprise': typeof AuthedAdminEnterpriseRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/learning': typeof AuthedAdminLearningRoute
+  '/admin/local-ai': typeof AuthedAdminLocalAiRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/proactive': typeof AuthedAdminProactiveRoute
@@ -663,6 +671,7 @@ export interface FileRoutesById {
   '/_authed/admin/enterprise': typeof AuthedAdminEnterpriseRoute
   '/_authed/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/_authed/admin/learning': typeof AuthedAdminLearningRoute
+  '/_authed/admin/local-ai': typeof AuthedAdminLocalAiRoute
   '/_authed/admin/people': typeof AuthedAdminPeopleRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/proactive': typeof AuthedAdminProactiveRoute
@@ -741,6 +750,7 @@ export interface FileRouteTypes {
     | '/admin/enterprise'
     | '/admin/identity-providers'
     | '/admin/learning'
+    | '/admin/local-ai'
     | '/admin/people'
     | '/admin/playground'
     | '/admin/proactive'
@@ -813,6 +823,7 @@ export interface FileRouteTypes {
     | '/admin/enterprise'
     | '/admin/identity-providers'
     | '/admin/learning'
+    | '/admin/local-ai'
     | '/admin/people'
     | '/admin/playground'
     | '/admin/proactive'
@@ -889,6 +900,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/enterprise'
     | '/_authed/admin/identity-providers'
     | '/_authed/admin/learning'
+    | '/_authed/admin/local-ai'
     | '/_authed/admin/people'
     | '/_authed/admin/playground'
     | '/_authed/admin/proactive'
@@ -1129,6 +1141,13 @@ declare module '@tanstack/react-router' {
       path: '/learning'
       fullPath: '/admin/learning'
       preLoaderRoute: typeof AuthedAdminLearningRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/local-ai': {
+      id: '/_authed/admin/local-ai'
+      path: '/local-ai'
+      fullPath: '/admin/local-ai'
+      preLoaderRoute: typeof AuthedAdminLocalAiRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/admin/people': {
@@ -1486,6 +1505,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminEnterpriseRoute: typeof AuthedAdminEnterpriseRoute
   AuthedAdminIdentityProvidersRoute: typeof AuthedAdminIdentityProvidersRoute
   AuthedAdminLearningRoute: typeof AuthedAdminLearningRoute
+  AuthedAdminLocalAiRoute: typeof AuthedAdminLocalAiRoute
   AuthedAdminPeopleRoute: typeof AuthedAdminPeopleRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
   AuthedAdminProactiveRoute: typeof AuthedAdminProactiveRoute
@@ -1513,6 +1533,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminEnterpriseRoute: AuthedAdminEnterpriseRoute,
   AuthedAdminIdentityProvidersRoute: AuthedAdminIdentityProvidersRoute,
   AuthedAdminLearningRoute: AuthedAdminLearningRoute,
+  AuthedAdminLocalAiRoute: AuthedAdminLocalAiRoute,
   AuthedAdminPeopleRoute: AuthedAdminPeopleRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
   AuthedAdminProactiveRoute: AuthedAdminProactiveRoute,

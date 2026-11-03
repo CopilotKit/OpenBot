@@ -1,4 +1,5 @@
 import {
+  IconCpu,
   IconBuildingBank,
   IconChecks,
   IconChevronRight,
@@ -113,6 +114,13 @@ const SECTIONS: {
           "Turn check-ins on or off, limit them, and see how often people start what Bots raise.",
         icon: IconRadar,
         linkOptions: { to: "/admin/proactive" },
+      },
+      {
+        title: "AI: online or offline",
+        description:
+          "See the AI already on this computer, like Ollama or LM Studio, and run your Bots on it for free.",
+        icon: IconCpu,
+        linkOptions: { to: "/admin/local-ai" },
       },
       {
         title: "UI components",
