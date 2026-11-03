@@ -177,6 +177,7 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  mcpToolLists,
   users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
@@ -1161,6 +1162,35 @@ const accountModes = createAccountModeSwitch({
   deploymentId: config.deploymentId ?? tenantPackage.tenantId,
   audit: bootAuditStore,
 });
+
+/*
+ * An app's tool list is this deployment's own cache of what the app's server last said (`mcp_tools`,
+ * `mcp_tool_lists`); the app itself is Intelligence's. A deployment whose cache is empty for an app
+ * it holds (a new database pointed at an existing Intelligence project, or a cache lost with it)
+ * lists it again in the background, once, rather than offering it with no tools until an
+ * administrator presses Refresh. A failure is said and changes nothing.
+ */
+void (async () => {
+  const listed = new Set(
+    (
+      await database
+        .selectDistinct({ serverId: mcpToolLists.serverId })
+        .from(mcpToolLists)
+    ).map((row) => row.serverId),
+  );
+  for (const server of vaultDirectory.servers()) {
+    if (listed.has(server.id)) continue;
+    await pluginStore.refreshTools(server.id).catch((error: unknown) =>
+      console.warn(
+        JSON.stringify({
+          type: "app-tool-list-rebuild-failed",
+          serverId: server.id,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
+  }
+})();
 
 // Logo metadata is optional; a vendor outage must not prevent the API from starting.
 if (composio) {
