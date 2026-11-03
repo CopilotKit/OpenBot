@@ -111,6 +111,8 @@ export function pingText(items: readonly AttentionItem[]): {
   return { text, pushBody };
 }
 
+/** The most items one ping carries: as many as Intelligence takes in one step. */
+const TAKE_MAX_ITEMS = 500;
 /** How many times one take is tried when an item it was to carry changed in between. */
 const TAKE_TRIES = 2;
 
@@ -212,7 +214,11 @@ export function createPingStore(database: Database) {
     async take(ownerUserId: string): Promise<AttentionPing | null> {
       for (let attempt = 1; attempt <= TAKE_TRIES; attempt += 1) {
         if (!slotFree(ownerUserId, Date.now())) return null;
-        const items = named((await pingable(ownerUserId)).map(itemOf));
+        // Oldest first, as many as one take carries; any beyond wait for the next hour.
+        const items = named((await pingable(ownerUserId)).map(itemOf)).slice(
+          0,
+          TAKE_MAX_ITEMS,
+        );
         if (items.length === 0) return null;
         const pingId = randomUUID();
         const { text, pushBody } = pingText(items);

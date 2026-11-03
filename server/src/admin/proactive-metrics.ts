@@ -202,13 +202,13 @@ export async function proactiveMetrics(
     if (row.outcome === "skipped") {
       const reason = row.skipReason as ProactiveSkipReason | null;
       if (reason && reason in bot.runs.skipped)
-        bot.runs.skipped[reason] += row.count;
+        bot.runs.skipped[reason] += row.runs;
     } else if (
       row.outcome === "quiet" ||
       row.outcome === "raised" ||
       row.outcome === "failed"
     )
-      bot.runs[row.outcome] += row.count;
+      bot.runs[row.outcome] += row.runs;
   }
 
   // The window's items, by where each stands now, and how many of them a ping carried.
@@ -218,12 +218,12 @@ export async function proactiveMetrics(
   )) {
     const bot = byBot.get(row.agentId);
     if (!bot) continue;
-    bot.items.raised += row.count;
+    bot.items.raised += row.items;
     bot.pinged += row.delivered;
-    if (row.status === "open") bot.items.open += row.count;
-    else if (row.status === "started") bot.items.started += row.count;
-    else if (row.status === "dismissed") bot.items.hidden += row.count;
-    else bot.items.cleared += row.count;
+    if (row.status === "open") bot.items.open += row.items;
+    else if (row.status === "started") bot.items.started += row.items;
+    else if (row.status === "dismissed") bot.items.hidden += row.items;
+    else bot.items.cleared += row.items;
   }
 
   for (const bot of byBot.values()) {

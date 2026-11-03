@@ -20,6 +20,13 @@ import type {
 } from "../../proactive/types";
 import { users } from "./core";
 
+/*
+ * LEGACY. Check-ins live in Intelligence's agent schedules now (`proactive/store.ts`): these five
+ * tables receive no writes and are read only by the boot-time copy (`proactive/upgrade.ts`). They stay
+ * for one release, so a deployment upgrading from the one before has its rows to copy. What each
+ * comment below says of a table holds of the Intelligence collection it was copied to.
+ */
+
 /**
  * Background research by one of a person's Bots.
  *
