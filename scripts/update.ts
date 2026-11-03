@@ -14,7 +14,9 @@ import {
   writeGitOpsPromotion,
 } from "./promote-kubernetes";
 import {
+  acceptedBuildEnvironment,
   applyLocalUpdate,
+  assertLocalStartAllowed,
   type LocalUpdateOptions,
   planLocalUpdate,
 } from "./update-local";
@@ -110,7 +112,15 @@ export async function main(args: string[]) {
   if (
     positionals.length !== 2 ||
     !["local", "kubernetes"].includes(mode ?? "") ||
-    !["check", "plan", "apply", "gitops", "status"].includes(action ?? "")
+    ![
+      "check",
+      "plan",
+      "apply",
+      "gitops",
+      "status",
+      "assert-start",
+      "build-environment",
+    ].includes(action ?? "")
   )
     throw new Error(HELP);
   const required = (name: string, value: string | undefined) => {
@@ -118,6 +128,15 @@ export async function main(args: string[]) {
     return value;
   };
   const root = resolve(values.root ?? process.cwd());
+  if (mode === "local" && action === "build-environment") {
+    for (const [key, value] of Object.entries(acceptedBuildEnvironment(root)))
+      console.log(`${key}=${value}`);
+    return 0;
+  }
+  if (mode === "local" && action === "assert-start") {
+    assertLocalStartAllowed(root, process.env.OPENBOT_UPDATE_OPERATION);
+    return 0;
+  }
   if (mode === "local" && action === "status") {
     console.log(
       readFileSync(join(root, ".openbot-update-journal.json"), "utf8"),

@@ -13,6 +13,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+if [ -f "$ROOT/.openbot-update-journal.json" ]; then
+  # Only the exact in-flight updater operation may start before acceptance. A normal startup
+  # must not run source whose migration/activation was interrupted.
+  bun "$ROOT/scripts/update.ts" local assert-start --root "$ROOT"
+fi
+if [ -f "$ROOT/.openbot-release.json" ] && [ -z "${OPENBOT_UPDATE_OPERATION:-}" ]; then
+  # Keep ordinary host restarts on the accepted build identity. Quoting each export treats
+  # release strings as data; no shell text from metadata is evaluated.
+  release_environment="$(bun "$ROOT/scripts/update.ts" local build-environment --root "$ROOT")"
+  while IFS= read -r release_setting; do
+    export "$release_setting"
+  done <<< "$release_environment"
+fi
 LOGS="$ROOT/.logs"
 mkdir -p "$LOGS"
 

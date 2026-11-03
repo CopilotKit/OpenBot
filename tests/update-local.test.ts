@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -11,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   applyLocalUpdate,
+  assertLocalStartAllowed,
   type CommandRunner,
   type LocalUpdateOptions,
   planLocalUpdate,
@@ -21,12 +23,15 @@ import currentFixture from "../shared/fixtures/releases/installed.json";
 import { parseReleaseManifest } from "../shared/release-manifest";
 
 const roots: string[] = [];
+// These integration fixtures execute real Git subprocesses. Keep the watchdog finite while
+// allowing the repository's one concurrent native build to occupy laptop CPU/disk.
+setDefaultTimeout(20_000);
 afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
 function fixture(topology: "host" | "image" = "image") {
-  const root = mkdtempSync(join(tmpdir(), "openbot-update-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "openbot-update-")));
   roots.push(root);
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -260,4 +265,50 @@ test("a ready server reporting the wrong release is never accepted", async () =>
     JSON.parse(readFileSync(join(f.root, ".openbot-release.json"), "utf8"))
       .version,
   ).toBe("v0.2.0");
+});
+
+test("manual startup refuses an interrupted journal while the exact update operation may start", () => {
+  const f = fixture();
+  writeFileSync(
+    join(f.root, ".openbot-update-journal.json"),
+    JSON.stringify({ phase: "starting", operation: "this-operation" }),
+  );
+  expect(() => assertLocalStartAllowed(f.root)).toThrow("recovery");
+  expect(() => assertLocalStartAllowed(f.root, "another-operation")).toThrow(
+    "recovery",
+  );
+  expect(() => assertLocalStartAllowed(f.root, "this-operation")).not.toThrow();
+});
+
+test("binary subprocess backups stream to disk and close without hanging", () => {
+  const f = fixture();
+  const output = join(f.root, "binary.dump");
+  const program = `import {runCommand} from ${JSON.stringify(join(import.meta.dir, "../scripts/update-local.ts"))}; await runCommand([process.execPath,"-e","process.stdout.write(Buffer.from([0,255,1,128,10]))"],{cwd:${JSON.stringify(f.root)},stdoutFile:${JSON.stringify(output)}});`;
+  execFileSync(process.execPath, ["-e", program], {
+    cwd: f.root,
+    timeout: 2000,
+  });
+  expect([...readFileSync(output)]).toEqual([0, 255, 1, 128, 10]);
+});
+
+test("failed host readiness stops only candidate processes whose cwd belongs to this root", async () => {
+  const f = fixture("host");
+  let started = false;
+  const run: CommandRunner = async (command, options) => {
+    const output = await f.run(command, options);
+    if (command[0] === "bash") started = true;
+    if (started && command[0] === "lsof")
+      return command.includes("-p") ? `n${join(f.root, "server")}\n` : "4242\n";
+    return output;
+  };
+  await expect(
+    applyLocalUpdate({
+      ...f.options,
+      run,
+      timeoutSeconds: 1,
+      probe: async () => ({ status: "ok", version: "wrong" }),
+    }),
+  ).rejects.toThrow("ready");
+  expect(f.calls.some((command) => command === "kill -TERM 4242")).toBe(true);
+  expect(f.calls.some((command) => command.includes("pkill"))).toBe(false);
 });

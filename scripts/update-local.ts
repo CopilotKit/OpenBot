@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
+  createReadStream,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -29,6 +30,7 @@ export interface CommandOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   stdoutFile?: string;
+  stdinFile?: string;
   timeoutMs?: number;
   acceptExitCodes?: number[];
 }
@@ -39,30 +41,41 @@ export type CommandRunner = (
 
 /** No shell interpolation. Backup output streams to a private file instead of process memory. */
 export const runCommand: CommandRunner = async (command, options) => {
-  const child = Bun.spawn([...command], {
-    cwd: options.cwd,
-    env: options.env ?? process.env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: options.timeoutMs ?? 300_000,
-  });
+  const input = options.stdinFile
+    ? openSync(options.stdinFile, "r")
+    : undefined;
   const output = options.stdoutFile
-    ? Bun.write(options.stdoutFile, new Response(child.stdout)).then(() => "")
-    : new Response(child.stdout).text();
-  const [code, stdout, stderr] = await Promise.all([
-    child.exited,
-    output,
-    new Response(child.stderr).text(),
-  ]);
-  if (!(options.acceptExitCodes ?? [0]).includes(code)) {
-    // Arguments/environment/configuration output may contain credentials. Name the failed tool,
-    // not its input. The durable operation journal identifies the failed lifecycle phase.
-    throw new Error(
-      `${command[0]} ${command[1] ?? ""} failed with exit ${code}${stderr.trim() ? "; inspect that tool's local diagnostics" : ""}`,
-    );
+    ? openSync(options.stdoutFile, "w", 0o600)
+    : undefined;
+  try {
+    // Direct descriptors preserve custom-format dump bytes and avoid a Bun 1.3 pipe/Response
+    // completion hang. The parent closes its descriptors only after the child has exited.
+    const child = Bun.spawn([...command], {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      stdin: input ?? "ignore",
+      stdout: output ?? "pipe",
+      stderr: "pipe",
+      timeout: options.timeoutMs ?? 300_000,
+    });
+    const text =
+      child.stdout instanceof ReadableStream
+        ? new Response(child.stdout).text()
+        : Promise.resolve("");
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      text,
+      new Response(child.stderr).text(),
+    ]);
+    if (!(options.acceptExitCodes ?? [0]).includes(code))
+      throw new Error(
+        `${command[0]} ${command[1] ?? ""} failed with exit ${code}${stderr.trim() ? "; inspect that tool's local diagnostics" : ""}`,
+      );
+    return stdout;
+  } finally {
+    if (input !== undefined) closeSync(input);
+    if (output !== undefined) closeSync(output);
   }
-  return stdout;
 };
 
 export interface LocalUpdateOptions {
@@ -121,6 +134,7 @@ export interface UpdateJournal {
 interface ComposeService {
   image?: string;
   environment?: Record<string, string>;
+  volumes?: { type?: string; source?: string; target?: string }[];
 }
 interface ComposeConfiguration {
   name: string;
@@ -170,6 +184,18 @@ function environment(root: string): NodeJS.ProcessEnv {
     }
   }
   return { ...values, ...process.env };
+}
+export function acceptedBuildEnvironment(root: string): Record<string, string> {
+  const manifest = parseReleaseManifest(
+    JSON.parse(readFileSync(join(root, ACCEPTED), "utf8")),
+  );
+  return {
+    OPENBOT_BUILD_VERSION: manifest.version,
+    OPENBOT_BUILD_COMMIT: manifest.source.commit,
+    OPENBOT_BUILD_DISTRIBUTION_ID: manifest.distribution.id,
+    OPENBOT_BUILD_REPOSITORY: manifest.distribution.repository,
+    OPENBOT_BUILD_CHANNEL: manifest.distribution.channel,
+  };
 }
 function imagesEnvironment(
   manifest: ReleaseManifest,
@@ -249,6 +275,44 @@ function volumeIdentity(configuration: ComposeConfiguration) {
       .map(([key, value]) => [key, value.name, value.external])
       .sort(),
   );
+}
+function preservedState(
+  before: ComposeConfiguration,
+  after: ComposeConfiguration,
+) {
+  if (
+    before.name !== after.name ||
+    volumeIdentity(before) !== volumeIdentity(after)
+  )
+    return false;
+  for (const [name, service] of Object.entries(before.services)) {
+    for (const volume of service.volumes ?? []) {
+      if (
+        !after.services[name]?.volumes?.some(
+          (candidate) =>
+            candidate.type === volume.type &&
+            candidate.source === volume.source &&
+            candidate.target === volume.target,
+        )
+      )
+        return false;
+    }
+    for (const key of [
+      "COMPUTER_NAMESPACE",
+      "TENANT_PACKAGE_DIR",
+      "OPENBOT_MODEL_OAUTH_FILE",
+    ]) {
+      const existing = service.environment?.[key];
+      if (existing && existing !== after.services[name]?.environment?.[key])
+        return false;
+    }
+  }
+  return true;
+}
+async function fileSha256(path: string) {
+  const digest = createHash("sha256");
+  for await (const chunk of createReadStream(path)) digest.update(chunk);
+  return digest.digest("hex");
 }
 async function candidateConfiguration(
   root: string,
@@ -341,7 +405,78 @@ async function hostStopped(
       throw new Error(
         "Stop this installation's routine worker before applying a host update; no process was stopped",
       );
+    throw new Error(
+      "Another installation's host worker is active; existing startup shares global worker detection, so the update was paused without stopping that worker",
+    );
   }
+}
+
+export function assertLocalStartAllowed(root: string, operation?: string) {
+  if (!existsSync(join(root, JOURNAL))) return;
+  const journal: { phase?: string; operation?: string } = JSON.parse(
+    readFileSync(join(root, JOURNAL), "utf8"),
+  );
+  if (journal.phase === "accepted") return;
+  if (
+    operation &&
+    operation === journal.operation &&
+    journal.phase === "starting"
+  )
+    return;
+  throw new Error(
+    "Startup is blocked until update recovery is resolved. Inspect .openbot-update-journal.json and its matching backup; starting source against an ambiguous schema is unsafe.",
+  );
+}
+
+async function ownedHostProcesses(
+  root: string,
+  env: NodeJS.ProcessEnv,
+  run: CommandRunner,
+) {
+  const pids = new Set<string>();
+  for (const port of [env.APP_PORT ?? "3010", env.SERVER_PORT ?? "3001"]) {
+    const listeners = await run(
+      ["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { cwd: root, acceptExitCodes: [0, 1] },
+    );
+    for (const pid of listeners.trim().split(/\s+/).filter(Boolean))
+      pids.add(pid);
+  }
+  const workers = await run(["pgrep", "-f", "bun worker/src/index.ts"], {
+    cwd: root,
+    acceptExitCodes: [0, 1],
+  });
+  for (const pid of workers.trim().split(/\s+/).filter(Boolean)) pids.add(pid);
+  const owned: string[] = [];
+  for (const pid of pids) {
+    if (!/^\d+$/.test(pid))
+      throw new Error(
+        "Could not establish process ownership during failed update cleanup",
+      );
+    const cwd = await run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], {
+      cwd: root,
+      acceptExitCodes: [0, 1],
+    });
+    if (
+      cwd
+        .split("\n")
+        .some((line) =>
+          [root, join(root, "server"), join(root, "app")].some(
+            (path) => line === `n${path}`,
+          ),
+        )
+    )
+      owned.push(pid);
+  }
+  return owned;
+}
+async function stopOwnedHost(
+  root: string,
+  env: NodeJS.ProcessEnv,
+  run: CommandRunner,
+) {
+  const owned = await ownedHostProcesses(root, env, run);
+  if (owned.length) await run(["kill", "-TERM", ...owned], { cwd: root });
 }
 
 async function inspect(
@@ -457,10 +592,7 @@ async function inspect(
       imagesEnvironment(candidate, env),
       run,
     );
-    if (
-      before.name !== after.name ||
-      volumeIdentity(before) !== volumeIdentity(after)
-    )
+    if (!preservedState(before, after))
       throw new Error(
         "Candidate would change Compose project or volume identities",
       );
@@ -492,6 +624,10 @@ async function inspect(
     }
     plan.composeProject = before.name;
     if (options.topology === "host") await hostStopped(root, env, run);
+    else if ((await ownedHostProcesses(root, env, run)).length)
+      throw new Error(
+        "Host processes belonging to this installation are still running; stop them before choosing image topology",
+      );
   } catch (error) {
     plan.reasons.push(error instanceof Error ? error.message : String(error));
   }
@@ -557,6 +693,7 @@ export async function applyLocalUpdate(
   const env = environment(root);
   const candidateEnv = imagesEnvironment(options.candidate, env);
   const operation = randomUUID();
+  candidateEnv.OPENBOT_UPDATE_OPERATION = operation;
   const backupDirectory = resolve(options.backupDirectory, operation);
   let installed = false;
   const journal: UpdateJournal = {
@@ -580,6 +717,12 @@ export async function applyLocalUpdate(
   try {
     const verified = await inspect(options, true);
     if (!verified.allowed) throw new Error(verified.reasons.join("; "));
+    const originalConfiguration = readConfiguration(
+      await run(
+        compose(["config", "--format", "json"], root, initial.composeProject),
+        { cwd: root, env },
+      ),
+    );
     mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
     if (lstatSync(backupDirectory).isSymbolicLink())
       throw new Error("Backup directory must not be a symbolic link");
@@ -642,7 +785,12 @@ export async function applyLocalUpdate(
     const dump = join(backupDirectory, "database.dump");
     writeFileSync(dump, "", { flag: "wx", mode: 0o600 });
     // Image Compose's migrate/server share its resolved URL. Host uses its existing .env URL.
-    if (options.topology === "image") {
+    if (
+      options.topology === "image" &&
+      new URL(
+        originalConfiguration.services.server?.environment?.DATABASE_URL ?? "",
+      ).hostname === "postgres"
+    ) {
       await run(
         compose(
           [
@@ -659,20 +807,39 @@ export async function applyLocalUpdate(
         { cwd: root, env, stdoutFile: dump },
       );
     } else {
-      if (!env.DATABASE_URL || env.DATABASE_URL.includes("${"))
+      const databaseUrl =
+        options.topology === "host"
+          ? env.DATABASE_URL
+          : originalConfiguration.services.server?.environment?.DATABASE_URL;
+      if (!databaseUrl || databaseUrl.includes("${"))
         throw new Error(
           "A fully resolved DATABASE_URL is required for a host backup",
         );
       await run(["pg_dump", "--format=custom"], {
         cwd: root,
-        env: { ...env, PGDATABASE: env.DATABASE_URL },
+        env: { ...env, PGDATABASE: databaseUrl },
         stdoutFile: dump,
       });
     }
     if (statSync(dump).size === 0)
       throw new Error("Database backup is empty; source was not changed");
+    if (
+      options.topology === "image" &&
+      new URL(
+        originalConfiguration.services.server?.environment?.DATABASE_URL ?? "",
+      ).hostname === "postgres"
+    ) {
+      await run(
+        compose(
+          ["exec", "-T", "postgres", "pg_restore", "--list"],
+          root,
+          initial.composeProject,
+        ),
+        { cwd: root, env, stdinFile: dump },
+      );
+    } else await run(["pg_restore", "--list", dump], { cwd: root, env });
     atomicJson(join(backupDirectory, "backup.json"), {
-      sha256: createHash("sha256").update(readFileSync(dump)).digest("hex"),
+      sha256: await fileSha256(dump),
       previousCommit: initial.currentCommit,
       candidateCommit: initial.targetCommit,
       composeProject: initial.composeProject,
@@ -682,6 +849,16 @@ export async function applyLocalUpdate(
       cwd: root,
     });
     installed = true;
+    const activatedConfiguration = readConfiguration(
+      await run(
+        compose(["config", "--format", "json"], root, initial.composeProject),
+        { cwd: root, env: candidateEnv },
+      ),
+    );
+    if (!preservedState(originalConfiguration, activatedConfiguration))
+      throw new Error(
+        "Activated source changed Compose state identities; migration was not started",
+      );
     if (options.topology === "host")
       await run(["bun", "install", "--frozen-lockfile"], {
         cwd: root,
@@ -789,6 +966,13 @@ export async function applyLocalUpdate(
         );
       } catch (stopError) {
         journal.error += `; candidate stop failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`;
+      }
+    }
+    if (options.topology === "host" && installed) {
+      try {
+        await stopOwnedHost(root, env, run);
+      } catch (stopError) {
+        journal.error += `; owned host cleanup failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`;
       }
     }
     atomicJson(join(root, JOURNAL), journal);

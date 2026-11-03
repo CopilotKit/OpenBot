@@ -45,6 +45,16 @@ function fixture() {
   const calls: string[][] = [];
   const run: CommandRunner = async (command) => {
     calls.push([...command]);
+    if (command[0] === "kubectl" && command.includes("exec"))
+      return JSON.stringify({
+        version: candidate.version,
+        commit: candidate.source.commit,
+        distributionId: candidate.distribution.id,
+        repository: candidate.distribution.repository,
+        channel: candidate.distribution.channel,
+      });
+    if (command[0] === "kubectl" && command.includes("cronjob"))
+      return JSON.stringify({ items: [] });
     if (command[0] === "kubectl" && command.includes("get"))
       return JSON.stringify({
         items: [
@@ -171,4 +181,15 @@ test("GitOps writes pinned review artifacts without claiming deployment or calli
       "utf8",
     ),
   ).toContain("sha256:");
+});
+
+test("Helm workload metadata alone cannot accept a server reporting another release", async () => {
+  const f = fixture();
+  const run: CommandRunner = async (command, options) =>
+    command.includes("exec")
+      ? JSON.stringify({ version: "another-release" })
+      : (f.options.run?.(command, options) ?? "");
+  await expect(promoteKubernetes({ ...f.options, run })).rejects.toThrow(
+    "identity",
+  );
 });

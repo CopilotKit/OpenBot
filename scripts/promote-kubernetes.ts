@@ -51,6 +51,13 @@ interface Deployment {
 interface DeploymentList {
   items: Deployment[];
 }
+interface CronJobList {
+  items: {
+    metadata: { name: string };
+    spec: { suspend?: boolean };
+    status?: { active?: { name: string }[] };
+  }[];
+}
 interface PromotionJournal {
   operation: string;
   phase:
@@ -68,6 +75,7 @@ interface PromotionJournal {
   backupReference: string;
   databaseMayHaveChanged: boolean;
   previousReplicas?: number;
+  pausedCronJobs?: { name: string; wasSuspended: boolean }[];
   error?: string;
   recovery: string;
 }
@@ -265,6 +273,7 @@ export async function promoteKubernetes(
   const lock = join(options.outputDirectory, ".promotion.lock");
   mkdirSync(lock, { mode: 0o700 });
   const run = options.run ?? runCommand;
+  let mutationStarted = false;
   const timeout = `${options.timeoutSeconds ?? 300}s`;
   const journal: PromotionJournal = {
     operation: randomUUID(),
@@ -303,6 +312,57 @@ export async function promoteKubernetes(
     ) {
       phase("quiescing");
       journal.previousReplicas = before.spec.replicas ?? 1;
+      const cronJobs: CronJobList = JSON.parse(
+        await run(
+          [
+            "kubectl",
+            "--namespace",
+            options.namespace,
+            "get",
+            "cronjob",
+            "--selector",
+            `app.kubernetes.io/instance=${options.release}`,
+            "--output",
+            "json",
+          ],
+          { cwd: options.outputDirectory },
+        ),
+      );
+      journal.pausedCronJobs = cronJobs.items.map((job) => ({
+        name: job.metadata.name,
+        wasSuspended: job.spec.suspend ?? false,
+      }));
+      phase("quiescing");
+      mutationStarted = true;
+      for (const job of cronJobs.items) {
+        await run(
+          [
+            "kubectl",
+            "--namespace",
+            options.namespace,
+            "patch",
+            "cronjob",
+            job.metadata.name,
+            "--type=merge",
+            "--patch",
+            '{"spec":{"suspend":true}}',
+          ],
+          { cwd: options.outputDirectory },
+        );
+        for (const active of job.status?.active ?? [])
+          await run(
+            [
+              "kubectl",
+              "--namespace",
+              options.namespace,
+              "wait",
+              "--for=condition=complete",
+              `job/${active.name}`,
+              `--timeout=${timeout}`,
+            ],
+            { cwd: options.outputDirectory },
+          );
+      }
       await run(
         [
           "kubectl",
@@ -321,17 +381,17 @@ export async function promoteKubernetes(
           "kubectl",
           "--namespace",
           options.namespace,
-          "rollout",
-          "status",
-          "deployment",
+          "wait",
+          "--for=delete",
+          "pod",
           "--selector",
           selector(options.release),
           `--timeout=${timeout}`,
         ],
         { cwd: options.outputDirectory },
       );
-      // The API is no longer admitting requests; routines may remain scheduled, but cannot hand
-      // off new API work. Their existing lease/idempotency behavior handles a bounded retry.
+      // Target CronJobs are reconciled by Helm after the guarded pre-upgrade migration. Their
+      // declared target/customer suspension policy takes effect with the target workloads.
       phase("backing-up");
       if (!options.backupCommand?.length)
         throw new Error("Missing backup command after quiescence");
@@ -341,6 +401,7 @@ export async function promoteKubernetes(
       });
     }
     journal.databaseMayHaveChanged = true;
+    mutationStarted = true;
     phase("promoting");
     await run(
       [
@@ -367,6 +428,28 @@ export async function promoteKubernetes(
       },
     );
     phase("verifying");
+    const activated = await deployments(options, run);
+    if ((activated.spec.replicas ?? 1) === 0) {
+      if (!journal.previousReplicas)
+        throw new Error(
+          "Target has no serving replicas; automatic activation cannot establish readiness",
+        );
+      // HPA-owned Deployments omit replicas in the chart; explicitly leave the maintenance
+      // scale-to-zero state before waiting for the existing autoscaler to resume.
+      await run(
+        [
+          "kubectl",
+          "--namespace",
+          options.namespace,
+          "scale",
+          "deployment",
+          "--selector",
+          selector(options.release),
+          `--replicas=${journal.previousReplicas}`,
+        ],
+        { cwd: options.outputDirectory },
+      );
+    }
     await run(
       [
         "kubectl",
@@ -382,6 +465,41 @@ export async function promoteKubernetes(
       { cwd: options.outputDirectory },
     );
     verifyDeployment(await deployments(options, run), options.candidate, true);
+    const deployment = await deployments(options, run);
+    const identityText = await run(
+      [
+        "kubectl",
+        "--namespace",
+        options.namespace,
+        "exec",
+        `deployment/${deployment.metadata?.name ?? `${options.release}-server`}`,
+        "--container",
+        "server",
+        "--",
+        "bun",
+        "-e",
+        "const r=await fetch('http://127.0.0.1:'+(process.env.PORT||process.env.SERVER_PORT||3001)+'/release'); if(!r.ok)process.exit(1); console.log(JSON.stringify(await r.json()));",
+      ],
+      { cwd: options.outputDirectory, timeoutMs: 15_000 },
+    );
+    const identity: {
+      version?: string;
+      commit?: string;
+      distributionId?: string;
+      repository?: string;
+      channel?: string;
+    } = JSON.parse(identityText);
+    const candidate = options.candidate;
+    if (
+      identity.version !== candidate.version ||
+      identity.commit !== candidate.source.commit ||
+      identity.distributionId !== candidate.distribution.id ||
+      identity.repository !== candidate.distribution.repository ||
+      identity.channel !== candidate.distribution.channel
+    )
+      throw new Error(
+        "Running server release identity does not match the candidate",
+      );
     // Helm --wait waits for chart workload readiness and migration Jobs. Additional customer
     // workflow acceptance remains the operator's responsibility and is not implied by this record.
     atomicJson(
@@ -392,6 +510,56 @@ export async function promoteKubernetes(
     return journal;
   } catch (error) {
     journal.error = error instanceof Error ? error.message : String(error);
+    if (mutationStarted) {
+      try {
+        await run(
+          [
+            "kubectl",
+            "--namespace",
+            options.namespace,
+            "scale",
+            "deployment",
+            "--selector",
+            selector(options.release),
+            "--replicas=0",
+          ],
+          { cwd: options.outputDirectory },
+        );
+        const jobs: CronJobList = JSON.parse(
+          await run(
+            [
+              "kubectl",
+              "--namespace",
+              options.namespace,
+              "get",
+              "cronjob",
+              "--selector",
+              `app.kubernetes.io/instance=${options.release}`,
+              "--output",
+              "json",
+            ],
+            { cwd: options.outputDirectory },
+          ),
+        );
+        for (const job of jobs.items)
+          await run(
+            [
+              "kubectl",
+              "--namespace",
+              options.namespace,
+              "patch",
+              "cronjob",
+              job.metadata.name,
+              "--type=merge",
+              "--patch",
+              '{"spec":{"suspend":true}}',
+            ],
+            { cwd: options.outputDirectory },
+          );
+      } catch (stopError) {
+        journal.error += `; maintenance shutdown failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`;
+      }
+    }
     phase("recovery-required");
     throw new Error(
       `${journal.error}. Promotion requires operator recovery; see ${join(options.outputDirectory, "promotion-journal.json")}`,
