@@ -418,33 +418,27 @@ again when they come back to the end or press the arrow. A rail beside a convers
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
 
-### First run shows what OpenBot does, one step at a time
+### First run gets you into the app in three clicks at most
 
-- The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
-  own, a team of Bots, and asking before it acts, with Ask before making changes offered right
-  there), then Check your setup, Connect your apps, Get notified, and the name step, whose Get
-  started opens the app. On a desktop each step's words sit beside a picture of it, under one line
-  saying where the person is ("Step 5 of 9") that opens the list of steps; on a phone they come one
-  at a time. A reload, browser Back and a connection's return all keep the person's place, which is
-  now saved as they go. A link on a step to another page moves on to the next step and opens that
-  page once onboarding is done.
-- Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
-  more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
-  shown the page or the variables that close a gap; everybody else only that their admin sets it up,
-  with no warning colours. An admin can reopen the same checklist afterwards in Settings → Setup, to
-  check again after setting a variable and restarting OpenBot.
-  Check again asks Intelligence and the model provider again, at most every 10 seconds. Reading the
-  checklist does the same once an answer could not be had or is five minutes old, without waiting
-  for it, so the next read has the new answer; a refusal (a licence, a key, a computer's policy)
-  waits for Check again or the five minutes. To check the Bot computer, the server sends each running
-  computer its network policy whenever it asks, and sees that it answers; it wakes none.
-- An app connected from Connect your apps comes back to that step from the app's own sign-in page,
-  whether it connected, failed or was cancelled there. A connection started from Connections or an
-  app's admin page comes back where it did before.
-- Somebody running OpenBot alone, on Desktop or with `copilotkit local`, gets a Talk to us step just
-  before the name step. Book a call opens CopilotKit's booking page in a new tab and moves on; Not
-  now just moves on. An organization's people never see it. The self-host banner's link now reads
-  Book a call too.
+- The looping intro is replaced by a short onboarding. Welcome shows what OpenBot does as one
+  animation (asking in plain words, the browser and files Bots use apart from yours, and picking a
+  Bot), with Set up your permissions beside it: the Ask before making changes switch, the same one
+  as Settings → Approvals. Somebody running OpenBot alone, on Desktop or with `copilotkit local`,
+  then gets Talk to us, where Book a call opens CopilotKit's booking page in a new tab and Not now
+  moves on. Last comes the name, skipped when sign-in already gave one. A reload and browser Back
+  keep the person's place, which is now saved as they go.
+- Notifications are offered in a conversation once the first task has started, with Enable
+  notifications and Not now, instead of during onboarding.
+- New **Settings → Setup**, for admins and somebody running OpenBot alone, asks the new
+  `GET /api/setup` whether Intelligence, the model key, the Bot computer, more apps and Slack and
+  Teams work, row by row, with the page or the variables that close each gap. The Settings sidebar
+  counts the rows an admin can fix. Check again asks Intelligence and the model provider again, at
+  most every 10 seconds. Reading the checklist does the same once an answer could not be had or is
+  five minutes old, without waiting for it, so the next read has the new answer; a refusal (a
+  licence, a key, a computer's policy) waits for Check again or the five minutes. To check the Bot
+  computer, the server sends each running computer its network policy whenever it asks, and sees
+  that it answers; it wakes none.
+- The self-host banner's link now reads Book a call.
 
 ### Generated interfaces use A2UI 1.0
 
