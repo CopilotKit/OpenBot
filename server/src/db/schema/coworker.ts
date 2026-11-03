@@ -13,6 +13,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { agents, users } from "./core";
 import { jsonb } from "./json";
@@ -198,6 +199,28 @@ export const intelligenceCopies = pgTable("intelligence_copies", {
   /** How many rows the copy found in Intelligence when it verified, for the record. */
   copied: integer("copied").notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Where a long copy into Intelligence has got to, so a restart resumes it rather than starting over.
+ *
+ * The audit trail copy (`audit-trail/upgrade.ts`) can be millions of rows. It walks each table in
+ * `(created_at, id)` order and moves this forward after every batch Intelligence stored, with the
+ * running count of ids Intelligence reported stored. Operational: when the copy finishes it is recorded
+ * in `intelligence_copies` and this row no longer matters.
+ */
+export const intelligenceCopyProgress = pgTable("intelligence_copy_progress", {
+  name: text("name").primaryKey(),
+  /** The last copied row's `created_at`, to the microsecond. Null before the first batch. */
+  afterCreatedAt: timestamp("after_created_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
+  afterId: uuid("after_id"),
+  copied: integer("copied").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });

@@ -1,11 +1,14 @@
 import { sql } from "drizzle-orm";
 import {
+  bigserial,
+  check,
   index,
   integer,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { jsonb } from "./json";
 
@@ -120,4 +123,57 @@ export const localLocks = pgTable("local_locks", {
   name: text("name").primaryKey(),
   holder: text("holder").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+/**
+ * Audit events, action records and model usage written here and not yet stored in Intelligence.
+ *
+ * The trail lives in Intelligence (`/api/audit`, `/api/model-usage`), but a row is written where it
+ * always was: in the caller's own transaction, so an audit row commits or rolls back with the change it
+ * records, and nothing waits on the network to write one. The drainer (`audit-trail/drainer.ts`) sends
+ * the rows in `seq` order and deletes each only after Intelligence reports it stored. `id` is the
+ * row's UUID in Intelligence, chosen here, so a resend is the same row rather than a second one.
+ *
+ * Operational: an empty table is the normal state. A row Intelligence refused outright (a payload too
+ * large, say) is kept with `refused_at` and its reason rather than deleted, said loudly, and no longer
+ * sent.
+ */
+export const auditOutbox = pgTable(
+  "audit_outbox",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    kind: text("kind").$type<"event" | "action" | "usage">().notNull(),
+    id: uuid("id").notNull(),
+    /** The database's clock at write time, as `audit_events.created_at` was. */
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** The record as Intelligence takes it, without `id` and `occurredAt`. */
+    record: jsonb("record").notNull(),
+    refusedAt: timestamp("refused_at", { withTimezone: true }),
+    refusal: text("refusal"),
+  },
+  (table) => [
+    check(
+      "audit_outbox_kind_check",
+      sql`${table.kind} IN ('event', 'action', 'usage')`,
+    ),
+    index("audit_outbox_pending_idx")
+      .on(table.seq)
+      .where(sql`${table.refusedAt} IS NULL`),
+  ],
+);
+
+/**
+ * When each computer was last asked to do anything, keyed by `person:<id>` or `bot:<id>`.
+ *
+ * The idle-computer culler's bookmark (`work/culler.ts`). It used to group the audit trail by
+ * computer; the trail is in Intelligence now and a group-by over the network on every sweep is the
+ * wrong price, so every `computer.*` audit row moves this forward in the same statement that writes
+ * it. Derived and disposable: a lost row reads as "idle since it started", which delays nothing a
+ * person did and at worst stops a computer nobody had touched since its start.
+ */
+export const computerActivity = pgTable("computer_activity", {
+  computer: text("computer").primaryKey(),
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }).notNull(),
 });

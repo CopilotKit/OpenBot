@@ -11,6 +11,7 @@ import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
+  ACTION_RECORD_RETENTION_DAYS,
   auditRoutineStore,
   enterpriseControls,
   guardDeliveryStore,
@@ -24,6 +25,16 @@ import {
   CoworkerUnavailableError,
   createActorAgentResolver,
 } from "./agents/agent-resolver";
+import { createAgentRegistryClient } from "./agents/bot-registry/client";
+import {
+  createBotDirectory,
+  installBotDirectory,
+} from "./agents/bot-registry/directory";
+import {
+  removeBotLocalRows,
+  sweepPurgedBotRows,
+} from "./agents/bot-registry/local-rows";
+import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import {
   mintRunAssertion,
   type RunAssertion,
@@ -42,16 +53,6 @@ import {
   createBotLifecycleStore,
 } from "./agents/lifecycle";
 import { createBotReset } from "./agents/lifecycle-reset";
-import { createAgentRegistryClient } from "./agents/bot-registry/client";
-import {
-  createBotDirectory,
-  installBotDirectory,
-} from "./agents/bot-registry/directory";
-import {
-  removeBotLocalRows,
-  sweepPurgedBotRows,
-} from "./agents/bot-registry/local-rows";
-import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -84,6 +85,11 @@ import {
   recordAuditEvent,
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
+import { createAuditTrailClient } from "./audit-trail/client";
+import { createAuditDrainer } from "./audit-trail/drainer";
+import { startAuditRetentionSync } from "./audit-trail/retention";
+import { installAuditTrail } from "./audit-trail/trail";
+import { startAuditHistoryCopy } from "./audit-trail/upgrade";
 import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createEntra, withEntraBearer } from "./auth/entra";
@@ -422,6 +428,26 @@ const learningSettings = withLearningAutoAssign(
 learningAutoAssign.start();
 await initializeDevActorUser(database, config.singleUser);
 /*
+ * The audit trail, action records and model usage live in Intelligence. Every row is written to the
+ * local outbox in its writer's own transaction, as before; the drainer carries it to Intelligence and
+ * readers read it there (audit-trail/). Started here so anything written before it waits only until now.
+ */
+const auditTrailClient = createAuditTrailClient({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const { drainer: auditDrainer } = installAuditTrail({
+  client: auditTrailClient,
+  drainer: createAuditDrainer({ database, client: auditTrailClient }),
+});
+auditDrainer.start();
+// How long Intelligence keeps the trail is still this deployment's to say: AUDIT_RETENTION_DAYS, and
+// 90 days of Action Recording.
+const auditRetentionSync = startAuditRetentionSync(auditTrailClient, {
+  eventRetentionDays: config.auditRetentionDays ?? null,
+  actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+});
+/*
  * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
  * Intelligence's change announcements (agents/bot-registry/directory.ts). Started before anything
  * reads a Bot (nothing above does), and fatal when Intelligence cannot answer: a server with no Bots would show everybody
@@ -447,6 +473,9 @@ await sweepPurgedBotRows(
   database,
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
 );
+// An upgraded deployment's earlier audit trail, action records and model usage, copied into
+// Intelligence once, in the background: it can be millions of rows (audit-trail/upgrade.ts).
+const auditHistoryCopy = startAuditHistoryCopy(database, auditTrailClient);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -861,14 +890,11 @@ const approvalService = createServerApprovalService({
 });
 // Check-ins' settings, items, run ledger and pings. See proactive/store.ts.
 const proactiveStore = createProactiveStore(database);
-// Housekeeping on a schedule: audit rows when asked for, screenshots and the check-in ledger always,
-// one timer. See audit-retention.ts.
-const retentionSweeps = startRetentionSweeps(
-  config.databaseUrl,
-  config.auditRetentionDays,
-  pageFrameStore,
-  { proactive: proactiveStore },
-);
+// Housekeeping on a schedule: screenshots and the check-in ledger, one timer. See audit-retention.ts;
+// the audit trail's own retention is Intelligence's.
+const retentionSweeps = startRetentionSweeps(pageFrameStore, {
+  proactive: proactiveStore,
+});
 /**
  * Whose computer a Bot runs on: the person it acts for, unless the Bot is isolated and its owner
  * still holds the switch (`runsIsolated`, agents/isolation.ts). A provider that cannot make a
@@ -2960,6 +2986,8 @@ if (config.singleUser) {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     botDirectory.stop();
+    auditRetentionSync.stop();
+    auditHistoryCopy.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();
@@ -2977,6 +3005,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       // Started only where handing work between Bots is switched on, so it is often not there.
       workOfferedListener?.stop() ?? Promise.resolve(),
       Promise.resolve(retentionSweeps.stop()),
+      // What is written but not yet sent stays in the outbox for the next start; this ends the pass.
+      auditDrainer.stop(),
     ]).finally(() => process.exit(0));
   });
 }
