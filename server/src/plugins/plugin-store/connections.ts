@@ -24,7 +24,7 @@ import {
   askAction as composioAskAction,
   VERSION_ARG,
 } from "../composio";
-import { type AccountRef, personAccount } from "../shared-accounts";
+import type { AccountRef } from "../shared-accounts";
 import type { StoreContext } from "./context";
 import {
   attemptNamed,
@@ -46,6 +46,7 @@ export function connectionMethods(context: StoreContext) {
     credentials,
     registerClient,
     broker,
+    personAccountOf,
     accountRow,
     swapUserCredential,
     withOAuthClientLock,
@@ -1076,6 +1077,18 @@ export function connectionMethods(context: StoreContext) {
     },
 
     /**
+     * The name a person's grants are filed under at this deployment's broker NOW: their own id, or
+     * the one `brokered_identities` holds for them, which only a single-user deployment's one person
+     * has. Read the way every resolution reads it ({@link personAccountOf}).
+     *
+     * For the verifier, which has to tell an attempt minted under that name from one minted under a
+     * name the person has since been given a replacement for. See `/arcade/verify`.
+     */
+    async personAccount(userId: string): Promise<AccountRef> {
+      return personAccountOf(userId);
+    },
+
+    /**
      * The other apps this deployment holds a connection for that share THIS app's connection: the
      * apps on the same vendor identity AND the same AUTH PROVIDER, never the provider alone. The
      * reason is written out on {@link connectionSiblings}; this is that computation over the rows
@@ -1137,7 +1150,8 @@ export function connectionMethods(context: StoreContext) {
     async claimAuthorizationAttempt(input: {
       actorId: string;
       serverId: string;
-      action: string;
+      /** The action Authorize was pressed for, or `null` for a whole-app Connect. */
+      action: string | null;
       account: AccountRef;
     }): Promise<
       | { claimed: true; attempt: PendingAuthorization }
@@ -1339,7 +1353,8 @@ export function connectionMethods(context: StoreContext) {
       authId: string;
       toolkit: string;
       account: AccountRef;
-      action: string;
+      /** The attempt's own: an action, or `null` where Connect asked for the whole app. */
+      action: string | null;
       scopes: string[];
       authProvider: string;
     }): Promise<{ claimed: boolean }> {
@@ -1423,7 +1438,17 @@ export function connectionMethods(context: StoreContext) {
                   // The identity the grant was just made under, for `recordBrokeredConnection`'s
                   // reason: calls go out under the row's id, so a re-consent that left the old one
                   // standing sent them to an account this consent says nothing about.
-                  set: { ...set, vendorUserId: input.account.vendorUserId },
+                  //
+                  // AND WHEN, because a consent over a standing row is a reconnection. A call Arcade
+                  // refused one action keeps its row and shows Reconnect; `connectedAt` newer than
+                  // that refusal is how the card knows the Connect it offered has happened (see
+                  // `AppAccess.connectedAt`). Left at the first consent, the card went on offering
+                  // Reconnect over an account that now allowed the action.
+                  set: {
+                    ...set,
+                    vendorUserId: input.account.vendorUserId,
+                    connectedAt: verifiedAt,
+                  },
                 }
               : {
                   target: [
@@ -1435,6 +1460,7 @@ export function connectionMethods(context: StoreContext) {
                     ...set,
                     vendorUserId: input.account.vendorUserId,
                     connectedBy,
+                    connectedAt: verifiedAt,
                   },
                 },
           );
@@ -1459,6 +1485,7 @@ export function connectionMethods(context: StoreContext) {
                */
               scope: input.scopes.join(" "),
               // The action the attempt was for: what this grant was obtained in order to call.
+              // `null` for a whole-app Connect, which asked for every action at once.
               action: input.action,
               authProvider: input.authProvider,
               reconnected: Boolean(existing),
@@ -1927,6 +1954,12 @@ export function connectionMethods(context: StoreContext) {
       toolkit: string;
       account: AccountRef;
       by: string;
+      /**
+       * Set where the person pressed Connect and the broker answered that it already holds the
+       * account, which makes this confirm the reconnection rather than a read on page load. See the
+       * write at the end.
+       */
+      pressed?: "connect";
     }): Promise<{ connected: boolean }> {
       // Before anything, and for the reason `addBrokeredApp` says it first too: a deployment with
       // no key has no broker to have connected anybody at, so there is nothing here to ask.
@@ -2156,6 +2189,26 @@ export function connectionMethods(context: StoreContext) {
        * not known WHAT the yes is evidence of. Both answers are the same act — write nothing — and
        * it is the only act available that cannot claim more than was learned.
        */
+
+      /*
+       * A CONNECT PRESSED OVER A ROW THAT STANDS IS A RECONNECTION, AND IS DATED AS ONE.
+       *
+       * `connectedAt` newer than a Bot's refusal is how the card over that refusal knows its
+       * Reconnect has happened (`AppAccess.connectedAt`). A reconnection that came back through a
+       * consent is dated by the verifier's write. One where the broker answered that it already
+       * holds everything the app asks for comes here instead, and on a consent row already verified
+       * the arms above write nothing, so the row kept its first date and the card went on offering
+       * Reconnect over an account that now allowed the action.
+       *
+       * ONLY ON A PRESS. This method also runs on every page load, and a load re-dating the row would
+       * read to that card as a reconnection nobody made. A new row is dated by its insert.
+       */
+      if (input.pressed === "connect" && existing) {
+        await database
+          .update(brokeredConnections)
+          .set({ connectedAt: new Date(), updatedAt: new Date() })
+          .where(accountRow(input.toolkit, input.account));
+      }
 
       if (!existing) {
         await recordAuditEvent(auditStore, {
@@ -3385,7 +3438,7 @@ export function connectionMethods(context: StoreContext) {
        * DISTINCT TOOLKITS this person holds rather than that number squared. Empty with no broker
        * configured, where nothing is asked of anybody and the `false` below is the whole truth.
        */
-      const account = personAccount(userId);
+      const account = await personAccountOf(userId);
       const authProviders = new Map<string, Promise<string | null>>();
       const endedBesides = new Map<
         string,

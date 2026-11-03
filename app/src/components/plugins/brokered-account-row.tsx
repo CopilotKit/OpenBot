@@ -171,21 +171,16 @@ export type BrokeredAccount = {
    */
   configured: boolean;
   /**
-   * Whether the broker grants ONE ACTION AT A TIME, which is whether a whole-app Connect exists.
+   * Whether Connect takes a fresh consent over the account that stands, so a connected row can
+   * offer Reconnect in one press.
    *
-   * READ OFF THE DECLARED CAPABILITY AND NEVER OFF THE VENDOR'S NAME — the same rule, and the same
-   * server-computed field, the grant list is drawn on. `provider === "arcade"` would key the button
-   * on a different fact from the route behind it, and the two must not be able to disagree.
-   *
-   * THE ROW WITHHOLDS `Connect` WHERE THIS IS TRUE, AND NOTHING ELSE. A per-action broker has no
-   * whole-app consent to mint — the adapter refuses an authorization with no action on it — so the
-   * button could only ever reach the vendor's refusal, which is the state this closes: somebody
-   * pressed it, was told "an authorization needs the action it is for", and had no way to tell from
-   * the screen that the thing they wanted was the list underneath. `Disconnect` is NOT withheld:
-   * per-action authorizations still add up to one account at the vendor, and ending it is a real
-   * act this row is the only offer of.
+   * TRUE WHERE THE BROKER AUTHORIZES PER ACTION, which is Arcade: a consent there adds what it asks
+   * for to the one connection, and the connect route lets it through over a standing row. A Bot's
+   * card sends a person here to reconnect on both brokers, and on Arcade this is where it finishes,
+   * with no Disconnect first. FALSE ON COMPOSIO, whose second consent would attach a second account
+   * and is refused, so reconnecting there is Disconnect and then Connect.
    */
-  authorizesPerAction: boolean;
+  reconnectsInPlace: boolean;
   /** See {@link BrokeredAccountKind}. Derived here so no branch below re-asks. */
   kind: BrokeredAccountKind;
   /** Leave for the vendor's consent screen. */
@@ -292,8 +287,8 @@ export function useBrokeredAccount(input: {
    * from and never how an app connects. Null where the app is not brokered at all.
    */
   authScheme: string | null;
-  /** See {@link BrokeredAccount.authorizesPerAction}. The server's computed capability, passed in. */
-  authorizesPerAction: boolean;
+  /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed in. */
+  reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
   /**
@@ -307,12 +302,12 @@ export function useBrokeredAccount(input: {
   const queryClient = useQueryClient();
   const {
     authScheme,
-    authorizesPerAction,
     brokered,
     checkable,
     configured,
     recorded,
     probe,
+    reconnectsInPlace,
     report,
     returnTo,
     serverId,
@@ -645,9 +640,7 @@ export function useBrokeredAccount(input: {
      * offered or withheld for an instant, not a sentence anybody is told.
      */
     checkable,
-    /* Passed straight through: it is the server's answer about the app, and nothing pressed here
-       can make a broker start or stop granting per action. */
-    authorizesPerAction,
+    reconnectsInPlace,
     recheck: () => {
       report(null);
       recheck.mutate(serverId);
@@ -1019,6 +1012,24 @@ export function BrokeredAccountRow({
                     {account.rechecking ? "Checking…" : "Re-check"}
                   </Button>
                 ) : null}
+                {/*
+                 * RECONNECT OVER THE ACCOUNT THAT STANDS, where the broker adds a consent to it.
+                 * This is where a Bot's card sends somebody whose call the vendor refused, and on
+                 * Arcade one press asks for everything the app needs. The arrow says it leaves
+                 * OpenBot for the vendor's consent page, as Connect's does.
+                 */}
+                {account.reconnectsInPlace && account.kind === "consent" ? (
+                  <Button
+                    disabled={account.connecting}
+                    onClick={account.connect}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Reconnect
+                    <IconArrowUpRight />
+                  </Button>
+                ) : null}
                 <Button
                   disabled={account.disconnecting}
                   onClick={account.disconnect}
@@ -1029,23 +1040,6 @@ export function BrokeredAccountRow({
                   Disconnect
                 </Button>
               </>
-            ) : account.authorizesPerAction ? (
-              /*
-               * A value and nothing to press, the same layout the missing key draws above and for
-               * the same reason given there: a button that cannot work is worse than no button.
-               *
-               * NOT A DISABLED `Connect`. A greyed button says "not yet", and announces a step
-               * somebody is missing — but there is no later state in which a per-action broker
-               * grows a whole-app consent, so the step it names does not exist. What this person
-               * wants is the action list, and the sentence beside this row sends them to it.
-               *
-               * IT SAYS THE MECHANISM AND NOT A STATE. "Approved per action" is true before anybody
-               * has approved anything and stays true after all of it is approved; the account's own
-               * state is the branch above, which this one is reached only by failing.
-               */
-              <span className="text-muted-foreground text-xs">
-                Approved per action
-              </span>
             ) : (
               /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
               <Button

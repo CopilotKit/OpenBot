@@ -237,6 +237,7 @@ import {
   createSharedUseGate,
   createSharedUseStore,
 } from "./plugins/shared-use-store";
+import { ensureSingleUserIdentity } from "./plugins/single-user-identity";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -1032,6 +1033,17 @@ if (providerConfiguration.kind === "ambiguous") {
   );
 }
 const sharedUseStore = createSharedUseStore(database, brokerProvider);
+
+/*
+ * A single-user deployment's own name at its broker, Composio or Arcade, settled before the store
+ * resolves anybody's account. Every single-user deployment's person is `dev-local-user`, so without
+ * this every one of them on the same broker key shared one set of grants. Connections recorded under
+ * that shared name are retired here, never ended at the broker. See `ensureSingleUserIdentity`.
+ */
+await ensureSingleUserIdentity(database, {
+  singleUser: config.singleUser,
+  provider: composio?.provider ?? null,
+});
 
 const pluginStore = createPluginStore({
   database,
