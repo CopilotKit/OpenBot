@@ -234,14 +234,20 @@ test("the personal edition has no Admin, and a feature list in its place", () =>
   expect(navigationFor("admin").map((item) => item.id)).toContain("admin");
 });
 
-test("in the personal edition the menu opens the team features instead of Admin", async () => {
+test("in the personal edition the menu opens OpenBot for Business instead of Admin", async () => {
   const { view, user } = renderSidebar("admin", "personal");
   await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
   const menu = await view.findByRole("menu");
   expect(within(menu).queryByRole("menuitem", { name: "Admin" })).toBeNull();
-  await user.click(
-    within(menu).getByRole("menuitem", { name: "Team features" }),
-  );
+  const entry = within(menu).getByRole("menuitem", {
+    name: "OpenBot for Business",
+  });
+  // As wide as the links beside it, and marked with OpenBot's own logo.
+  expect(entry.className).toContain("w-full");
+  expect(entry.querySelector("svg image")).toBeTruthy();
+  await user.click(entry);
   const dialog = await view.findByRole("dialog");
-  expect(within(dialog).getByText("OpenBot for teams")).toBeTruthy();
+  expect(
+    within(dialog).getByText("OpenBot for Business", { selector: "h2" }),
+  ).toBeTruthy();
 });

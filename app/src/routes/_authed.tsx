@@ -32,7 +32,7 @@ export const Route = createFileRoute("/_authed")({
       <AppHotkeys />
       {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
       <SkinAccountSync />
-      {/* Opened by the personal edition's "Team features" entry, from whichever skin draws it. */}
+      {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
       <TeamFeaturesDialog />
       <SkinBotLook>
         <Outlet />

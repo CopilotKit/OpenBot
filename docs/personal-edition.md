@@ -70,7 +70,7 @@ are the same decision when one person makes both:
   can't be turned off. See [Routines](routines.md).
 
 The rest of what a person running OpenBot for themselves needs is under Settings: Skills for every
-Bot, Credentials, Computer and Activity (the audit trail). Where Admin was, **Team features** opens
+Bot, Credentials, Computer and Activity (the audit trail). Where Admin was, **OpenBot for Business** opens
 a list of what the team edition adds. An old `/admin/...` or `/settings/plugins/...` address opens
 the same page under Connections or Settings, or Settings itself. Settings has no Learning page,
 which chooses who else's Bots use your Skills, and a Bot has no Sharing page.

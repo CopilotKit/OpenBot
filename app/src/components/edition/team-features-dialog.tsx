@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { NavigationItem } from "@/lib/navigation";
+import { cn } from "@/lib/utils";
 
 /**
  * What the team edition has and the personal edition does not.
@@ -95,9 +96,9 @@ export function TeamFeaturesDialog() {
     <Dialog onOpenChange={setOpen} open={isOpen}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>OpenBot for teams</DialogTitle>
+          <DialogTitle>OpenBot for Business</DialogTitle>
           <DialogDescription>
-            These features come with the team edition.
+            These features come with OpenBot for Business.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
@@ -129,11 +130,13 @@ export function navigationRender(
   if (item.kind === "dialog") {
     /*
      * A real button. A Base UI menu item drawing it has to be told (`nativeButton`), or it treats
-     * the element as a non-button and drops the click event its own handler reads.
+     * the element as a non-button and drops the click event its own handler reads. Full width,
+     * because a button shrinks to its text where the links beside it fill their row.
      */
     return (
       <button
         {...props}
+        className={cn("w-full text-left", props.className)}
         onClick={(event) => {
           props.onClick?.(event);
           openTeamFeatures();
@@ -166,6 +169,7 @@ export function NavigationTarget({
     return (
       <button
         {...props}
+        className={cn("w-full text-left", props.className)}
         onClick={(event) => {
           onClick?.(event);
           openTeamFeatures();

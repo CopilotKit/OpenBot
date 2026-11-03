@@ -5,9 +5,9 @@ import {
   IconPlug,
   IconSettings,
   IconShieldLock,
-  IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
@@ -60,8 +60,8 @@ export function isNavigationLink(item: NavigationItem): item is NavigationLink {
 const TEAM_FEATURES_ITEM: NavigationItem = {
   kind: "dialog",
   id: "team-features",
-  label: "Team features",
-  icon: IconUsersGroup,
+  label: "OpenBot for Business",
+  icon: OpenBotLogo,
   section: "account",
 };
 
