@@ -15,6 +15,7 @@ import { TurnInFlightContext } from "@/components/gallery/streaming";
 const parameters = z.object({
   task: z.string().optional(),
   answer: z.string().optional(),
+  role: z.string().optional(),
 });
 
 /**
@@ -24,6 +25,7 @@ const parameters = z.object({
 function Subtask(props: {
   toolCallId: string;
   task: string | undefined;
+  role: string | undefined;
   result: string | undefined;
 }) {
   return <SubagentCard {...props} running={useContext(TurnInFlightContext)} />;
@@ -34,7 +36,12 @@ export function SubagentTool() {
     name: SUBAGENT_TOOL,
     parameters,
     render: ({ toolCallId, parameters: given, result }) => (
-      <Subtask result={result} task={given?.task} toolCallId={toolCallId} />
+      <Subtask
+        result={result}
+        role={given?.role}
+        task={given?.task}
+        toolCallId={toolCallId}
+      />
     ),
   });
 

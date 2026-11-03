@@ -1,5 +1,9 @@
 import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
-import { readSubagentResult } from "@openbot/shared/subagent";
+import {
+  isSubagentRole,
+  readSubagentResult,
+  SUBAGENT_ROLE_NAMES,
+} from "@openbot/shared/subagent";
 import { readToolName } from "@openbot/shared/tool-name";
 import {
   IconChevronDown,
@@ -37,25 +41,30 @@ type ToolItem = Extract<VisibleChatItem, { kind: "tool" }>;
 export function SubagentCard({
   toolCallId,
   task,
+  role,
   result,
   running,
 }: {
   toolCallId: string;
   task: string | undefined;
+  /** Planner, builder or checker, when the Bot gave it one. */
+  role?: string | undefined;
   /** The call's result. Absent while it runs, or after a turn that stopped before it answered. */
   result: string | undefined;
   /** The turn is still working on this call. */
   running: boolean;
 }) {
   const answer = result === undefined ? undefined : asText(result);
+  const label = isSubagentRole(role) ? SUBAGENT_ROLE_NAMES[role] : "Subtask";
   if (answer?.startsWith(REFUSAL_MARKER))
     return (
-      <ToolLine detail={task} label="Subtask" refused>
+      <ToolLine detail={task} label={label} refused>
         <p className="text-sm">{answer.slice(REFUSAL_MARKER.length).trim()}</p>
       </ToolLine>
     );
   return (
     <SubtaskFrame
+      label={label}
       result={answer}
       running={running && result === undefined}
       task={task}
@@ -66,11 +75,13 @@ export function SubagentCard({
 
 function SubtaskFrame({
   toolCallId,
+  label,
   task,
   result,
   running,
 }: {
   toolCallId: string;
+  label: string;
   task: string | undefined;
   result: string | undefined;
   running: boolean;
@@ -125,7 +136,7 @@ function SubtaskFrame({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="min-w-0 truncate text-sm font-medium">
-              Subtask
+              {label}
               {progress ? (
                 <span className="font-normal text-muted-foreground">
                   {" "}

@@ -283,6 +283,12 @@ const ORCHESTRATION_GUIDANCE_LINES = [
   "Keep the planning, the decisions, anything that needs the person's approval, and the final answer",
   "yourself. A subagent that reaches an action needing approval stops and hands it back to you: if it",
   "still needs doing, do it yourself in this conversation, where the person is asked.",
+  "",
+  "For a bigger job that is made in stages, like writing, building or fixing something, give the",
+  `subagents roles with the role argument: first one with role plan to work out the steps, then one`,
+  "with role build for each step (independent steps together), then one with role check, given the",
+  "request and the result, before you answer. If the checker says FIX, give those problems to one more",
+  "builder and check once more at most; then answer, and say plainly anything still not right.",
 ];
 
 export const ORCHESTRATION_GUIDANCE = asParagraphs(

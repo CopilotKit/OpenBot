@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { readSubagentResult, subagentThreadId } from "./subagent";
+import {
+  isSubagentRole,
+  readSubagentResult,
+  SUBAGENT_ROLE_BRIEFS,
+  SUBAGENT_ROLE_NAMES,
+  SUBAGENT_ROLES,
+  subagentThreadId,
+} from "./subagent";
 
 /*
  * The server and the browser find a subagent's thread the same way, from the conversation and the
@@ -30,4 +37,14 @@ test("a result is read back from the tool message as the store holds it", () => 
     steps: 2,
   });
   expect(readSubagentResult("Refused. No subagent was started.")).toBeNull();
+});
+
+test("planner, builder and checker each have a name and a brief", () => {
+  for (const role of SUBAGENT_ROLES) {
+    expect(SUBAGENT_ROLE_NAMES[role].length).toBeGreaterThan(0);
+    expect(SUBAGENT_ROLE_BRIEFS[role].length).toBeGreaterThan(0);
+  }
+  expect(isSubagentRole("check")).toBe(true);
+  expect(isSubagentRole("boss")).toBe(false);
+  expect(SUBAGENT_ROLE_BRIEFS.check).toContain("PASS or FIX");
 });

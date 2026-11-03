@@ -10,6 +10,34 @@
 /** What the model is offered. One name, so a transcript can find every subagent by searching for it. */
 export const SUBAGENT_TOOL = "run_subagent";
 
+/**
+ * Planner, builder and checker, after Cindy's (makecindy/cindy, Apache-2.0) three-part way of doing a
+ * bigger job: one plans the steps, builders do them, and one checks the result before it is answered.
+ * A role only changes what the subagent is told to do; its tools and permissions are the Bot's own.
+ */
+export const SUBAGENT_ROLES = ["plan", "build", "check"] as const;
+export type SubagentRole = (typeof SUBAGENT_ROLES)[number];
+
+/** What each role is called on its card. */
+export const SUBAGENT_ROLE_NAMES: Record<SubagentRole, string> = {
+  plan: "Planner",
+  build: "Builder",
+  check: "Checker",
+};
+
+/** What each role is told, after the task. Written for the model. */
+export const SUBAGENT_ROLE_BRIEFS: Record<SubagentRole, string> = {
+  plan: "Your role is planner. Do not do the work. Look into only what you need to, then reply with a short numbered list of steps, each one self-contained enough to give to someone else, and what a finished result must have.",
+  build:
+    "Your role is builder. Do the step you were given, fully, with your tools, and reply with what you made or found and anything you could not do.",
+  check:
+    "Your role is checker. Do not redo the work. Check the result you were given against what was asked: test it or look it up where you can. Reply with PASS or FIX first, then each problem you found, most important first.",
+};
+
+export function isSubagentRole(value: unknown): value is SubagentRole {
+  return (SUBAGENT_ROLES as readonly unknown[]).includes(value);
+}
+
 /** How many subagents one answer may start. The next one is refused with a sentence. */
 export const SUBAGENTS_PER_ANSWER = 5;
 

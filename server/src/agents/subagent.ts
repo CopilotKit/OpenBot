@@ -24,9 +24,12 @@
 
 import type { AbstractAgent, Message } from "@ag-ui/client";
 import {
+  SUBAGENT_ROLE_BRIEFS,
+  SUBAGENT_ROLES,
   SUBAGENT_TOOL,
   SUBAGENTS_PER_ANSWER,
   type SubagentResult,
+  type SubagentRole,
   subagentThreadId,
 } from "@openbot/shared/subagent";
 import type { GrantedTool, ToolExecution } from "@openbot/toolkit/granted-tool";
@@ -47,6 +50,12 @@ const parameters = z.object({
     .string()
     .describe(
       "What to hand back: a list, a figure, a short summary with its sources, a yes or no with the reason",
+    ),
+  role: z
+    .enum(SUBAGENT_ROLES)
+    .optional()
+    .describe(
+      "For a bigger job done in stages: plan (work out the steps, do nothing), build (do one step), check (check a result against the request, reply PASS or FIX). Leave out for a plain piece of work",
     ),
 });
 
@@ -74,12 +83,13 @@ type TurnOptions = Parameters<typeof createTurnRunner>[0];
  * Written for the model. It is a user message rather than a prompt, so the Bot's own prompt, role
  * and standing instructions are exactly what they are in the conversation.
  */
-function framed(task: string, answer: string): string {
+function framed(task: string, answer: string, role?: SubagentRole): string {
   return [
     "You are a subagent: you were given one part of a larger piece of work, to do on your own. Nobody is watching this run and you cannot ask the person anything. Do the work with your tools, then reply with the answer asked for and nothing else.",
     "If an action needs the person's approval, it is handed back to the main conversation; do not look for another way to do it.",
     `Task: ${task}`,
     `Answer wanted: ${answer}`,
+    ...(role ? [SUBAGENT_ROLE_BRIEFS[role]] : []),
   ].join("\n\n");
 }
 
@@ -174,7 +184,11 @@ export function createSubagents(options: {
               userMessage: {
                 id: crypto.randomUUID(),
                 role: "user",
-                content: framed(parsed.data.task, parsed.data.answer),
+                content: framed(
+                  parsed.data.task,
+                  parsed.data.answer,
+                  parsed.data.role,
+                ),
               },
               initiator: parent.initiator,
               depth: (parent.depth ?? 0) + 1,
