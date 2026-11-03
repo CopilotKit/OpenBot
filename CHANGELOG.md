@@ -441,6 +441,10 @@ changes for a deployment.
 - An app connected from Connect your apps comes back to that step from the app's own sign-in page,
   whether it connected, failed or was cancelled there. A connection started from Connections or an
   app's admin page comes back where it did before.
+- Somebody running OpenBot alone, on Desktop or with `copilotkit local`, gets a Talk to us step just
+  before the name step. Book a call opens CopilotKit's booking page in a new tab and moves on; Not
+  now just moves on. An organization's people never see it. The self-host banner's link now reads
+  Book a call too.
 
 ### Generated interfaces use A2UI 1.0
 
