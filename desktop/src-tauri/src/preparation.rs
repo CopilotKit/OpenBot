@@ -596,7 +596,7 @@ mod tests {
             std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();
             std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
             std::fs::write(root.join("container-images.json"), "{}").unwrap();
-            deployment::record(&root, "v-test").unwrap();
+            deployment::record(&root, "v-test", false).unwrap();
             let source = root.join("runtime.rs");
             std::fs::write(&source, r#"
 use std::io::Write;

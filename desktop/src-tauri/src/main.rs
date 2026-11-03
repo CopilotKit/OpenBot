@@ -869,7 +869,9 @@ fn ensure_linux_podman_api(shell: &Shell, address: &engine::Address) -> Result<(
 /// Install the latest published deployment on first use, then keep its recorded version.
 ///
 /// Local preparation fetches the manifest needed by both launch and plan sign-in images.
-/// An installed deployment keeps its exact tag without consulting GitHub again.
+/// A customer build keeps an installed deployment's exact tag without consulting GitHub again.
+/// An internal or candidate build instead installs the deployment it was compiled with over any
+/// deployment already there, and keeps the data.
 async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
@@ -880,6 +882,7 @@ async fn deployment_ready<R: tauri::Runtime>(
     let target = root.to_path_buf();
     let handle = app.clone();
     let version = tauri::async_runtime::spawn_blocking(move || {
+        let pin = deployment::pinned();
         let version = deployment_release::resolve_version(&target)?;
         if deployment::needs_fetch(&target, &version) {
             report_running(
@@ -888,7 +891,10 @@ async fn deployment_ready<R: tauri::Runtime>(
                 format!("Downloading OpenBot {version}."),
                 None,
             );
-            deployment::fetch(&target, &version)?;
+            match &pin {
+                Some(pin) => deployment::fetch_pinned(&target, pin)?,
+                None => deployment::fetch(&target, &version)?,
+            }
         }
         Ok::<_, String>(version)
     })
@@ -5218,11 +5224,13 @@ mod tests {
         assert!(migrate.is_ok(), "{migrate:?}");
     }
 
+    // A pinned build installs its own pin, so the unpinned keep-the-installed-release behaviour does not apply.
+    #[cfg(not(openbot_pinned))]
     #[test]
     fn deployment_ready_preserves_the_installed_release() {
         let root = temp_root("deployment-ready-pinned");
         write_installed_deployment(&root);
-        deployment::record(&root, "v0.0.7").unwrap();
+        deployment::record(&root, "v0.0.7", false).unwrap();
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -9303,7 +9311,7 @@ fn main() {
             serde_json::to_string(&images).unwrap(),
         )
         .unwrap();
-        deployment::record(root, DEPLOYMENT_VERSION).unwrap();
+        deployment::record(root, DEPLOYMENT_VERSION, false).unwrap();
         for package in ["", "server", "worker", "shared", "toolkit", "extension"] {
             std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
         }
