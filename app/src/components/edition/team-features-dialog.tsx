@@ -15,6 +15,7 @@ import {
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { useEffect, useSyncExternalStore } from "react";
+import illustration from "@/assets/business-illustration.svg";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -104,7 +105,7 @@ export function TeamFeaturesDialog() {
       <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-4xl">
         <div className="grid min-h-0 sm:grid-cols-2">
           {/*
-           * OpenBot's mark over the illustration's place, until there is one. Only where there is
+           * OpenBot's mark over one OpenBot reaching a team's people and apps. Only where there is
            * room beside the list.
            */}
           <div className="hidden flex-col gap-6 border-border border-r bg-muted/50 p-6 sm:flex">
@@ -112,12 +113,13 @@ export function TeamFeaturesDialog() {
               <OpenBotLogo className="size-7" />
               OpenBot
             </div>
-            <div
-              aria-hidden="true"
-              className="flex flex-1 items-center justify-center rounded-lg border border-border border-dashed text-muted-foreground"
-              data-testid="business-illustration"
-            >
-              Illustration TBD
+            <div className="flex flex-1 items-center justify-center">
+              <img
+                alt=""
+                className="w-full max-w-xs"
+                data-testid="business-illustration"
+                src={illustration}
+              />
             </div>
           </div>
           <div className="flex min-h-0 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
