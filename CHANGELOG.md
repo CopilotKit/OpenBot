@@ -99,6 +99,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### A Bot closes a responsibility only with evidence
+
+A Bot marking a responsibility complete now has to say what shows its success criteria were met: a
+link, a file, a test, a number. `report_responsibility_progress` with `complete` and
+`complete_responsibility` refuse without it, and the refusal tells the Bot what to add, so a Bot
+that used to close goals with nothing corrects itself on its next call. The evidence is kept on the
+goal's progress and on a new `responsibility.completed` audit row. A Bot can no longer close a goal
+its person paused. Closing a goal from its page is unchanged.
+
 ### Bots can install packages on their computers
 
 Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
