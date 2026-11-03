@@ -55,7 +55,21 @@ export type AgentChannel = {
    * things to put on the screen. See the note in `channel-chat.tsx`.
    */
   lastMessageAt: Date | null;
+  /**
+   * The task this conversation is the work of, or null for an ordinary one. A task works in a
+   * conversation of its own (tasks/store.ts), which the app opens as the task, where a reply goes
+   * through the task's order (`POST /api/tasks/:id/reply`). Absent reads as null.
+   */
+  taskId?: string | null;
 };
+
+/**
+ * The task a channel is the conversation of, as SQL over the channel row: one at most, since a
+ * task's conversation is made for it (`bot_tasks_channel_idx`).
+ */
+const TASK_OF_CHANNEL = sql<
+  string | null
+>`(select ${botTasks.id} from ${botTasks} where ${botTasks.channelId} = ${channels.id} limit 1)`;
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
 export type ChannelSummary = AgentChannel & {
@@ -73,6 +87,8 @@ export type ChannelSummary = AgentChannel & {
    * "a conversation with this Bot", such as where its check-ins reach the person, leave these out.
    */
   task: boolean;
+  /** Which task, when `task` is true. */
+  taskId: string | null;
 };
 
 /** What a client that ran an agent reports back about the message it just saw. */
@@ -348,7 +364,15 @@ export function createChannelStore(
       threadId,
     });
 
-    return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
+    return {
+      id,
+      name,
+      agentIds,
+      threadId,
+      active: true,
+      lastMessageAt: null,
+      taskId: null,
+    };
   };
 
   /**
@@ -507,6 +531,7 @@ export function createChannelStore(
           threadId: intelligenceChannelMappings.threadId,
           lastMessageAt: channels.lastMessageAt,
           deletedAt: agentProfiles.deletedAt,
+          taskId: TASK_OF_CHANNEL,
         })
         .from(channels)
         .innerJoin(
@@ -541,6 +566,7 @@ export function createChannelStore(
         threadId: first.threadId,
         active: rows.every((row) => row.deletedAt === null),
         lastMessageAt: first.lastMessageAt,
+        taskId: first.taskId,
       };
     },
 
@@ -619,7 +645,7 @@ export function createChannelStore(
           createdAt: channels.createdAt,
           pinnedAt: channelMemberships.pinnedAt,
           lastReadAt: channelMemberships.lastReadAt,
-          task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
+          taskId: TASK_OF_CHANNEL,
         })
         .from(channels)
         .innerJoin(
@@ -679,7 +705,8 @@ export function createChannelStore(
           createdAt: row.createdAt,
           pinned: row.pinnedAt !== null,
           lastReadAt: row.lastReadAt,
-          task: row.task,
+          task: row.taskId !== null,
+          taskId: row.taskId,
         });
       }
       return { channels: [...summaries.values()], nextCursor };
@@ -1375,9 +1402,10 @@ export function createChannelRoutes(
   return routes;
 }
 
-/** A channel as it goes over the wire: the same shape, with the date serialised. */
-type ChannelWire = Omit<AgentChannel, "lastMessageAt"> & {
+/** A channel as it goes over the wire: the same shape, with the date serialised and the task said. */
+type ChannelWire = Omit<AgentChannel, "lastMessageAt" | "taskId"> & {
   lastMessageAt: string | null;
+  taskId: string | null;
 };
 
 function channelDto(channel: AgentChannel): ChannelWire {
@@ -1389,6 +1417,7 @@ function channelDto(channel: AgentChannel): ChannelWire {
     active: channel.active,
     // ISO-8601 so the browser gets a string it can compare, like the roster's copy.
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
+    taskId: channel.taskId ?? null,
   };
 }
 

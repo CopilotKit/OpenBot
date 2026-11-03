@@ -251,6 +251,7 @@ describe("what a channel is waiting on", () => {
       pinned: false,
       lastReadAt: null,
       task,
+      taskId: task ? `${id}-task` : null,
     });
     const store = fakeStore({
       list: async () => ({
@@ -262,11 +263,14 @@ describe("what a channel is waiting on", () => {
 
     const response = await appFor(store).request("http://openbot.test/");
     const body = (await response.json()) as {
-      channels: Array<{ id: string; task: boolean }>;
+      channels: Array<{ id: string; task: boolean; taskId: string | null }>;
     };
-    expect(body.channels.map(({ id, task }) => ({ id, task }))).toEqual([
-      { id: "own", task: false },
-      { id: "task", task: true },
+    // `task` for the callers that only ask whether, `taskId` for the app opening it as the task.
+    expect(
+      body.channels.map(({ id, task, taskId }) => ({ id, task, taskId })),
+    ).toEqual([
+      { id: "own", task: false, taskId: null },
+      { id: "task", task: true, taskId: "task-task" },
     ]);
   });
 });
