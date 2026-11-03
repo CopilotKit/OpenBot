@@ -34,11 +34,10 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
-import { responsibilities } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
 import { removeBots, seedBot } from "./support/bots";
-import { seedRoutine } from "./support/schedules";
+import { seedResponsibility, seedRoutine } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -107,7 +106,7 @@ beforeAll(async () => {
       instruction: "Summarise the day",
       nextRunAt: new Date(Date.now() + 3_600_000),
     });
-    await database.insert(responsibilities).values({
+    await seedResponsibility({
       id: `${prefix}-goal-${person}`,
       ownerUserId: person,
       agentId: bot,

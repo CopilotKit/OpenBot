@@ -1,15 +1,15 @@
 /**
- * Real PostgreSQL: trigger registration, secret rotation in the vault, owner scoping, the store's
- * trigger-targeted matching, per-trigger delivery dedup and paused-never-runs, end to end through
- * the public ingress route. Needs a database with `responsibility_triggers` (parity_dev today).
+ * Real PostgreSQL and a real Intelligence: trigger registration, secret rotation in the vault, owner
+ * scoping, the store's trigger-targeted matching, per-trigger delivery dedup and paused-never-runs,
+ * end to end through the public ingress route. Triggers, events and runs live in Intelligence's
+ * agent schedules; the secrets and the work queue live here.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHmac, randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { credentials, users } from "../src/db/schema/core";
-import { responsibilityRuns } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createResponsibilityStore } from "../src/responsibilities/store";
 import { createTriggerIngressRoutes } from "../src/responsibilities/trigger-routes";
@@ -17,6 +17,14 @@ import { createTriggerStore } from "../src/responsibilities/triggers";
 import { ResponsibilityNotFoundError } from "../src/responsibilities/types";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeResponsibilitiesOwnedBy,
+  responsibilityEventsFor,
+  responsibilityRunsOf,
+  storedResponsibilityRun,
+  testScheduleClient,
+  useTestSchedules,
+} from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `triggers-${randomUUID()}`;
@@ -43,6 +51,7 @@ const routes = createTriggerIngressRoutes({
 const runIds: string[] = [];
 
 beforeAll(async () => {
+  await useTestSchedules();
   await database.insert(users).values([
     { id: ownerId, email: `${ownerId}@example.test` },
     { id: strangerId, email: `${strangerId}@example.test` },
@@ -50,15 +59,21 @@ beforeAll(async () => {
   await seedBot({ id: botId, name: "Trigger test Bot", type: "built_in" });
 });
 afterAll(async () => {
-  if (runIds.length)
-    await database
-      .delete(workItems)
-      .where(
-        and(
-          eq(workItems.kind, "responsibility.run"),
-          inArray(workItems.key, runIds),
+  await database
+    .delete(workItems)
+    .where(
+      and(
+        inArray(workItems.kind, [
+          "responsibility.run",
+          "responsibility.ingest",
+        ]),
+        or(
+          inArray(sql<string>`${workItems.payload}->>'runId'`, ["", ...runIds]),
+          sql`${workItems.payload}->'event'->>'ownerUserId' = ${ownerId}`,
         ),
-      );
+      ),
+    );
+  await purgeResponsibilitiesOwnedBy(ownerId);
   await database.delete(users).where(inArray(users.id, [ownerId, strangerId]));
   await removeBots([botId]);
   await database.$client.close();
@@ -116,10 +131,7 @@ test("a generic webhook trigger queues exactly one run per idempotency key, and 
     duplicate: boolean;
   };
   expect(again).toMatchObject({ duplicate: true, runIds: accepted.runIds });
-  const runs = await database
-    .select()
-    .from(responsibilityRuns)
-    .where(eq(responsibilityRuns.responsibilityId, responsibility.id));
+  const runs = await responsibilityRunsOf(responsibility.id);
   expect(runs).toHaveLength(1);
   expect(runs[0]?.status).toBe("queued");
 
@@ -156,10 +168,7 @@ test("a generic webhook trigger queues exactly one run per idempotency key, and 
   expect(paused.status).toBe(409);
   // A run queued before the pause is skipped at dispatch, never run.
   expect(await store.beginRun(accepted.runIds[0] ?? "")).toBeNull();
-  const [skipped] = await database
-    .select()
-    .from(responsibilityRuns)
-    .where(eq(responsibilityRuns.id, accepted.runIds[0] ?? ""));
+  const skipped = await storedResponsibilityRun(accepted.runIds[0] ?? "");
   expect(skipped?.status).toBe("skipped");
 });
 
@@ -250,4 +259,144 @@ test("another person can neither see, add to, nor name a trigger they do not own
       payload: {},
     }),
   ).rejects.toBeInstanceOf(ResponsibilityNotFoundError);
+});
+
+test("a trigger paused on another replica records nothing, even while this one still holds it enabled", async () => {
+  const responsibility = await goal();
+  const created = await triggers.create(ownerId, responsibility.id, {
+    config: { kind: "webhook" },
+  });
+  // Another replica pauses it: Intelligence changes, this instance has not heard yet.
+  const elsewhere = testScheduleClient();
+  const current = await elsewhere.get(
+    "responsibility-triggers",
+    created.trigger.id,
+  );
+  await elsewhere.update(
+    "responsibility-triggers",
+    created.trigger.id,
+    current?.version ?? 0,
+    { enabled: false },
+  );
+  const auth = {
+    authorization: `Bearer ${created.secret}`,
+    "idempotency-key": "k-stale",
+  };
+  const first = await post(created.trigger.id, "{}", auth);
+  // Refused either from memory (the announcement arrived) or by the store's own read.
+  expect([409, 503]).toContain(first.status);
+  expect(
+    await responsibilityEventsFor(ownerId, `${created.trigger.id}:k-stale`),
+  ).toEqual([]);
+  expect(await responsibilityRunsOf(responsibility.id)).toEqual([]);
+  // That read put the pause into this instance's memory: the next delivery is answered from it.
+  expect((await post(created.trigger.id, "{}", auth)).status).toBe(409);
+});
+
+test("a change this instance never heard of is picked up by the next full read", async () => {
+  const responsibility = await goal();
+  const created = await triggers.create(ownerId, responsibility.id, {
+    config: { kind: "webhook", filter: { eventTypes: ["deploy"] } },
+  });
+  const elsewhere = testScheduleClient();
+  const current = await elsewhere.get(
+    "responsibility-triggers",
+    created.trigger.id,
+  );
+  await elsewhere.update(
+    "responsibility-triggers",
+    created.trigger.id,
+    current?.version ?? 0,
+    { config: { kind: "webhook", filter: { eventTypes: ["incident"] } } },
+  );
+  await (await useTestSchedules()).resync();
+  const resolved = await triggers.directory.resolve(created.trigger.id);
+  expect(resolved?.config).toEqual({
+    kind: "webhook",
+    filter: { eventTypes: ["incident"] },
+  });
+});
+
+test("a deleted trigger stays readable in Intelligence and its URL stops working", async () => {
+  const responsibility = await goal();
+  const created = await triggers.create(ownerId, responsibility.id, {
+    config: { kind: "webhook" },
+  });
+  await triggers.remove(ownerId, created.trigger.id);
+  expect(
+    (
+      await post(created.trigger.id, "{}", {
+        authorization: `Bearer ${created.secret}`,
+      })
+    ).status,
+  ).toBe(404);
+  expect(await triggers.list(ownerId, responsibility.id)).toEqual([]);
+  const kept = await testScheduleClient().get(
+    "responsibility-triggers",
+    created.trigger.id,
+  );
+  expect(kept?.deletedAt).toBeInstanceOf(Date);
+  await expect(
+    triggers.remove(ownerId, created.trigger.id),
+  ).rejects.toBeInstanceOf(ResponsibilityNotFoundError);
+});
+
+test("a rotation that stopped after the vault is finished by the next one", async () => {
+  const responsibility = await goal();
+  const created = await triggers.create(ownerId, responsibility.id, {
+    config: { kind: "webhook" },
+  });
+  const trigger = await testScheduleClient().get(
+    "responsibility-triggers",
+    created.trigger.id,
+  );
+  // The vault swapped the key, and the process stopped before the trigger named the new one.
+  await credentialStore.rotate({
+    kind: "connector",
+    provider: "webhook-trigger",
+    keyId: created.trigger.id,
+    metadata: { ownerUserId: ownerId, responsibilityId: responsibility.id },
+    encryptedValue: "orphaned",
+    previousCredentialId: trigger?.credentialRef ?? "",
+  });
+  expect((await post(created.trigger.id, "{}", {})).status).toBe(503);
+  const rotated = await triggers.setSecret(ownerId, created.trigger.id);
+  const live = await post(created.trigger.id, "{}", {
+    authorization: `Bearer ${rotated.secret}`,
+  });
+  expect(live.status).toBe(200);
+  runIds.push(...((await live.json()) as { runIds: string[] }).runIds);
+});
+
+test("Slack listeners for a workspace come from this instance's memory, with their Bot", async () => {
+  const responsibility = await goal();
+  const id = randomUUID();
+  await (await useTestSchedules()).create("responsibility-triggers", {
+    id,
+    ownerUserId: ownerId,
+    responsibilityId: responsibility.id,
+    kind: "slack",
+    config: {
+      kind: "slack",
+      teamId: "T0TRIGGERS",
+      mode: "mention",
+      phrases: [],
+      reactions: [],
+      channels: [],
+    },
+    credentialRef: null,
+    enabled: true,
+  });
+  const listening = await triggers.directory.slackTriggers("T0TRIGGERS");
+  expect(listening.filter((trigger) => trigger.id === id)).toEqual([
+    expect.objectContaining({
+      id,
+      ownerUserId: ownerId,
+      responsibilityId: responsibility.id,
+      responsibilityStatus: "active",
+      agentId: botId,
+      secret: null,
+    }),
+  ]);
+  expect(await triggers.directory.slackTriggers("T0ELSEWHERE")).toEqual([]);
 });
