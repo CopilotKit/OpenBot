@@ -138,9 +138,11 @@ jobs:
           test "v$(bun -e 'console.log(require("./package.json").version)')" = "$VERSION"
           # A stable release has its own section, written when the release was prepared. A
           # candidate or beta does not get one: its notes are what is under Unreleased, and a
-          # prerelease nobody can describe is not worth publishing.
+          # prerelease nobody can describe is not worth publishing. awk decides on its own: piped
+          # into `grep -q`, it is killed when grep stops reading early, and pipefail calls that a
+          # failure.
           if [ "$PRERELEASE" = true ]; then
-            awk '$0=="## Unreleased"{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md | grep -q '[^[:space:]]' || {
+            awk '$0=="## Unreleased"{f=1;next} /^## /{if(f)exit} f && /[^[:space:]]/{found=1; exit} END{exit !found}' CHANGELOG.md || {
               echo "::error::CHANGELOG.md has nothing under Unreleased for ${VERSION#v}."
               exit 1
             }
@@ -364,19 +366,27 @@ jobs:
   # so a person reviews it, and it only opens, so a conflict is a conflict for a person to resolve.
   # A PR opened with the workflow's token does not start CI, so the body says to push or close and
   # reopen it before merging.
+  #
+  # The PR comes from `merge-back/vX.Y.Z`, a branch made at the tip of the release branch, and not
+  # from the release branch itself. The first candidate pinned `desktop/intelligence-cli.json` to
+  # an exact CLI version, and a final cannot change it. Merged as it is, that pin would replace
+  # main's own choice, such as `latest`, and every later build from main would keep the old CLI.
+  # So main's file is put back on the merge-back branch first. The branch is outside `release/`,
+  # so a push to it is not a release.
   merge-back:
     name: merge back
     needs: [metadata, github-release]
     if: needs.metadata.outputs.final_from_candidate == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
     steps:
       - name: Open the merge-back PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
+          CLI_FILE: desktop/intelligence-cli.json
         run: |
           set -euo pipefail
           # The release branch is the one the version names: v0.3.0 was cut from release/0.3.
@@ -385,16 +395,60 @@ jobs:
             exit 1
           fi
           BRANCH="release/${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          MERGE_BRANCH="merge-back/$VERSION"
+          repo="repos/$GITHUB_REPOSITORY"
 
           # A re-run, or a PR somebody opened by hand, is already what this job is for.
-          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head "$MERGE_BRANCH" \
             --state open --json url --jq '.[0].url // empty')"
           if [ -n "$existing" ]; then
-            echo "A PR for $BRANCH is already open: $existing"
+            echo "A PR for $MERGE_BRANCH is already open: $existing"
             exit 0
           fi
 
+          # Reads the file at a ref as "<blob sha> <base64 content>". Prints nothing when the
+          # file is not there. Any other error stops the run.
+          read_cli() {
+            local out
+            if out="$(gh api "$repo/contents/$CLI_FILE?ref=$1" \
+              --jq '.sha + " " + (.content | gsub("\n"; ""))' 2>&1)"; then
+              printf '%s\n' "$out"
+            elif ! grep -q 'HTTP 404' <<<"$out"; then
+              echo "::error::Could not read $CLI_FILE on $1: $out" >&2
+              return 1
+            fi
+          }
+
+          # A re-run after a failure may find the branch already made. It is used as it is.
+          if out="$(gh api "$repo/git/ref/heads/$MERGE_BRANCH" --jq .object.sha 2>&1)"; then
+            echo "$MERGE_BRANCH already exists at $out."
+          elif grep -q 'HTTP 404' <<<"$out"; then
+            tip="$(gh api "$repo/git/ref/heads/$BRANCH" --jq .object.sha)"
+            gh api "$repo/git/refs" -f ref="refs/heads/$MERGE_BRANCH" -f sha="$tip" >/dev/null
+            echo "Created $MERGE_BRANCH at $tip, the tip of $BRANCH."
+          else
+            echo "::error::Could not read $MERGE_BRANCH: $out"
+            exit 1
+          fi
+
+          main_cli="$(read_cli main)"
+          branch_cli="$(read_cli "$MERGE_BRANCH")"
+          if [ -z "$main_cli" ]; then
+            echo "main has no $CLI_FILE, so the release branch's is left as it is."
+          elif [ "${main_cli#* }" = "${branch_cli#* }" ]; then
+            echo "$CLI_FILE is the same on main and $MERGE_BRANCH."
+          else
+            put=(-X PUT "$repo/contents/$CLI_FILE" -f message="Keep main's Intelligence CLI choice"
+              -f content="${main_cli#* }" -f branch="$MERGE_BRANCH")
+            if [ -n "$branch_cli" ]; then
+              put+=(-f sha="${branch_cli%% *}")
+            fi
+            gh api "${put[@]}" >/dev/null
+            echo "Put main's $CLI_FILE back on $MERGE_BRANCH."
+          fi
+
           body="$VERSION was released from $BRANCH. This brings its version and the fixes made on that branch to main."
-          body="$body"$'\n\n'"A PR opened with GITHUB_TOKEN does not trigger CI. Push an empty commit to $BRANCH or close and reopen this PR to run the checks before merging."
-          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+          body="$body"$'\n\n'"It comes from $MERGE_BRANCH, which is $BRANCH with main's own \`$CLI_FILE\`. The release pinned the Intelligence CLI to an exact version, and main keeps its own choice."
+          body="$body"$'\n\n'"A PR opened with GITHUB_TOKEN does not trigger CI. Push an empty commit to $MERGE_BRANCH or close and reopen this PR to run the checks before merging."
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$MERGE_BRANCH" \
             --title "Merge $BRANCH back into main" --body "$body"

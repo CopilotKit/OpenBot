@@ -84,7 +84,8 @@ Cutting a release candidate or beta pins `cli` to an exact version when it names
 whether `latest`, `next` or another. The tag is replaced with the version it resolves to at that
 moment. An exact version and a `https://pkg.pr.new/...` URL are left as they are, because neither
 can move. So the candidate and the release built from it carry the same CLI. A final release cannot
-change the file.
+change the file. The pin stays on the release branch: the merge-back PR keeps main's own choice, as
+described under [Finishing a candidate](#finishing-a-candidate).
 
 To assemble the bundle locally, from the repository root:
 
@@ -203,7 +204,13 @@ does for any stable release.
 
 Afterwards the publish workflow opens a PR titled "Merge release/X.Y back into main". The version,
 the changelog section and every fix made on the release branch exist only there until it merges.
-A PR opened by a workflow does not start CI, so push an empty commit to the release branch or close
+
+The PR comes from `merge-back/vX.Y.Z`, not from `release/X.Y`. The workflow makes that branch at the
+tip of `release/X.Y`, and puts main's `desktop/intelligence-cli.json` back on it when the two
+differ. The candidate pinned the CLI to an exact version for the release only, so main keeps its
+own choice, such as `latest`. A push to `merge-back/vX.Y.Z` is not a release.
+
+A PR opened by a workflow does not start CI, so push an empty commit to `merge-back/vX.Y.Z` or close
 and reopen the PR before merging. If the merge conflicts, a person resolves it.
 
 ## What merging does
