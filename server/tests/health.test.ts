@@ -53,6 +53,8 @@ describe("runtime capabilities", () => {
       voice: false,
       // Names only. The sign-in screen reads this to know which buttons to draw.
       authProviders: ["google"],
+      // Whether people sign in through a CopilotKit organization; never which organization.
+      copilotKitSignIn: false,
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
       // sign-in page which companies use this deployment.
       ssoConfigured: false,
@@ -79,6 +81,7 @@ describe("runtime capabilities", () => {
       "transcription",
       "voice",
       "authProviders",
+      "copilotKitSignIn",
       "ssoConfigured",
       "ssoRequired",
     ]);
