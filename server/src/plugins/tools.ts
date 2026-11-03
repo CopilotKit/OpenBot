@@ -5,7 +5,7 @@ import {
 import { RESEARCH_TOOLS, type ResearchRole } from "@openbot/shared/research";
 import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import { SEARCH_TOOLS } from "../agents/tool-search";
+import { SEARCH_TOOLS, systemOf } from "../agents/tool-search";
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
 import { markUntrusted } from "../untrusted-content";
@@ -129,8 +129,8 @@ export function grantedToolGuidance(
   const waitingBySystem = new Map<string, number>();
   for (const tool of reaching) {
     // `mcp__server__tool`, which is the shape the model is offered.
+    const system = systemOf(tool.name);
     const parts = tool.name.replace(/^mcp__/, "").split("__");
-    const system = parts.length > 1 ? (parts[0] as string) : "this deployment";
     const rest = parts.length > 1 ? parts.slice(1).join("__") : tool.name;
     if (!bySystem.has(system)) bySystem.set(system, []);
     if (waiting.has(tool.name))
