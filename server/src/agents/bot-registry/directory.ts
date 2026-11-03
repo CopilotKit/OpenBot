@@ -133,6 +133,14 @@ export function createBotDirectory(options: {
     }
   };
 
+  const rememberMiss = (key: string) => {
+    const now = Date.now();
+    // Kept small: an entry only matters for a couple of seconds.
+    if (misses.size > 5_000)
+      for (const [held, until] of misses) if (until <= now) misses.delete(held);
+    misses.set(key, now + MISS_TTL_MS);
+  };
+
   const readThrough = (id: string): Promise<Bot | null> => {
     const pending = inFlight.get(id);
     if (pending) return pending;
@@ -141,7 +149,7 @@ export function createBotDirectory(options: {
       .get(id)
       .then((bot) => {
         if (bot) return apply(bot, startedAt);
-        misses.set(id, Date.now() + MISS_TTL_MS);
+        rememberMiss(id);
         return null;
       })
       .finally(() => inFlight.delete(id));
@@ -152,7 +160,8 @@ export function createBotDirectory(options: {
   const heard = async (change: BotChange) => {
     try {
       if (change.change === "purged") {
-        await forget(change.agentId);
+        // Cleaned up even when this instance never held it: the rows are in the shared database.
+        await forget(change.agentId, true);
         return;
       }
       const held = bots.get(change.agentId);
@@ -292,10 +301,19 @@ export function createBotDirectory(options: {
         if (bot.callbackTokenHash === hash && bot.deletedAt === null)
           return bot;
       }
-      // Issued on another instance a moment ago, before its announcement arrived here.
+      // Issued on another instance a moment ago, before its announcement arrived here. A hash that
+      // matched nothing is remembered briefly, so a caller presenting a bad token again and again
+      // does not turn each attempt into a request to Intelligence.
+      const missKey = `token:${hash}`;
+      const missedUntil = misses.get(missKey);
+      if (missedUntil !== undefined && missedUntil > Date.now()) return null;
       const page = await registry.page({ callbackTokenHash: hash }, null, 1);
       const bot = page.bots[0];
-      return bot ? apply(bot) : null;
+      if (!bot) {
+        rememberMiss(missKey);
+        return null;
+      }
+      return apply(bot);
     },
 
     async create(draft, key = idempotencyKey("create")) {

@@ -829,6 +829,19 @@ export async function synchronizeTenantPackage(
     );
   }
 
+  // The package's own Bots are checked before anything is written, against the package row this
+  // tenant already has; a tenant seen for the first time owns no Bot yet, so any Bot of a declared
+  // id is somebody else's.
+  const [existingPackage] = await database
+    .select({ id: deploymentPackages.id })
+    .from(deploymentPackages)
+    .where(eq(deploymentPackages.tenantId, tenantPackage.tenantId))
+    .limit(1);
+  const current = await refusePackageBotCollisions(
+    tenantPackage,
+    existingPackage?.id ?? null,
+  );
+
   const [deploymentPackage] = await database
     .insert(deploymentPackages)
     .values({
@@ -858,7 +871,7 @@ export async function synchronizeTenantPackage(
    * booting together send the same requests and Intelligence answers the later ones with the first's
    * result; and a boot that fails part way is finished by the next.
    */
-  await synchronizePackageBots(tenantPackage, deploymentPackage.id);
+  await synchronizePackageBots(tenantPackage, deploymentPackage.id, current);
   const packageBotIds = bots()
     .cached()
     .filter((bot) => bot.packageId === deploymentPackage.id)
@@ -1054,6 +1067,43 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 /**
+ * The package's Bots as Intelligence holds them now, refusing before anything is written when one
+ * cannot be the package's.
+ */
+async function refusePackageBotCollisions(
+  tenantPackage: LoadedTenantPackage,
+  packageId: string | null,
+): Promise<Map<string, Bot | null>> {
+  /*
+   * Every refusal is decided before anything is written, so a package that cannot be synchronised
+   * leaves Intelligence as it found it, as the one transaction this used to be did.
+   */
+  const current = new Map<string, Bot | null>();
+  for (const agent of tenantPackage.agents) {
+    const bot = await bots().find(agent.id);
+    current.set(agent.id, bot);
+    if (!bot) continue;
+    if (bot.packageId === null || bot.packageId !== packageId) {
+      throw new Error(
+        `Tenant package agent "${agent.id}" collides with a user-created agent`,
+      );
+    }
+    if (bot.ownerUserId !== null) {
+      throw new Error(
+        `Tenant package agent "${agent.id}" collides with a user-owned profile`,
+      );
+    }
+    if (bot.type !== agent.type) {
+      throw new Error(
+        `Tenant package agent "${agent.id}" was a ${bot.type} Bot and the package now makes it ${agent.type}. A Bot keeps its type for its lifetime in Intelligence; give the ${agent.type} Bot a new id in the package.`,
+      );
+    }
+  }
+
+  return current;
+}
+
+/**
  * Make Intelligence hold exactly the Bots this package declares, as the package declares them.
  *
  * Only ever the package's own Bots. A Bot of the same id that a person made, or another package
@@ -1064,6 +1114,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 async function synchronizePackageBots(
   tenantPackage: LoadedTenantPackage,
   packageId: string,
+  current: Map<string, Bot | null>,
 ) {
   const key = (botId: string, operation: string, version: number) =>
     `openbot-package:${tenantPackage.checksum}:${botId}:${operation}:${version}`;
@@ -1094,28 +1145,13 @@ async function synchronizePackageBots(
       packageId,
       configuration: agent.configuration,
     };
-    let bot: Bot | null = await bots().find(agent.id);
+    let bot = current.get(agent.id) ?? null;
     if (!bot) {
       await bots().create(
         { id: agent.id, type: agent.type, isolated: false, ...wanted },
         key(agent.id, "create", 0),
       );
       continue;
-    }
-    if (bot.packageId !== packageId) {
-      throw new Error(
-        `Tenant package agent "${agent.id}" collides with a user-created agent`,
-      );
-    }
-    if (bot.ownerUserId !== null) {
-      throw new Error(
-        `Tenant package agent "${agent.id}" collides with a user-owned profile`,
-      );
-    }
-    if (bot.type !== agent.type) {
-      throw new Error(
-        `Tenant package agent "${agent.id}" was a ${bot.type} Bot and the package now makes it ${agent.type}. A Bot keeps its type for its lifetime in Intelligence; give the ${agent.type} Bot a new id in the package.`,
-      );
     }
     if (bot.deletedAt !== null) {
       bot = await bots().restore(
