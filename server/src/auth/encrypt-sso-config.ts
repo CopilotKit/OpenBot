@@ -181,5 +181,26 @@ function wrapAdapter<T extends AdapterLike>(
     };
   }
 
+  /*
+   * A transaction's adapter is wrapped too. Better Auth hands the callback an adapter of its own (the
+   * drizzle adapter's transaction-bound one, or the unwrapped factory adapter when transactions are
+   * off), and the SSO plugin locks and re-reads the provider through it while it links an account:
+   * unwrapped, that read came back as ciphertext, which the plugin took for a provider changed under
+   * it, and every sign-in through a registered OIDC provider failed with SSO_PROVIDER_CHANGED.
+   */
+  const transaction = (adapter as { transaction?: unknown }).transaction;
+  if (typeof transaction === "function") {
+    (wrapped as { transaction?: unknown }).transaction = <R>(
+      callback: (trx: unknown) => Promise<R>,
+    ) =>
+      (
+        transaction as (
+          callback: (trx: AdapterLike) => Promise<R>,
+        ) => Promise<R>
+      ).call(adapter, (trx: AdapterLike) =>
+        callback(wrapAdapter(trx, encryptionKey)),
+      );
+  }
+
   return wrapped as unknown as T;
 }
