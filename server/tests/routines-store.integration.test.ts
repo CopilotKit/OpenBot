@@ -7,19 +7,13 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  channels,
-  intelligenceChannelMappings,
-  routineRuns,
-  routines,
-  users,
-} from "../src/db/schema";
+import { channels, intelligenceChannelMappings, users } from "../src/db/schema";
 import {
   createRoutineStore,
   MAX_ENABLED_ROUTINES,
@@ -28,7 +22,17 @@ import {
   RoutineNotFoundError,
   RoutineRefusedError,
 } from "../src/routines/store";
+import { releaseLocalLock, tryLocalLock } from "../src/work/local-lock";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  changeRoutine,
+  changeRun,
+  purgeRoutinesOwnedBy,
+  runsOf,
+  storedRoutine,
+  storedRun,
+  useTestSchedules,
+} from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -57,7 +61,7 @@ afterEach(async () => {
   // cleared first so a failure part-way through cleanup leaves nothing pointing at rows this file
   // is about to delete.
   for (const userId of createdUserIds) {
-    await database.delete(routines).where(eq(routines.ownerUserId, userId));
+    await purgeRoutinesOwnedBy(userId);
   }
   for (const channelId of createdChannelIds.splice(0)) {
     await database
@@ -73,6 +77,7 @@ afterEach(async () => {
 
 beforeAll(async () => {
   await useTestBots();
+  await useTestSchedules();
 });
 
 afterAll(async () => {
@@ -115,25 +120,32 @@ async function setUp() {
   return { owner, agentId, channel };
 }
 
-async function waitForDatabaseLock(name: string) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const rows = await database.execute(
-      sql`select wait_event_type from pg_stat_activity where application_name = ${name} and datname = current_database()`,
-    );
-    if (rows.some((row) => row.wait_event_type === "Lock")) return;
-  }
-  throw new Error(
-    `The database did not report the expected lock wait for ${name}`,
+/**
+ * Hold the lock a person's cap-guarded writes take, as another replica's write in progress would,
+ * until the returned function is called. The writes started meanwhile must wait for it.
+ */
+async function holdCapLock(ownerUserId: string): Promise<() => Promise<void>> {
+  const name = `routine-cap:${ownerUserId}`;
+  const holder = `test-${randomUUID()}`;
+  if (!(await tryLocalLock(database, name, holder, 60_000)))
+    throw new Error(`could not take ${name} for the test`);
+  return () => releaseLocalLock(database, name, holder);
+}
+
+/** Whether a promise has settled yet, without waiting for it. */
+async function settled(promise: Promise<unknown>): Promise<boolean> {
+  const marker = Symbol("pending");
+  return (
+    (await Promise.race([
+      promise.then(
+        () => true,
+        () => true,
+      ),
+      marker,
+    ])) !== marker
   );
 }
 
-/**
- * A routine is one person's standing instruction, so every method takes the owner and every
- * statement is guarded by it. A routine belonging to somebody else has to be indistinguishable from
- * one that was never created — the `setPinned` rule — because anything else tells a stranger which
- * ids exist.
- */
 describe("owner-guarding", () => {
   test("another person cannot update, remove or switch off a routine", async () => {
     const { owner, agentId, channel } = await setUp();
@@ -256,7 +268,7 @@ describe("what the schedule has to be", () => {
  * talked into creating a hundred. It counts what is switched ON, so switching one off makes room.
  */
 describe("how many a person may have switched on", () => {
-  test("an enable queued behind a pause rechecks the cap after another create takes the slot", async () => {
+  test("writes queued behind another's cap lock never leave more than the cap switched on", async () => {
     const { owner, agentId, channel } = await setUp();
     const input = {
       ownerUserId: owner.id,
@@ -268,69 +280,33 @@ describe("how many a person may have switched on", () => {
     const target = await store.create(input);
     for (let index = 1; index < MAX_ENABLED_ROUTINES; index += 1)
       await store.create(input);
-    const blocker = createDatabase(databaseUrl, { max: 1 });
-    const pausing = createDatabase(databaseUrl, { max: 1 });
-    const creating = createDatabase(databaseUrl, { max: 1 });
-    const enabling = createDatabase(databaseUrl, { max: 1 });
-    const names = ["pausing", "creating", "enabling"].map(
-      (name) => `${name}_${randomUUID()}`,
-    );
-    await pausing.execute(
-      sql`select set_config('application_name', ${names[0]!}, false)`,
-    );
-    await creating.execute(
-      sql`select set_config('application_name', ${names[1]!}, false)`,
-    );
-    await enabling.execute(
-      sql`select set_config('application_name', ${names[2]!}, false)`,
-    );
-    const locked = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const gate = blocker.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext(${`routine-cap-${owner.id}`}))`,
-      );
-      locked.resolve();
-      await release.promise;
-    });
-    void gate.catch(locked.reject);
+    const release = await holdCapLock(owner.id);
     const operations: Promise<unknown>[] = [];
-
     try {
-      await locked.promise;
+      // A pause, a create and a switch-on, each from a store of its own, all waiting on the lock.
       operations.push(
-        createRoutineStore(pausing).setEnabled(owner.id, target.id, false),
+        createRoutineStore(database).setEnabled(owner.id, target.id, false),
+        createRoutineStore(database).create(input),
+        createRoutineStore(database).setEnabled(owner.id, target.id, true),
       );
-      await waitForDatabaseLock(names[0]!);
-      operations.push(createRoutineStore(creating).create(input));
-      await waitForDatabaseLock(names[1]!);
-      operations.push(
-        createRoutineStore(enabling).setEnabled(owner.id, target.id, true),
-      );
-      await waitForDatabaseLock(names[2]!);
-      release.resolve();
-      await gate;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      for (const operation of operations)
+        expect(await settled(operation)).toBe(false);
+      await release();
       const outcomes = await Promise.allSettled(operations);
+      // Whatever order they took the lock in, each counted what the one before it left, so the
+      // person ends with exactly the cap switched on and every refusal is the friendly sentence.
       expect(
         (await store.listFor(owner.id)).filter((routine) => routine.enabled),
       ).toHaveLength(MAX_ENABLED_ROUTINES);
-      expect(outcomes[0]?.status).toBe("fulfilled");
-      expect(outcomes[1]?.status).toBe("fulfilled");
-      const enabled = outcomes[2];
-      expect(enabled?.status).toBe("rejected");
-      if (enabled?.status === "rejected")
-        expect(enabled.reason).toBeInstanceOf(RoutineRefusedError);
+      for (const outcome of outcomes)
+        if (outcome.status === "rejected")
+          expect(outcome.reason).toBeInstanceOf(RoutineRefusedError);
     } finally {
-      release.resolve();
-      await Promise.allSettled([gate, ...operations]);
-      await Promise.all([
-        blocker.$client.end(),
-        pausing.$client.end(),
-        creating.$client.end(),
-        enabling.$client.end(),
-      ]);
+      await release();
+      await Promise.allSettled(operations);
     }
-  }, 15000);
+  }, 30000);
 
   test("refuses the one past the cap, and accepts it once another is off", async () => {
     const { owner, agentId, channel } = await setUp();
@@ -702,52 +678,27 @@ describe("changing a routine", () => {
       cron: DAILY,
       timezone: "UTC",
     });
-    const blocker = createDatabase(databaseUrl, { max: 1 });
-    const changingCron = createDatabase(databaseUrl, { max: 1 });
-    const changingZone = createDatabase(databaseUrl, { max: 1 });
-    const cronName = `cron_${randomUUID()}`;
-    const zoneName = `zone_${randomUUID()}`;
-    await changingCron.execute(
-      sql`select set_config('application_name', ${cronName}, false)`,
-    );
-    await changingZone.execute(
-      sql`select set_config('application_name', ${zoneName}, false)`,
-    );
-    const locked = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const gate = blocker.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext(${`routine-cap-${owner.id}`}))`,
-      );
-      locked.resolve();
-      await release.promise;
-    });
-    void gate.catch(locked.reject);
+    const release = await holdCapLock(owner.id);
     const operations: Promise<unknown>[] = [];
     try {
-      await locked.promise;
-      const cron = createRoutineStore(changingCron).update(
-        owner.id,
-        routine.id,
-        { cron: "0 17 * * *", channelId: channel.id },
-      );
-      operations.push(cron);
-      await waitForDatabaseLock(cronName);
-      const zone = createRoutineStore(changingZone).update(
-        owner.id,
-        routine.id,
-        { timezone: "America/New_York" },
-      );
-      operations.push(zone);
-      await waitForDatabaseLock(zoneName);
-      release.resolve();
-      await gate;
-      await cron;
-      const result = await zone;
+      const cron = createRoutineStore(database).update(owner.id, routine.id, {
+        cron: "0 17 * * *",
+        channelId: channel.id,
+      });
+      const zone = createRoutineStore(database).update(owner.id, routine.id, {
+        timezone: "America/New_York",
+      });
+      operations.push(cron, zone);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await settled(cron)).toBe(false);
+      expect(await settled(zone)).toBe(false);
+      await release();
+      await Promise.all(operations);
+      // Whichever went second derived its clock from what the first left: 17:00 in New York.
+      const result = await storedRoutine(routine.id);
       expect(result.cron).toBe("0 17 * * *");
       expect(result.timezone).toBe("America/New_York");
       expect(result.channelId).toBe(channel.id);
-      // The stored clock must mean 17:00 in its stored zone, independently checked with Intl.
       expect(
         new Intl.DateTimeFormat("en", {
           timeZone: result.timezone,
@@ -756,15 +707,10 @@ describe("changing a routine", () => {
         }).format(result.nextRunAt),
       ).toBe("17");
     } finally {
-      release.resolve();
-      await Promise.allSettled([gate, ...operations]);
-      await Promise.all([
-        blocker.$client.end(),
-        changingCron.$client.end(),
-        changingZone.$client.end(),
-      ]);
+      await release();
+      await Promise.allSettled(operations);
     }
-  }, 15000);
+  }, 30000);
 
   test("recomputes the next run when the cron changes", async () => {
     const { owner, agentId, channel } = await setUp();
@@ -893,10 +839,7 @@ describe("changing a routine", () => {
     // been true before the disable, and deleting the recompute branch would leave this green.
     await store.setEnabled(owner.id, routine.id, false);
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    await database
-      .update(routines)
-      .set({ nextRunAt: stale })
-      .where(eq(routines.id, routine.id));
+    await changeRoutine(routine.id, { nextRunAt: stale });
 
     const enabled = await store.update(owner.id, routine.id, { enabled: true });
 
@@ -905,10 +848,7 @@ describe("changing a routine", () => {
 
     // The mirror image: an instruction-only change on an already-enabled routine must not recompute,
     // even when the stored stamp is one that recomputing would obviously move.
-    await database
-      .update(routines)
-      .set({ nextRunAt: stale })
-      .where(eq(routines.id, routine.id));
+    await changeRoutine(routine.id, { nextRunAt: stale });
 
     const untouched = await store.update(owner.id, routine.id, {
       instruction: "Summarise the week instead.",
@@ -917,7 +857,7 @@ describe("changing a routine", () => {
     expect(untouched.nextRunAt.getTime()).toBe(stale.getTime());
   });
 
-  test("removing one is a hard delete, and only once", async () => {
+  test("removing one takes it off the page for good, and only once", async () => {
     const { owner, agentId, channel } = await setUp();
     const routine = await store.create({
       ownerUserId: owner.id,
@@ -954,26 +894,12 @@ describe("changing a routine", () => {
  * its own rows sort ahead of anything else in the database.
  */
 async function makeDueAt(routineId: string, nextRunAt: Date): Promise<Date> {
-  await database
-    .update(routines)
-    .set({ nextRunAt })
-    .where(eq(routines.id, routineId));
-  const [row] = await database
-    .select({ nextRunAt: routines.nextRunAt })
-    .from(routines)
-    .where(eq(routines.id, routineId))
-    .limit(1);
-  // Read back rather than trusting the Date we wrote: the comparison the CAS makes is Postgres's.
-  return row?.nextRunAt as Date;
+  // Read back rather than trusting the Date we wrote: the comparison the CAS makes is Intelligence's.
+  return (await changeRoutine(routineId, { nextRunAt })).nextRunAt;
 }
 
 async function readRoutine(routineId: string) {
-  const [row] = await database
-    .select()
-    .from(routines)
-    .where(eq(routines.id, routineId))
-    .limit(1);
-  return row;
+  return storedRoutine(routineId);
 }
 
 async function makeRoutine(instruction = "Summarise the day.") {
@@ -1129,10 +1055,7 @@ describe("opening and closing a run", () => {
     const { routine } = await makeRoutine();
 
     const { runId } = await store.insertRun(routine.id);
-    const [inFlight] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.id, runId));
+    const inFlight = await storedRun(runId);
     // Null status is the in-flight state, which is why the column is nullable.
     expect(inFlight?.status).toBeNull();
     expect(inFlight?.finishedAt).toBeNull();
@@ -1140,10 +1063,7 @@ describe("opening and closing a run", () => {
 
     await store.finishRun(runId, "succeeded");
 
-    const [finished] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.id, runId));
+    const finished = await storedRun(runId);
     expect(finished?.status).toBe("succeeded");
     expect(finished?.finishedAt).toBeInstanceOf(Date);
     expect(finished?.error).toBeNull();
@@ -1155,10 +1075,7 @@ describe("opening and closing a run", () => {
 
     await store.finishRun(runId, "failed", "x".repeat(600));
 
-    const [finished] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.id, runId));
+    const finished = await storedRun(runId);
     expect(finished?.status).toBe("failed");
     expect(finished?.error).toHaveLength(MAX_RUN_ERROR);
     expect(MAX_RUN_ERROR).toBe(400);
@@ -1169,20 +1086,14 @@ describe("opening and closing a run", () => {
     const { runId } = await store.insertRun(routine.id);
 
     await store.finishRun(runId, "succeeded");
-    const [firstFinish] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.id, runId));
+    const firstFinish = await storedRun(runId);
 
     // The natural next-task implementation: finish "succeeded", then something downstream throws,
     // and the catch calls finishRun("failed", ...). Without a finish-once guard this would
     // relabel a run that had already succeeded.
     await store.finishRun(runId, "failed", "late");
 
-    const [secondFinish] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.id, runId));
+    const secondFinish = await storedRun(runId);
     expect(secondFinish?.status).toBe("succeeded");
     expect(secondFinish?.error).toBeNull();
     expect(secondFinish?.finishedAt?.getTime()).toBe(
@@ -1213,10 +1124,7 @@ describe("opening and closing a run", () => {
 describe("reaping the runs the server never finished", () => {
   /** Age one run row past the reaper's cutoff by hand; the reaper compares on the database's clock. */
   async function ageRun(runId: string, byMs: number) {
-    await database
-      .update(routineRuns)
-      .set({ startedAt: new Date(Date.now() - byMs) })
-      .where(eq(routineRuns.id, runId));
+    await changeRun(runId, { startedAt: new Date(Date.now() - byMs) });
   }
 
   test("closes only the rows past the cutoff, as skipped, and leaves live work alone", async () => {
@@ -1236,10 +1144,7 @@ describe("reaping the runs the server never finished", () => {
     // abandoned row from elsewhere in the database may be swept up in the same call.
     expect(reaped).toBeGreaterThanOrEqual(1);
 
-    const rows = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.routineId, routine.id));
+    const rows = await runsOf(routine.id);
     const byId = new Map(rows.map((row) => [row.id, row]));
 
     const abandonedRow = byId.get(abandoned.runId);
@@ -1262,10 +1167,7 @@ describe("reaping the runs the server never finished", () => {
 
     await store.reapAbandonedRuns(10 * 60_000, "x".repeat(600));
 
-    const [row] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.id, runId));
+    const row = await storedRun(runId);
     expect(row?.error).toHaveLength(MAX_RUN_ERROR);
   });
 });
@@ -1289,10 +1191,7 @@ describe("switching off a routine the sweep cannot schedule", () => {
     // The run row is the announcement: the sweep has no channel to say this in, so the page's
     // last-run column is where the owner learns why their routine stopped.
     expect(summary?.lastRun?.status).toBe("skipped");
-    const [row] = await database
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.routineId, routine.id));
+    const [row] = await runsOf(routine.id);
     expect(row?.error).toBe("Routines may run at most every 15 minutes.");
     expect(row?.finishedAt).toBeInstanceOf(Date);
   });
@@ -1334,12 +1233,7 @@ describe("switching off a routine the sweep cannot schedule", () => {
 
     // Gone is gone: no throw, and no orphaned run row for a routine nobody can see.
     await store.markUnschedulable(routine.id, "unschedulable");
-    expect(
-      await database
-        .select()
-        .from(routineRuns)
-        .where(eq(routineRuns.routineId, routine.id)),
-    ).toEqual([]);
+    expect(await runsOf(routine.id)).toEqual([]);
   });
 });
 

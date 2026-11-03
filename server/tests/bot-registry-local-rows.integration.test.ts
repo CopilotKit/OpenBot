@@ -26,7 +26,6 @@ import {
   channelAgents,
   channels,
   pluginGrants,
-  routines,
   teamBotPublications,
   users,
 } from "../src/db/schema";
@@ -37,6 +36,7 @@ import {
   testIntelligence,
   useTestBots,
 } from "./support/bots";
+import { seedRoutine, testScheduleClient } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -63,6 +63,12 @@ const OUTLIVES_ITS_BOT = new Set([
   "agent_profiles.agent_id",
 ]);
 
+/**
+ * Legacy tables whose data moved to Intelligence, kept unwritten for one release and read only by
+ * the upgrade copy. Intelligence purges the moved records with their agent, so nothing here does.
+ */
+const MOVED_TO_INTELLIGENCE = new Set(["routines.agent_id"]);
+
 describe("which rows go with a Bot", () => {
   test("every column naming a Bot is cleaned up with it or listed as outliving it", () => {
     const covered = new Set(
@@ -80,12 +86,15 @@ describe("which rows go with a Bot", () => {
       }
     }
     const undecided = named.filter(
-      (name) => !covered.has(name) && !OUTLIVES_ITS_BOT.has(name),
+      (name) =>
+        !covered.has(name) &&
+        !OUTLIVES_ITS_BOT.has(name) &&
+        !MOVED_TO_INTELLIGENCE.has(name),
     );
     // A new table naming a Bot: add it to BOT_CHILD_TABLES, or here with the reason it outlives one.
     expect(undecided).toEqual([]);
-    // The 26 tables that cascaded and the one column that was set to null, all still covered.
-    expect(BOT_CHILD_TABLES.length).toBe(26);
+    // The tables that cascaded and still live here, and the one column that was set to null.
+    expect(BOT_CHILD_TABLES.length).toBe(26 - MOVED_TO_INTELLIGENCE.size);
     expect([...covered]).toContain("channels.last_message_agent_id");
   });
 
@@ -118,10 +127,13 @@ async function rowsFor(botId: string, channelId: string) {
     .select()
     .from(pluginGrants)
     .where(eq(pluginGrants.agentId, botId));
-  const [routine] = await database
-    .select()
-    .from(routines)
-    .where(eq(routines.agentId, botId));
+  // Routines live in Intelligence, which purges an agent's schedules with the agent.
+  const [routine] = (
+    await testScheduleClient().all("routines", {
+      agentId: botId,
+      includeDeleted: true,
+    })
+  ).items;
   const [publication] = await database
     .select()
     .from(teamBotPublications)
@@ -157,14 +169,11 @@ async function botWithRows() {
   await database
     .insert(pluginGrants)
     .values({ kind: "skill", ref: `skill-${randomUUID()}`, agentId: bot.id });
-  await database.insert(routines).values({
-    id: `routine_${randomUUID()}`,
+  await seedRoutine({
     ownerUserId: owner,
     agentId: bot.id,
     channelId,
     instruction: "Check in.",
-    cron: "0 9 * * *",
-    nextRunAt: new Date(Date.now() + 86_400_000),
   });
   await database
     .insert(teamBotPublications)
