@@ -228,6 +228,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
+                  {appConfig.brand.logoUrl ? (
+                    // Decorative: the product name beside it is the link's text.
+                    <img
+                      alt=""
+                      className="size-5 shrink-0 rounded-[5px]"
+                      src={appConfig.brand.logoUrl}
+                    />
+                  ) : null}
                   {appConfig.brand.productName}
                 </Link>
               )}

@@ -189,7 +189,16 @@ function SignScreen() {
           variants={{ hidden, shown }}
           className="flex items-center justify-center"
         >
-          <AgentOrb size="56px" />
+          {appConfig.brand.logoUrl ? (
+            // Decorative: the heading below names the product.
+            <img
+              alt=""
+              className="size-14 rounded-2xl"
+              src={appConfig.brand.logoUrl}
+            />
+          ) : (
+            <AgentOrb size="56px" />
+          )}
         </motion.div>
         <motion.h1
           className="text-2xl font-medium tracking-tight text-center mt-8"

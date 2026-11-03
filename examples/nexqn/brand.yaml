@@ -1,0 +1,13 @@
+# The NexQN AI tenant package. Select it with TENANT_PACKAGE_DIR=../examples/nexqn (resolved from
+# server/). Everything a browser is shown about the brand comes from this file and theme.css, so the
+# app's components never name the product themselves. See docs/nexqn/README.md.
+tenant:
+  id: nexqn
+  product_name: NexQN AI
+  short_name: NexQN
+  website_url: https://nexqn.vn
+  # Plain filenames in this directory; inlined into the app as data: URIs (128 KB each at most).
+  logo: logo.svg
+  favicon: logo.svg
+skin:
+  stylesheet: theme.css

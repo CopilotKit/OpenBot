@@ -5,6 +5,16 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { brandIndexHtml } from "./src/lib/brand/index-html";
+import { appConfig } from "./src/lib/generated/application-config";
+
+/** The tenant's title and theme in the page shell, in development and in the build alike. */
+function tenantBrand(): Plugin {
+  return {
+    name: "openbot-tenant-brand",
+    transformIndexHtml: (html) => brandIndexHtml(html, appConfig.brand),
+  };
+}
 
 /*
  * Announce the server's port to the two runtimes that serve the app through Vite, and to no other.
@@ -171,6 +181,7 @@ export const routeBuildRollupOutputOptions = {
 export default defineConfig({
   plugins: [
     announceServerPort(apiPort.port),
+    tenantBrand(),
     tanstackRouter({
       autoCodeSplitting: true,
       codeSplittingOptions: routeCodeSplittingOptions,

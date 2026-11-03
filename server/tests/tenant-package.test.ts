@@ -87,6 +87,13 @@ function loadedPackage(
   return {
     tenantId,
     productName: "Package Test",
+    brand: {
+      shortName: "Package Test",
+      websiteUrl: null,
+      supportEmail: null,
+      logoUrl: null,
+      faviconUrl: null,
+    },
     stylesheet: null,
     agents: [agent],
     omittedAgentIds: [],
@@ -431,6 +438,12 @@ describe("tenant YAML validation", () => {
       brand: {
         tenantId: "fintech",
         productName: "Ledgerline",
+        shortName: "Ledgerline",
+        websiteUrl: null,
+        supportEmail: null,
+        logoUrl: null,
+        faviconUrl: null,
+        themeCss: ":root { --primary: oklch(0.32 0.09 250); }",
       },
     });
   });

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NexQN AI">
+  <defs>
+    <linearGradient id="nexqn-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#nexqn-mark)"/>
+  <path d="M18 46V18h6.5L40 37.5V18H46v28h-6.5L24 26.5V46z" fill="#fff"/>
+  <circle cx="46" cy="46" r="4" fill="#fff" opacity=".9"/>
+</svg>

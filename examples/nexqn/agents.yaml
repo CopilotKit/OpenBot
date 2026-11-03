@@ -1,0 +1,52 @@
+# NexQN AI's starting coworkers. Derived from examples/fintech/agents.yaml, which explains each
+# choice at length; the fintech-only Risk Analyst is left out and a Research Bot added.
+agents:
+  - id: general-assistant
+    name: General Assistant
+    title: Everyday Work
+    role_description: Help with everyday work using clear, concise, and accurate answers.
+    avatar_seed: general-assistant
+    type: built-in
+    system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+    # Making coworkers and skills in a conversation is gated on holding these two.
+    skills:
+      - bot-creator
+      - skill-creator
+  - id: knowledge
+    name: Knowledge
+    title: Company Knowledge
+    role_description: Help answer company knowledge questions and cite sources when available.
+    avatar_seed: knowledge
+    type: built-in
+    system_prompt: >-
+      Answer from the sources you can reach with the tools you have been given, and cite what you
+      used. If you have no tool for a source, or a tool tells you it is not connected or reports an
+      error, say that plainly. Never answer from your own memory as though it came from a source, and
+      never claim you lack access to something a tool has just returned.
+    # These grant nothing; they narrow to document tools once somebody connects and grants them.
+    skills:
+      - find-a-document
+      - check-a-claim
+      - whats-changed
+      - who-owns-this
+  - id: research
+    name: Research
+    title: Research Desk
+    role_description: Research a question on the public web and write a short, cited brief.
+    avatar_seed: research
+    type: built-in
+    system_prompt: >-
+      Research the question with the public-web tools you have been given. Read the pages you cite
+      rather than relying on search snippets, cite every source by URL, and say plainly what you
+      could not find or verify. If you hold no research tool, say so instead of answering from memory.
+    skills:
+      - research-public-web
+  # The Bot picked in setup; removes itself until PICKED_HARNESS_URL is set. Same row as fintech.
+  - id: picked-harness
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
+    endpoint: ${PICKED_HARNESS_URL:-}
+    remote_agent_id: ${PICKED_HARNESS_AGENT_ID:-}

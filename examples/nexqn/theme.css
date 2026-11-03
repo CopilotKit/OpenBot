@@ -1,0 +1,26 @@
+/*
+ * NexQN AI. Indigo #4F46E5 is the primary colour and cyan #06B6D4 the accent, written in oklch like
+ * the app's own theme.css. Only the brand-bearing tokens are set; every surface and grey keeps the
+ * app's values. A tenant theme may define only these two blocks and approved variables.
+ */
+:root {
+  --primary: oklch(0.511 0.262 276.966);
+  --primary-foreground: oklch(1 0 0);
+  --ring: oklch(0.585 0.233 277.117);
+  --chart-1: oklch(0.511 0.262 276.966);
+  --chart-2: oklch(0.715 0.126 215.221);
+  --sidebar-primary: oklch(0.511 0.262 276.966);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-ring: oklch(0.585 0.233 277.117);
+}
+
+.dark {
+  --primary: oklch(0.673 0.182 276.935);
+  --primary-foreground: oklch(0.145 0.025 277);
+  --ring: oklch(0.673 0.182 276.935);
+  --chart-1: oklch(0.673 0.182 276.935);
+  --chart-2: oklch(0.789 0.154 211.53);
+  --sidebar-primary: oklch(0.673 0.182 276.935);
+  --sidebar-primary-foreground: oklch(0.145 0.025 277);
+  --sidebar-ring: oklch(0.673 0.182 276.935);
+}

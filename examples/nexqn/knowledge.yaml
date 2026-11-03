@@ -1,0 +1,3 @@
+# Required by the package format and read by nothing yet (docs/configuration.md#knowledgeyaml).
+# NexQN's own Knowledge Base is planned as a separate module; see docs/nexqn/architecture.md.
+sources: []

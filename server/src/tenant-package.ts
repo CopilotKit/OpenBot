@@ -126,6 +126,8 @@ type PackageFiles = {
    * with only `agents.yaml` is unchanged.
    */
   agentFiles?: PackageAgentFile[];
+  /** Image files in the package root, for `tenant.logo` and `tenant.favicon` to name. */
+  images?: PackageImageFile[];
   themeCss: string;
 };
 
@@ -204,9 +206,53 @@ type TenantChannel = {
   allowedGroups: string[];
 };
 
+/**
+ * The optional parts of a brand, beyond its id and name, from `brand.yaml`'s `tenant` block.
+ *
+ * Each has a value a package written before it existed still gets: a short name is the product
+ * name, and the two contact fields are absent. They reach the browser through
+ * `createApplicationConfiguration`, so nothing here may be a secret.
+ */
+export type TenantBrand = {
+  /** Where space is short (a narrow sidebar, a tab). The product name when not given. */
+  shortName: string;
+  /** An `https:` address for the product's own site. */
+  websiteUrl: string | null;
+  /** Where a person writes for help. */
+  supportEmail: string | null;
+  /** The package's logo as a `data:` URI, so no package file is ever served from the app's origin. */
+  logoUrl: string | null;
+  /** The package's tab icon, the same way. */
+  faviconUrl: string | null;
+};
+
+/** An image file in the package root, which `tenant.logo` and `tenant.favicon` may name. */
+export type PackageImageFile = { filename: string; bytes: Uint8Array };
+
+const BRAND_IMAGE_TYPES: Record<string, string> = {
+  svg: "image/svg+xml",
+  png: "image/png",
+  webp: "image/webp",
+  ico: "image/x-icon",
+};
+
+/**
+ * The largest logo or favicon a package may ship, in bytes.
+ *
+ * Inlined into the built page and into the app bundle, so every visitor downloads it on every
+ * first load. A real mark is a few kilobytes; this refuses a photograph exported by mistake.
+ */
+export const MAX_BRAND_IMAGE_BYTES = 128 * 1024;
+
+const BRAND_IMAGE_FILENAME = new RegExp(
+  `^[A-Za-z0-9][A-Za-z0-9._-]*\\.(${Object.keys(BRAND_IMAGE_TYPES).join("|")})$`,
+  "i",
+);
+
 export type TenantPackage = {
   tenantId: string;
   productName: string;
+  brand: TenantBrand;
   stylesheet: string | null;
   agents: TenantAgent[];
   /** Remote agents explicitly disabled by a blank endpoint, not arbitrary removed YAML rows. */
@@ -254,6 +300,13 @@ export type ApplicationConfiguration = {
   brand: {
     tenantId: string;
     productName: string;
+    shortName: string;
+    websiteUrl: string | null;
+    supportEmail: string | null;
+    logoUrl: string | null;
+    faviconUrl: string | null;
+    /** The package's validated `theme.css`, or empty. Applied to the built page's `<head>`. */
+    themeCss: string;
   };
 };
 
@@ -272,6 +325,10 @@ export function createApplicationConfiguration(
     brand: {
       tenantId: tenantPackage.tenantId,
       productName: tenantPackage.productName,
+      ...tenantPackage.brand,
+      // Validated when the package loaded, and a theme may hold only approved variables, so it is
+      // safe to place in the page as it is.
+      themeCss: tenantPackage.themeCss.trim(),
     },
   };
 }
@@ -302,6 +359,86 @@ function requiredString(value: unknown, name: string): string {
     throw new Error(`${name} must be a non-empty string`);
   }
   return value;
+}
+
+function optionalString(value: unknown, name: string): string | null {
+  return value === undefined ? null : requiredString(value, name).trim();
+}
+
+/**
+ * The optional brand fields under `tenant`.
+ *
+ * The website is shown as a link, so only `https:` is taken: a `javascript:` address in a package
+ * would otherwise become a link that runs script on the app's origin. The email is checked for
+ * shape only, enough to refuse a typo that would put a broken `mailto:` in front of everybody.
+ */
+function parseTenantBrand(
+  tenant: Record<string, unknown>,
+  productName: string,
+  images: readonly PackageImageFile[],
+): TenantBrand {
+  const websiteUrl = optionalString(tenant.website_url, "tenant.website_url");
+  if (websiteUrl !== null) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(websiteUrl);
+    } catch {}
+    if (parsed?.protocol !== "https:" || parsed.username || parsed.password) {
+      throw new Error("tenant.website_url must be an https: address");
+    }
+  }
+  const supportEmail = optionalString(
+    tenant.support_email,
+    "tenant.support_email",
+  );
+  if (
+    supportEmail !== null &&
+    !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(supportEmail)
+  ) {
+    throw new Error("tenant.support_email must be an email address");
+  }
+  return {
+    shortName:
+      optionalString(tenant.short_name, "tenant.short_name") ?? productName,
+    websiteUrl,
+    supportEmail,
+    logoUrl: brandImage(tenant.logo, "tenant.logo", images),
+    faviconUrl: brandImage(tenant.favicon, "tenant.favicon", images),
+  };
+}
+
+/**
+ * A logo or favicon named in `brand.yaml`, as a `data:` URI.
+ *
+ * Only a plain filename in the package root, so a package cannot reach outside itself with `..` or
+ * an absolute path. Inlined rather than served: an SVG served from the app's own origin and opened
+ * directly runs any script it carries there, while one in a `data:` URI used as an image runs none.
+ */
+function brandImage(
+  value: unknown,
+  name: string,
+  images: readonly PackageImageFile[],
+): string | null {
+  const filename = optionalString(value, name);
+  if (filename === null) return null;
+  const extension = BRAND_IMAGE_FILENAME.exec(filename)?.[1]?.toLowerCase();
+  if (!extension) {
+    throw new Error(
+      `${name} must be the name of an .svg, .png, .webp or .ico file in the package root`,
+    );
+  }
+  const image = images.find((file) => file.filename === filename);
+  if (!image) {
+    throw new Error(
+      `${name} names ${filename}, which this package does not contain`,
+    );
+  }
+  if (image.bytes.byteLength > MAX_BRAND_IMAGE_BYTES) {
+    throw new Error(
+      `${name} (${filename}) is larger than ${MAX_BRAND_IMAGE_BYTES / 1024} KB`,
+    );
+  }
+  return `data:${BRAND_IMAGE_TYPES[extension]};base64,${Buffer.from(image.bytes).toString("base64")}`;
 }
 
 function agentTitle(value: unknown): string {
@@ -628,9 +765,14 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     },
   );
 
+  const productName = requiredString(
+    tenant.product_name,
+    "tenant.product_name",
+  );
   return {
     tenantId: requiredString(tenant.id, "tenant.id"),
-    productName: requiredString(tenant.product_name, "tenant.product_name"),
+    productName,
+    brand: parseTenantBrand(tenant, productName, files.images ?? []),
     stylesheet: skin
       ? requiredString(skin.stylesheet, "skin.stylesheet")
       : null,
@@ -737,6 +879,20 @@ async function readAgentFiles(sourcePath: string): Promise<PackageAgentFile[]> {
   );
 }
 
+/** The image files in the package root, in filename order, for a brand to name. */
+async function readImageFiles(sourcePath: string): Promise<PackageImageFile[]> {
+  const entries = await readdir(sourcePath);
+  const filenames = entries
+    .filter((entry) => BRAND_IMAGE_FILENAME.test(entry))
+    .sort();
+  return await Promise.all(
+    filenames.map(async (filename) => ({
+      filename,
+      bytes: new Uint8Array(await readFile(join(sourcePath, filename))),
+    })),
+  );
+}
+
 export async function loadTenantPackage(
   sourcePath: string,
 ): Promise<LoadedTenantPackage> {
@@ -776,6 +932,7 @@ export async function loadTenantPackage(
       throw error;
     });
   const agentFiles = await readAgentFiles(sourcePath);
+  const images = await readImageFiles(sourcePath);
   const tenantPackage = validateTenantPackage({
     brand,
     agents,
@@ -784,6 +941,7 @@ export async function loadTenantPackage(
     knowledge,
     skills,
     agentFiles,
+    images,
     themeCss,
   });
 
@@ -801,6 +959,11 @@ export async function loadTenantPackage(
           ...contents,
           skills,
           ...agentFiles.map((file) => `${file.filename}\n${file.contents}`),
+          // A new logo is a package change too.
+          ...images.map(
+            (file) =>
+              `${file.filename}\n${createHash("sha256").update(file.bytes).digest("hex")}`,
+          ),
         ].join("\n"),
       )
       .digest("hex"),
