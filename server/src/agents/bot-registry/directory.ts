@@ -201,8 +201,10 @@ export function createBotDirectory(options: {
       await forget(id);
     }
     const subscribed = subscription?.joinCode();
-    if (subscribed && joinCode && subscribed !== joinCode) {
-      // Intelligence rotated the code; announcements for the new one never reach the old topic.
+    if (subscribed && subscribed !== joinCode) {
+      // Intelligence rotated the code, or could not say what it is (null: its Redis did not answer).
+      // Announcements for a new code never reach the old topic, so subscribe again; a subscription
+      // Intelligence cannot mint is retried with backoff.
       subscription?.renew();
     }
   };
