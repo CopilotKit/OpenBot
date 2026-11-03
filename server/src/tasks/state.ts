@@ -662,7 +662,8 @@ export async function readTaskStates(
      * later fails: the person said what they had to say.
      */
     if (turn.followup === "true")
-      for (const id of turn.questionIds ?? []) entry.answeredQuestionIds.add(id);
+      for (const id of turn.questionIds ?? [])
+        entry.answeredQuestionIds.add(id);
     // Taken and not yet running, with its turn still to come: waiting behind another.
     if (
       turn.reply &&

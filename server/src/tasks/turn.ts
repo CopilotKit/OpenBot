@@ -139,7 +139,9 @@ export function createTaskTurn(deps: {
           : { attachments: [], skillInstructions: [] };
       const content = context.attachments.length
         ? [
-            ...(input.text ? [{ type: "text" as const, text: input.text }] : []),
+            ...(input.text
+              ? [{ type: "text" as const, text: input.text }]
+              : []),
             ...context.attachments,
           ]
         : input.text;

@@ -91,7 +91,9 @@ type Run = {
  */
 function runnerFor(
   options: {
-    behave?: (run: Run) => Promise<{ messageId: string; asks: boolean } | undefined> | undefined;
+    behave?: (
+      run: Run,
+    ) => Promise<{ messageId: string; asks: boolean } | undefined> | undefined;
     turnMs?: number;
     turnsAtOnce?: number;
   } = {},
@@ -254,9 +256,9 @@ describe("an asked task", () => {
     expect((await channelStore.direct(owner, botId)).id).not.toBe(
       task.channelId,
     );
-    expect(
-      (await channelStore.get(owner, task.channelId))?.taskId,
-    ).toBe(task.id);
+    expect((await channelStore.get(owner, task.channelId))?.taskId).toBe(
+      task.id,
+    );
   });
 
   test("sent twice with one clientId, at once or after, opens one task and one conversation", async () => {
@@ -266,7 +268,11 @@ describe("an asked task", () => {
     });
     const request = appFor(runner);
     const clientId = randomUUID();
-    const ask = { title: "Plan the Lisbon trip", instruction: "Plan it.", clientId };
+    const ask = {
+      title: "Plan the Lisbon trip",
+      instruction: "Plan it.",
+      clientId,
+    };
     // Two at once race on the unique index; the loser rolls back.
     const [first, second] = await Promise.all([
       runner.startAsked(owner.id, botId, ask),
@@ -545,10 +551,7 @@ describe("how many task turns run at once", () => {
           instruction: `Do task ${index}.`,
         }),
       );
-    await until(
-      () => runs.length === TASK_TURNS_PER_PERSON,
-      "the first turns",
-    );
+    await until(() => runs.length === TASK_TURNS_PER_PERSON, "the first turns");
     await runner.sweep();
     await Bun.sleep(50);
     expect(runs).toHaveLength(TASK_TURNS_PER_PERSON);
@@ -760,7 +763,10 @@ describe("reading one person's tasks", () => {
     });
     await runner.idle();
     const record = await taskStore.get(owner.id, opened.id);
-    const report = createTaskReportReader({ database, history: async () => [] });
+    const report = createTaskReportReader({
+      database,
+      history: async () => [],
+    });
     const questions = createApprovalQuestions(database, async () => {});
     const sent = [
       ...(await statementsOf(() => taskStore.list(owner.id))),

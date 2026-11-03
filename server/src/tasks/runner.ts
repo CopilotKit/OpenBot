@@ -332,10 +332,7 @@ export function createTaskRunner(deps: {
      * after a turn that succeeded can never make the turn, and what it did, run again.
      */
     if (work.followup && work.questionIds?.length)
-      await deps.questions?.answerQuestions(
-        work.ownerUserId,
-        work.questionIds,
-      );
+      await deps.questions?.answerQuestions(work.ownerUserId, work.questionIds);
     const ending = await deps.runTask(scope, {
       runId: taskExecutionId({
         taskId: task.id,
