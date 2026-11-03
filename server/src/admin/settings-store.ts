@@ -18,6 +18,7 @@ import {
   userRoles,
   users,
 } from "../db/schema";
+import { currentEdition, PERSONAL_ENTERPRISE_SETTINGS } from "../edition";
 import type { CapabilityRow, Member } from "./capabilities";
 
 export const ENTERPRISE_TOPIC = "enterprise_settings_changed";
@@ -127,6 +128,8 @@ async function announce(database: Pick<Database, "execute">) {
 export function createEnterpriseStore(database: Database) {
   return {
     async settings(): Promise<EnterpriseSettings> {
+      // Fixed for the personal edition: a value a team deployment left behind is not read.
+      if (currentEdition() === "personal") return PERSONAL_ENTERPRISE_SETTINGS;
       const rows = await database.select().from(enterpriseSettings);
       const byKey = new Map(rows.map((row) => [row.key, row.value]));
       return Object.fromEntries(
@@ -159,6 +162,7 @@ export function createEnterpriseStore(database: Database) {
     },
 
     async capabilityRows(): Promise<CapabilityRow[]> {
+      if (currentEdition() === "personal") return [];
       return database
         .select({
           scopeKind: capabilitySettings.scopeKind,

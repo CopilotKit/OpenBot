@@ -140,6 +140,7 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
+import { setEdition } from "./edition";
 import {
   chooseOpenAIApi,
   mountCopilotRuntime,
@@ -307,6 +308,8 @@ import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 
 const config = loadConfig();
+// Before anything resolves a capability or reads an enterprise setting. See edition.ts.
+setEdition(config.edition);
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
 // after an administrator clears a pin to follow the latest published Skills.
 clearLearningRevisionFallback();
