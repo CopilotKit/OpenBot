@@ -9,7 +9,8 @@ import { createComponentRoutes } from "../src/components/routes";
 import { createSandboxedStore } from "../src/components/sandboxed";
 import { createComponentStore } from "../src/components/store";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, components, sandboxedComponents } from "../src/db/schema";
+import { components, sandboxedComponents } from "../src/db/schema";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -23,6 +24,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 const auditStore = createAuditStore(database);
 const componentStore = createComponentStore(database);
 const sandboxedStore = createSandboxedStore(database, auditStore);
@@ -181,10 +183,7 @@ describe("the generic Published switch on a sandboxed component", () => {
     expect((await postPublication(name, true)).status).toBe(200);
 
     expect((await sourceOf(name))?.revision).toBe(1);
-    const events = await database
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, name));
+    const events = await auditRows({ targetId: name });
     expect(
       events.filter((event) => event.eventType === "component.published"),
     ).toHaveLength(1);

@@ -1,13 +1,14 @@
 // server/tests/remove-server-foreign-provenance.test.ts
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { brokeredConnections, mcpServers } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -20,10 +21,11 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * revocation off the ACTIVE broker. So a foreign row's slug was handed to the wrong vendor while
  * the deletes beneath it matched nothing, and the removal reported success either way.
  *
- * SCOPING. `audit_events` is append-only and `brokered_connections` is long-lived, so every
- * assertion is keyed on names this file alone writes.
+ * SCOPING. The audit trail in Intelligence is append-only and `brokered_connections` is
+ * long-lived, so every assertion is keyed on names this file alone writes.
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 afterAll(async () => {
   await database.$client.close();
@@ -130,20 +132,18 @@ const rowsFor = async (names: string[]) =>
       .orderBy(asc(brokeredConnections.app))
   ).map((row) => `${row.provider}:${row.app}`);
 
-const trailFor = (names: string[]) =>
-  database
-    .select({
-      app: auditEvents.targetId,
-      payload: sql<Record<string, unknown>>`payload`,
-    })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_disconnected"),
-        inArray(auditEvents.targetId, names),
+/** Every `mcp.account_disconnected` row under these apps, ordered by app. */
+const trailFor = async (names: string[]) =>
+  (
+    await Promise.all(
+      names.map((name) =>
+        auditRows({ eventType: "mcp.account_disconnected", targetId: name }),
       ),
     )
-    .orderBy(asc(auditEvents.targetId));
+  )
+    .flat()
+    .map((row) => ({ app: row.targetId, payload: row.payload }))
+    .sort((a, b) => (a.app ?? "").localeCompare(b.app ?? ""));
 
 afterEach(async () => {
   if (apps.length) {
