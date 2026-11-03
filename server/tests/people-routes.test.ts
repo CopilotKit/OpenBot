@@ -35,6 +35,7 @@ function person(overrides: Partial<Person> = {}): Person {
 function appWith(
   people: Person[],
   role: "admin" | "user" = "admin",
+  environment: Record<string, string | undefined> = testEnvironment(),
 ): {
   request: (path: string, init?: RequestInit) => Promise<Response>;
   calls: string[];
@@ -61,7 +62,7 @@ function appWith(
   };
 
   const app = createApp(
-    loadConfig(testEnvironment()),
+    loadConfig(environment),
     {
       handler: () => new Response(null, { status: 204 }),
       api: { getSession: async () => ({ user: ADMIN }) },
@@ -123,6 +124,37 @@ describe("people routes", () => {
 
     expect(response.status).toBe(200);
     expect(calls).toEqual(["setRole:u1:admin"]);
+  });
+
+  /*
+   * Signed in through a CopilotKit organization, the organization's role is written at every
+   * sign-in, so a role set here would be undone the next time the person came back.
+   */
+  test("refuses to change a role when a CopilotKit organization decides roles", async () => {
+    const { request, calls } = appWith(
+      [person()],
+      "admin",
+      testEnvironment({
+        GOOGLE_OAUTH_CLIENT_ID: undefined,
+        GOOGLE_OAUTH_CLIENT_SECRET: undefined,
+        INITIAL_ADMIN_EMAILS: undefined,
+        COPILOTKIT_ORGANIZATION_ID: "org_acme",
+        COPILOTKIT_DASHBOARD_URL: "http://127.0.0.1:7066",
+        COPILOTKIT_OPS_API_URL: "http://127.0.0.1:7051",
+        COPILOTKIT_OPS_API_TOKEN: "openbot-ops-token",
+      }),
+    );
+
+    const response = await request(
+      "/api/admin/people/u1/role",
+      json({ role: "admin" }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "CopilotKit organization",
+    );
+    expect(calls).toEqual([]);
   });
 
   /**

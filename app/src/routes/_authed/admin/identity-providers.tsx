@@ -35,6 +35,7 @@ import {
   type IdentityProviderInput,
   registerIdentityProviderMutationOptions,
 } from "@/lib/identity-providers/mutations";
+import { authProvidersQueryOptions } from "@/lib/auth/queries";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
 import { queryClient } from "@/query-client";
 
@@ -54,6 +55,23 @@ const EMPTY = {
 };
 
 function IdentityProvidersPage() {
+  const signIn = useQuery(authProvidersQueryOptions());
+  if (signIn.data?.copilotKit) {
+    return (
+      <PageShell
+        description="People sign in to OpenBot with their CopilotKit organization, so you can't add another identity provider here."
+        title="Identity providers"
+      >
+        <PageEmpty icon={IconBuildingBank} title="Signed in through CopilotKit">
+          Manage who can sign in from your CopilotKit organization.
+        </PageEmpty>
+      </PageShell>
+    );
+  }
+  return <RegisteredIdentityProviders />;
+}
+
+function RegisteredIdentityProviders() {
   const providers = useQuery(identityProviderListQueryOptions());
   const register = useMutation(
     registerIdentityProviderMutationOptions(queryClient),

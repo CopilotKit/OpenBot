@@ -27,7 +27,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
+import {
+  authProvidersQueryOptions,
+  currentUserQueryOptions,
+} from "@/lib/auth/queries";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
 import {
   setPersonAccessMutationOptions,
@@ -45,6 +48,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   google: "Google",
   microsoft: "Microsoft",
   okta: "Okta",
+  copilotkit: "CopilotKit",
 };
 
 /**
@@ -84,6 +88,9 @@ function PeoplePage() {
   const people = useInfiniteQuery(peopleListQueryOptions(query));
   const rows = people.data?.pages.flatMap((page) => page.people) ?? [];
   const currentUser = useQuery(currentUserQueryOptions());
+  // Signed in through a CopilotKit organization, roles come from the organization at every sign-in.
+  const rolesFromCopilotKit =
+    useQuery(authProvidersQueryOptions()).data?.copilotKit === true;
   const setRole = useMutation(setPersonRoleMutationOptions(queryClient));
   const setAccess = useMutation(setPersonAccessMutationOptions(queryClient));
   // Offboarding: stops this person's Bots' computers, keeping their disks. Access is unchanged.
@@ -99,7 +106,11 @@ function PeoplePage() {
       title="People"
     >
       <PageSection
-        description="Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
+        description={
+          rolesFromCopilotKit
+            ? "Roles come from your CopilotKit organization. Its admins are admins here, and everyone else is a user."
+            : "Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
+        }
         title="Who is here"
       >
         {failure ? (
@@ -197,7 +208,12 @@ function PeoplePage() {
                       <Switch
                         aria-label={`Admin: ${person.email}`}
                         checked={person.role === "admin"}
-                        disabled={busy || person.configuredAdmin || isSelf}
+                        disabled={
+                          busy ||
+                          person.configuredAdmin ||
+                          isSelf ||
+                          rolesFromCopilotKit
+                        }
                         onCheckedChange={(checked) =>
                           setRole.mutate({
                             userId: person.id,

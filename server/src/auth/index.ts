@@ -26,6 +26,7 @@ import {
   users,
   verifications,
 } from "../db/schema";
+import { ACCESS_REMOVED_MESSAGE, copilotKitSignIn } from "./copilotkit";
 import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
 import { encryptSsoConfig } from "./encrypt-sso-config";
 import { SIGN_OUT_UNFINISHED } from "./organization";
@@ -35,6 +36,9 @@ import { recordProvisioned, scimOptions } from "./scim";
 /** What a person sees when SSO is required and they tried another way in. */
 /** The native app's custom scheme (mobile/app.config.ts). */
 const NATIVE_APP_ORIGIN = "openbotmobile://";
+
+/** How long a session started through a CopilotKit organization lasts: eight hours, as Intelligence's does. */
+export const COPILOTKIT_SESSION_SECONDS = 8 * 60 * 60;
 
 export const SSO_REQUIRED_MESSAGE =
   "This deployment requires signing in through your company's identity provider. Enter your work email to continue.";
@@ -266,16 +270,34 @@ export function createAuth(
      * here or they land with no role at all and the request guard refuses them with a 403, which
      * reads as a broken deployment rather than a first sign-in.
      */
-    sso({
-      provisionUser: async ({ user }) => {
-        await seedRole(
-          database,
-          user.id,
-          user.email,
-          authConfig.initialAdminEmails,
-        );
-      },
-    }),
+    /*
+     * Not on an OpenBot that signs people in through a CopilotKit organization: a registered
+     * provider there would be a second way in, admitting people the organization never vouched for.
+     */
+    ...(authConfig.copilotKit
+      ? []
+      : [
+          sso({
+            provisionUser: async ({ user }) => {
+              await seedRole(
+                database,
+                user.id,
+                user.email,
+                authConfig.initialAdminEmails,
+              );
+            },
+          }),
+        ]),
+    ...(authConfig.copilotKit
+      ? [
+          copilotKitSignIn({
+            config: authConfig.copilotKit,
+            database,
+            appUrl: config.appUrl ?? authConfig.baseUrl,
+            audit: (event) => record(auditStore, event),
+          }),
+        ]
+      : []),
   ];
 
   /*
@@ -337,6 +359,12 @@ export function createAuth(
         },
       },
       validateUserInfo: async ({ user, source }) => {
+        /*
+         * A CopilotKit organization is the only way into such an OpenBot, so "SSO required" has
+         * nothing to choose between. Asked anyway, it would refuse everybody: there is no
+         * INITIAL_ADMIN_EMAILS there to break glass with.
+         */
+        if (authConfig.copilotKit) return;
         const verdict = await decideSignInMethod({
           method: source.method,
           email: typeof user.email === "string" ? user.email : undefined,
@@ -377,6 +405,21 @@ export function createAuth(
     },
     baseURL: authConfig.baseUrl,
     secret: authConfig.secret,
+    /*
+     * Signed in through a CopilotKit organization, a session lasts eight hours from sign-in and is
+     * never extended, the same as a managed Intelligence session. That bounds how long somebody
+     * removed from the organization keeps using a session they already had: their next sign-in is
+     * refused, since the organization is asked again every time. Elsewhere Better Auth's own
+     * default stands, a week that renews while it is used.
+     */
+    ...(authConfig.copilotKit
+      ? {
+          session: {
+            expiresIn: COPILOTKIT_SESSION_SECONDS,
+            disableSessionRefresh: true,
+          },
+        }
+      : {}),
     trustedOrigins: [
       ...authConfig.trustedOrigins,
       ...(nativeApp ? [NATIVE_APP_ORIGIN] : []),
@@ -482,7 +525,7 @@ export function createAuth(
                 },
               });
               throw new APIError("FORBIDDEN", {
-                message: "Your access to OpenBot has been removed.",
+                message: ACCESS_REMOVED_MESSAGE,
               });
             }
             return { data: user };
@@ -552,7 +595,7 @@ export function createAuth(
                 },
               });
               throw new APIError("FORBIDDEN", {
-                message: "Your access to OpenBot has been removed.",
+                message: ACCESS_REMOVED_MESSAGE,
               });
             }
             return { data: session };
