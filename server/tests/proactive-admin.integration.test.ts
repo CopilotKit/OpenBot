@@ -33,11 +33,9 @@ import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   botLifecycle,
   capabilitySettings,
   enterpriseSettings,
-  modelUsage,
   proactivePeople,
   proactivePings,
   proactiveRuns,
@@ -64,6 +62,7 @@ import type {
   SuggestionStatus,
 } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -72,7 +71,12 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * and their routes, the real proactive store, work queue and headless turn runner, with the engine
  * asking `proactiveAdmin` exactly as the server wires it. The model is the only fake: a scripted
  * AG-UI agent that looks and finds nothing, so a request reaching it is a check-in that ran.
+ *
+ * The audit trail and model usage live in Intelligence: a check-in reads its own reads from the trail
+ * there, and the setting's change is read back from it.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const auditStore = createAuditStore(database);
@@ -201,9 +205,6 @@ beforeEach(reset);
 afterAll(async () => {
   await reset();
   await controls?.stop();
-  await database
-    .delete(modelUsage)
-    .where(inArray(modelUsage.agentId, [inboxBot, calendarBot]));
   await database
     .delete(proactiveSettings)
     .where(inArray(proactiveSettings.id, settingIds()));
@@ -571,16 +572,11 @@ describe("the daily cap", () => {
     });
 
     // The change is on the audit trail with who made it, like every other enterprise setting.
-    const trail = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "enterprise.setting_changed"),
-          eq(auditEvents.targetId, "proactiveDailyRuns"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const trail = await auditRows({
+      eventType: "enterprise.setting_changed",
+      targetId: "proactiveDailyRuns",
+      actorUserId: admin.id,
+    });
     expect(trail.map((row) => row.payload)).toContainEqual({
       setting: "proactiveDailyRuns",
       before: 24,

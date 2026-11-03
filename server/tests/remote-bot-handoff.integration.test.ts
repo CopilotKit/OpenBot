@@ -7,15 +7,16 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, pluginGrants, workItems } from "../src/db/schema";
+import { pluginGrants, workItems } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -25,7 +26,12 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * The desk in `agent-handoff.integration.test.ts` reads grants with its own query, so it could not
  * see the store keeping only built-in grantees. This one is wired the way `index.ts` wires the
  * desk: `mayAddress` is `botsReachableFrom`, failing closed.
+ *
+ * What the desk records is read back from the audit trail in Intelligence, by this suite's own Bots
+ * and actor: the trail is shared by every run.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -173,16 +179,10 @@ describe("a Bot at its own endpoint, handing work on", () => {
     });
     expect(refused.ok).toBe(false);
 
-    const [row] = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "agent.handoff_refused"),
-          eq(auditEvents.targetId, REMOTE),
-        ),
-      )
-      .limit(1);
+    const [row] = await auditRows({
+      eventType: "agent.handoff_refused",
+      targetId: REMOTE,
+    });
     expect(row).toBeDefined();
   });
 
@@ -204,10 +204,11 @@ describe("a Bot at its own endpoint, handing work on", () => {
     });
     expect(toRemote).toMatchObject({ ok: true, to: OTHER_REMOTE });
 
-    const offered = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "agent.handoff_offered"));
+    // By this suite's actor, which every hop it sends carries: the trail is shared by every run.
+    const offered = await auditRows({
+      eventType: "agent.handoff_offered",
+      actorUserId: ACTOR,
+    });
     const targets = offered
       .map((row) => row.payload as Record<string, unknown>)
       .filter((payload) => payload.from === REMOTE)

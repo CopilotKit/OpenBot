@@ -17,8 +17,12 @@ import {
   ProactiveNotFoundError,
   ProactiveRefusedError,
 } from "../src/proactive/types";
+import { useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+
+// A run's reads are its audit rows, which live in Intelligence: `readsFor` reads the trail there.
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `proactive-${randomUUID()}`;
