@@ -44,7 +44,86 @@ contain the release number. The protected signing job checks both embedded strin
 
 Ad-hoc signed Mac builds require the first-open exception described in
 [Apple's instructions](https://support.apple.com/en-us/102445). They are for internal testing
-and are not Apple-notarized. See [Windows signing](windows-signing.md) for signed NSIS builds.
+and are not Apple-notarized. See [signed Mac builds](#signed-mac-builds-and-the-updater) for the
+ones people install, and [Windows signing](windows-signing.md) for signed NSIS builds.
+
+## Signed Mac builds and the updater
+
+[Desktop macOS signing](../.github/workflows/desktop-macos-signing.yml) builds OpenBot with the
+Developer ID certificate, notarizes and staples both the `.app` and the `.dmg`, and produces the
+archive the in-app updater installs. It runs one native runner per architecture (`macos-15` for
+Apple silicon, `macos-15-intel` for Intel) and fails unless each build passes all three of:
+
+```sh
+codesign --verify --deep --strict --verbose=2 OpenBot.app
+spctl -a -t exec -vv OpenBot.app
+xcrun stapler validate OpenBot.app
+```
+
+An ad-hoc build fails every one of them, which is why it needs "Open Anyway".
+
+When it runs:
+
+- pull requests and pushes to `main` that touch the desktop run only **Updater regressions
+  (no Apple access)**. It holds no secrets.
+- **Actions → Desktop macOS signing → Run workflow** with `signing-mode: developer-id` signs any
+  ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
+  release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
+  files, and `latest.json` to it. After a release is published, run this against the release tag.
+- a `v*` tag pushed by a person does the same thing automatically. The tag `publish-release.yml`
+  creates does not start it, because GitHub does not start workflows from events made with
+  `GITHUB_TOKEN`. That is why the step above is manual for now.
+
+Signing imports the certificate into a temporary keychain made for the run, and always deletes
+that keychain afterwards, even when an earlier step failed.
+
+Only the signing job produces updater artifacts. `bundle.createUpdaterArtifacts` lives in
+`desktop/src-tauri/tauri.macos-signing.conf.json`, which that job alone passes to Tauri, because
+Tauri refuses to finish any bundle that asks for updater artifacts without
+`TAURI_SIGNING_PRIVATE_KEY`. In the base config it would break ordinary desktop CI and the local
+build above. Do not rename the overlay `tauri.macos.conf.json`: Tauri merges that filename into
+every Mac build automatically.
+
+### The updater
+
+The app checks `https://copilotkit.ai/openbot/desktop/latest.json` once at launch. If a newer
+version is listed, the window offers **Update and restart**. Nothing installs without that click.
+`copilotkit.ai` redirects that address to
+`https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`, so the newest
+non-draft release is always the one offered.
+
+`latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
+that archive's minisign signature. The app verifies the signature against the public key in
+`plugins.updater.pubkey` in `tauri.conf.json` and refuses any archive that does not match. That
+key pair is the Tauri updater key. It is not the Developer ID certificate, and it is not the
+Windows Key Vault certificate. Losing the private key means installed apps can never update
+again, so keep it in 1Password as well as in the environment.
+
+A failed check says nothing, because an offline laptop is not a problem to report. A failed
+install shows its error.
+
+### One-time setup
+
+Create the protected GitHub environment `macos-signing` with required reviewers, and add these
+environment **secrets**:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | The Developer ID Application certificate and private key, exported as `.p12`, base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | The `.p12` export password |
+| `APPLE_SIGNING_IDENTITY` | The identity name, e.g. `Developer ID Application: <Company> (<TEAMID>)` |
+| `APPLE_API_ISSUER` | App Store Connect API issuer ID |
+| `APPLE_API_KEY` | App Store Connect API key ID |
+| `APPLE_API_KEY_P8` | The contents of that key's `AuthKey_<id>.p8`. The job writes it to a temporary file and sets `APPLE_API_KEY_PATH` |
+| `TAURI_SIGNING_PRIVATE_KEY` | The Tauri updater private key (`tauri signer generate`) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password |
+
+The job also reads the existing `OPENBOT_GOOGLE_MODEL_OAUTH_*` variables and secret, as the other
+desktop builds do.
+
+Put the matching updater **public** key in `plugins.updater.pubkey` in
+`desktop/src-tauri/tauri.conf.json`. The signing job refuses to run while that field still holds
+`REPLACE_WITH_UPDATER_PUBKEY`.
 
 ## What merging does
 
@@ -142,6 +221,8 @@ not matter: a pull request opened by a workflow does not trigger them.
 
 **No secrets are required to release.** CI and both release workflows use only the built-in
 `GITHUB_TOKEN`. The desktop build workflows also read `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET`.
+Signed desktop builds are the exception: they read the `macos-signing` and `windows-signing`
+environments described above and in [Windows signing](windows-signing.md).
 
 ## The one thing CI cannot do
 
