@@ -10,6 +10,7 @@ import {
   computerGuidance,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
+  WORKING_STYLE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
@@ -326,7 +327,7 @@ describe("registered Copilot agents", () => {
       model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere.
-      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${WORKING_STYLE_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       apiKey: "openai-secret",
     });
   });
@@ -653,6 +654,7 @@ describe("standing agent roles", () => {
         // stays exact without pinning the wording twice.
         PROVENANCE_GUIDANCE,
         COMPONENT_GUIDANCE,
+        WORKING_STYLE_GUIDANCE,
         ORCHESTRATION_GUIDANCE,
         UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
@@ -863,6 +865,7 @@ describe("standing agent roles", () => {
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
         PROVENANCE_GUIDANCE,
         COMPONENT_GUIDANCE,
+        WORKING_STYLE_GUIDANCE,
         ORCHESTRATION_GUIDANCE,
         UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
@@ -1465,7 +1468,7 @@ describe("when a Bot gives work to subagents", () => {
     );
     const prompt = "prompt" in configuration ? configuration.prompt : undefined;
     expect(prompt).toContain(
-      `${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}`,
+      `${COMPONENT_GUIDANCE}\n\n${WORKING_STYLE_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}`,
     );
   });
 
@@ -1582,7 +1585,7 @@ describe("a person's standing instructions", () => {
       // Byte for byte what a deployment had before any of this existed, which is what most people
       // on most days get.
       expect(prompt).toBe(
-        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${WORKING_STYLE_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       );
     },
   );

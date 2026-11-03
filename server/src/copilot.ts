@@ -15,6 +15,7 @@ import {
   type ComputerGuidance,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
+  WORKING_STYLE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
 import {
   defaultModelFor,
@@ -191,6 +192,8 @@ export function standingRoleMessage(
       PROVENANCE_GUIDANCE,
       // When to answer with a component, which a remote Bot is offered through the run's tools.
       COMPONENT_GUIDANCE,
+      // How to work through a job and talk about it: plan, one step at a time, plain words.
+      WORKING_STYLE_GUIDANCE,
       // When to share its work out to subagents, which OpenBot runs for it through the same tools.
       ORCHESTRATION_GUIDANCE,
       // And for the same reason, how to read the untrusted-content envelope its tool results carry.
@@ -206,6 +209,7 @@ export function standingRoleMessage(
 const STANDING_GUIDANCE = `\n\n${[
   PROVENANCE_GUIDANCE,
   COMPONENT_GUIDANCE,
+  WORKING_STYLE_GUIDANCE,
   ORCHESTRATION_GUIDANCE,
   UNTRUSTED_GUIDANCE,
 ].join("\n\n")}`;
@@ -531,6 +535,8 @@ export function builtInAgentConfiguration(
       PROVENANCE_GUIDANCE,
       // When to answer with a component. Also unconditional: the tools it names vary, the rule not.
       COMPONENT_GUIDANCE,
+      // How to work through a job and talk about it. Unconditional: it names no tool it needs.
+      WORKING_STYLE_GUIDANCE,
       // When to give work to subagents. Worded for a run that holds the tool, which most do.
       ORCHESTRATION_GUIDANCE,
       // How to read the untrusted-content envelope every outside result arrives in.

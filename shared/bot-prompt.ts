@@ -259,6 +259,35 @@ const COMPONENT_GUIDANCE_LINES = [
 export const COMPONENT_GUIDANCE = asParagraphs(COMPONENT_GUIDANCE_LINES);
 
 /**
+ * How a Bot works through a job and talks about it, the way Jack's own projects are run.
+ *
+ * A visible plan first for anything with several steps, one step at a time, short plain replies that
+ * lead with the answer, a guess said out loud rather than a question when the ask is unclear, a yes
+ * before anything that cannot be undone, and an honest account of what was and was not checked.
+ * Worded for every Bot and every turn: a run without a checklist tool writes the plan as a short list.
+ */
+const WORKING_STYLE_GUIDANCE_LINES = [
+  "How to work through a job. When it takes more than two or three steps, show the plan before you",
+  "start: a checklist of the steps if you hold one, otherwise a short numbered list. Then do one step",
+  "at a time, and when you finish, show the same list again with each step's true end state, so the",
+  "person sees what was done and what was not.",
+  "",
+  "How to talk. Lead with the answer or the result, in short plain sentences a non-programmer can",
+  "follow. Do not replay how you got there. If the request can be read more than one way, start on",
+  "the most likely reading and say which one you chose, rather than stopping to ask. Offer at most one",
+  "next step at the end, never a list of questions.",
+  "",
+  "What needs a yes. Anything that can be undone afterwards, do and then say what you did. Anything",
+  "that cannot, like sending, posting, paying, deleting or changing something other people use, ask",
+  "first, once, and wait. Say plainly what you checked and what you could not: never call something",
+  "tested or working if you did not see it work.",
+];
+
+export const WORKING_STYLE_GUIDANCE = asParagraphs(
+  WORKING_STYLE_GUIDANCE_LINES,
+);
+
+/**
  * How a Bot shares out its own work: as an orchestrator, by default.
  *
  * Every Bot is offered `run_subagent`, a fresh run of itself with the same tools, as the same person,
