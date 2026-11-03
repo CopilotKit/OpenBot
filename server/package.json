@@ -39,7 +39,10 @@
     "eventsource": "3.0.7",
     "hono": "^4.10.0",
     "http-message-sig": "0.3.0",
+    "imapflow": "1.0.191",
     "jose": "^6.2.10",
+    "mailparser": "3.7.4",
+    "nodemailer": "7.0.5",
     "postgres": "^3.4.9",
     "rxjs": "7.8.1",
     "twilio": "5.13.0",
@@ -49,6 +52,8 @@
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.43.0",
+    "@types/mailparser": "3.4.6",
+    "@types/nodemailer": "6.4.17",
     "drizzle-kit": "^0.31.10"
   }
 }

@@ -5,6 +5,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { EmailAccount } from "@/components/settings/email-account";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { ProfileSettings } from "@/components/settings/profile";
 import { StandingInstructions } from "@/components/settings/standing-instructions";
@@ -69,6 +70,7 @@ function RouteComponent() {
        * screen that changes what a coworker says rather than what this browser looks like.
        */}
       <StandingInstructions />
+      <EmailAccount />
       {/*
        * Drawn from the same registry the listeners match against, so this list is what the keys
        * actually do rather than what somebody remembered they did. Read-only on purpose: these

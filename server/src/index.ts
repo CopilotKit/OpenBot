@@ -225,6 +225,12 @@ import { useArcadeClient } from "./plugins/arcade";
 import { createArcadeClient } from "./plugins/arcade-adapter";
 import { assertActivatable, providerDecision } from "./plugins/broker";
 import { useRoutineTools } from "./plugins/builtin-routines";
+import { imapMailClient } from "./mail/client";
+import {
+  createMailAccountStore,
+  createMailService,
+  useMailService,
+} from "./mail/service";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
@@ -1118,6 +1124,14 @@ if (composio) {
  */
 const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
+// Email's tools and the Settings card reach each person's own mailbox through this, the same way.
+useMailService(
+  createMailService({
+    store: createMailAccountStore(database),
+    client: imapMailClient,
+    encryptionKey: config.keyEncryptionKey,
+  }),
+);
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {
     const actor = await actorFor(ownerUserId);

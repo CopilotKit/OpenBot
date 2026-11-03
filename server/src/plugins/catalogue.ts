@@ -497,6 +497,24 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     ]),
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },
+  {
+    key: "mail",
+    title: "Email",
+    vendor: "OpenBot",
+    summary:
+      "Read, search and send email from each person's own mailbox, with the app password they saved.",
+    /*
+     * First-party and in-process, as Routines is: the server logs in to the person's mailbox over
+     * IMAP and SMTP itself. In the catalogue so an administrator grants it per Bot, and so sending
+     * is a named write the action policy governs.
+     */
+    host: "builtin://mail",
+    path: "/",
+    transport: "builtin-mail",
+    auth: Object.freeze({ kind: "builtin" }),
+    writeTools: Object.freeze(["send_email"]),
+    docsUrl: "https://github.com/itsjustajack/openbot/blob/main/docs/email.md",
+  },
 ]);
 
 const BY_KEY = new Map(CATALOGUE.map((entry) => [entry.key, entry]));

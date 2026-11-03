@@ -1,4 +1,5 @@
 import * as arcade from "./arcade";
+import * as builtinMail from "./builtin-mail";
 import * as builtinRoutines from "./builtin-routines";
 import * as composio from "./composio";
 import * as driveRest from "./google-drive-rest";
@@ -123,6 +124,7 @@ export type TransportKind =
   | "mcp"
   | "google-drive-rest"
   | "builtin-routines"
+  | "builtin-mail"
   | "composio"
   | "arcade";
 
@@ -152,6 +154,7 @@ const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,
   "builtin-routines": builtinRoutines,
+  "builtin-mail": builtinMail,
   composio,
   arcade,
 };

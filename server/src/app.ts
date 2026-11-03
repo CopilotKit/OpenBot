@@ -107,6 +107,7 @@ import type { MemoryIngestion } from "./memory/ingestion";
 import { createMemoryRoutes } from "./memory/routes";
 import type { MemoryStore } from "./memory/store";
 import { parsePageLimit } from "./paging";
+import { createMailRoutes } from "./mail/routes";
 import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
 import type { SignInService } from "./passwords/service";
 import type { OnboardingStore } from "./people/onboarding";
@@ -1719,6 +1720,8 @@ export function createApp(
       createPasswordRoutes(coworker.passwords, requireUser),
     );
   }
+  // A person's own mailbox for the Email tools. Answers 503 when the server has no mail service.
+  app.route("/api/mail", createMailRoutes(requireUser));
   if (coworker?.proactive)
     app.route(
       "/api/proactive",
