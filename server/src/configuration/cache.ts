@@ -27,8 +27,11 @@ export type RecordCache<R> = {
   forget(key: string): void;
   /** Change every held record, in memory only, for a fact Intelligence already applied (a purge). */
   rewrite(change: (record: R) => R | null): void;
-  /** An announcement: read the record unless the one held is already that new. */
-  heard(key: string, revision: number): Promise<void>;
+  /**
+   * An announcement: read the record unless the one held is already that new. A removal is always
+   * read: it carries the revision the record had when it went, which the one held may equal.
+   */
+  heard(key: string, revision: number, change?: string): Promise<void>;
   /** Read one record from Intelligence now. */
   refresh(key: string): Promise<R | null>;
   /** Read the whole set again. */
@@ -119,10 +122,15 @@ export function createRecordCache<R>(options: {
         else if (next !== record) records.set(key, next);
       }
     },
-    async heard(key, revision) {
+    async heard(key, revision, change) {
       try {
         const held = records.get(key);
-        if (held && options.revisionOf(held) >= revision) return;
+        if (
+          change !== "removed" &&
+          held &&
+          options.revisionOf(held) >= revision
+        )
+          return;
         await readThrough(key);
       } catch (error) {
         console.warn(

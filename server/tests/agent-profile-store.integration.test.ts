@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { authFromConfiguration } from "../src/agents/auth-header";
 import {
   AgentNotFoundError,
@@ -25,14 +25,18 @@ import type {
 import { DEPLOYMENT_ROUTES } from "../src/computer/deployment-routes";
 import { createDatabase } from "../src/db/client";
 import {
-  agentPreferences,
   channelAgents,
   channels,
-  deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { removeBots, seedBot, useTestBots } from "./support/bots";
+import {
+  removeBots,
+  seedBot,
+  storedPreferences,
+  useTestBots,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -46,7 +50,6 @@ const testPrefix = `agent-profile-store-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
-const createdPackageIds: string[] = [];
 
 afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
@@ -54,11 +57,6 @@ afterEach(async () => {
   }
   // For good, with this deployment's rows that named them, as deleting the agents row used to.
   await removeBots(createdAgentIds.splice(0));
-  for (const packageId of createdPackageIds.splice(0)) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.id, packageId));
-  }
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
@@ -87,18 +85,14 @@ async function createUser(role: AgentActor["role"] = "user") {
   return { id: userId, role } satisfies AgentActor;
 }
 
+/** A tenant package, recorded in Intelligence as the server records the one it applies. */
 async function createPackage() {
-  const [deploymentPackage] = await database
-    .insert(deploymentPackages)
-    .values({
-      tenantId: id("tenant"),
-      sourcePath: "test/profile-store",
-      checksum: randomUUID(),
-    })
-    .returning();
-  if (!deploymentPackage) throw new Error("Expected deployment package.");
-  createdPackageIds.push(deploymentPackage.id);
-  return deploymentPackage;
+  const configuration = await useTestConfiguration();
+  return configuration.client.packages.record(
+    id("tenant"),
+    { source: "test/profile-store", checksum: randomUUID() },
+    `test:${randomUUID()}`,
+  );
 }
 
 async function createProfileFixture(options: {
@@ -315,15 +309,9 @@ describe("agent profile store integration", () => {
     await store.setHidden(owner, source.agentId, false);
     expectListed(await store.list(owner), source.agentId, true);
     expectListed(await store.list(owner, true), source.agentId, false);
-    const [preference] = await database
-      .select()
-      .from(agentPreferences)
-      .where(
-        and(
-          eq(agentPreferences.userId, owner.id),
-          eq(agentPreferences.agentId, source.agentId),
-        ),
-      );
+    const preference = (await storedPreferences(owner.id)).bots.find(
+      (entry) => entry.botId === source.agentId,
+    );
     expect(preference?.hiddenAt).toBeNull();
   });
 
@@ -352,15 +340,9 @@ describe("agent profile store integration", () => {
     expect(await pinnedFor(owner)).toBe(true);
     await store.setPinned(owner, source.agentId, false);
     expect(await pinnedFor(owner)).toBe(false);
-    const [preference] = await database
-      .select()
-      .from(agentPreferences)
-      .where(
-        and(
-          eq(agentPreferences.userId, owner.id),
-          eq(agentPreferences.agentId, source.agentId),
-        ),
-      );
+    const preference = (await storedPreferences(owner.id)).bots.find(
+      (entry) => entry.botId === source.agentId,
+    );
     expect(preference?.pinnedAt).toBeNull();
     expect(preference?.hiddenAt).toBeNull();
   });
@@ -606,11 +588,11 @@ describe("agent profile store integration", () => {
     });
     expect(duplicate.id).not.toBe(source.agentId);
     createdAgentIds.push(duplicate.id);
-    const duplicatePreferences = await database
-      .select()
-      .from(agentPreferences)
-      .where(eq(agentPreferences.agentId, duplicate.id));
-    expect(duplicatePreferences).toHaveLength(0);
+    expect(
+      (await storedPreferences(owner.id)).bots.filter(
+        (entry) => entry.botId === duplicate.id,
+      ),
+    ).toHaveLength(0);
   });
 
   test("duplicates no channel membership or Intelligence mapping from the source", async () => {

@@ -20,13 +20,13 @@ import {
   seatOf,
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
+import { auditEvents, capabilitySettings, users } from "../src/db/schema";
 import {
-  auditEvents,
-  capabilitySettings,
-  deploymentPackages,
-  users,
-} from "../src/db/schema";
-import { removeBots, seedBot, useTestBots } from "./support/bots";
+  recordTestPackage,
+  removeBots,
+  seedBot,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -99,11 +99,6 @@ afterAll(async () => {
     .filter((bot) => people.includes(bot.ownerUserId))
     .map((bot) => bot.id);
   await removeBots([...made, `iso-pkg-${suite}`]);
-  if (packageId) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.id, packageId));
-  }
   // Audit rows are append-only and stay, as every other suite's do.
   await database.delete(users).where(like(users.email, `%${suite}%`));
   await database.$client.end({ timeout: 5 });
@@ -392,15 +387,8 @@ describe("changing it later", () => {
   });
 
   test("a Bot that belongs to no person is refused one, and the trail says why", async () => {
-    const [deploymentPackage] = await database
-      .insert(deploymentPackages)
-      .values({
-        tenantId: `iso-tenant-${suite}`,
-        sourcePath: "test/isolated-bots",
-        checksum: randomUUID(),
-      })
-      .returning();
-    packageId = deploymentPackage?.id;
+    const deploymentPackage = await recordTestPackage(`iso-tenant-${suite}`);
+    packageId = deploymentPackage.id;
     const agentId = `iso-pkg-${suite}`;
     await seedBot({
       id: agentId,

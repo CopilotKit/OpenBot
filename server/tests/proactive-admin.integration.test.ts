@@ -34,7 +34,6 @@ import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   auditEvents,
-  botLifecycle,
   capabilitySettings,
   enterpriseSettings,
   modelUsage,
@@ -64,7 +63,13 @@ import type {
   SuggestionStatus,
 } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  setBotPreference,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -112,6 +117,7 @@ const settingOf = (person: { id: string }, bot: string) =>
   settings.get(`${person.id}:${bot}`) as ProactiveSetting;
 
 beforeAll(async () => {
+  await useTestConfiguration();
   await database.insert(users).values([
     { ...admin, name: "Admin" },
     { ...seller, name: "Seller", groups: [`sales-${suite}`] },
@@ -179,9 +185,7 @@ async function reset() {
   await database
     .delete(proactiveRuns)
     .where(inArray(proactiveRuns.settingId, settingIds()));
-  await database
-    .delete(botLifecycle)
-    .where(inArray(botLifecycle.agentId, [inboxBot, calendarBot]));
+  await clearPreferences(people.map((person) => person.id));
   await database
     .update(users)
     .set({ preferences: {} })
@@ -710,11 +714,7 @@ describe("the numbers", () => {
       .update(users)
       .set({ preferences: { proactive: "off" } })
       .where(eq(users.id, admin.id));
-    await database.insert(botLifecycle).values({
-      ownerUserId: seller.id,
-      agentId: calendarBot,
-      pausedAt: new Date(),
-    });
+    await setBotPreference(seller.id, calendarBot, { pausedAt: new Date() });
     await database
       .update(proactiveSettings)
       .set({ enabled: false })

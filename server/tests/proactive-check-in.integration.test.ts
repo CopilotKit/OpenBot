@@ -27,7 +27,6 @@ import { createDatabase } from "../src/db/client";
 import { modelUsage } from "../src/db/schema/admin";
 import { channels, users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
-import { botLifecycle } from "../src/db/schema/lifecycle";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import {
   proactivePeople,
@@ -61,7 +60,13 @@ import {
 } from "../src/proactive/types";
 import { CHECK_IN_OPENING } from "../src/proactive/window";
 import { createWorkQueue } from "../src/work/queue";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  setBotPreference,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -125,6 +130,7 @@ let calendar: ProactiveSetting;
 const FAR = new Date("2100-01-01T00:00:00Z");
 
 beforeAll(async () => {
+  await useTestConfiguration();
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
@@ -229,9 +235,7 @@ async function reset() {
   await database
     .delete(proactiveRuns)
     .where(eq(proactiveRuns.ownerUserId, owner));
-  await database
-    .delete(botLifecycle)
-    .where(eq(botLifecycle.ownerUserId, owner));
+  await clearPreferences([owner]);
   await database
     .update(users)
     .set({ preferences: sql`${users.preferences} - 'proactive'` })
@@ -793,9 +797,7 @@ describe("the gates, before any model call", () => {
   });
 
   test("a Bot the person paused is never claimed, and a Run now is skipped as paused", async () => {
-    await database
-      .insert(botLifecycle)
-      .values({ ownerUserId: owner, agentId: inboxBot, pausedAt: new Date() });
+    await setBotPreference(owner, inboxBot, { pausedAt: new Date() });
     await due(inbox);
     const { engine, requests } = replica();
     await engine.sweep();
@@ -1675,9 +1677,7 @@ describe("the ping", () => {
   });
 
   test("a Bot set to notify nothing never holds the slot: its items stay listed and are never pinged", async () => {
-    await database
-      .insert(botLifecycle)
-      .values({ ownerUserId: owner, agentId: inboxBot, notify: "none" });
+    await setBotPreference(owner, inboxBot, { notify: "none" });
     await openItem(inbox, "Reply to Dana");
     await replica().engine.sweep();
     expect(await pingsOf()).toEqual([]);

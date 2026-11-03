@@ -7,28 +7,30 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   ComponentNotFoundError,
   type ComponentStore,
   createComponentStore,
 } from "../src/components/store";
 import { createDatabase } from "../src/db/client";
+import { auditEvents } from "../src/db/schema";
 import {
-  auditEvents,
-  componentExclusions,
-  componentFunctions,
-  components,
-} from "../src/db/schema";
-import { removeBots, seedBot } from "./support/bots";
+  makeTestComponent,
+  removeBots,
+  removeTestComponents,
+  seedBot,
+  storedComponent,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
- * The grant surface, against a real database.
+ * The grant surface, against a real Intelligence.
  *
- * Not mocked: every interesting property here is a property of the query. A left join that has to
- * return a row for a component nobody configured, a purge that has to take a Bot's withholdings
- * with it, a primary key that has to make withholding twice a no-op.
+ * Not mocked: every interesting property here is a property of the stored catalogue. A component
+ * nobody configured that has to be allowed, a purge that has to take a Bot's withholdings with it,
+ * withholding twice that has to be a no-op.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -44,18 +46,11 @@ const fixtureAgentIds = new Set([botA, botB]);
 
 async function makeComponent(name: string, published: boolean) {
   fixtureComponentNames.add(name);
-  await database.insert(components).values({
-    name,
-    title: `Test ${name}`,
-    kind: "chart",
-    draftDescription: "The draft wording.",
-    publishedDescription: published ? "The published wording." : null,
-    published,
-    ...(published ? { publishedAt: new Date() } : {}),
-  });
+  await makeTestComponent(name, { published });
 }
 
 beforeAll(async () => {
+  await useTestConfiguration();
   for (const id of [botA, botB]) await seedBot({ id, name: id });
   await makeComponent(componentName, true);
   await makeComponent(otherName, false);
@@ -230,14 +225,7 @@ describe("component data functions against PostgreSQL", () => {
 
 afterAll(async () => {
   // Register before writes so a failed assertion or partially completed setup still has teardown.
-  const names = [...fixtureComponentNames];
-  await database
-    .delete(componentFunctions)
-    .where(inArray(componentFunctions.componentName, names));
-  await database
-    .delete(componentExclusions)
-    .where(inArray(componentExclusions.componentName, names));
-  await database.delete(components).where(inArray(components.name, names));
+  await removeTestComponents(fixtureComponentNames);
   await removeBots([...fixtureAgentIds]);
 });
 
@@ -294,16 +282,14 @@ describe("deciding whether a Bot may use a component", () => {
 describe("withholding", () => {
   test("withholding twice does not move the date it was withheld", async () => {
     await store.revoke(componentName, botB, "first@example.test");
-    const [first] = await database
-      .select()
-      .from(componentExclusions)
-      .where(eq(componentExclusions.agentId, botB));
+    const withheldFromB = async () =>
+      ((await storedComponent(componentName))?.withheldFrom ?? []).filter(
+        (entry) => entry.botId === botB,
+      );
+    const [first] = await withheldFromB();
 
     await store.revoke(componentName, botB, "second@example.test");
-    const rows = await database
-      .select()
-      .from(componentExclusions)
-      .where(eq(componentExclusions.agentId, botB));
+    const rows = await withheldFromB();
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.withheldBy).toBe("first@example.test");
@@ -326,14 +312,19 @@ describe("withholding", () => {
     await seedBot({ id: doomed, name: doomed });
     await store.revoke(componentName, doomed, "x@example.test");
 
-    // Purged in Intelligence: this deployment's rows that named it go, as the foreign key took them.
+    // Purged in Intelligence: the withholdings that named it go with it, as the foreign key took them.
     await removeBots([doomed]);
 
-    const left = await database
-      .select()
-      .from(componentExclusions)
-      .where(eq(componentExclusions.agentId, doomed));
+    const left = (
+      (await storedComponent(componentName))?.withheldFrom ?? []
+    ).filter((entry) => entry.botId === doomed);
     expect(left).toHaveLength(0);
+    // And this process's copy forgot it too.
+    expect(
+      (await store.list())
+        .find((component) => component.name === componentName)
+        ?.withheldFrom.includes(doomed),
+    ).toBeFalse();
   });
 });
 
@@ -379,10 +370,7 @@ describe("publishing", () => {
     await store.revoke(componentName, botA, "x@example.test");
     await store.unpublish(componentName, "editor@example.test");
 
-    const rows = await database
-      .select()
-      .from(componentExclusions)
-      .where(eq(componentExclusions.componentName, componentName));
+    const rows = (await storedComponent(componentName))?.withheldFrom ?? [];
 
     // Unpublishing is "nobody may use this for now", not "forget who was held back from it".
     // Clearing them would quietly hand it to a Bot on the next publish.
@@ -510,16 +498,12 @@ describe("what a component may read", () => {
   });
 
   test("granting twice does not move the date it was granted", async () => {
-    const [first] = await database
-      .select()
-      .from(componentFunctions)
-      .where(eq(componentFunctions.componentName, componentName));
+    const functionsOf = async () =>
+      (await storedComponent(componentName))?.functions ?? [];
+    const [first] = await functionsOf();
 
     await store.grantFunction(componentName, fn, "somebody-else@example.test");
-    const rows = await database
-      .select()
-      .from(componentFunctions)
-      .where(eq(componentFunctions.componentName, componentName));
+    const rows = await functionsOf();
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.grantedBy).toBe("admin@example.test");
@@ -544,13 +528,12 @@ describe("what a component may read", () => {
     await makeComponent(doomed, true);
     await store.grantFunction(doomed, fn, "admin@example.test");
 
-    await database.delete(components).where(eq(components.name, doomed));
+    await removeTestComponents([doomed]);
 
-    const left = await database
-      .select()
-      .from(componentFunctions)
-      .where(eq(componentFunctions.componentName, doomed));
-    expect(left).toHaveLength(0);
+    // Gone with it: a component made again under the name starts with no grants.
+    await makeComponent(doomed, true);
+    expect(await store.mayCall(doomed, fn)).toBeFalse();
+    expect((await storedComponent(doomed))?.functions).toEqual([]);
   });
 
   test("a function this build does not ship cannot be run", async () => {

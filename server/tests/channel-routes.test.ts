@@ -36,11 +36,16 @@ import {
   channelAgents,
   channelMemberships,
   channels,
-  deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { deleteBot, removeBots, seedBot, useTestBots } from "./support/bots";
+import {
+  deleteBot,
+  recordTestPackage,
+  removeBots,
+  seedBot,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
@@ -888,7 +893,6 @@ const testPrefix = `channel-store-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
-const createdPackageIds: string[] = [];
 
 afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
@@ -896,11 +900,6 @@ afterEach(async () => {
       .delete(intelligenceChannelMappings)
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
-  }
-  for (const packageId of createdPackageIds.splice(0)) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.id, packageId));
   }
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
@@ -1665,16 +1664,7 @@ describe("channel soft delete", () => {
 
   test("refuses to delete a package-defined channel", async () => {
     const actor = await createPersistentUser();
-    const [pkg] = await database
-      .insert(deploymentPackages)
-      .values({
-        tenantId: persistentId("tenant"),
-        sourcePath: "/tmp/none",
-        checksum: "0",
-      })
-      .returning({ id: deploymentPackages.id });
-    if (!pkg) throw new Error("package row was not created");
-    createdPackageIds.push(pkg.id);
+    const pkg = await recordTestPackage(persistentId("tenant"));
     const channelId = persistentId("package-channel");
     await database.insert(channels).values({
       id: channelId,

@@ -8,10 +8,10 @@ import { createDatabase } from "../src/db/client";
 import {
   channelMemberships,
   channels,
-  userInstructions,
   userRoles,
   users,
 } from "../src/db/schema";
+import { changePreferences, storedPreferences } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -47,9 +47,9 @@ test("verified employee keeps the same-email local account and history identity 
       onboardingCompletedAt: new Date(),
     });
     await setRole(database, localId, "admin");
-    await database
-      .insert(userInstructions)
-      .values({ userId: localId, instructions: history });
+    await changePreferences(localId, [
+      { op: "setInstructions", instructions: history },
+    ]);
     await database.insert(channels).values({
       id: channelId,
       name: "Existing conversation",
@@ -81,11 +81,7 @@ test("verified employee keeps the same-email local account and history identity 
     expect(
       await database.select().from(users).where(eq(users.id, authorityId)),
     ).toHaveLength(0);
-    const [instructions] = await database
-      .select()
-      .from(userInstructions)
-      .where(eq(userInstructions.userId, localId));
-    expect(instructions?.instructions).toBe(history);
+    expect((await storedPreferences(localId)).instructions).toBe(history);
     const [saved] = await database
       .select()
       .from(users)

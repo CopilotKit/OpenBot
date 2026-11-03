@@ -214,13 +214,40 @@ export async function copyLocalConfigurationToIntelligence(
       assignedAt: row.assignedAt,
     });
   }
+  /*
+   * Checked against what Intelligence answered, which is what it committed (or, for a second replica
+   * sending the same copy, what it committed for the first). A record somebody changed since is
+   * refused by its revision and left as they made it.
+   */
+  const missing: string[] = [];
+  const accessCopied = new Set<string>();
   for (const [botId, changes] of accessByBot) {
-    await client.access
+    const answer = await client.access
       .change(changes, copyKey("access", changes), { [botId]: 0 })
       .catch((error: unknown) => {
-        if (error instanceof ConfigurationConflictError) return;
+        if (error instanceof ConfigurationConflictError) return null;
         refusedBy(`Bot ${botId}'s access`)(error);
+        return null;
       });
+    if (!answer) continue;
+    accessCopied.add(botId);
+    const record = answer.records.find((held) => held.botId === botId);
+    for (const change of changes) {
+      if (
+        change.op === "grant" &&
+        !record?.grants.some(
+          (grant) => grant.kind === change.kind && grant.ref === change.ref,
+        )
+      )
+        missing.push(`Bot ${botId}'s grant of ${change.kind} ${change.ref}`);
+      if (change.op === "publish" && !record?.publication)
+        missing.push(`Bot ${botId}'s publication`);
+      if (
+        change.op === "assign" &&
+        !record?.assignments.some((held) => held.group === change.group)
+      )
+        missing.push(`Bot ${botId}'s assignment to ${change.group}`);
+    }
   }
 
   /* --------------------------------------------------------------------------------------------
@@ -301,13 +328,36 @@ export async function copyLocalConfigurationToIntelligence(
       serverId: row.serverId,
       allowed: true,
     });
+  const preferencesCopied = new Set<string>();
   for (const [userId, changes] of preferencesByPerson) {
-    await client.preferences
+    const answer = await client.preferences
       .change(userId, changes, copyKey("preferences", { userId, changes }), 0)
       .catch((error: unknown) => {
-        if (error instanceof ConfigurationConflictError) return;
+        if (error instanceof ConfigurationConflictError) return null;
         refusedBy(`${userId}'s preferences`)(error);
+        return null;
       });
+    if (!answer) continue;
+    preferencesCopied.add(userId);
+    const record = answer.preferences;
+    const counts = {
+      bots: changes.filter((change) => change.op === "setBot").length,
+      routes: changes.filter((change) => change.op === "setRoute").length,
+      optOuts: changes.filter((change) => change.op === "optOut").length,
+      consents: changes.filter((change) => change.op === "setConsent").length,
+      defaults: changes.filter((change) => change.op === "setConsentDefault")
+        .length,
+    };
+    if (
+      record.bots.length < counts.bots ||
+      record.routes.length < counts.routes ||
+      record.optOuts.length < counts.optOuts ||
+      record.consents.length < counts.consents ||
+      record.consentDefaults.length < counts.defaults ||
+      (changes.some((change) => change.op === "setInstructions") &&
+        record.instructions === null)
+    )
+      missing.push(`part of ${userId}'s preferences`);
   }
 
   /* --------------------------------------------------------------------------------------------
@@ -400,9 +450,8 @@ export async function copyLocalConfigurationToIntelligence(
   }
 
   /* --------------------------------------------------------------------------------------------
-   * Verify: every piece copied is in Intelligence now.
+   * Verify: every record copied is in Intelligence now.
    * ------------------------------------------------------------------------------------------ */
-  const missing: string[] = [];
   const recordedPackages = new Map(
     (await client.packages.all()).map((record) => [record.name, record]),
   );
@@ -419,60 +468,17 @@ export async function copyLocalConfigurationToIntelligence(
   );
   for (const row of skillRows)
     if (!presentSkills.has(row.slug)) missing.push(`skill ${row.slug}`);
-  const presentAccess = new Map(
-    (await client.access.all()).map((record) => [record.botId, record]),
+  const presentAccess = new Set(
+    (await client.access.all()).map((record) => record.botId),
   );
-  for (const [botId, changes] of accessByBot) {
-    const record = presentAccess.get(botId);
-    if (!record) {
-      missing.push(`Bot ${botId}'s access`);
-      continue;
-    }
-    for (const change of changes) {
-      if (
-        change.op === "grant" &&
-        !record.grants.some(
-          (grant) => grant.kind === change.kind && grant.ref === change.ref,
-        )
-      )
-        missing.push(`Bot ${botId}'s grant of ${change.kind} ${change.ref}`);
-      if (change.op === "publish" && !record.publication)
-        missing.push(`Bot ${botId}'s publication`);
-      if (
-        change.op === "assign" &&
-        !record.assignments.some((held) => held.group === change.group)
-      )
-        missing.push(`Bot ${botId}'s assignment to ${change.group}`);
-    }
-  }
-  const presentPreferences = new Map(
-    (await client.preferences.all()).map((record) => [record.userId, record]),
+  for (const botId of accessCopied)
+    if (!presentAccess.has(botId)) missing.push(`Bot ${botId}'s access`);
+  const presentPreferences = new Set(
+    (await client.preferences.all()).map((record) => record.userId),
   );
-  for (const [userId, changes] of preferencesByPerson) {
-    const record = presentPreferences.get(userId);
-    if (!record) {
+  for (const userId of preferencesCopied)
+    if (!presentPreferences.has(userId))
       missing.push(`${userId}'s preferences`);
-      continue;
-    }
-    const counts = {
-      bots: changes.filter((change) => change.op === "setBot").length,
-      routes: changes.filter((change) => change.op === "setRoute").length,
-      optOuts: changes.filter((change) => change.op === "optOut").length,
-      consents: changes.filter((change) => change.op === "setConsent").length,
-      defaults: changes.filter((change) => change.op === "setConsentDefault")
-        .length,
-    };
-    if (
-      record.bots.length < counts.bots ||
-      record.routes.length < counts.routes ||
-      record.optOuts.length < counts.optOuts ||
-      record.consents.length < counts.consents ||
-      record.consentDefaults.length < counts.defaults ||
-      (changes.some((change) => change.op === "setInstructions") &&
-        record.instructions === null)
-    )
-      missing.push(`part of ${userId}'s preferences`);
-  }
   const presentComponents = new Set(
     (await client.components.all()).map((component) => component.name),
   );

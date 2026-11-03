@@ -3,9 +3,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
+import {
+  createBotConfiguration,
+  installBotConfiguration,
+} from "../src/configuration/directory";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources } from "../src/db/schema/memory";
 import {
   brokeredConnections,
@@ -22,7 +25,13 @@ import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import { createProactiveStore } from "../src/proactive/store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  storedPreferences,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -100,12 +109,11 @@ async function reset() {
   await database
     .delete(proactiveSettings)
     .where(inArray(proactiveSettings.ownerUserId, [owner, other]));
-  await database
-    .delete(defaultOptOuts)
-    .where(inArray(defaultOptOuts.ownerUserId, [owner, other]));
+  await clearPreferences([owner, other]);
 }
 
 beforeAll(async () => {
+  await useTestConfiguration();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
@@ -271,16 +279,48 @@ describe("memory sources, on by default", () => {
     expect(await defaults().adoptSources(owner, bot)).toEqual([]);
     expect(await sourcesOf(owner, bot)).toEqual([]);
     expect(
-      await database
-        .select({
-          feature: defaultOptOuts.feature,
-          scope: defaultOptOuts.scope,
-        })
-        .from(defaultOptOuts)
-        .where(eq(defaultOptOuts.ownerUserId, owner)),
+      (await storedPreferences(owner)).optOuts.map((optOut) => ({
+        feature: optOut.feature,
+        scope: optOut.scope,
+      })),
     ).toEqual([{ feature: "memory_source", scope: app }]);
     // The person's other Bot is a separate choice.
     expect(await defaults().adoptSources(owner, secondBot)).toHaveLength(1);
+  });
+
+  /*
+   * The opt-out is in Intelligence and each replica holds a copy. A removal on one replica writes the
+   * opt-out there before it deletes the row; another replica that has not heard of it yet would
+   * adopt the app straight back from its stale copy. So an adoption that created something asks
+   * Intelligence afresh and takes back what an opt-out now covers.
+   */
+  test("an opt-out another replica wrote a moment ago wins, though this replica has not heard of it", async () => {
+    await reset();
+    const heard = await useTestConfiguration();
+    // A replica whose copy predates the opt-out: no announcements reach it, no timer re-reads it.
+    const deaf = createBotConfiguration({
+      client: heard.client,
+      registry: {
+        subscribe: async () => {
+          throw new Error("This replica hears nothing.");
+        },
+      },
+      resyncIntervalMs: 3_600_000,
+    });
+    await deaf.start();
+    await heard.client.preferences.change(
+      owner,
+      [{ op: "optOut", botId: bot, feature: "memory_source", scope: app }],
+      `test:${randomUUID()}`,
+    );
+    installBotConfiguration(deaf);
+    try {
+      expect(await defaults().adoptSources(owner, bot)).toEqual([]);
+      expect(await sourcesOf(owner, bot)).toEqual([]);
+    } finally {
+      deaf.stop();
+      installBotConfiguration(heard);
+    }
   });
 
   test("a source made by hand on the app counts as the person's choice", async () => {

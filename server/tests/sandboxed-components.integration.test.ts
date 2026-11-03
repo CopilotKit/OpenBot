@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import {
   createSandboxedStore,
@@ -8,12 +7,13 @@ import {
 } from "../src/components/sandboxed";
 import { createDatabase } from "../src/db/client";
 import {
-  componentExclusions,
-  componentFunctions,
-  components,
-  sandboxedComponents,
-} from "../src/db/schema";
-import { removeBots, seedBot } from "./support/bots";
+  makeTestComponent,
+  removeBots,
+  removeTestComponents,
+  seedBot,
+  storedComponent,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -34,11 +34,12 @@ const name = `custom_${slug}`;
 
 const store = createSandboxedStore(database, createAuditStore(database));
 
+beforeAll(async () => {
+  await useTestConfiguration();
+});
+
 afterAll(async () => {
-  await database
-    .delete(sandboxedComponents)
-    .where(eq(sandboxedComponents.name, name));
-  await database.delete(components).where(eq(components.name, name));
+  if (await storedComponent(name)) await removeTestComponents([name]);
 });
 
 describe("authoring a component without a rebuild", () => {
@@ -60,10 +61,7 @@ describe("authoring a component without a rebuild", () => {
 
     // On the grant grid, so an administrator can decide about it before it can be drawn rather than
     // after. Unpublished and granted to nobody, which is how a compiled component arrives too.
-    const [governance] = await database
-      .select()
-      .from(components)
-      .where(eq(components.name, name));
+    const governance = await storedComponent(name);
     expect(governance?.kind).toBe("sandboxed");
     expect(governance?.published).toBe(false);
     expect(governance?.publishedDescription).toBeNull();
@@ -93,10 +91,7 @@ describe("authoring a component without a rebuild", () => {
     // Both halves, because either on its own is an invalid publication state: a description with no markup
     // offers the model a component that draws the old version, and markup with no description leaves
     // a component no model is ever told about.
-    const [governance] = await database
-      .select()
-      .from(components)
-      .where(eq(components.name, name));
+    const governance = await storedComponent(name);
     expect(governance?.published).toBe(true);
     expect(governance?.publishedDescription).toBe("Draws a test card.");
   });
@@ -142,12 +137,9 @@ describe("authoring a component without a rebuild", () => {
 
   test("deleting takes the governance row with it", async () => {
     await store.remove(name, "admin@openbot.local");
-    const [governance] = await database
-      .select()
-      .from(components)
-      .where(eq(components.name, name));
-    // A governance row pointing at a component with no source is the "catalogue disagrees with the
-    // build" state the components table exists to make visible.
+    const governance = (await storedComponent(name)) ?? undefined;
+    // Governance pointing at a component with no source is the "catalogue disagrees with the build"
+    // state the catalogue exists to make visible.
     expect(governance).toBeUndefined();
   });
 });
@@ -166,32 +158,34 @@ describe("deleting a name this surface does not own", () => {
   beforeAll(async () => {
     await seedBot({ id: bot, name: bot });
     // A component the build ships, as `syncCatalogue` would have written it.
-    await database.insert(components).values({
-      name: compiled,
-      title: "A compiled chart",
-      kind: "chart",
-      draftDescription: "Drawn by the build.",
-      publishedDescription: "Drawn by the build.",
-      published: true,
-      publishedAt: new Date(),
-      updatedBy: "the build",
-    });
-    // One Bot held back from it. This row is the whole of the decision: a published component is
-    // available to every Bot unless it exists.
-    await database.insert(componentExclusions).values({
-      componentName: compiled,
-      agentId: bot,
-      withheldBy: "admin@openbot.local",
-    });
-    await database.insert(componentFunctions).values({
-      componentName: compiled,
-      functionName: "listRecentOrders",
-      grantedBy: "admin@openbot.local",
-    });
+    const configuration = await useTestConfiguration();
+    configuration.components.apply(
+      await configuration.client.components.create(
+        compiled,
+        {
+          title: "A compiled chart",
+          kind: "chart",
+          draftDescription: "Drawn by the build.",
+          publishedDescription: "Drawn by the build.",
+          published: true,
+          publishedAt: new Date(),
+          updatedBy: "the build",
+          // One function it may call.
+          functions: [
+            { name: "listRecentOrders", grantedBy: "admin@openbot.local" },
+          ],
+          // One Bot held back from it. This is the whole of the decision: a published component is
+          // available to every Bot unless it is withheld.
+          withheldFrom: [{ botId: bot, withheldBy: "admin@openbot.local" }],
+          source: null,
+        },
+        `test:${randomUUID()}`,
+      ),
+    );
   });
 
   afterAll(async () => {
-    await database.delete(components).where(eq(components.name, compiled));
+    await removeTestComponents([compiled]);
     await removeBots([bot]);
   });
 
@@ -200,10 +194,7 @@ describe("deleting a name this surface does not own", () => {
       SandboxedNotFoundError,
     );
 
-    const [governance] = await database
-      .select()
-      .from(components)
-      .where(eq(components.name, compiled));
+    const governance = await storedComponent(compiled);
     expect(governance).toBeDefined();
     expect(governance?.published).toBe(true);
   });
@@ -213,20 +204,14 @@ describe("deleting a name this surface does not own", () => {
     // this row does not hide the component from the Bot, it releases it to the Bot — and the next
     // catalogue announcement rewrites the component as published, because that is how one the build
     // ships arrives. A deliberate "not this Bot" would come back as "every Bot".
-    const withheld = await database
-      .select()
-      .from(componentExclusions)
-      .where(eq(componentExclusions.componentName, compiled));
+    const withheld = (await storedComponent(compiled))?.withheldFrom ?? [];
     expect(withheld).toHaveLength(1);
   });
 
   test("leaves the function grants, which the cascade would also have taken", async () => {
     // This half fails closed, so it is a capability lost rather than one gained. Asserted anyway:
     // a component that silently stops being able to read is still a component that stopped working.
-    const granted = await database
-      .select()
-      .from(componentFunctions)
-      .where(eq(componentFunctions.componentName, compiled));
+    const granted = (await storedComponent(compiled))?.functions ?? [];
     expect(granted).toHaveLength(1);
   });
 
@@ -248,22 +233,16 @@ describe("deleting a name this surface does not own", () => {
      * source row instead would have left it with no way to be cleared.
      */
     const orphan = `custom_orphan_${suite}`;
-    await database.insert(components).values({
-      name: orphan,
+    await makeTestComponent(orphan, {
+      published: false,
       title: "A draft whose source went",
       kind: "sandboxed",
       draftDescription: "Authored here.",
-      published: false,
-      updatedBy: "admin@openbot.local",
     });
 
     await store.remove(orphan, "admin@openbot.local");
 
-    const [gone] = await database
-      .select()
-      .from(components)
-      .where(eq(components.name, orphan));
-    expect(gone).toBeUndefined();
+    expect(await storedComponent(orphan)).toBeNull();
   });
 });
 

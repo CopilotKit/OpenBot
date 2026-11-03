@@ -27,11 +27,10 @@ import { createDatabase } from "../src/db/client";
 import {
   channelMemberships,
   channels,
-  deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { removeBots, useTestBots } from "./support/bots";
+import { recordTestPackage, removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 function event(overrides: Partial<ChannelActivityEvent> = {}) {
@@ -155,7 +154,6 @@ const testPrefix = `channel-events-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
-const createdPackageIds: string[] = [];
 
 afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
@@ -163,11 +161,6 @@ afterEach(async () => {
       .delete(intelligenceChannelMappings)
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
-  }
-  for (const packageId of createdPackageIds.splice(0)) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.id, packageId));
   }
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
@@ -347,16 +340,9 @@ describe("channel change delivery", () => {
 
   test("announces nothing for a delete the deployment package refuses", async () => {
     const owner = await createTestUser("Refused Member");
-    const [deploymentPackage] = await database
-      .insert(deploymentPackages)
-      .values({
-        tenantId: `${testPrefix}-tenant-${randomUUID()}`,
-        sourcePath: "/tmp/none",
-        checksum: "0",
-      })
-      .returning({ id: deploymentPackages.id });
-    if (!deploymentPackage) throw new Error("package row was not created");
-    createdPackageIds.push(deploymentPackage.id);
+    const deploymentPackage = await recordTestPackage(
+      `${testPrefix}-tenant-${randomUUID()}`,
+    );
     const channelId = `${testPrefix}-package-channel-${randomUUID()}`;
     await database.insert(channels).values({
       id: channelId,

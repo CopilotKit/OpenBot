@@ -950,16 +950,7 @@ describe("a hop to a Bot that is paused while it works", () => {
       resetBotLifecycleForTests,
     } = await import("../src/agents/lifecycle");
     const pause = { at: null as Date | null };
-    const query = {
-      from: () => query,
-      where: () => query,
-      limit: async () => [{ pausedAt: pause.at }],
-    };
-    configureBotLifecycle({
-      database: { select: () => query } as unknown as Parameters<
-        typeof configureBotLifecycle
-      >[0]["database"],
-    });
+    configureBotLifecycle({ pauses: { pausedAt: () => pause.at } });
     const released: string[] = [];
     const stopped: string[] = [];
     let started: () => void = () => {};
@@ -1017,16 +1008,7 @@ describe("a hop to a Bot that is paused while it works", () => {
   test("a Bot paused before the hop never touches the lock and never runs", async () => {
     const { BotPausedError, configureBotLifecycle, resetBotLifecycleForTests } =
       await import("../src/agents/lifecycle");
-    const query = {
-      from: () => query,
-      where: () => query,
-      limit: async () => [{ pausedAt: new Date() }],
-    };
-    configureBotLifecycle({
-      database: { select: () => query } as unknown as Parameters<
-        typeof configureBotLifecycle
-      >[0]["database"],
-    });
+    configureBotLifecycle({ pauses: { pausedAt: () => new Date() } });
     const lockCalls: string[] = [];
     let runs = 0;
     const hop = createHandoffDelivery({

@@ -1,18 +1,31 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { sweepRemovedPeople } from "../src/configuration/people-sweep";
 import { createDatabase } from "../src/db/client";
-import { userInstructions, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import {
   createUserInstructionsStore,
   INSTRUCTIONS_LIMIT,
   InstructionsTooLongError,
 } from "../src/user-instructions";
+import { storedPreferences, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
-const store = createUserInstructionsStore(database);
+const store = createUserInstructionsStore();
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 
 const createdUserIds: string[] = [];
 
@@ -53,12 +66,10 @@ describe("one person's standing instructions", () => {
     );
     await expect(store.read(userId)).resolves.toBe("Never say we are a team.");
 
-    // One row, not two. See the primary key on the table.
-    const rows = await database
-      .select()
-      .from(userInstructions)
-      .where(eq(userInstructions.userId, userId));
-    expect(rows.length).toBe(1);
+    // One text, not two, in the person's preferences in Intelligence.
+    expect((await storedPreferences(userId)).instructions).toBe(
+      "Never say we are a team.",
+    );
   });
 
   test("trims what it is given, so the stored text is what the model will read", async () => {
@@ -70,7 +81,7 @@ describe("one person's standing instructions", () => {
     await expect(store.read(userId)).resolves.toBe("Write in British English.");
   });
 
-  test("clears by saving nothing, and leaves no empty row behind", async () => {
+  test("clears by saving nothing, and leaves no empty text behind", async () => {
     const userId = await person();
     await store.write(userId, "Write in British English.");
 
@@ -82,12 +93,7 @@ describe("one person's standing instructions", () => {
      * person written any" would stop being a row count.
      */
     await expect(store.read(userId)).resolves.toBeNull();
-    expect(
-      await database
-        .select()
-        .from(userInstructions)
-        .where(eq(userInstructions.userId, userId)),
-    ).toEqual([]);
+    expect((await storedPreferences(userId)).instructions).toBeNull();
   });
 
   test("clearing what was never written is not an error", async () => {
@@ -136,13 +142,30 @@ describe("one person's standing instructions", () => {
     const userId = await person();
     await store.write(userId, "Write in British English.");
 
+    // The old foreign key's cascade, run by hand: the sweep removes what Intelligence holds about a
+    // person this deployment no longer has.
     await database.delete(users).where(eq(users.id, userId));
+    await sweepRemovedPeople(database, await useTestConfiguration());
 
-    expect(
-      await database
-        .select()
-        .from(userInstructions)
-        .where(eq(userInstructions.userId, userId)),
-    ).toEqual([]);
+    expect((await storedPreferences(userId)).revision).toBe(0);
+    await expect(store.read(userId)).resolves.toBeNull();
+  });
+
+  test("another replica's save reaches this one without a restart", async () => {
+    const userId = await person();
+    const configuration = await useTestConfiguration();
+    // Written past this process's copy, as another replica writes it.
+    await configuration.client.preferences.change(
+      userId,
+      [{ op: "setInstructions", instructions: "Answer in Welsh." }],
+      `test:${randomUUID()}`,
+    );
+    const deadline = Date.now() + 5_000;
+    while (
+      (await store.read(userId)) !== "Answer in Welsh." &&
+      Date.now() < deadline
+    )
+      await Bun.sleep(50);
+    await expect(store.read(userId)).resolves.toBe("Answer in Welsh.");
   });
 });

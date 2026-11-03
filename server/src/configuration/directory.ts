@@ -180,7 +180,8 @@ export function createBotConfiguration(options: {
               const change = parseChange(payload);
               if (!change) return;
               const cache = caches[change.resource];
-              if (cache) void cache.heard(change.key, change.revision);
+              if (cache)
+                void cache.heard(change.key, change.revision, change.change);
             },
           },
           onJoined: () => {
@@ -285,18 +286,29 @@ export function createBotConfiguration(options: {
   return configuration;
 }
 
-function parseChange(
-  payload: unknown,
-): { resource: string; key: string; revision: number } | null {
+function parseChange(payload: unknown): {
+  resource: string;
+  key: string;
+  revision: number;
+  change: string;
+} | null {
   if (!payload || typeof payload !== "object") return null;
-  const { resource, key, revision } = payload as Record<string, unknown>;
+  const { resource, key, revision, change } = payload as Record<
+    string,
+    unknown
+  >;
   if (
     typeof resource !== "string" ||
     typeof key !== "string" ||
     typeof revision !== "number"
   )
     return null;
-  return { resource, key, revision };
+  return {
+    resource,
+    key,
+    revision,
+    change: typeof change === "string" ? change : "updated",
+  };
 }
 
 let installed: BotConfiguration | undefined;

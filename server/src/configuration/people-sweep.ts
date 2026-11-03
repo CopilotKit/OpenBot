@@ -9,9 +9,9 @@
  * cascade, run by hand: at boot and on a timer, for anybody removed since (a directory deleting them
  * through SCIM, for one).
  *
- * THE ORDER IS THE SAFETY. Intelligence is read first, then `users`. A person is in `users` before
- * anything in Intelligence names them, so an id Intelligence named when it was read, and that is
- * absent from `users` read after, belonged to somebody removed, never to somebody new.
+ * THE ORDER IS THE SAFETY. What Intelligence holds is read first (from this instance's copy of it),
+ * then `users`. A person is in `users` before anything in Intelligence names them, so an id named in
+ * that copy, and absent from `users` read after, belonged to somebody removed, never to somebody new.
  */
 import { inArray } from "drizzle-orm";
 import type { Database } from "../db/client";
@@ -27,11 +27,10 @@ export async function sweepRemovedPeople(
   configuration: BotConfiguration,
 ): Promise<string[]> {
   const client = configuration.client;
-  const [preferences, access, skills] = await Promise.all([
-    client.preferences.all(),
-    client.access.all(),
-    client.skills.all(),
-  ]);
+  // What this instance holds of Intelligence: read before `users`, which is all the order needs.
+  const preferences = configuration.preferences.all();
+  const access = configuration.access.all();
+  const skills = configuration.skills.all();
   const named = new Set<string>([
     ...preferences.map((record) => record.userId),
     ...access.flatMap((record) => [
