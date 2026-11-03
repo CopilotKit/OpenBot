@@ -486,7 +486,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         .limit(1);
       return row;
     },
-    async withdrawPending(owner, reason, match) {
+    async withdrawPending(owner, reason, match, options = {}) {
       const pending = await database
         .select()
         .from(approvalRequests)
@@ -515,6 +515,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
             )
             .returning({ id: approvalRequests.id });
           if (!rows.length) return false;
+          if (options.resume === false) return true;
           // The waiting conversation resumes with the reason as its result; nothing is executed.
           await tx
             .insert(workItems)

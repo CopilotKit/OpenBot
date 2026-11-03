@@ -87,6 +87,7 @@ test("a rebuilt but identical tool row is the same row", () => {
   const props = {
     id: "group:a",
     active: false,
+    inFlight: false,
     latest: false,
     spokeAfter: false,
   };
@@ -118,6 +119,13 @@ test("a rebuilt but identical tool row is the same row", () => {
     sameToolRow(
       { ...props, steps: [step("a", "done")] },
       { ...props, spokeAfter: true, steps: [step("a", "done")] },
+    ),
+  ).toBe(false);
+  // A subtask's card stops saying it is working when its turn ends, so the row must redraw then.
+  expect(
+    sameToolRow(
+      { ...props, inFlight: true, steps: [step("a")] },
+      { ...props, steps: [step("a")] },
     ),
   ).toBe(false);
 });

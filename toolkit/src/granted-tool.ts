@@ -1,13 +1,27 @@
 import { z } from "zod";
 import type { AuditInitiator } from "./initiator";
 
+/** Where a call came from, for a tool that needs more than its arguments. */
+export type ToolExecution = { toolCallId?: string; signal?: AbortSignal };
+
 /** A tool a Bot holds, as the built-in runtime is handed it and executes it on the server. */
 export type GrantedTool = {
   name: string;
   description: string;
   parameters: z.ZodType;
-  execute: (args: unknown) => Promise<string>;
+  /**
+   * The call's id and its run's abort signal come second, where the runner has them: the AI SDK's
+   * own execute options on a built-in Bot, the headless middleware's context on a remote one. A tool
+   * that only needs its arguments ignores them.
+   */
+  execute: (args: unknown, execution?: ToolExecution) => Promise<string>;
   initiator?: AuditInitiator;
+  /**
+   * May run beside the other calls of its step instead of after them. The AI SDK already runs a
+   * built-in Bot's calls together; this is for the headless middleware, which runs one at a time so
+   * that a browser's clicks keep their order.
+   */
+  concurrent?: true;
   /**
    * `<serverId>/<toolName>`, carried alongside the name the model is offered.
    *

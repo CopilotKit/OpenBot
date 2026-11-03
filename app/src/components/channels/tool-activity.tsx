@@ -529,7 +529,14 @@ function StepStatus({ step, active }: { step: StepDetails; active: boolean }) {
   return null;
 }
 
-function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
+/** One step, as a folded line opens to it. Also how a subtask's card lists the steps it took. */
+export function StepRow({
+  step,
+  active,
+}: {
+  step: StepDetails;
+  active: boolean;
+}) {
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
