@@ -21,6 +21,7 @@ import {
   linkedNotice,
   visibleLinkedNotice,
 } from "@/components/settings/linked-notice";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -37,6 +38,7 @@ import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
   connectionRows,
+  personalAppsNeedingSetup,
   personalConnectionRows,
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -318,8 +320,22 @@ function RouteComponent() {
     plugins.data?.composioConfigured ?? false,
   );
   const browse = personal && moreApps.linked ? moreApps : null;
+  /*
+   * Apps that need a key or an OAuth client typed first stay out of the personal grid until asked
+   * for, or searched for by name. See `personalConnectionRows`.
+   */
+  const [showSetup, setShowSetup] = React.useState(false);
+  const query = search.trim().toLocaleLowerCase();
+  const needingSetup = personal
+    ? personalAppsNeedingSetup({
+        catalogue: plugins.data?.catalogue ?? [],
+        added,
+        connected,
+      })
+    : 0;
   const rows = personal
     ? personalConnectionRows({
+        everything: showSetup || query !== "",
         catalogue: plugins.data?.catalogue ?? [],
         added,
         brokered: brokeredAccountsListedOn(listed),
@@ -335,7 +351,6 @@ function RouteComponent() {
         links: links.data ?? [],
         providers: providers.data,
       });
-  const query = search.trim().toLocaleLowerCase();
   const matching = rows.filter((row) =>
     `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
   );
@@ -485,6 +500,18 @@ function RouteComponent() {
                 ) : null}
               </div>
             )}
+            {needingSetup > 0 && !showSetup && query === "" ? (
+              <Button
+                className="mt-3"
+                onClick={() => setShowSetup(true)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Show {needingSetup === 1 ? "1 app" : `${needingSetup} apps`}{" "}
+                that need setup
+              </Button>
+            ) : null}
           </>
         )}
         {links.error || providers.error ? (

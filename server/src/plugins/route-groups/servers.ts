@@ -46,6 +46,16 @@ export function mountServerRoutes({
          */
         auth: entry.auth.kind,
         perInstance: entry.host === null,
+        /*
+         * Whether connecting needs nothing typed first: no account at all, or an OAuth vendor this
+         * deployment registers itself with. The personal edition lists only these on Connections.
+         */
+        oneStep:
+          entry.host !== null &&
+          (entry.auth.kind === "none" ||
+            entry.auth.kind === "builtin" ||
+            (entry.auth.kind === "user-oauth" &&
+              entry.auth.clientRegistration === "dynamic")),
       })),
       /*
        * Whether a Bot with no credential of its own can still call a tool back.

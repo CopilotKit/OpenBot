@@ -164,14 +164,20 @@ export const ALWAYS_ON_APP = "routines";
 
 /**
  * The personal edition's tiles: every app in the catalogue, whether or not it has been added, and
- * the same brokered apps and GitHub and Slack links as {@link connectionRows}.
+ * the same brokered apps and GitHub link as {@link connectionRows}.
  *
  * One person adds an app and connects their account, so the two are one press: a tile says what
  * that press does. An app reached as you is Connect. An app with no account at all (a free search
  * provider, Routines) is Add, and On once added. An app that needs a key typed first is Set up,
  * and is On once added with it.
+ *
+ * ONE PRESS OR NOT AT ALL, UNLESS ASKED. An app that needs a key or an OAuth client typed before it
+ * connects is where a person gets stuck, so it is left out unless `everything` is set or it is
+ * already in use. Slack is left out too: the personal edition has no Slack.
  */
 export function personalConnectionRows(input: {
+  /** Also the apps that need something typed before they connect. */
+  everything?: boolean;
   catalogue: CatalogueItem[];
   added: ReadonlySet<string>;
   brokered: PluginServer[];
@@ -179,25 +185,11 @@ export function personalConnectionRows(input: {
   links: LinkedAccount[];
   providers: IdentityProviders | undefined;
 }): ConnectionRow[] {
-  const apps = input.catalogue.map((entry): ConnectionRow => {
-    const base = {
-      key: entry.key,
-      title: entry.title,
-      summary: entry.summary,
-      mark: { kind: "catalogue", key: entry.key } as const,
-    };
-    if (entry.auth === "user-oauth")
-      return {
-        ...base,
-        state: input.connected.has(entry.key) ? "connected" : "available",
-        action: "connect",
-      };
-    return {
-      ...base,
-      state: input.added.has(entry.key) ? "connected" : "available",
-      action: entry.auth === "deployment-bearer" ? "setup" : "add",
-      noAccount: true,
-    };
+  const apps = input.catalogue.flatMap((entry): ConnectionRow[] => {
+    const row = personalAppRow(entry, input);
+    return input.everything || entry.oneStep || row.state !== "available"
+      ? [row]
+      : [];
   });
   const rest = connectionRows({
     catalogue: [],
@@ -206,8 +198,44 @@ export function personalConnectionRows(input: {
     connected: input.connected,
     links: input.links,
     providers: input.providers,
-  });
+  }).filter((row) => row.key !== "slack");
   const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
+}
+
+/** How many apps the personal Connections leaves out until asked: see {@link personalConnectionRows}. */
+export function personalAppsNeedingSetup(input: {
+  catalogue: CatalogueItem[];
+  added: ReadonlySet<string>;
+  connected: ReadonlySet<string>;
+}): number {
+  return input.catalogue.filter(
+    (entry) =>
+      !entry.oneStep && personalAppRow(entry, input).state === "available",
+  ).length;
+}
+
+function personalAppRow(
+  entry: CatalogueItem,
+  input: { added: ReadonlySet<string>; connected: ReadonlySet<string> },
+): ConnectionRow {
+  const base = {
+    key: entry.key,
+    title: entry.title,
+    summary: entry.summary,
+    mark: { kind: "catalogue", key: entry.key } as const,
+  };
+  if (entry.auth === "user-oauth")
+    return {
+      ...base,
+      state: input.connected.has(entry.key) ? "connected" : "available",
+      action: "connect",
+    };
+  return {
+    ...base,
+    state: input.added.has(entry.key) ? "connected" : "available",
+    action: entry.auth === "deployment-bearer" ? "setup" : "add",
+    noAccount: true,
+  };
 }

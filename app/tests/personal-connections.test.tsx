@@ -42,6 +42,7 @@ function entry(
   key: string,
   title: string,
   auth: CatalogueItem["auth"],
+  oneStep: boolean,
 ): CatalogueItem {
   return {
     key,
@@ -51,15 +52,22 @@ function entry(
     docsUrl: "",
     auth,
     perInstance: false,
+    oneStep,
   };
 }
 
+/** Notion registers its own OAuth client; Google Drive needs one typed in. */
 const CATALOGUE = [
-  entry("notion", "Notion", "user-oauth"),
-  entry("google-drive", "Google Drive", "user-oauth"),
-  entry("exa", "Exa Search", "none"),
-  entry("exa-authenticated", "Exa Search (API key)", "deployment-bearer"),
-  entry("routines", "Routines", "builtin"),
+  entry("notion", "Notion", "user-oauth", true),
+  entry("google-drive", "Google Drive", "user-oauth", false),
+  entry("exa", "Exa Search", "none", true),
+  entry(
+    "exa-authenticated",
+    "Exa Search (API key)",
+    "deployment-bearer",
+    false,
+  ),
+  entry("routines", "Routines", "builtin", true),
 ];
 
 /** A server row as the plugin list returns it. Notion registers its own client; Drive needs one. */
@@ -202,11 +210,10 @@ const tile = (view: ReturnType<typeof draw>["view"], key: string) =>
   view.getByTestId(`account-${key}`);
 
 describe("Connections in the personal edition", () => {
-  test("is one searchable list of every app, with no apps-versus-accounts split", async () => {
+  test("is one searchable list of every app that connects in one press, with no apps-versus-accounts split", async () => {
     const { view } = draw("personal");
-    await view.findByTestId("account-google-drive");
-    for (const key of ["notion", "google-drive", "exa", "exa-authenticated"])
-      expect(tile(view, key)).toBeTruthy();
+    await view.findByTestId("account-notion");
+    for (const key of ["notion", "exa"]) expect(tile(view, key)).toBeTruthy();
     expect(
       view.getByRole("textbox", { name: "Search connections" }),
     ).toBeTruthy();
@@ -214,9 +221,29 @@ describe("Connections in the personal edition", () => {
     expect(view.queryByText("Add an app")).toBeNull();
     expect(within(tile(view, "notion")).getByText("Connect")).toBeTruthy();
     expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
+  });
+
+  test("apps that need something typed first wait behind one button, or a search", async () => {
+    const { view, user } = draw("personal");
+    await view.findByTestId("account-notion");
+    expect(view.queryByTestId("account-google-drive")).toBeNull();
+    expect(view.queryByTestId("account-exa-authenticated")).toBeNull();
+    await user.click(
+      view.getByRole("button", { name: "Show 2 apps that need setup" }),
+    );
+    expect(tile(view, "google-drive")).toBeTruthy();
     expect(
       within(tile(view, "exa-authenticated")).getByText("Set up"),
     ).toBeTruthy();
+  });
+
+  test("searching finds an app that needs setup", async () => {
+    const { view, user } = draw("personal");
+    await user.type(
+      await view.findByRole("textbox", { name: "Search connections" }),
+      "drive",
+    );
+    expect(await view.findByTestId("account-google-drive")).toBeTruthy();
   });
 
   test("Connect on an app with a client goes straight to your account", async () => {
@@ -229,6 +256,9 @@ describe("Connections in the personal edition", () => {
 
   test("Connect on an app nobody added adds it first; one that needs a client set up then opens its page", async () => {
     const { view, user, history } = draw("personal");
+    await user.click(
+      await view.findByRole("button", { name: /apps that need setup/ }),
+    );
     await user.click(await view.findByTestId("account-google-drive"));
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/google-drive"),
@@ -247,6 +277,9 @@ describe("Connections in the personal edition", () => {
 
   test("Set up opens the app's page, where its key is typed", async () => {
     const { view, user, history } = draw("personal");
+    await user.click(
+      await view.findByRole("button", { name: /apps that need setup/ }),
+    );
     await user.click(await view.findByTestId("account-exa-authenticated"));
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/exa-authenticated"),
