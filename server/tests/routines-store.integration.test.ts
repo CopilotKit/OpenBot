@@ -295,10 +295,14 @@ describe("how many a person may have switched on", () => {
       await release();
       const outcomes = await Promise.allSettled(operations);
       // Whatever order they took the lock in, each counted what the one before it left, so the
-      // person ends with exactly the cap switched on and every refusal is the friendly sentence.
-      expect(
-        (await store.listFor(owner.id)).filter((routine) => routine.enabled),
-      ).toHaveLength(MAX_ENABLED_ROUTINES);
+      // person never ends above the cap, and every refusal is the friendly sentence. Not always AT
+      // the cap: switching on first (already on, so nothing to count), then the create (refused at
+      // twenty), then the pause, leaves nineteen, which is a correct outcome of that order.
+      const enabled = (await store.listFor(owner.id)).filter(
+        (routine) => routine.enabled,
+      ).length;
+      expect(enabled).toBeLessThanOrEqual(MAX_ENABLED_ROUTINES);
+      expect(enabled).toBeGreaterThanOrEqual(MAX_ENABLED_ROUTINES - 1);
       for (const outcome of outcomes)
         if (outcome.status === "rejected")
           expect(outcome.reason).toBeInstanceOf(RoutineRefusedError);
