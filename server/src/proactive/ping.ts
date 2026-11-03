@@ -2,43 +2,36 @@
  * The ping: one message to a person that something needs them, at most once an hour, folding every
  * Bot's waiting items into it, each item named with its Bot.
  *
- * ALL OF IT IS IN POSTGRES. No replica holds the hour in memory. Taking the person's slot is one
- * conditional UPDATE of `proactive_people.last_pinged_at`: the row lock serializes replicas, and
- * under read committed Postgres re-checks the condition against the row a winner just wrote, so two
- * replicas finishing check-ins for one person in the same second take the slot once. The ping row,
- * its text and the items it carries are written in the same transaction, so a replica that stops
- * after that commit leaves a ping the next pass offers word for word (`unoffered`). Delivery's own
- * dedupe keys, built from the ping's id, stop a second send when it is offered twice.
+ * THE HOUR IS INTELLIGENCE'S. No replica holds it in memory. Taking the person's slot is one call,
+ * `check-in-pings/take`, which in one transaction on Intelligence's side takes the slot only when it
+ * is free, refuses when any item it names was started, hidden or carried by another ping meanwhile,
+ * and writes the ping, its text and the items it carries. Two replicas finishing check-ins for one
+ * person in the same second take the slot once. A replica that stops after that call leaves a ping
+ * the next pass offers word for word (`unoffered`). Delivery's own dedupe keys, built from the ping's
+ * id, stop a second send when it is offered twice.
  *
  * WHAT A PING CARRIES. Every open item of the person that no ping has carried, from any of their
- * Bots, as of the moment the slot is taken: items started, hidden or cleared before then are not in
- * it. Two kinds of item never hold the slot and are never pinged: a Bot the person set to notify
- * them of nothing (its items stay in the app list), and every item while the person has check-ins
- * turned off. A ping is a template filled from the items, never a model turn.
+ * Bots, as listed just before the slot is taken: an item started or hidden in between makes the take
+ * refuse, and it is listed again once. Two kinds of item never hold the slot and are never pinged: a
+ * Bot the person set to notify them of nothing (its items stay in the app list), and every item while
+ * the person has check-ins turned off. Those two switches are this deployment's own, read here and
+ * joined to Intelligence's list in code. A ping is a template filled from the items, never a model
+ * turn.
  */
 import { randomUUID } from "node:crypto";
-import {
-  and,
-  asc,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  lte,
-  notInArray,
-  or,
-  sql,
-  TransactionRollbackError,
-} from "drizzle-orm";
-import type { Database } from "../db/client";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { bots } from "../agents/bot-registry/directory";
+import type { Database } from "../db/client";
 import { users } from "../db/schema/core";
 import { botLifecycle } from "../db/schema/lifecycle";
 import {
-  proactivePeople,
-  proactivePings,
-  proactiveSuggestions,
-} from "../db/schema/proactive";
+  CheckInItemsChangedError,
+  CheckInSlotTakenError,
+  ScheduleNotFoundError,
+  ScheduleVersionConflictError,
+} from "../schedules/client";
+import { schedules } from "../schedules/directory";
+import type { CheckInSuggestionRecord } from "../schedules/types";
 import type { AttentionItem, AttentionPing } from "./contracts";
 
 /** The least time between two pings to one person. */
@@ -118,40 +111,36 @@ export function pingText(items: readonly AttentionItem[]): {
   return { text, pushBody };
 }
 
+/** How many times one take is tried when an item it was to carry changed in between. */
+const TAKE_TRIES = 2;
+
 /**
- * An item a ping may carry: open, carried by no ping yet, from a Bot its person has not told to
- * notify them of nothing, while they have check-ins on.
+ * The person's slot is free, as this instance last heard: never pinged, or the last ping an hour or
+ * more ago. Intelligence decides for certain when the slot is taken; this only spares asking it for
+ * a person plainly pinged within the hour.
  */
-const pingableItem = and(
-  eq(proactiveSuggestions.status, "open"),
-  isNull(proactiveSuggestions.pingId),
-  sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSuggestions.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSuggestions.agentId} and ${botLifecycle.notify} = 'none')`,
-  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSuggestions.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
-);
-const pingable = (ownerUserId: string) =>
-  and(eq(proactiveSuggestions.ownerUserId, ownerUserId), pingableItem);
+function slotFree(ownerUserId: string, at: number): boolean {
+  const person = schedules().peek("check-in-people", ownerUserId);
+  return (
+    !person?.lastPingedAt ||
+    person.lastPingedAt.getTime() <= at - PING_GAP_MINUTES * 60_000
+  );
+}
 
-/** The person's slot is free: never pinged, or the last ping was an hour or more ago. */
-const slotFree = or(
-  isNull(proactivePeople.lastPingedAt),
-  lte(
-    proactivePeople.lastPingedAt,
-    sql`now() - make_interval(mins => ${PING_GAP_MINUTES})`,
-  ),
-);
-
-const itemColumns = {
-  suggestionId: proactiveSuggestions.id,
-  agentId: proactiveSuggestions.agentId,
-  title: proactiveSuggestions.title,
-  why: proactiveSuggestions.detail,
-  sourceApp: proactiveSuggestions.sourceApp,
-};
+/** What a ping lists of an item. */
+function itemOf(record: CheckInSuggestionRecord) {
+  return {
+    suggestionId: record.id,
+    agentId: record.agentId,
+    title: record.title,
+    why: record.detail,
+    sourceApp: record.sourceApp,
+  };
+}
 
 /**
- * Each item with its Bot's name, from the Bot directory's memory (some of these run inside a
- * transaction, which must not wait on Intelligence). An item whose Bot Intelligence no longer has is
- * left out, as the join to `agents` left it out before.
+ * Each item with its Bot's name, from the Bot directory's memory. An item whose Bot Intelligence no
+ * longer has is left out, as the join to `agents` left it out before.
  */
 function named<Row extends { agentId: string }>(
   rows: Row[],
@@ -163,6 +152,57 @@ function named<Row extends { agentId: string }>(
 }
 
 export function createPingStore(database: Database) {
+  /**
+   * Items a ping may carry, oldest first: open, carried by no ping yet (from Intelligence), from a
+   * Bot its person has not told to notify them of nothing, while they have check-ins on (here).
+   */
+  async function pingable(
+    ownerUserId?: string,
+  ): Promise<CheckInSuggestionRecord[]> {
+    const { items } = await schedules().client.all("check-in-suggestions", {
+      ...(ownerUserId ? { ownerUserId } : {}),
+      status: "open",
+      unpinged: true,
+      order: "asc",
+    });
+    if (items.length === 0) return [];
+    const owners = [...new Set(items.map((item) => item.ownerUserId))];
+    const off = new Set(
+      (
+        await database
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(
+              inArray(users.id, owners),
+              sql`${users.preferences}->>'proactive' = 'off'`,
+            ),
+          )
+      ).map((row) => row.id),
+    );
+    const silenced = new Set(
+      (
+        await database
+          .select({
+            ownerUserId: botLifecycle.ownerUserId,
+            agentId: botLifecycle.agentId,
+          })
+          .from(botLifecycle)
+          .where(
+            and(
+              inArray(botLifecycle.ownerUserId, owners),
+              eq(botLifecycle.notify, "none"),
+            ),
+          )
+      ).map((row) => `${row.ownerUserId}\u001f${row.agentId}`),
+    );
+    return items.filter(
+      (item) =>
+        !off.has(item.ownerUserId) &&
+        !silenced.has(`${item.ownerUserId}\u001f${item.agentId}`),
+    );
+  }
+
   return {
     /**
      * Take the person's hourly slot and write one ping folding everything waiting for them. Null when
@@ -170,66 +210,39 @@ export function createPingStore(database: Database) {
      * any number of replicas at once: exactly one of them gets the ping.
      */
     async take(ownerUserId: string): Promise<AttentionPing | null> {
-      // The person's row, made once. The slot is a lock on it, so it has to exist before the race.
-      await database
-        .insert(proactivePeople)
-        .values({ ownerUserId })
-        .onConflictDoNothing();
-      try {
-        return await database.transaction(async (transaction) => {
-          const [slot] = await transaction
-            .update(proactivePeople)
-            .set({ lastPingedAt: sql`now()`, updatedAt: sql`now()` })
-            .where(
-              and(
-                eq(proactivePeople.ownerUserId, ownerUserId),
-                slotFree,
-                sql`exists (select 1 from ${proactiveSuggestions} where ${pingable(ownerUserId)})`,
-              ),
-            )
-            .returning({ ownerUserId: proactivePeople.ownerUserId });
-          if (!slot) return null;
-          /*
-           * Locked, so a Start or Hide arriving now waits for this commit and then finds the item
-           * still open: it was open when the ping was written, so the ping names it truthfully.
-           */
-          const items = named(
-            await transaction
-              .select(itemColumns)
-              .from(proactiveSuggestions)
-              .where(pingable(ownerUserId))
-              .orderBy(
-                asc(proactiveSuggestions.createdAt),
-                asc(proactiveSuggestions.id),
-              )
-              .for("update", { of: proactiveSuggestions }),
-          );
-          // Everything waiting was started or hidden between the slot and here: give the slot back.
-          if (items.length === 0) transaction.rollback();
-          const pingId = randomUUID();
-          const { text, pushBody } = pingText(items);
-          await transaction.insert(proactivePings).values({
+      for (let attempt = 1; attempt <= TAKE_TRIES; attempt += 1) {
+        if (!slotFree(ownerUserId, Date.now())) return null;
+        const items = named((await pingable(ownerUserId)).map(itemOf));
+        if (items.length === 0) return null;
+        const pingId = randomUUID();
+        const { text, pushBody } = pingText(items);
+        try {
+          await schedules().client.takePing({
             id: pingId,
             ownerUserId,
-            itemCount: items.length,
+            gapMinutes: PING_GAP_MINUTES,
+            suggestionIds: items.map((item) => item.suggestionId),
             text,
             pushBody,
           });
-          await transaction
-            .update(proactiveSuggestions)
-            .set({ pingId, deliveredAt: sql`now()` })
-            .where(
-              inArray(
-                proactiveSuggestions.id,
-                items.map((item) => item.suggestionId),
-              ),
-            );
-          return { pingId, ownerUserId, text, pushBody, items };
-        });
-      } catch (error) {
-        if (error instanceof TransactionRollbackError) return null;
-        throw error;
+        } catch (error) {
+          if (error instanceof CheckInSlotTakenError) {
+            await schedules()
+              .refresh("check-in-people", ownerUserId)
+              .catch(() => null);
+            return null;
+          }
+          // Started, hidden or carried meanwhile: list what waits again, once.
+          if (error instanceof CheckInItemsChangedError) continue;
+          throw error;
+        }
+        // This instance knows its own ping at once; every other one hears it announced.
+        await schedules()
+          .refresh("check-in-people", ownerUserId)
+          .catch(() => null);
+        return { pingId, ownerUserId, text, pushBody, items };
       }
+      return null;
     },
 
     /**
@@ -238,84 +251,84 @@ export function createPingStore(database: Database) {
      * can page past people it may not ping (`pingPass` in engine.ts).
      */
     async waiting(limit = 20, skip: readonly string[] = []): Promise<string[]> {
-      const rows = await database
-        .select({ ownerUserId: proactiveSuggestions.ownerUserId })
-        .from(proactiveSuggestions)
-        .leftJoin(
-          proactivePeople,
-          eq(proactivePeople.ownerUserId, proactiveSuggestions.ownerUserId),
-        )
-        .where(
-          and(
-            pingableItem,
-            slotFree,
-            skip.length > 0
-              ? notInArray(proactiveSuggestions.ownerUserId, [...skip])
-              : undefined,
-          ),
-        )
-        .groupBy(proactiveSuggestions.ownerUserId)
-        .orderBy(sql`min(${proactiveSuggestions.createdAt})`)
-        .limit(limit);
-      return rows.map((row) => row.ownerUserId);
+      const at = Date.now();
+      const skipped = new Set(skip);
+      const firstWaited = new Map<string, number>();
+      for (const item of await pingable()) {
+        if (skipped.has(item.ownerUserId) || !slotFree(item.ownerUserId, at))
+          continue;
+        const created = item.createdAt.getTime();
+        const known = firstWaited.get(item.ownerUserId);
+        if (known === undefined || created < known)
+          firstWaited.set(item.ownerUserId, created);
+      }
+      return [...firstWaited]
+        .sort((left, right) => left[1] - right[1])
+        .slice(0, limit)
+        .map(([ownerUserId]) => ownerUserId);
     },
 
     /**
      * Pings written but never offered to delivery, older than `olderThanMs`: a replica stopped
-     * between the commit and the offer. Rebuilt from the ping row, so the text is the one written.
+     * between the take and the offer. Rebuilt from the ping record, so the text is the one written.
      */
     async unoffered(olderThanMs: number, limit = 20): Promise<AttentionPing[]> {
-      const pings = await database
-        .select()
-        .from(proactivePings)
-        .where(
-          and(
-            isNull(proactivePings.offeredAt),
-            lte(
-              proactivePings.createdAt,
-              sql`now() - make_interval(secs => ${olderThanMs / 1000})`,
-            ),
-            // A day late is no longer news: the items are on the person's list either way.
-            gte(proactivePings.createdAt, sql`now() - interval '1 day'`),
-          ),
-        )
-        .orderBy(asc(proactivePings.createdAt))
-        .limit(limit);
-      if (pings.length === 0) return [];
-      const items = named(
-        await database
-          .select({ ...itemColumns, pingId: proactiveSuggestions.pingId })
-          .from(proactiveSuggestions)
-          .where(
-            inArray(
-              proactiveSuggestions.pingId,
-              pings.map((ping) => ping.id),
-            ),
-          )
-          .orderBy(
-            asc(proactiveSuggestions.createdAt),
-            asc(proactiveSuggestions.id),
-          ),
+      const at = Date.now();
+      const { items: pings } = await schedules().client.page(
+        "check-in-pings",
+        {
+          offered: false,
+          createdBefore: new Date(at - olderThanMs),
+          // A day late is no longer news: the items are on the person's list either way.
+          createdAfter: new Date(at - 86_400_000),
+        },
+        null,
+        limit,
       );
+      if (pings.length === 0) return [];
+      const items: (ReturnType<typeof itemOf> & { pingId: string | null })[] =
+        [];
+      for (let start = 0; start < pings.length; start += 200) {
+        const { items: carried } = await schedules().client.all(
+          "check-in-suggestions",
+          {
+            pingId: pings.slice(start, start + 200).map((ping) => ping.id),
+            order: "asc",
+          },
+        );
+        items.push(
+          ...carried.map((item) => ({ ...itemOf(item), pingId: item.pingId })),
+        );
+      }
+      const listed = named(items);
       return pings.map((ping) => ({
         pingId: ping.id,
         ownerUserId: ping.ownerUserId,
         text: ping.text,
         pushBody: ping.pushBody,
-        items: items
+        items: listed
           .filter((item) => item.pingId === ping.id)
           .map(({ pingId: _, ...item }) => item),
       }));
     },
 
-    /** Delivery rows were offered for this ping. */
+    /** Delivery rows were offered for this ping. Once: one already marked stays as it was. */
     async markOffered(pingId: string) {
-      await database
-        .update(proactivePings)
-        .set({ offeredAt: sql`now()` })
-        .where(
-          and(eq(proactivePings.id, pingId), isNull(proactivePings.offeredAt)),
-        );
+      const { client } = schedules();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const ping = await client.get("check-in-pings", pingId);
+        if (!ping || ping.offeredAt) return;
+        try {
+          await client.update("check-in-pings", pingId, ping.version, {
+            offeredAt: new Date(),
+          });
+          return;
+        } catch (error) {
+          if (error instanceof ScheduleVersionConflictError) continue;
+          if (error instanceof ScheduleNotFoundError) return;
+          throw error;
+        }
+      }
     },
   };
 }

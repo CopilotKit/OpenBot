@@ -52,11 +52,13 @@ import {
   sweepPurgedBotRows,
 } from "./agents/bot-registry/local-rows";
 import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
+import { checkInCopySteps } from "./proactive/upgrade";
 import { createScheduleClient } from "./schedules/client";
 import {
   createScheduleDirectory,
   installScheduleDirectory,
 } from "./schedules/directory";
+import { copyLocalSchedulesToIntelligence } from "./schedules/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -468,6 +470,18 @@ const scheduleDirectory = installScheduleDirectory(
   }),
 );
 await scheduleDirectory.start();
+/*
+ * An upgraded deployment's routines, check-ins and responsibilities, copied from the local tables
+ * once, parents first (schedules/upgrade.ts), then read into the directory so the first sweep sees
+ * them.
+ */
+const copiedSchedules = await copyLocalSchedulesToIntelligence(
+  database,
+  scheduleDirectory.client,
+  [...checkInCopySteps(database)],
+);
+if (copiedSchedules.some((step) => step.kind === "copied"))
+  await scheduleDirectory.resync();
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);

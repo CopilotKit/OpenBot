@@ -141,6 +141,12 @@ export type CheckInSuggestionSummaryRow = {
   delivered: number;
 };
 
+export type CheckInPingSummary = {
+  pings: number;
+  people: number;
+  itemsPerPing: number | null;
+};
+
 export type TakePingInput = {
   id: string;
   ownerUserId: string;
@@ -516,9 +522,11 @@ export function createScheduleClient(settings: ScheduleClientSettings) {
       >;
     },
 
-    async checkInPingSummary(
-      since: Date,
-    ): Promise<{ pings: number; people: number }> {
+    /**
+     * Pings delivery was offered since `since`: how many, to how many people, and how many items each
+     * carried on average (null when there were none).
+     */
+    async checkInPingSummary(since: Date): Promise<CheckInPingSummary> {
       const query = new URLSearchParams({ since: since.toISOString() });
       const response = await request(
         "GET",
@@ -526,7 +534,7 @@ export function createScheduleClient(settings: ScheduleClientSettings) {
       );
       if (response.status !== 200)
         return refusal(response, "check-in-pings", "*", "summarize");
-      return (await response.json()) as { pings: number; people: number };
+      return (await response.json()) as CheckInPingSummary;
     },
 
     /** Remove finished history older than `before`. Returns how many records went. */

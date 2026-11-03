@@ -34,14 +34,12 @@ import {
   channels,
   memorySources,
   personalMemories,
-  proactiveSettings,
-  proactiveSuggestions,
   responsibilities,
   routines,
   workItems,
 } from "../db/schema";
 import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
-import { PROACTIVE_RUN_KIND } from "../proactive/engine";
+import { checkInsOf, resetCheckInsOf } from "../proactive/store";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
 
@@ -120,12 +118,6 @@ export function createBotReset(options: {
       eq(personalMemories.formedByAgentId, agentId),
       isNull(personalMemories.sourceId),
       isNull(personalMemories.deletedAt),
-    );
-
-  const research = (ownerUserId: string, agentId: string) =>
-    and(
-      eq(proactiveSettings.ownerUserId, ownerUserId),
-      eq(proactiveSettings.agentId, agentId),
     );
 
   /** Grants only: a rule that makes the Bot ask first or hand back is the person's protection. */
@@ -213,12 +205,7 @@ export function createBotReset(options: {
           .from(personalMemories)
           .where(formedMemories(ownerUserId, agentId)),
       ),
-      backgroundResearch: await count(
-        database
-          .select({ total })
-          .from(proactiveSettings)
-          .where(research(ownerUserId, agentId)),
-      ),
+      backgroundResearch: checkInsOf(ownerUserId, agentId),
       standingApprovals: await count(
         database
           .select({ total })
@@ -237,6 +224,9 @@ export function createBotReset(options: {
       const found = await conversations(ownerUserId, agentId);
       for (const channelId of found.mine)
         await softDeleteChannel(actor, channelId);
+      // Check-ins live in Intelligence, so they go before the transaction rather than inside it: no
+      // OpenBot transaction waits on Intelligence. Removed for good, their runs and items with them.
+      const research = await resetCheckInsOf(database, ownerUserId, agentId);
 
       return database.transaction(async (transaction) => {
         // The lock defaults adoption takes, so no default is adopted between these reads and the deletes.
@@ -320,46 +310,6 @@ export function createBotReset(options: {
           .delete(personalMemories)
           .where(formedMemories(ownerUserId, agentId))
           .returning({ id: personalMemories.id });
-        const settings = await transaction
-          .select({
-            id: proactiveSettings.id,
-            enabled: proactiveSettings.enabled,
-          })
-          .from(proactiveSettings)
-          .where(research(ownerUserId, agentId));
-        if (settings.some((setting) => !setting.enabled))
-          await recordOptOut(transaction, {
-            ownerUserId,
-            agentId,
-            feature: "proactive_research",
-          });
-        if (settings.length > 0) {
-          const ids = settings.map((setting) => setting.id);
-          // A run already queued for the setting would find it gone; cancel it rather than fail it.
-          await transaction
-            .update(workItems)
-            .set({
-              finishedAt: sql`now()`,
-              claimedBy: null,
-              leaseUntil: null,
-              lastError: "Cancelled by reset",
-              updatedAt: sql`now()`,
-            })
-            .where(
-              and(
-                eq(workItems.kind, PROACTIVE_RUN_KIND),
-                isNull(workItems.finishedAt),
-                inArray(sql<string>`${workItems.payload}->>'settingId'`, ids),
-              ),
-            );
-          // Suggestions go with their setting through the foreign key.
-          await transaction
-            .delete(proactiveSuggestions)
-            .where(inArray(proactiveSuggestions.settingId, ids));
-          await transaction
-            .delete(proactiveSettings)
-            .where(inArray(proactiveSettings.id, ids));
-        }
         const revoked = await transaction
           .update(approvalRules)
           .set({ revokedAt: sql`now()` })
@@ -374,7 +324,7 @@ export function createBotReset(options: {
           responsibilities: deletedGoals.length,
           followUps: followUps.length,
           formedMemories: formed.length,
-          backgroundResearch: settings.length,
+          backgroundResearch: research,
           standingApprovals: revoked.length,
         };
       });

@@ -30,8 +30,6 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
-  proactivePings,
-  proactiveSuggestions,
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
@@ -39,6 +37,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
+import { schedules } from "../schedules/directory";
 import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
@@ -605,20 +604,11 @@ export function createActivityStore(database: Database) {
        * What check-ins raised and the person has not decided: listed in the app the moment it is
        * raised, pinged or not, and whatever the Bot may notify them of. Badges always show.
        */
-      const items = await database
-        .select({
-          agentId: proactiveSuggestions.agentId,
-          total: sql<number>`count(*)::int`,
-        })
-        .from(proactiveSuggestions)
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, ownerUserId),
-            eq(proactiveSuggestions.status, "open"),
-          ),
-        )
-        .groupBy(proactiveSuggestions.agentId);
-      for (const row of items) entry(row.agentId).items += row.total;
+      const { items } = await schedules().client.all("check-in-suggestions", {
+        ownerUserId,
+        status: "open",
+      });
+      for (const item of items) entry(item.agentId).items += 1;
 
       return [...byBot.values()];
     },
@@ -628,13 +618,26 @@ export function createActivityStore(database: Database) {
      * notification each time this changes, never one per item.
      */
     async lastPing(ownerUserId: string): Promise<string | null> {
-      const [row] = await database
-        .select({ id: proactivePings.id })
-        .from(proactivePings)
-        .where(eq(proactivePings.ownerUserId, ownerUserId))
-        .orderBy(desc(proactivePings.createdAt), desc(proactivePings.id))
-        .limit(1);
-      return row?.id ?? null;
+      /*
+       * The slot records when the person was last pinged, in the same step that wrote that ping, so
+       * only pings from about then are asked for. The person's slot is held in memory: one never
+       * pinged has none and asks nothing.
+       */
+      const pingedAt = schedules().peek(
+        "check-in-people",
+        ownerUserId,
+      )?.lastPingedAt;
+      if (!pingedAt) return null;
+      const { client } = schedules();
+      const recent = await client.all("check-in-pings", {
+        ownerUserId,
+        createdAfter: new Date(pingedAt.getTime() - 60_000),
+      });
+      const pings =
+        recent.items.length > 0
+          ? recent.items
+          : (await client.all("check-in-pings", { ownerUserId })).items;
+      return pings.at(-1)?.id ?? null;
     },
   };
 }
