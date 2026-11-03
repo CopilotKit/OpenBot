@@ -110,6 +110,11 @@ jobs:
     needs: metadata
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
+    # Reading the releases is all the decision below needs.
+    permissions:
+      contents: read
+    outputs:
+      becomes_latest: ${{ steps.latest.outputs.becomes_latest }}
     steps:
       # A final cut from a candidate is compared with the candidate's tag below, so it needs the
       # whole history and the tags. Every other release needs only the commit itself.
@@ -151,6 +156,42 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: bun scripts/release-candidate-check.ts "$GITHUB_SHA" "${VERSION#v}"
+      # Whether this release becomes the latest one, decided once, before anything is built, so the
+      # `latest` image tag and the GitHub release's Latest mark always agree. A candidate or beta
+      # never does. A stable release does only when nothing newer already is. A patch from main can
+      # be cut while a newer final from a release branch is out, before the merge back lands, and
+      # customer installers and whoever pulls `latest` must not be moved back to it. A re-run of an
+      # older release likewise leaves Latest where it is.
+      - id: latest
+        name: Decide whether this becomes the latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = true ]; then
+            becomes_latest=false
+          else
+            # Only a 404 means there is no release yet. A rate limit or a server error must stop
+            # the run: reading it as "no Latest" would let a stable release take Latest by mistake.
+            if out="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>&1)"; then
+              current="$out"
+            elif grep -q 'HTTP 404' <<<"$out"; then
+              current=""
+            else
+              echo "::error::Could not read the current latest release: $out"
+              exit 1
+            fi
+            highest="$(printf '%s\n%s\n' "${current#v}" "${VERSION#v}" | sort -V | tail -n 1)"
+            if [ -z "$current" ] || [ "$highest" = "${VERSION#v}" ]; then
+              becomes_latest=true
+            else
+              becomes_latest=false
+            fi
+          fi
+          echo "becomes_latest=$becomes_latest" >> "$GITHUB_OUTPUT"
+          echo "$VERSION becomes the latest release: $becomes_latest."
 
   # The same checks CI runs, against the commit being published. This is the gate: nothing is built
   # or tagged unless they pass here, on this exact tree.
@@ -163,8 +204,9 @@ jobs:
 
   # The images, built once from the commit that passed the checks above, and tagged with this
   # release's version and `latest`. How they are built lives in `images.yml`, so every channel that
-  # publishes images builds them the same way and only the tags differ. A candidate or beta never
-  # moves `latest`: whoever pulls `latest` gets the last stable release.
+  # publishes images builds them the same way and only the tags differ. `latest` follows the one
+  # decision made in `verify`, the same one that marks the GitHub release Latest: whoever pulls
+  # `latest` gets the newest stable release, never a candidate, a beta or an older patch.
   images:
     needs: [metadata, verify, checks]
     if: needs.metadata.outputs.is_release == 'true'
@@ -172,7 +214,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       tags: ${{ needs.metadata.outputs.version }}
-      latest: ${{ needs.metadata.outputs.prerelease != 'true' }}
+      latest: ${{ needs.verify.outputs.becomes_latest == 'true' }}
       manifest_version: ${{ needs.metadata.outputs.version }}
     permissions:
       contents: read
@@ -238,6 +280,7 @@ jobs:
           VERSION: ${{ needs.metadata.outputs.version }}
           PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
           FINAL_FROM_CANDIDATE: ${{ needs.metadata.outputs.final_from_candidate }}
+          BECOMES_LATEST: ${{ needs.verify.outputs.becomes_latest }}
         run: |
           set -euo pipefail
           # The notes are the section a person wrote, not a list of commits. A candidate or beta
@@ -248,13 +291,9 @@ jobs:
             flags=(--prerelease --latest=false)
           else
             section="## ${VERSION#v}"
-            # A stable release becomes Latest only when nothing newer already is. A patch from main
-            # can be cut while a newer final from a release branch is out, before the merge back
-            # lands, and customer installers must not be moved back to it. A re-run of an older
-            # release likewise leaves Latest where it is.
-            current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)" || current=""
-            highest="$(printf '%s\n%s\n' "${current#v}" "${VERSION#v}" | sort -V | tail -n 1)"
-            if [ -z "$current" ] || [ "$highest" = "${VERSION#v}" ]; then
+            # Latest follows the one decision made in `verify`, the same one the `latest` image
+            # tag followed.
+            if [ "$BECOMES_LATEST" = true ]; then
               flags=(--latest)
             else
               flags=(--latest=false)
