@@ -33,6 +33,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   removeSkillMutationOptions,
   saveSkillMutationOptions,
@@ -56,6 +57,9 @@ export function SkillsPage() {
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
+  // Under Settings in the personal edition, beside the person's own skills, so named apart from them.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const nameFor = useBotNames();
 
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +94,12 @@ export function SkillsPage() {
           Write a skill
         </Button>
       }
-      description="Create reusable instructions people can run with /. Skills use a Bot’s existing permissions and do not grant additional access."
-      title="Skills"
+      description={
+        personal
+          ? "Write instructions any of your Bots can run with /. A skill uses what a Bot can already do. Your own skills for one Bot are under Capabilities."
+          : "Create reusable instructions people can run with /. Skills use a Bot’s existing permissions and do not grant additional access."
+      }
+      title={personal ? "Skills for every Bot" : "Skills"}
     >
       {error ? (
         <p className="text-destructive text-sm" role="alert">

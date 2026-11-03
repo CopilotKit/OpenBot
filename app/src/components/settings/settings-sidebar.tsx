@@ -1,13 +1,19 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconBook,
   IconBrowser,
   IconChecks,
+  IconDeviceDesktop,
+  IconHistory,
   IconKey,
   IconLayoutGrid,
+  IconLock,
+  IconPlug,
   IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import {
@@ -20,10 +26,11 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
-export const SETTINGS_SIDEBAR_ITEMS: {
+type SettingsSidebarItem = {
   /**
    * Whether this entry lights only on its own route.
    *
@@ -34,7 +41,9 @@ export const SETTINGS_SIDEBAR_ITEMS: {
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
-}[] = [
+};
+
+export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   {
     title: "General",
     icon: IconSettings,
@@ -80,9 +89,47 @@ export const SETTINGS_SIDEBAR_ITEMS: {
   },
 ];
 
+/**
+ * What the personal edition keeps of Admin. There is no Admin there, and the one person still adds
+ * apps, writes skills for every Bot, stores credentials, resets the computer and reads the trail.
+ */
+const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
+  { title: "Apps", icon: IconPlug, linkOptions: { to: "/settings/plugins" } },
+  {
+    title: "Skills for every Bot",
+    icon: IconBook,
+    linkOptions: { to: "/settings/skills" },
+  },
+  {
+    title: "Credentials",
+    icon: IconLock,
+    linkOptions: { to: "/settings/credentials" },
+  },
+  {
+    title: "Computer",
+    icon: IconDeviceDesktop,
+    linkOptions: { to: "/settings/computer" },
+  },
+  {
+    title: "Activity",
+    icon: IconHistory,
+    linkOptions: { to: "/settings/activity" },
+  },
+];
+
+export function settingsSidebarItems(
+  edition: "team" | "personal",
+): SettingsSidebarItem[] {
+  return edition === "personal"
+    ? [...SETTINGS_SIDEBAR_ITEMS, ...PERSONAL_SETTINGS_SIDEBAR_ITEMS]
+    : SETTINGS_SIDEBAR_ITEMS;
+}
+
 export function SettingsSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
+  const { data } = useQuery(deploymentCapabilitiesQueryOptions());
+  const items = settingsSidebarItems(data?.edition ?? "team");
   return (
     <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}
@@ -107,7 +154,7 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {SETTINGS_SIDEBAR_ITEMS.map((option) => (
+            {items.map((option) => (
               <SidebarMenuItem key={option.title}>
                 <SidebarMenuButton
                   render={(props) => (
