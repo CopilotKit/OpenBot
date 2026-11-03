@@ -48,6 +48,7 @@ at `agent-langgraph` on a laptop.
 | Variable             | Default                            | Meaning                                                             |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------- |
 | `PORT`               | `3001`                             | API server port. `SERVER_PORT` names the same port; set either, or both to the same value, or the server refuses to start. |
+| `OPENBOT_EDITION`    | `team`                             | `personal` runs OpenBot for one person with no sign-in, one computer and no Admin. See [personal-edition.md](personal-edition.md). Any value other than `team` or `personal` refuses to start. |
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project, and prefixes the identity a Shared app's account is held under at the vendor. That identity is fixed when the app is made Shared, so changing this later does not move it. |
