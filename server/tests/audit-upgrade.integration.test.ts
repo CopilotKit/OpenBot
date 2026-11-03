@@ -178,7 +178,9 @@ describe("copying an upgraded deployment's trail into Intelligence", () => {
         .map((row) => ({ id: row.id, at: row.createdAt }))
         .toSorted((a, b) => a.id.localeCompare(b.id)),
     );
-    expect(stored.find((row) => row.eventType === "mcp.call_succeeded")).toMatchObject({
+    expect(
+      stored.find((row) => row.eventType === "mcp.call_succeeded"),
+    ).toMatchObject({
       initiatorKind: "routine",
       initiatorId: expect.stringMatching(/^routine-/),
       actorUserId: expect.stringMatching(/^upgrade-user-/),
