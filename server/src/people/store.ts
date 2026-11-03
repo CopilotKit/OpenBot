@@ -1,13 +1,8 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { isConfiguredAdmin, type OpenBotRole, setRole } from "../auth/roles";
 import type { Database } from "../db/client";
-import {
-  accounts,
-  revokedAccess,
-  sessions,
-  userRoles,
-  users,
-} from "../db/schema";
+import { accounts, sessions, users } from "../db/schema";
+import { people } from "./directory/directory";
 
 /**
  * Everybody who has signed in, and what an administrator may do about them.
@@ -208,22 +203,14 @@ export function createPeopleStore(
          * has one row per provider, so a plain join would return the same person once per
          * combination and the screen would list them several times.
          */
-        roles: sql<
-          string[]
-        >`coalesce(array_agg(distinct ${userRoles.role}) filter (where ${userRoles.role} is not null), '{}')`,
+        role: users.role,
         providers: sql<
           string[]
         >`coalesce(array_agg(distinct ${accounts.providerId}) filter (where ${accounts.providerId} is not null), '{}')`,
         lastSignedInAt: users.lastSignedInAt,
-        revoked: sql<boolean>`bool_or(${revokedAccess.email} is not null)`,
       })
       .from(users)
-      .leftJoin(userRoles, eq(userRoles.userId, users.id))
       .leftJoin(accounts, eq(accounts.userId, users.id))
-      .leftJoin(
-        revokedAccess,
-        eq(revokedAccess.email, sql`lower(${users.email})`),
-      )
       .where(filters.length > 0 ? and(...filters) : undefined)
       .groupBy(users.id)
       /*
@@ -240,6 +227,11 @@ export function createPeopleStore(
 
     const page = rows.slice(0, limit);
     const last = page.at(-1);
+    /*
+     * Who on this page an administrator removed, asked of Intelligence's directory in one request:
+     * removals are kept there, by address, and this screen is the only list that shows them.
+     */
+    const removed = await people().removals.among(page.map((row) => row.email));
 
     return {
       people: page.map((row) => ({
@@ -247,13 +239,13 @@ export function createPeopleStore(
         email: row.email,
         name: row.name,
         image: row.image,
-        // `admin` wins, the same way the request guard reads it. Anything else is a plain user.
-        role: row.roles.includes("admin") ? "admin" : "user",
+        // The role on the row, the same one the request guard reads. Anything else is a plain user.
+        role: row.role === "admin" ? "admin" : "user",
         providers: row.providers,
         lastSignedInAt: row.lastSignedInAt
           ? new Date(row.lastSignedInAt).toISOString()
           : null,
-        revoked: row.revoked === true,
+        revoked: removed.has(normalize(row.email)),
         configuredAdmin: isConfiguredAdmin(row.email, initialAdminEmails),
       })),
       nextCursor:
@@ -291,9 +283,14 @@ export function createPeopleStore(
     /**
      * Remove somebody, and end the session they are using.
      *
-     * Both halves matter. The deny list stops the next sign-in, and deleting the sessions stops the
+     * Both halves matter. The removal stops the next sign-in, and deleting the sessions stops the
      * current one: without that, somebody removed keeps working until their cookie happens to
      * expire, which can be days.
+     *
+     * The removal is Intelligence's (people/directory), written first; the sessions are this
+     * deployment's, deleted after. They can no longer share a transaction, so the order is the one
+     * that fails safe: if deleting the sessions fails, the person is already refused at their next
+     * sign-in, and removing them again ends the sessions.
      */
     async revoke(userId, revokedBy) {
       const [user] = await database
@@ -303,13 +300,8 @@ export function createPeopleStore(
         .limit(1);
       if (!user) return;
 
-      await database.transaction(async (tx) => {
-        await tx
-          .insert(revokedAccess)
-          .values({ email: normalize(user.email), revokedBy })
-          .onConflictDoNothing();
-        await tx.delete(sessions).where(eq(sessions.userId, userId));
-      });
+      await people().removals.remove(normalize(user.email), revokedBy);
+      await database.delete(sessions).where(eq(sessions.userId, userId));
     },
 
     /*
@@ -337,18 +329,11 @@ export function createPeopleStore(
         .limit(1);
       if (!user) return;
 
-      await database
-        .delete(revokedAccess)
-        .where(eq(revokedAccess.email, normalize(user.email)));
+      await people().removals.lift(normalize(user.email));
     },
 
     async isRevoked(email) {
-      const rows = await database
-        .select({ email: revokedAccess.email })
-        .from(revokedAccess)
-        .where(inArray(revokedAccess.email, [normalize(email)]))
-        .limit(1);
-      return rows.length > 0;
+      return (await people().removals.find(normalize(email))) !== null;
     },
   };
 }

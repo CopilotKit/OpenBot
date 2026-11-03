@@ -1,6 +1,7 @@
-import { and, eq, ne } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { userRoles, users } from "../db/schema";
+import { users } from "../db/schema";
+import { people } from "../people/directory/directory";
 
 export type OpenBotRole = "admin" | "user";
 
@@ -32,23 +33,18 @@ export function roleForEmail(
 /**
  * Give somebody exactly one role.
  *
- * `user_roles` is a set with a `(user_id, role)` primary key and the guard takes `admin` if any row
- * says so, so setting a role means removing the rows that should not be there rather than only
- * inserting one. Both statements inside one transaction: between them a request arriving on another
- * process would find no role at all and be refused with a 403 that reads as a permissions bug.
+ * The role is the person's in Intelligence's directory (people/directory), written there first; their
+ * row here is then updated from the directory's answer, which is what the request guard reads. One
+ * field rather than the old `user_roles` set, so there is never a moment with no role at all.
  */
 export async function setRole(
-  database: Database,
+  _database: Database,
   userId: string,
   role: OpenBotRole,
 ): Promise<OpenBotRole> {
-  await database.transaction(async (tx) => {
-    await tx
-      .delete(userRoles)
-      .where(and(eq(userRoles.userId, userId), ne(userRoles.role, role)));
-    await tx.insert(userRoles).values({ userId, role }).onConflictDoNothing();
-  });
-
+  await people().update(userId, (current) =>
+    current.role === role ? null : { role },
+  );
   return role;
 }
 
@@ -91,7 +87,7 @@ export async function applyConfiguredAdmin(
   if (initialAdminEmails.length === 0) return false;
 
   const [user] = await database
-    .select({ email: users.email })
+    .select({ email: users.email, role: users.role })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -102,15 +98,12 @@ export async function applyConfiguredAdmin(
 
   if (!isConfiguredAdmin(user.email, initialAdminEmails)) return false;
 
-  const [already] = await database
-    .select({ role: userRoles.role })
-    .from(userRoles)
-    .where(and(eq(userRoles.userId, userId), eq(userRoles.role, "admin")))
-    .limit(1);
+  // Already an administrator: nothing to grant, and nothing to ask Intelligence.
+  if (user.role === "admin") return false;
 
   await setRole(database, userId, "admin");
 
   // Whether this sign-in is what granted it. The caller writes an audit row when it did, and a
   // returning administrator must not produce one on every sign-in.
-  return !already;
+  return true;
 }

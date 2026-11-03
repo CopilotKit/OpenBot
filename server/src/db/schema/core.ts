@@ -91,6 +91,23 @@ export const users = pgTable("users", {
     withTimezone: true,
   }),
   lastSignedInAt: timestamp("last_signed_in_at", { withTimezone: true }),
+  /**
+   * The person's role here, as Intelligence's directory holds it. Read by the request guard on every
+   * request, so it is kept on this row rather than asked of Intelligence. `user_roles` held it before
+   * and is no longer written.
+   */
+  role: role("role"),
+  /**
+   * The version of this person in Intelligence's organization directory that this row reflects.
+   *
+   * THIS TABLE IS A PROJECTION. People live in Intelligence (people/directory); this row is this
+   * deployment's copy, kept because about 56 tables name a person by a foreign key to it and because
+   * the session and the guard read it on every request. Null means the row holds a change Intelligence
+   * has not acknowledged yet: Better Auth wrote it (a first sign-in, a name the identity provider
+   * changed, a directory group), and the directory pushes it after the write commits. A null row is
+   * never overwritten from Intelligence and never taken for a person Intelligence deleted.
+   */
+  directoryVersion: integer("directory_version"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

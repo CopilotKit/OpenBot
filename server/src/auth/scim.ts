@@ -21,7 +21,9 @@ import { eq } from "drizzle-orm";
 import { enterpriseControls } from "../admin/controls";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
-import { revokedAccess, userRoles, users } from "../db/schema";
+import { users } from "../db/schema";
+import { people } from "../people/directory/directory";
+import { afterPeopleCommit } from "./directory-adapter";
 import { roleForEmail } from "./roles";
 
 export const SCIM_REVOKED_BY_PREFIX = "scim:";
@@ -56,9 +58,10 @@ async function emailOf(database: Database, userId: string) {
  * React to a person becoming inactive or active in the directory.
  *
  * Called inside the plugin's transaction, so nothing here touches the rows that transaction holds
- * (`users`, `sessions`, the SCIM tables): the deny-list is its own table, and everything slower runs
- * after the hook returns. Deny-listing before the transaction commits errs toward refusing; a
- * rolled-back deactivation is undone by the directory's next retry setting them active again.
+ * (`users`, `sessions`, the SCIM tables). The removal lives in Intelligence's directory
+ * (people/directory), so it is written once that transaction commits and before the directory is
+ * answered (`afterPeopleCommit`): no transaction waits on Intelligence, and a removal that cannot be
+ * written fails the directory's request, which it sends again. The slower offboarding runs after.
  */
 export async function reconcileDirectoryState(
   deps: ScimDeps,
@@ -70,49 +73,42 @@ export async function reconcileDirectoryState(
   const by = `${SCIM_REVOKED_BY_PREFIX}directory`;
 
   if (!state.active) {
-    const inserted = await deps.database
-      .insert(revokedAccess)
-      .values({ email: normalized, revokedBy: by })
-      .onConflictDoNothing()
-      .returning({ email: revokedAccess.email });
-    setTimeout(() => {
-      void (async () => {
-        await enterpriseControls()?.offboard(state.userId, by);
-        if (deps.auditStore && inserted.length > 0) {
-          await recordAuditEvent(deps.auditStore, {
-            eventType: "person.deprovisioned",
-            targetType: "person",
-            targetId: state.userId,
-            payload: {
-              email,
-              via: "SCIM",
-              note: "Sessions ended, address deny-listed, connector credentials retired, computers stopped.",
-            },
-          });
-        }
-      })().catch((error) =>
-        console.error(
-          JSON.stringify({
-            type: "scim-offboard-failed",
-            error: String(error),
-          }),
-        ),
-      );
-    }, 0);
+    await afterPeopleCommit(async () => {
+      const { created } = await people().removals.remove(normalized, by);
+      setTimeout(() => {
+        void (async () => {
+          await enterpriseControls()?.offboard(state.userId, by);
+          if (deps.auditStore && created) {
+            await recordAuditEvent(deps.auditStore, {
+              eventType: "person.deprovisioned",
+              targetType: "person",
+              targetId: state.userId,
+              payload: {
+                email,
+                via: "SCIM",
+                note: "Sessions ended, address deny-listed, connector credentials retired, computers stopped.",
+              },
+            });
+          }
+        })().catch((error) =>
+          console.error(
+            JSON.stringify({
+              type: "scim-offboard-failed",
+              error: String(error),
+            }),
+          ),
+        );
+      }, 0);
+    });
     return;
   }
 
-  const [entry] = await deps.database
-    .select({ revokedBy: revokedAccess.revokedBy })
-    .from(revokedAccess)
-    .where(eq(revokedAccess.email, normalized))
-    .limit(1);
-  // An administrator's removal stands until an administrator lifts it.
-  if (entry?.revokedBy.startsWith(SCIM_REVOKED_BY_PREFIX)) {
-    await deps.database
-      .delete(revokedAccess)
-      .where(eq(revokedAccess.email, normalized));
-    if (deps.auditStore) {
+  await afterPeopleCommit(async () => {
+    // An administrator's removal stands until an administrator lifts it.
+    const lifted = await people().removals.lift(normalized, (removal) =>
+      removal.removedBy.startsWith(SCIM_REVOKED_BY_PREFIX),
+    );
+    if (lifted && deps.auditStore) {
       await recordAuditEvent(deps.auditStore, {
         eventType: "person.reprovisioned",
         targetType: "person",
@@ -120,7 +116,7 @@ export async function reconcileDirectoryState(
         payload: { email, via: "SCIM" },
       }).catch(() => undefined);
     }
-  }
+  });
 }
 
 /** The plugin's options, or undefined when SCIM is not configured. */
@@ -194,9 +190,9 @@ export async function recordProvisioned(
 ): Promise<void> {
   if (!deps.auditStore) return;
   const [role] = await deps.database
-    .select({ role: userRoles.role })
-    .from(userRoles)
-    .where(eq(userRoles.userId, user.id))
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, user.id))
     .limit(1);
   await recordAuditEvent(deps.auditStore, {
     eventType: "person.provisioned",

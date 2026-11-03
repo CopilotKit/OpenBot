@@ -24,6 +24,16 @@ import {
   CoworkerUnavailableError,
   createActorAgentResolver,
 } from "./agents/agent-resolver";
+import { createAgentRegistryClient } from "./agents/bot-registry/client";
+import {
+  createBotDirectory,
+  installBotDirectory,
+} from "./agents/bot-registry/directory";
+import {
+  removeBotLocalRows,
+  sweepPurgedBotRows,
+} from "./agents/bot-registry/local-rows";
+import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import {
   mintRunAssertion,
   type RunAssertion,
@@ -42,16 +52,6 @@ import {
   createBotLifecycleStore,
 } from "./agents/lifecycle";
 import { createBotReset } from "./agents/lifecycle-reset";
-import { createAgentRegistryClient } from "./agents/bot-registry/client";
-import {
-  createBotDirectory,
-  installBotDirectory,
-} from "./agents/bot-registry/directory";
-import {
-  removeBotLocalRows,
-  sweepPurgedBotRows,
-} from "./agents/bot-registry/local-rows";
-import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -92,6 +92,7 @@ import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
+import { roleForEmail } from "./auth/roles";
 import { openbotAddress } from "./browser/address";
 import { botBrowserNetwork } from "./browser/bot-browser";
 import { personBrowserEgressPolicy } from "./browser/egress";
@@ -226,6 +227,12 @@ import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
+import { createDirectoryClient } from "./people/directory/client";
+import {
+  createPeopleDirectory,
+  installPeopleDirectory,
+} from "./people/directory/directory";
+import { copyLocalPeopleToIntelligence } from "./people/directory/upgrade";
 import { createOnboardingStore } from "./people/onboarding";
 import { createProfileStore } from "./people/profile";
 import { createPeopleStore } from "./people/store";
@@ -420,6 +427,27 @@ const learningSettings = withLearningAutoAssign(
   learningAutoAssign,
 );
 learningAutoAssign.start();
+/*
+ * Every person, from Intelligence's organization directory, projected into `users` and kept fresh by
+ * the directory's change announcements (people/directory/directory.ts). Started before anything signs
+ * anybody in or names a person, and fatal when Intelligence cannot answer.
+ */
+const peopleDirectory = installPeopleDirectory(
+  createPeopleDirectory({
+    client: createDirectoryClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    database,
+    defaultRole: (email) =>
+      roleForEmail(email, config.auth?.initialAdminEmails ?? []),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await peopleDirectory.start();
+// An upgraded deployment's people, removals, linked accounts and identity providers, copied once
+// (people/directory/upgrade.ts).
+await copyLocalPeopleToIntelligence(database, peopleDirectory);
 await initializeDevActorUser(database, config.singleUser);
 /*
  * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
@@ -2960,6 +2988,7 @@ if (config.singleUser) {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     botDirectory.stop();
+    peopleDirectory.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();

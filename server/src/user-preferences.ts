@@ -3,9 +3,11 @@ import {
   isSkinId,
   type UserPreferences,
 } from "@openbot/shared/user-preferences";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Database } from "./db/client";
 import { users } from "./db/schema";
+import { PersonMissingError } from "./people/directory/client";
+import { people } from "./people/directory/directory";
 
 /*
  * What is stored, over the defaults. A skin a later build no longer ships stays in the row, so going
@@ -40,17 +42,19 @@ export function createUserPreferencesStore(
       return withDefaults(user.preferences);
     },
     async patch(userId, preferences) {
-      const [user] = await database
-        .update(users)
-        .set({
-          // Merge in Postgres so simultaneous updates to different preferences are preserved.
-          preferences: sql`${users.preferences} || ${preferences}::jsonb`,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId))
-        .returning({ preferences: users.preferences });
-      if (!user) throw new Error("User preferences could not be saved.");
-      return withDefaults(user.preferences);
+      let person: Awaited<ReturnType<ReturnType<typeof people>["update"]>>;
+      try {
+        // Merged over what Intelligence's directory holds, under its version: a save made meanwhile
+        // to a different preference makes this one read again and merge again, so both survive.
+        person = await people().update(userId, (current) => ({
+          preferences: { ...current.preferences, ...preferences },
+        }));
+      } catch (error) {
+        if (error instanceof PersonMissingError)
+          throw new Error("User preferences could not be saved.");
+        throw error;
+      }
+      return withDefaults(person.preferences);
     },
   };
 }

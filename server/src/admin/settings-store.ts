@@ -15,7 +15,6 @@ import {
   modelUsage,
   networkPolicies,
   scimGroups,
-  userRoles,
   users,
 } from "../db/schema";
 import type { CapabilityRow, Member } from "./capabilities";
@@ -212,26 +211,23 @@ export function createEnterpriseStore(database: Database) {
 
     /** One person as the capability rules see them. Unknown means a plain user in no group. */
     async member(userId: string): Promise<Member> {
-      const roles = await database
-        .select({ role: userRoles.role })
-        .from(userRoles)
-        .where(eq(userRoles.userId, userId));
+      // The role and groups on the person's row: this deployment's copy of the directory's person.
       const person = await database
-        .select({ groups: users.groups })
+        .select({ role: users.role, groups: users.groups })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
       return {
-        role: roles.some((row) => row.role === "admin") ? "admin" : "user",
+        role: person[0]?.role === "admin" ? "admin" : "user",
         groups: person[0]?.groups ?? [],
       };
     },
 
     async adminIds(): Promise<Set<string>> {
       const rows = await database
-        .select({ userId: userRoles.userId })
-        .from(userRoles)
-        .where(eq(userRoles.role, "admin"));
+        .select({ userId: users.id })
+        .from(users)
+        .where(eq(users.role, "admin"));
       return new Set(rows.map((row) => row.userId));
     },
 
