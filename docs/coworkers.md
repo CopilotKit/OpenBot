@@ -9,8 +9,8 @@ A coworker is a Bot with a durable profile and standing role. The role is sent w
 | Bot                  | Intelligence agent registry     | Type (built-in, remote AG-UI or remote Mastra), endpoint or prompt, key reference, name, title, role, avatar seed, owner, visibility, and soft deletion. |
 | Personal roster      | `agent_preferences`             | Per-user hidden and pinned state.                                                        |
 | Team publication     | `team_bot_publications`         | A Bot its owner has published to the whole team or to named people and groups.          |
-| Channel              | `channels`                      | Conversation membership and coworker binding.                                            |
-| Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                                               |
+| Channel              | Intelligence conversations      | A conversation: its members, its Bots, and the thread each member's turns run in.        |
+| Delivery binding     | Intelligence delivery bindings  | A conversation bound to Slack, Teams or SMS, and a person's push devices.                |
 
 Package-provided agents are public and ownerless. User-created coworkers are owned by the creator.
 
@@ -21,6 +21,14 @@ this deployment's vault; Intelligence holds only a reference to it. The rows her
 Bot (preferences, grants, routines, channel membership and the rest) name it by id and are removed
 when the Bot is deleted for good. A deployment upgrading from a release that kept Bots in its own
 `agents` and `agent_profiles` tables copies them into Intelligence once, at its first boot.
+
+Channels live in Intelligence too, as conversations (Intelligence's own "Channels" are its Slack and
+Teams adapters, so it calls these conversations): a channel's name, its members with their pins and
+read markers, its Bots, the thread each member's turns run in, a group's shared transcript, voice
+sessions and tasks. Each server holds the conversations it read lately in memory, refreshed by
+Intelligence's change announcements, so a turn never waits on a network read for them. A
+deployment upgrading from a release that kept them in `channels` and its neighbouring tables copies
+them into Intelligence once, at its first boot, with its delivery bindings and push devices.
 
 ## Standing role
 

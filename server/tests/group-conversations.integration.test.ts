@@ -25,16 +25,12 @@ import {
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  channels,
-  intelligenceChannelMappings,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { users, workItems } from "../src/db/schema";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { createWorkQueue } from "../src/work/queue";
 import { changeBot, removeBots, useTestBots } from "./support/bots";
+import { purgeConversations } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -51,12 +47,7 @@ const createdChannels: string[] = [];
 
 afterEach(async () => {
   await database.delete(workItems).where(like(workItems.key, `${prefix}%`));
-  for (const id of createdChannels.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, id));
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  await purgeConversations(createdChannels.splice(0));
   await removeBots(createdAgents.splice(0));
   for (const id of createdUsers.splice(0))
     await database.delete(users).where(eq(users.id, id));
@@ -219,14 +210,14 @@ describe("group conversations in PostgreSQL", () => {
     // A group Bot's thread authorises its own coordination callbacks, and no one else's.
     const threadId = calls[0]?.threadId ?? "";
     expect(
-      await groupSourceForRun(database, {
+      await groupSourceForRun({
         threadId,
         actorId: owner.id,
         botId: ada,
       }),
     ).toEqual({ channelId: channel.id, botId: ada });
     expect(
-      await groupSourceForRun(database, {
+      await groupSourceForRun({
         threadId,
         actorId: owner.id,
         botId: grace,
@@ -277,7 +268,7 @@ describe("group conversations in PostgreSQL", () => {
     await drain(conversations);
     expect(calls.map((call) => call.agentId)).toEqual([ada]);
     expect(
-      await groupSourceForRun(database, {
+      await groupSourceForRun({
         threadId: calls[0]?.threadId,
         actorId: stranger.id,
         botId: ada,

@@ -8,12 +8,8 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { FIRING_FRAME, frameFiring } from "@openbot/shared/routine-firing";
-import { eq, sql } from "drizzle-orm";
-import postgres from "postgres";
-import {
-  CHANNEL_ACTIVITY_TOPIC,
-  type ChannelActivityEvent,
-} from "../src/channels/events";
+import { eq } from "drizzle-orm";
+import type { ChannelActivityEvent } from "../src/channels/events";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
@@ -26,15 +22,21 @@ import {
 } from "../src/channels/summary";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { users, workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { deliverConversationChanges } from "../src/channels/live";
+import { createChannelEventHub } from "../src/channels/events";
+import { writeKey } from "../src/conversations/http";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  addConversationMember,
+  conversationClient,
+  deleteConversation,
+  eventually,
+  maybeConversation,
+  otherReplica,
+  purgeConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -56,13 +58,9 @@ const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
+  for (const channelId of createdChannelIds)
     await database.delete(workItems).where(eq(workItems.key, channelId));
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -129,11 +127,8 @@ function titler(answer: string | null): ChannelTitler {
 }
 
 async function summaryOf(channelId: string) {
-  const [row] = await database
-    .select({ summary: channels.summary, summaryAt: channels.summaryAt })
-    .from(channels)
-    .where(eq(channels.id, channelId));
-  return row;
+  const row = await maybeConversation(channelId);
+  return row ? { summary: row.summary, summaryAt: row.summaryAt } : undefined;
 }
 
 /**
@@ -363,10 +358,11 @@ describe("naming a claimed conversation", () => {
   test("never overwrites a name the conversation already has", async () => {
     const owner = await createUser();
     const channel = await createUsedChannel(owner);
-    await database
-      .update(channels)
-      .set({ summary: "Named already", summaryAt: new Date() })
-      .where(eq(channels.id, channel.id));
+    await (await conversationClient()).summary(
+      channel.id,
+      "Named already",
+      writeKey("test.summary"),
+    );
     // Offered before it was named, which is exactly the race two replicas produce.
     await queue.offer({ kind: CHANNEL_SUMMARY_KIND, key: channel.id });
 
@@ -426,7 +422,7 @@ describe("naming a claimed conversation", () => {
     // The channel goes while its naming is still queued. A queue key is not a foreign key, so the
     // work outlives the thing it was about — which happens for real on a delete, and happens on
     // every integration test that seeds a channel and tears it down.
-    await database.delete(channels).where(eq(channels.id, channel.id));
+    await purgeConversations([channel.id]);
 
     await summariseClaimedChannels(options({}));
 
@@ -461,32 +457,31 @@ describe("naming a claimed conversation", () => {
         }),
       );
       void work.catch(started.reject);
-      const notifications = postgres(databaseUrl, { max: 1 });
-      const barrier = `summary-barrier-${randomUUID()}`;
-      const observed = Promise.withResolvers<void>();
+      // Another instance's view, as a browser connected to it would hear: what Intelligence
+      // announces about this conversation.
+      const replica = await otherReplica();
+      const hub = createChannelEventHub();
       const summaries: string[] = [];
+      const deleted: string[] = [];
+      hub.register(owner.id, (payload) => {
+        const event = JSON.parse(payload) as ChannelActivityEvent;
+        if (event.channelId !== channel.id) return;
+        if (event.summary !== undefined) summaries.push(event.summary);
+        if (event.deleted) deleted.push(event.channelId);
+      });
+      const detach = deliverConversationChanges(replica, hub);
       try {
-        await notifications.listen(CHANNEL_ACTIVITY_TOPIC, (payload) => {
-          if (payload === barrier) {
-            observed.resolve();
-            return;
-          }
-          const event = JSON.parse(payload) as ChannelActivityEvent;
-          if (event.channelId === channel.id && event.summary !== undefined)
-            summaries.push(event.summary);
-        });
         await started.promise;
         if (kind === "soft")
           expect(await store.softDelete(owner, channel.id)).toBe(true);
-        else await database.delete(channels).where(eq(channels.id, channel.id));
+        else await purgeConversations([channel.id]);
         resume.resolve();
         const report = await work;
-        // NOTIFY is commit-ordered. This marker follows the completed worker transaction, so
-        // observing it also observes any summary announcement that worker could have committed.
-        await database.execute(
-          sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${barrier})`,
-        );
-        await observed.promise;
+        // Announcements are not ordered with the write that made them, so the deletion's own is
+        // waited for (soft), then a window for any summary announcement to have arrived.
+        if (kind === "soft")
+          await eventually(() => deleted.length > 0, { quietMs: 1_000 });
+        else await new Promise((resolve) => setTimeout(resolve, 1_500));
         expect(summaries).toEqual([]);
         const row = await summaryOf(channel.id);
         if (kind === "soft") {
@@ -502,7 +497,8 @@ describe("naming a claimed conversation", () => {
       } finally {
         resume.resolve();
         await Promise.allSettled([work]);
-        await notifications.end({ timeout: 1 });
+        detach();
+        replica.stop();
       }
     },
   );
@@ -511,10 +507,7 @@ describe("naming a claimed conversation", () => {
     const owner = await createUser();
     const channel = await createUsedChannel(owner);
     await offer(channel.id);
-    await database
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channel.id));
+    await deleteConversation(channel.id);
 
     await summariseClaimedChannels(options({}));
 
@@ -536,9 +529,7 @@ describe("naming a claimed conversation", () => {
     for (let index = 0; index < 40; index += 1) {
       const member = await createUser();
       crowd.push(member.id);
-      await database
-        .insert(channelMemberships)
-        .values({ channelId: channel.id, userId: member.id });
+      await addConversationMember(channel.id, member.id);
     }
 
     await offer(channel.id);

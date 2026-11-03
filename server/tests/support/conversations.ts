@@ -49,12 +49,20 @@ let started:
  * The process's conversation and delivery directories, against the test Intelligence, installed and
  * started, with the Bot directory beside them. Once per process: every file shares them.
  */
-export function useTestConversations(): Promise<{
+export async function useTestConversations(): Promise<{
+  conversations: ConversationDirectory;
+  delivery: DeliveryDirectory;
+}> {
+  // The Bot directory starts these too (support/bots.ts), so a test that only asks for Bots has them.
+  await useTestBots();
+  return startTestConversationDirectories();
+}
+
+export function startTestConversationDirectories(): Promise<{
   conversations: ConversationDirectory;
   delivery: DeliveryDirectory;
 }> {
   started ??= (async () => {
-    await useTestBots();
     const intelligence = testIntelligence();
     const settings = {
       apiUrl: intelligence.apiUrl,
@@ -100,9 +108,14 @@ export type SeedConversation = {
     joinedAt?: Date;
   }[];
   /** A Bot's thread in a group, per member. */
-  threads?: { userId: string; agentId: string; threadId?: string; createdAt?: Date }[];
+  threads?: {
+    userId: string;
+    agentId: string;
+    threadId?: string;
+    createdAt?: Date;
+  }[];
   managedBy?: string | null;
-  createdAt?: Date;
+  createdAt?: Date | string;
   deletedAt?: Date | null;
   summary?: string | null;
   lastMessage?: string | null;
@@ -144,7 +157,9 @@ export async function seedConversation(
       })),
       ...(input.createdAt ? { createdAt: input.createdAt } : {}),
       ...(input.deletedAt ? { deletedAt: input.deletedAt } : {}),
-      ...(input.summary ? { summary: input.summary, summaryAt: new Date() } : {}),
+      ...(input.summary
+        ? { summary: input.summary, summaryAt: new Date() }
+        : {}),
       ...(input.lastMessage
         ? {
             lastMessage: input.lastMessage,
@@ -172,7 +187,9 @@ export async function seedChannel(
   return seedConversation({
     ...rest,
     agentIds,
-    members: [{ userId, threadId: threadId ?? newThreadId(), pinnedAt, lastReadAt }],
+    members: [
+      { userId, threadId: threadId ?? newThreadId(), pinnedAt, lastReadAt },
+    ],
   });
 }
 
@@ -200,7 +217,9 @@ export async function ownThreadOf(
     (candidate) => candidate.userId === userId && candidate.agentId === null,
   );
   if (!thread)
-    throw new Error(`${userId} has no thread of their own in ${conversationId}`);
+    throw new Error(
+      `${userId} has no thread of their own in ${conversationId}`,
+    );
   return thread.threadId;
 }
 
@@ -342,7 +361,9 @@ export async function seedBinding(input: {
     mentionId: input.mentionId ?? null,
   });
   if (input.enabled === false)
-    return (await delivery.changeBinding(binding.id, { enabled: false })) ?? binding;
+    return (
+      (await delivery.changeBinding(binding.id, { enabled: false })) ?? binding
+    );
   return binding;
 }
 
@@ -370,7 +391,9 @@ export async function storedBindings(
 ): Promise<StoredBinding[]> {
   const { delivery } = await useTestConversations();
   await delivery.resync();
-  return delivery.bindings().filter((binding) => binding.ownerUserId === ownerUserId);
+  return delivery
+    .bindings()
+    .filter((binding) => binding.ownerUserId === ownerUserId);
 }
 
 /** Every push device this person has, as Intelligence holds them now. */
@@ -379,5 +402,69 @@ export async function storedDevices(
 ): Promise<StoredDevice[]> {
   const { delivery } = await useTestConversations();
   await delivery.resync();
-  return delivery.devices().filter((device) => device.ownerUserId === ownerUserId);
+  return delivery
+    .devices()
+    .filter((device) => device.ownerUserId === ownerUserId);
+}
+
+/**
+ * Add a person to a conversation with a thread of their own, as adding someone to a group does, and
+ * keep the answer in this process's directory so the next read sees them at once.
+ */
+export async function addConversationMember(
+  conversationId: string,
+  userId: string,
+  threadId: string = newThreadId(),
+): Promise<Conversation> {
+  const { conversations } = await useTestConversations();
+  return conversations.apply(
+    await conversations.client.addMember(
+      conversationId,
+      userId,
+      { threadId },
+      writeKey("test.member"),
+    ),
+  );
+}
+
+/**
+ * Wait until `ready` holds, for what arrives from Intelligence's change announcements (they are not
+ * the same transaction as the write, so a test reads them as they come). Then wait `quietMs` more,
+ * so a test that counts what arrived also sees anything that should NOT have come.
+ */
+export async function eventually(
+  ready: () => boolean,
+  options: { timeoutMs?: number; quietMs?: number; what?: string } = {},
+): Promise<void> {
+  const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+  while (!ready()) {
+    if (Date.now() > deadline)
+      throw new Error(
+        `${options.what ?? "The expected announcements"} did not arrive in time.`,
+      );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (options.quietMs)
+    await new Promise((resolve) => setTimeout(resolve, options.quietMs));
+}
+
+/**
+ * A second server instance's view of conversations: a directory of its own with its own subscription
+ * to Intelligence's announcements, sharing nothing with the writer but Intelligence. What it hears is
+ * what another replica would. Resolves once it is subscribed; `stop` it when done.
+ */
+export async function otherReplica(): Promise<ConversationDirectory> {
+  const intelligence = testIntelligence();
+  const replica = createConversationDirectory({
+    client: createConversationClient({
+      apiUrl: intelligence.apiUrl,
+      apiKey: intelligence.apiKey,
+    }),
+    gatewayWsUrl: intelligence.gatewayWsUrl,
+  });
+  await replica.start();
+  await eventually(() => replica.subscribed(), {
+    what: "The second instance's subscription",
+  });
+  return replica;
 }

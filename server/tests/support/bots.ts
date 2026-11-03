@@ -24,6 +24,7 @@ import type {
   BotType,
 } from "../../src/agents/bot-registry/types";
 import { createDatabase } from "../../src/db/client";
+import { startTestConversationDirectories } from "./conversations";
 import { testDatabaseUrl } from "./database";
 
 export type TestIntelligence = {
@@ -74,6 +75,9 @@ export function useTestBots(): Promise<BotDirectory> {
     const database = createDatabase(testDatabaseUrl(), { max: 1 });
     directory.onPurged((botId) => removeBotLocalRows(database, [botId]));
     await directory.start();
+    // Conversations and delivery bindings are in Intelligence too, and every store that names a Bot
+    // reads them through directories of their own: started with the Bots, as the server starts them.
+    await startTestConversationDirectories();
     return directory;
   })();
   return started;
