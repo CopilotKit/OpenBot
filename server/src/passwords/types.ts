@@ -51,22 +51,19 @@ export type SignInRequestView = Omit<
   passwordManager: boolean;
 };
 
+/** A saved login as the store holds it: never its password, which only `revealPassword` reads. */
 export type SavedLoginRecord = {
   id: string;
   ownerUserId: string;
   origin: string;
   username: string;
-  encryptedPassword: string;
   createdAt: Date;
   updatedAt: Date;
   lastUsedAt: Date | null;
 };
 
 /** A saved login as any route shows it. */
-export type SavedLoginView = Omit<
-  SavedLoginRecord,
-  "encryptedPassword" | "ownerUserId"
->;
+export type SavedLoginView = Omit<SavedLoginRecord, "ownerUserId">;
 
 export type PasswordStore = {
   createRequest(
@@ -109,8 +106,17 @@ export type PasswordStore = {
     ownerUserId: string;
     origin: string;
     username: string;
-    encryptedPassword: string;
+    password: string;
   }): Promise<SavedLoginRecord>;
+  /**
+   * The password of one of this person's saved logins, for the Bot it is about to be typed for, or
+   * null when there is no such login any more. Recorded by the vault: who, which login, which Bot.
+   */
+  revealPassword(
+    ownerUserId: string,
+    id: string,
+    botId: string,
+  ): Promise<string | null>;
   touchLogin(ownerUserId: string, id: string): Promise<void>;
   deleteLogin(ownerUserId: string, id: string): Promise<boolean>;
 };

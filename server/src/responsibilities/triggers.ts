@@ -14,10 +14,10 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  CredentialRefusedError,
   type CredentialSecretReader,
   type CredentialStore,
-  decryptSecret,
-  encryptSecret,
+  CredentialUnusableError,
 } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -346,7 +346,6 @@ export function createTriggerStore(
   vault: {
     store: CredentialStore;
     reader: CredentialSecretReader;
-    encryptionKey: string;
   },
   options: { slackAccess?: () => SlackAccess | undefined } = {},
 ) {
@@ -416,11 +415,17 @@ export function createTriggerStore(
       );
     return secret.trim();
   }
-  async function secretFor(credentialId: string | null) {
+  async function secretFor(
+    credentialId: string | null,
+    accessor: { purpose: string; userId: string },
+  ) {
     if (!credentialId) return null;
-    const credential = await vault.reader.readSecret(credentialId);
-    if (!credential || credential.revokedAt) return null;
-    return decryptSecret(vault.encryptionKey, credential.encryptedValue);
+    try {
+      return (await vault.reader.reveal(credentialId, accessor)).value;
+    } catch (error) {
+      if (error instanceof CredentialUnusableError) return null;
+      throw error;
+    }
   }
   async function resolved(
     row: Row & { ownerUserId: string; status: ResponsibilityStatus },
@@ -432,7 +437,10 @@ export function createTriggerStore(
       responsibilityStatus: row.status,
       kind: row.kind,
       config: row.config,
-      secret: await secretFor(row.credentialId),
+      secret: await secretFor(row.credentialId, {
+        purpose: "trigger_delivery_check",
+        userId: row.ownerUserId,
+      }),
       enabled: row.enabled,
       createdAt: row.createdAt,
     };
@@ -476,23 +484,19 @@ export function createTriggerStore(
         : SECRET_KINDS.has(config.kind) && input.secret
           ? checkSecret(input.secret)
           : null;
-      return database.transaction(async (transaction) => {
-        const credential = secret
-          ? await vault.store.create(
-              {
-                kind: "connector",
-                provider: `${config.kind}-trigger`,
-                keyId: id,
-                metadata: { ownerUserId, responsibilityId },
-                encryptedValue: await encryptSecret(
-                  vault.encryptionKey,
-                  secret,
-                ),
-              },
-              transaction,
-            )
-          : null;
-        const [row] = await transaction
+      // The secret goes to the vault first, then the trigger that names it; a trigger that could not
+      // be written takes its secret back with it, so no live secret is left that nothing names.
+      const credential = secret
+        ? await vault.store.create({
+            kind: "connector",
+            provider: `${config.kind}-trigger`,
+            keyId: id,
+            metadata: { ownerUserId, responsibilityId },
+            plaintext: secret,
+          })
+        : null;
+      try {
+        const [row] = await database
           .insert(responsibilityTriggers)
           .values({
             id,
@@ -508,7 +512,11 @@ export function createTriggerStore(
           trigger: record(row),
           secret: GENERATED_SECRET.has(config.kind) ? secret : null,
         };
-      });
+      } catch (error) {
+        if (credential)
+          await vault.store.revoke(credential.id).catch(() => undefined);
+        throw error;
+      }
     },
     async update(ownerUserId: string, id: string, input: { config: unknown }) {
       const existing = await ownedTrigger(ownerUserId, id);
@@ -555,7 +563,8 @@ export function createTriggerStore(
     },
     /**
      * Rotate: a new generated secret for webhook/GitHub, or the vendor's new pasted secret for
-     * Linear/Sentry/PagerDuty. The old credential is revoked in the same transaction.
+     * Linear/Sentry/PagerDuty. The vault revokes the old credential in the same step it stores the
+     * new one, then the trigger is pointed at it.
      */
     async setSecret(
       ownerUserId: string,
@@ -575,32 +584,33 @@ export function createTriggerStore(
       const secret = generated
         ? generateWebhookSecret()
         : checkSecret(pasted ?? "");
-      const encryptedValue = await encryptSecret(vault.encryptionKey, secret);
-      return database.transaction(async (transaction) => {
-        const value = {
-          kind: "connector" as const,
-          provider: `${existing.kind}-trigger`,
-          keyId: id,
-          metadata: {
-            ownerUserId,
-            responsibilityId: existing.responsibilityId,
-          },
-          encryptedValue,
-        };
-        const credential = existing.credentialId
-          ? await vault.store.rotate(
-              { ...value, previousCredentialId: existing.credentialId },
-              transaction,
-            )
-          : await vault.store.create(value, transaction);
-        const [row] = await transaction
-          .update(responsibilityTriggers)
-          .set({ credentialId: credential.id, updatedAt: new Date() })
-          .where(eq(responsibilityTriggers.id, id))
-          .returning(columns);
-        if (!row) throw new ResponsibilityNotFoundError();
-        return { trigger: record(row), secret: generated ? secret : null };
-      });
+      const value = {
+        kind: "connector" as const,
+        provider: `${existing.kind}-trigger`,
+        keyId: id,
+        metadata: {
+          ownerUserId,
+          responsibilityId: existing.responsibilityId,
+        },
+        plaintext: secret,
+      };
+      const credential = existing.credentialId
+        ? await vault.store.rotate({
+            ...value,
+            previousCredentialId: existing.credentialId,
+          })
+        : await vault.store.create(value);
+      const [row] = await database
+        .update(responsibilityTriggers)
+        .set({ credentialId: credential.id, updatedAt: new Date() })
+        .where(eq(responsibilityTriggers.id, id))
+        .returning(columns);
+      if (!row) {
+        // Removed while the secret was being stored: nothing names the new one.
+        await vault.store.revoke(credential.id).catch(() => undefined);
+        throw new ResponsibilityNotFoundError();
+      }
+      return { trigger: record(row), secret: generated ? secret : null };
     },
     /** The owner re-reading a generated secret (the page's copy button). Vendor secrets are never echoed. */
     async revealSecret(ownerUserId: string, id: string): Promise<string> {
@@ -609,7 +619,10 @@ export function createTriggerStore(
         throw new ResponsibilityRefusedError(
           "Provider secrets are not shown again. Paste a new one to rotate.",
         );
-      const secret = await secretFor(existing.credentialId);
+      const secret = await secretFor(existing.credentialId, {
+        purpose: "trigger_secret_shown_to_owner",
+        userId: ownerUserId,
+      });
       if (!secret)
         throw new ResponsibilityRefusedError(
           "This trigger has no live secret. Rotate it.",
@@ -617,24 +630,28 @@ export function createTriggerStore(
       return secret;
     },
     async remove(ownerUserId: string, id: string) {
-      await database.transaction(async (transaction) => {
-        const [row] = await transaction
-          .select(columns)
-          .from(responsibilityTriggers)
-          .where(
-            and(
-              eq(responsibilityTriggers.id, id),
-              eq(responsibilityTriggers.ownerUserId, ownerUserId),
-            ),
-          )
-          .for("update");
-        if (!row) throw new ResponsibilityNotFoundError();
-        if (row.credentialId)
-          await vault.store.revoke(row.credentialId, transaction);
-        await transaction
-          .delete(responsibilityTriggers)
-          .where(eq(responsibilityTriggers.id, id));
-      });
+      const [row] = await database
+        .select(columns)
+        .from(responsibilityTriggers)
+        .where(
+          and(
+            eq(responsibilityTriggers.id, id),
+            eq(responsibilityTriggers.ownerUserId, ownerUserId),
+          ),
+        );
+      if (!row) throw new ResponsibilityNotFoundError();
+      // Revoked before the row goes: a failure between the two leaves a trigger naming a revoked
+      // secret (which accepts nothing, and a retry removes), never a live secret nothing names.
+      if (row.credentialId) {
+        try {
+          await vault.store.revoke(row.credentialId);
+        } catch (error) {
+          if (!(error instanceof CredentialRefusedError)) throw error;
+        }
+      }
+      await database
+        .delete(responsibilityTriggers)
+        .where(eq(responsibilityTriggers.id, id));
     },
     directory: {
       async resolve(id: string) {

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import {
   databaseComplaint,
@@ -6,13 +6,8 @@ import {
   reasonWithoutStatement,
   withoutStatement,
 } from "../../db/query-failure";
-import {
-  brokeredConnections,
-  credentials as credentialRows,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-} from "../../db/schema";
+import { mcpToolLists, mcpTools, pluginGrants } from "../../db/schema";
+import { vault } from "../../vault/directory";
 import {
   accessFor,
   BROKERED_PROFILE,
@@ -44,6 +39,15 @@ import {
 import { transportFor } from "../transport";
 import type { StoreContext } from "./context";
 import {
+  allBrokered,
+  allServers,
+  findServer,
+  removeBrokered,
+  removeServer as removeServerRecord,
+  updateServer,
+  upsertServer,
+} from "./records";
+import {
   BROKERED_ID_PREFIXES,
   BROKERED_SCREEN_NAMES,
   CatalogueEntryUnknownError,
@@ -61,6 +65,10 @@ import {
   storableTools,
   unlistedAdvertisedTools,
 } from "./model";
+
+/** Code unit order, the one the in-memory sorts here use, so two readings answer alike. */
+const compareText = (left: string, right: string) =>
+  left < right ? -1 : left > right ? 1 : 0;
 
 /** Adding, removing, refreshing and listing MCP servers and brokered apps, and an app's account mode. */
 export function serverMethods(context: StoreContext) {
@@ -84,6 +92,29 @@ export function serverMethods(context: StoreContext) {
     vendorRevocationClaim,
     clearEndedSiblings,
   } = context;
+
+  /**
+   * What a refresh learned about an app's tool list: when, what went wrong, which tools it left out.
+   * This deployment's own cache, beside `mcp_tools`; the app itself is Intelligence's.
+   */
+  async function recordToolList(
+    serverId: string,
+    values: {
+      refreshedAt?: Date;
+      lastError?: string | null;
+      skippedTools?: string[] | null;
+      updatedAt?: Date;
+    },
+  ) {
+    await database
+      .insert(mcpToolLists)
+      .values({ serverId, ...values })
+      .onConflictDoUpdate({
+        target: mcpToolLists.serverId,
+        set: { ...values, updatedAt: new Date() },
+      });
+  }
+
   return {
     /**
      * The one provider this store's rows belong to, readable by the layer above it.
@@ -145,67 +176,61 @@ export function serverMethods(context: StoreContext) {
        * whose catalogue named an app a past build brokered. This path writes the catalogue's url
        * over whatever is there, which is exactly the write that strands the accounts.
        */
-      const [existing] = await database
-        .select({
-          provenance: mcpServers.provenance,
-          url: mcpServers.url,
-          // Part of what `accessFor` resolves a row with — see there. Nothing on this path reads
-          // the answer's `reachedAs`, but the column travels with the other two so no caller has
-          // to know which of the four answers the one it wants depends on.
-          authScheme: mcpServers.authScheme,
-        })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, resolved.entry.key));
+      // `authScheme` is part of what `accessFor` resolves a row with; see there.
+      const existing = (await findServer(resolved.entry.key)) ?? undefined;
       requireNotBrokered(resolved.entry.key, existing);
 
-      await database
-        .insert(mcpServers)
-        .values({
+      await upsertServer(
+        {
           id: resolved.entry.key,
           title: resolved.entry.title,
+          logo: null,
           vendor: resolved.entry.vendor,
           url: resolved.url,
+          provenance: "first-party",
+          authScheme: null,
           credentialId: credentialId ?? null,
+          accountMode: null,
+          sharedVendorUserId: null,
+          ownerGrants: null,
+          entraScope: null,
           addedBy: input.by,
-        })
-        .onConflictDoUpdate({
-          target: mcpServers.id,
-          set: {
-            url: resolved.url,
-            /*
-             * THE WHOLE IDENTITY THE CATALOGUE DECIDES, not the url alone.
-             *
-             * These three columns and the url are one statement — this row is that reviewed entry —
-             * and an update that moved one of them and left the rest was a row describing two
-             * different servers at once. `provenance` is read by `requireServer`, which refuses a
-             * `first-party` row with no entry, and by `accessFor`, which reads it whenever there is
-             * no entry to overrule it; `vendor` is what the first-party rule is checked against.
-             * Left behind, a row that arrived by another path kept saying so at an address only the
-             * catalogue chose — so every surface that asks how a server got here answered with the
-             * way it USED to get here.
-             *
-             * The entry wins over the row everywhere else too (see `accessFor`), so this is that
-             * same order written down at the one moment the row is being established rather than
-             * read.
-             */
-            title: resolved.entry.title,
-            vendor: resolved.entry.vendor,
-            provenance: "first-party",
-            /*
-             * Left alone when the caller sends none, rather than cleared.
-             *
-             * `registerOAuthClient` keeps the client it minted in this column, and adding the server
-             * again to change an instance host is not a statement about that client. Clearing it
-             * orphaned the credential row, which nothing then revokes, and told everybody who had
-             * connected that the deployment has no OAuth client registered. There is no longer a way
-             * to hand it back through this call either, since a `user-oauth` entry now refuses a
-             * credential id, so the pointer has to survive here.
-             */
-            ...(credentialId ? { credentialId } : {}),
-            addedBy: input.by,
-            updatedAt: new Date(),
-          },
-        });
+        },
+        () => ({
+          url: resolved.url,
+          /*
+           * THE WHOLE IDENTITY THE CATALOGUE DECIDES, not the url alone.
+           *
+           * These three columns and the url are one statement — this row is that reviewed entry —
+           * and an update that moved one of them and left the rest was a row describing two
+           * different servers at once. `provenance` is read by `requireServer`, which refuses a
+           * `first-party` row with no entry, and by `accessFor`, which reads it whenever there is
+           * no entry to overrule it; `vendor` is what the first-party rule is checked against.
+           * Left behind, a row that arrived by another path kept saying so at an address only the
+           * catalogue chose — so every surface that asks how a server got here answered with the
+           * way it USED to get here.
+           *
+           * The entry wins over the row everywhere else too (see `accessFor`), so this is that
+           * same order written down at the one moment the row is being established rather than
+           * read.
+           */
+          title: resolved.entry.title,
+          vendor: resolved.entry.vendor,
+          provenance: "first-party",
+          /*
+           * Left alone when the caller sends none, rather than cleared.
+           *
+           * `registerOAuthClient` keeps the client it minted in this column, and adding the server
+           * again to change an instance host is not a statement about that client. Clearing it
+           * orphaned the credential row, which nothing then revokes, and told everybody who had
+           * connected that the deployment has no OAuth client registered. There is no longer a way
+           * to hand it back through this call either, since a `user-oauth` entry now refuses a
+           * credential id, so the pointer has to survive here.
+           */
+          ...(credentialId ? { credentialId } : {}),
+          addedBy: input.by,
+        }),
+      );
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -379,21 +404,13 @@ export function serverMethods(context: StoreContext) {
        * address of the caller's choosing, which is the whole of what this refuses.
        */
       const credentialId = input.credentialId?.trim() || undefined;
-      const [existing] = await database
-        .select({
-          url: mcpServers.url,
-          credentialId: mcpServers.credentialId,
-          // Read for the refusal below. The namespace rule above already keeps this path away from
-          // every id `addBrokeredApp` mints; this is the same rule asked of the ROW, which is what
-          // covers one that arrived before the namespace was reserved, or by restore.
-          provenance: mcpServers.provenance,
-          // The third of what `accessFor` resolves a row with. See there.
-          authScheme: mcpServers.authScheme,
-          // Kept when the caller names none; see `entraScope` below.
-          entraScope: mcpServers.entraScope,
-        })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, input.id));
+      /*
+       * Read for the refusal below: the namespace rule above already keeps this path away from every
+       * id `addBrokeredApp` mints, and this is the same rule asked of the ROW, which is what covers
+       * one that arrived before the namespace was reserved, or by restore. Its `entraScope` is kept
+       * when the caller names none; see below.
+       */
+      const existing = (await findServer(input.id)) ?? undefined;
 
       /*
        * How it is reached once this write lands: the scope the caller named, none when they named
@@ -461,61 +478,62 @@ export function serverMethods(context: StoreContext) {
         );
       }
 
-      await database
-        .insert(mcpServers)
-        .values({
+      await upsertServer(
+        {
           id: input.id,
           title: input.title,
+          logo: null,
           vendor: new URL(input.url).hostname,
           url: input.url,
           provenance: "custom",
+          authScheme: null,
           credentialId: credentialId ?? null,
+          accountMode: null,
+          sharedVendorUserId: null,
+          ownerGrants: null,
           entraScope: entraScope ?? null,
           addedBy: input.by,
-        })
-        .onConflictDoUpdate({
-          target: mcpServers.id,
-          set: {
-            title: input.title,
-            url: input.url,
-            /*
-             * WHAT THE ROW NOW IS, written beside the address that made it that.
-             *
-             * `vendor` is derived from the url on the way in, so leaving it behind while the url
-             * moved left the column naming a host this row no longer addresses — and it is what the
-             * first-party rule is checked against, not a caption. `provenance` is the same fact one
-             * level up: a row whose entry a build removed still reads `first-party`, and
-             * `requireServer` refuses exactly that shape as a vendor it can no longer check a pinned
-             * host for. Adding it by URL is what makes it a typed address rather than a reviewed
-             * one, so this is the act that settles the column.
-             *
-             * The one conversion this cannot make is out of a brokered row, which is refused above
-             * rather than written here: there the url is the only record of which app a set of
-             * consents belongs to, so a rewrite loses them whatever else is written alongside.
-             */
-            vendor: new URL(input.url).hostname,
-            provenance: "custom",
-            /*
-             * Kept when the caller names none, rather than cleared, for a reason beyond tidiness.
-             *
-             * Clearing it left the credential live with nothing pointing at it, and `removeServer`
-             * retires a token by reading it off the row: with the pointer gone it revoked nothing
-             * and deleted the server, so the token outlived the server it was minted for. It could
-             * then be attached to a freshly created server at any address, because the rule above
-             * compares against a row that no longer existed. Three ordinary acts, and the address
-             * this server was entrusted to stopped meaning anything.
-             *
-             * So the pointer survives, `removeServer` finds it, and a removed server's token is
-             * dead rather than loose. Detaching a token without removing the server is not a thing
-             * this endpoint does, and nothing asks it to.
-             */
-            ...(credentialId ? { credentialId } : {}),
-            // Kept when the caller names none, for the reason given where `entraScope` is decided.
-            ...(namedScope !== undefined ? { entraScope: namedScope } : {}),
-            addedBy: input.by,
-            updatedAt: new Date(),
-          },
-        });
+        },
+        () => ({
+          title: input.title,
+          url: input.url,
+          /*
+           * WHAT THE ROW NOW IS, written beside the address that made it that.
+           *
+           * `vendor` is derived from the url on the way in, so leaving it behind while the url
+           * moved left the column naming a host this row no longer addresses — and it is what the
+           * first-party rule is checked against, not a caption. `provenance` is the same fact one
+           * level up: a row whose entry a build removed still reads `first-party`, and
+           * `requireServer` refuses exactly that shape as a vendor it can no longer check a pinned
+           * host for. Adding it by URL is what makes it a typed address rather than a reviewed
+           * one, so this is the act that settles the column.
+           *
+           * The one conversion this cannot make is out of a brokered row, which is refused above
+           * rather than written here: there the url is the only record of which app a set of
+           * consents belongs to, so a rewrite loses them whatever else is written alongside.
+           */
+          vendor: new URL(input.url).hostname,
+          provenance: "custom",
+          /*
+           * Kept when the caller names none, rather than cleared, for a reason beyond tidiness.
+           *
+           * Clearing it left the credential live with nothing pointing at it, and `removeServer`
+           * retires a token by reading it off the row: with the pointer gone it revoked nothing
+           * and deleted the server, so the token outlived the server it was minted for. It could
+           * then be attached to a freshly created server at any address, because the rule above
+           * compares against a row that no longer existed. Three ordinary acts, and the address
+           * this server was entrusted to stopped meaning anything.
+           *
+           * So the pointer survives, `removeServer` finds it, and a removed server's token is
+           * dead rather than loose. Detaching a token without removing the server is not a thing
+           * this endpoint does, and nothing asks it to.
+           */
+          ...(credentialId ? { credentialId } : {}),
+          // Kept when the caller names none, for the reason given where `entraScope` is decided.
+          ...(namedScope !== undefined ? { entraScope: namedScope } : {}),
+          addedBy: input.by,
+        }),
+      );
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -657,9 +675,8 @@ export function serverMethods(context: StoreContext) {
        * resolved row and left the next one standing. See {@link _EnableNamesTheRow}: after this
        * statement there is exactly one id in scope, and it is the answering row's.
        */
-      await database
-        .insert(mcpServers)
-        .values({
+      await upsertServer(
+        {
           id: rowId,
           title: input.title,
           logo: input.logo ?? null,
@@ -701,68 +718,68 @@ export function serverMethods(context: StoreContext) {
            * into Personal by it.
            */
           accountMode: input.connection.kind === "no-auth" ? null : "personal",
+          sharedVendorUserId: null,
+          ownerGrants: null,
+          entraScope: null,
           addedBy: input.by,
-        })
-        .onConflictDoUpdate({
-          target: mcpServers.id,
-          set: {
-            title: input.title,
-            logo: input.logo ?? null,
-            url,
-            /*
-             * WRITTEN BESIDE THE URL, BECAUSE THE TWO ARE ONE FACT AND A ROW HOLDING HALF OF IT IS
-             * NOT A SERVER AT ALL.
-             *
-             * CRITERION. Every row this method leaves behind says `composio`, whatever it said
-             * before. The url above and this column are what `accessFor` reads to answer that a call
-             * is brokered and which app it is against, and no path may write one without the other.
-             *
-             * REASON. This branch rewrote the url and left `provenance` standing, so enabling an app
-             * at an id a custom server already held produced a row reading `custom` at a
-             * `composio://` address. That is not a display inconsistency: `accessFor` answers
-             * `deployment-token` for it, so the transport dialled the row as an ordinary MCP
-             * endpoint on the deployment's own credential while the Composio screen went on
-             * attaching people's real accounts to the app its url named. The per-person gate was not
-             * weakened but SKIPPED — `connectionTokenFor` only ever asks for a connection down the
-             * brokered branch — which is the whole property this connector exists for. And
-             * `removeServer` finds the accounts to end at the vendor through that same answer, so it
-             * revoked nothing and reported the connector gone.
-             *
-             * A CONVERSION HERE, A REFUSAL IN THE OTHER DIRECTION, and the asymmetry is the point.
-             * What this method writes IS the app — the auth config stands at Composio before the row
-             * is touched, and the url names the app the connections will be keyed on — so a row it
-             * lands on comes out saying exactly what it now is, with nothing lost. Going the other
-             * way, the url being overwritten is the only record of which app a set of consents
-             * belongs to, and no column written alongside brings it back; see
-             * {@link requireNotBrokered}.
-             *
-             * `vendor` for the same reason one notch quieter: it is what the first-party rule is
-             * checked against, and a row reached over the broker whose vendor column still names the
-             * host somebody typed is answering that rule about a server this deployment no longer
-             * dials.
-             */
-            provenance: brokerProvider,
-            vendor: profile.vendor,
-            addedBy: input.by,
-            updatedAt: new Date(),
-            /*
-             * `credential_id` is neither written here nor cleared here.
-             *
-             * Every row this method creates has none and no path in this module attaches one, so
-             * there is nothing for an enable to set. Clearing it anyway would matter in the single
-             * case it could apply — a pointer that arrived by hand edit or restore — because
-             * `removeServer` retires a server's secret by reading it off this column, and a null
-             * written over it leaves that secret live with nothing left to name it.
-             */
-            /*
-             * `auth_scheme` is not written here either, and for a neighbouring reason.
-             *
-             * This is the branch a second press of Add takes, and the scheme is the one thing on
-             * the row that live connections depend on rather than merely display. Rewriting it
-             * here would move them; the statement below rewrites it only where there are none.
-             */
-          },
-        });
+        },
+        () => ({
+          title: input.title,
+          logo: input.logo ?? null,
+          url,
+          /*
+           * WRITTEN BESIDE THE URL, BECAUSE THE TWO ARE ONE FACT AND A ROW HOLDING HALF OF IT IS
+           * NOT A SERVER AT ALL.
+           *
+           * CRITERION. Every row this method leaves behind says `composio`, whatever it said
+           * before. The url above and this column are what `accessFor` reads to answer that a call
+           * is brokered and which app it is against, and no path may write one without the other.
+           *
+           * REASON. This branch rewrote the url and left `provenance` standing, so enabling an app
+           * at an id a custom server already held produced a row reading `custom` at a
+           * `composio://` address. That is not a display inconsistency: `accessFor` answers
+           * `deployment-token` for it, so the transport dialled the row as an ordinary MCP
+           * endpoint on the deployment's own credential while the Composio screen went on
+           * attaching people's real accounts to the app its url named. The per-person gate was not
+           * weakened but SKIPPED — `connectionTokenFor` only ever asks for a connection down the
+           * brokered branch — which is the whole property this connector exists for. And
+           * `removeServer` finds the accounts to end at the vendor through that same answer, so it
+           * revoked nothing and reported the connector gone.
+           *
+           * A CONVERSION HERE, A REFUSAL IN THE OTHER DIRECTION, and the asymmetry is the point.
+           * What this method writes IS the app — the auth config stands at Composio before the row
+           * is touched, and the url names the app the connections will be keyed on — so a row it
+           * lands on comes out saying exactly what it now is, with nothing lost. Going the other
+           * way, the url being overwritten is the only record of which app a set of consents
+           * belongs to, and no column written alongside brings it back; see
+           * {@link requireNotBrokered}.
+           *
+           * `vendor` for the same reason one notch quieter: it is what the first-party rule is
+           * checked against, and a row reached over the broker whose vendor column still names the
+           * host somebody typed is answering that rule about a server this deployment no longer
+           * dials.
+           */
+          provenance: brokerProvider,
+          vendor: profile.vendor,
+          addedBy: input.by,
+          /*
+           * `credential_id` is neither written here nor cleared here.
+           *
+           * Every row this method creates has none and no path in this module attaches one, so
+           * there is nothing for an enable to set. Clearing it anyway would matter in the single
+           * case it could apply — a pointer that arrived by hand edit or restore — because
+           * `removeServer` retires a server's secret by reading it off this column, and a null
+           * written over it leaves that secret live with nothing left to name it.
+           */
+          /*
+           * `auth_scheme` is not written here either, and for a neighbouring reason.
+           *
+           * This is the branch a second press of Add takes, and the scheme is the one thing on
+           * the row that live connections depend on rather than merely display. Rewriting it
+           * here would move them; the statement below rewrites it only where there are none.
+           */
+        }),
+      );
 
       /*
        * WHICH ROW THIS DEPLOYMENT WILL ANSWER FOR THE APP WITH, RESOLVED ONCE AND FOR EVERYTHING
@@ -871,22 +888,12 @@ export function serverMethods(context: StoreContext) {
        */
       // Anyone at all, of either holder: a deployment's shared account was made against the
       // standing config exactly as a person's was, and a rewrite would strand it the same way.
-      const connections = await database
-        .select({ app: brokeredConnections.app })
-        .from(brokeredConnections)
-        .where(
-          and(
-            eq(brokeredConnections.provider, brokerProvider),
-            eq(brokeredConnections.app, input.slug),
-          ),
-        )
-        .limit(1);
+      const connected = allBrokered(brokerProvider).some(
+        (connection) => connection.app === input.slug,
+      );
 
-      if (configured !== "standing" && connections.length === 0) {
-        await database
-          .update(mcpServers)
-          .set({ authScheme: scheme, updatedAt: new Date() })
-          .where(eq(mcpServers.id, answering));
+      if (configured !== "standing" && !connected) {
+        await updateServer(answering, { authScheme: scheme });
       }
 
       /*
@@ -924,9 +931,9 @@ export function serverMethods(context: StoreContext) {
        * reaches each asking person's own account. `shared` would hand everybody one account nobody
        * chose to share.
        *
-       * AND NEVER OVER A MODE THAT IS THERE. The `IS NULL` lives in the WHERE rather than in a
-       * read-then-write, so an administrator's Shared choice cannot be lost to this statement, nor
-       * to a switch racing it.
+       * AND NEVER OVER A MODE THAT IS THERE. The null check is the write's own condition, checked
+       * against the version the write carries (`If-Match`), so an administrator's Shared choice
+       * cannot be lost to this statement, nor to a switch racing it.
        *
        * ON THE ANSWERING ROW, WHICH IS WHY THE CONFLICT ARM STILL DOES NOT WRITE THE COLUMN. Every
        * reader of a brokered app's mode — {@link brokeredAppRowsAt} and so `serverAddress`, the
@@ -939,18 +946,13 @@ export function serverMethods(context: StoreContext) {
        * `0058_arcade_provider_backfill`, which is the same decision written once against the
        * table; see `tests/brokered-account-mode-backfill.integration.test.ts`.
        */
-      const [settled] = await database
-        .select({ authScheme: mcpServers.authScheme })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, answering))
-        .limit(1);
+      const settled = await findServer(answering);
       if (schemeKind(settled?.authScheme ?? null) !== "none") {
-        await database
-          .update(mcpServers)
-          .set({ accountMode: "personal", updatedAt: new Date() })
-          .where(
-            and(eq(mcpServers.id, answering), isNull(mcpServers.accountMode)),
-          );
+        await updateServer(
+          answering,
+          { accountMode: "personal" },
+          (current) => current.accountMode === null,
+        );
       }
 
       await recordAuditEvent(auditStore, {
@@ -1025,40 +1027,19 @@ export function serverMethods(context: StoreContext) {
      * delete-then-revoke leaves live secrets no server references and no operation can reach.
      */
     async removeServer(serverId: string, by: string): Promise<void> {
-      const [existing] = await database
-        .select({
-          credentialId: mcpServers.credentialId,
-          // Read so the brokered connections below can be keyed on the app the url names, which is
-          // the same key the call gate uses. See there for why the row id will not do.
-          provenance: mcpServers.provenance,
-          url: mcpServers.url,
-          // The third of what `accessFor` resolves a row with. See there.
-          authScheme: mcpServers.authScheme,
-        })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId));
+      // Its provenance and url key the brokered connections below on the app the url names, which
+      // is the same key the call gate uses. See there for why the row id will not do.
+      const existing = (await findServer(serverId)) ?? undefined;
 
       /**
-       * Whether that token is still live, read rather than inferred from a
-       * thrown error, so a token a previous attempt already revoked, or one
-       * whose row is gone entirely, is skipped while a database fault still
-       * propagates and leaves the server row in place to be removed again.
-       *
-       * Two queries rather than a join because `mcp_servers.credential_id` is
-       * `text` and `credentials.id` is `uuid`, so the two columns do not
-       * compare without a cast.
+       * Whether that token is still live, read rather than inferred from a thrown error, so a token a
+       * previous attempt already revoked, or one that is gone entirely, is skipped while a fault
+       * reaching the vault still propagates and leaves the app in place to be removed again.
        */
-      const [live] = existing?.credentialId
-        ? await database
-            .select({ id: credentialRows.id })
-            .from(credentialRows)
-            .where(
-              and(
-                eq(credentialRows.id, existing.credentialId),
-                isNull(credentialRows.revokedAt),
-              ),
-            )
-        : [];
+      const named = existing?.credentialId
+        ? await vault().findSecret(existing.credentialId)
+        : null;
+      const live = named && named.revokedAt === null ? named : undefined;
 
       if (live) {
         await credentials.revoke(live.id);
@@ -1075,25 +1056,24 @@ export function serverMethods(context: StoreContext) {
       }
 
       /*
-       * Every person's grant for this server, read out of the VAULT rather than through the join
-       * table.
+       * Every person's grant for this server, read out of the VAULT rather than through the grants.
        *
-       * `credentials.provider` holds the server id for an `mcp_user_token`, so the vault can be asked
-       * directly — which matters because the join row is the thing about to be cascaded away, and a
-       * grant whose pointer has already gone (a person removed earlier) would otherwise be invisible
-       * here too. The same argument `retireConnectionsFor` makes from the other direction.
+       * A secret's `provider` holds the server id for an `mcp_user_token`, so the vault can be asked
+       * directly — which matters because the grant is the thing about to be removed with the app,
+       * and a secret whose grant has already gone (a person removed earlier) would otherwise be
+       * invisible here too. The same argument `retireConnectionsFor` makes from the other direction.
        */
-      const held = await database
-        .select({ id: credentialRows.id, keyId: credentialRows.keyId })
-        .from(credentialRows)
-        .where(
-          and(
-            eq(credentialRows.kind, "mcp_user_token"),
-            eq(credentialRows.provider, serverId),
-            isNull(credentialRows.revokedAt),
-          ),
+      const held = vault()
+        .secrets()
+        .filter(
+          (secret) =>
+            secret.kind === "mcp_user_token" &&
+            secret.provider === serverId &&
+            secret.revokedAt === null,
         )
-        .orderBy(asc(credentialRows.keyId));
+        .sort((left, right) =>
+          left.keyId < right.keyId ? -1 : left.keyId > right.keyId ? 1 : 0,
+        );
 
       for (const grant of held) {
         await credentials.revoke(grant.id);
@@ -1104,8 +1084,8 @@ export function serverMethods(context: StoreContext) {
           payload: {
             actor: by,
             server: serverId,
-            // Whose it was. `key_id` holds the user id for this kind, and it is the only place left
-            // to read it from once the join row has been cascaded away.
+            // Whose it was. `keyId` holds the user id for this kind, and it is the only place left
+            // to read it from once the grant has gone with the app.
             owner: grant.keyId,
             /*
              * Not "they disconnected" and not "they were removed": an administrator took the whole
@@ -1224,24 +1204,19 @@ export function serverMethods(context: StoreContext) {
          * are where the people are. Sorted, so two removals of the same app revoke in the same
          * order and write their trail rows in the same order.
          */
-        const connected = await database
-          .select({
-            holder: brokeredConnections.holder,
-            userId: brokeredConnections.userId,
-            vendorUserId: brokeredConnections.vendorUserId,
-          })
-          .from(brokeredConnections)
-          .where(
-            and(
-              // The row's own broker, not the configured one: see the comment above `rowProvider`.
-              eq(brokeredConnections.provider, rowProvider),
-              eq(brokeredConnections.app, toolkit),
-            ),
+        // The row's own broker, not the configured one: see the comment above `rowProvider`.
+        const connected = allBrokered(rowProvider)
+          .filter((connection) => connection.app === toolkit)
+          .sort(
+            (left, right) =>
+              compareText(left.holder, right.holder) ||
+              compareText(left.userId ?? "", right.userId ?? ""),
           )
-          .orderBy(
-            asc(brokeredConnections.holder),
-            asc(brokeredConnections.userId),
-          );
+          .map((connection) => ({
+            holder: connection.holder,
+            userId: connection.userId,
+            vendorUserId: connection.vendorUserId,
+          }));
 
         /*
          * BOTH HOLDERS, EACH NAMED AS WHAT IT IS. Removing an app ends every account standing for
@@ -1329,12 +1304,10 @@ export function serverMethods(context: StoreContext) {
           );
         }
 
-        await database.delete(brokeredConnections).where(
-          and(
-            // The row's own broker, as the read above.
-            eq(brokeredConnections.provider, rowProvider),
-            eq(brokeredConnections.app, toolkit),
-          ),
+        // The row's own broker, as the read above.
+        await removeBrokered(
+          (connection) =>
+            connection.provider === rowProvider && connection.app === toolkit,
         );
 
         for (const [index, account] of accounts.entries()) {
@@ -1436,19 +1409,25 @@ export function serverMethods(context: StoreContext) {
         if (rowBroker) await rowBroker.deleteAuthConfig(toolkit);
       }
 
-      const released = await database.transaction(async (transaction) => {
-        const removed = await transaction
-          .delete(pluginGrants)
+      /*
+       * The Bots' grants on it, read for the trail, then the app itself. Removing the app in
+       * Intelligence takes its people's grants there with it, and the directory's removal listener
+       * takes this deployment's rows that named it (`vault/local-rows.ts`): the grants read here, its
+       * tool list, and anything pending against it. Read first and removed after, so a removal that
+       * fails leaves the grants in place with the app rather than an app nobody can use.
+       */
+      const released = (
+        await database
+          .select({ ref: pluginGrants.ref, agentId: pluginGrants.agentId })
+          .from(pluginGrants)
           .where(
             and(
               eq(pluginGrants.kind, "mcp"),
               eq(sql`split_part(${pluginGrants.ref}, '/', 1)`, serverId),
             ),
           )
-          .returning({ ref: pluginGrants.ref, agentId: pluginGrants.agentId });
-        await transaction.delete(mcpServers).where(eq(mcpServers.id, serverId));
-        return removed.sort((left, right) => left.ref.localeCompare(right.ref));
-      });
+      ).sort((left, right) => left.ref.localeCompare(right.ref));
+      await removeServerRecord(serverId);
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -1639,20 +1618,17 @@ export function serverMethods(context: StoreContext) {
         // explanation reads as a server that offers nothing, and an operator would go looking in
         // the wrong place. The tools already held are left alone: a vendor being briefly
         // unreachable is not a reason to revoke what Bots are using.
-        await database
-          .update(mcpServers)
-          .set({
-            /*
-             * Capped at the same 400 characters `callTool` caps its recorded failure at.
-             *
-             * Parts of this sentence come from a vendor, and it is drawn on the admin page — neither
-             * is a promise about length, and the two paths that show a vendor's words to an operator
-             * should not disagree about how much of them to keep.
-             */
-            lastError: message.slice(0, 400),
-            updatedAt: new Date(),
-          })
-          .where(eq(mcpServers.id, serverId));
+        await recordToolList(serverId, {
+          /*
+           * Capped at the same 400 characters `callTool` caps its recorded failure at.
+           *
+           * Parts of this sentence come from a vendor, and it is drawn on the admin page — neither
+           * is a promise about length, and the two paths that show a vendor's words to an operator
+           * should not disagree about how much of them to keep.
+           */
+          lastError: message.slice(0, 400),
+          updatedAt: new Date(),
+        });
         return { tools: 0 };
       }
 
@@ -1702,20 +1678,17 @@ export function serverMethods(context: StoreContext) {
           .where(eq(mcpTools.serverId, serverId));
 
         if (held.length > 0) {
-          await database
-            .update(mcpServers)
-            .set({
-              // Named as the state it is, because "listed nothing" and "would not answer" send an
-              // operator to different places, and reaching this line settles which one it was: a
-              // listing that could not be made throws and lands in the `catch` above instead. So
-              // this sentence must not send anybody to check their configuration — that is the
-              // other state's sentence, written by the transport that refused. No
-              // `toolsRefreshedAt`: that column says when this deployment last learned what the app
-              // offers, and it did not learn it here.
-              lastError: `This app was asked and answered with no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check whether it still publishes them, then refresh again.`,
-              updatedAt: new Date(),
-            })
-            .where(eq(mcpServers.id, serverId));
+          await recordToolList(serverId, {
+            // Named as the state it is, because "listed nothing" and "would not answer" send an
+            // operator to different places, and reaching this line settles which one it was: a
+            // listing that could not be made throws and lands in the `catch` above instead. So
+            // this sentence must not send anybody to check their configuration — that is the
+            // other state's sentence, written by the transport that refused. No
+            // `toolsRefreshedAt`: that column says when this deployment last learned what the app
+            // offers, and it did not learn it here.
+            lastError: `This app was asked and answered with no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check whether it still publishes them, then refresh again.`,
+            updatedAt: new Date(),
+          });
           // What the app advertises, which is what it advertised before: the honest count, because
           // nothing was replaced.
           return { tools: held.length };
@@ -1757,20 +1730,17 @@ export function serverMethods(context: StoreContext) {
       } catch (error) {
         const reason =
           error instanceof Error ? withoutStatement(error) : String(error);
-        await database
-          .update(mcpServers)
-          .set({
-            // Capped where every other quoted failure in this file is capped, and for the same
-            // reason: part of this sentence comes from elsewhere and none of it is a promise about
-            // length.
-            lastError:
-              `This app answered with an action whose schema could not be stored as it arrived, so the actions already recorded for it were kept rather than replaced. ${reason}`.slice(
-                0,
-                400,
-              ),
-            updatedAt: new Date(),
-          })
-          .where(eq(mcpServers.id, serverId));
+        await recordToolList(serverId, {
+          // Capped where every other quoted failure in this file is capped, and for the same
+          // reason: part of this sentence comes from elsewhere and none of it is a promise about
+          // length.
+          lastError:
+            `This app answered with an action whose schema could not be stored as it arrived, so the actions already recorded for it were kept rather than replaced. ${reason}`.slice(
+              0,
+              400,
+            ),
+          updatedAt: new Date(),
+        });
         return { tools: 0 };
       }
 
@@ -1820,18 +1790,15 @@ export function serverMethods(context: StoreContext) {
           .where(eq(mcpTools.serverId, serverId));
 
         if (held.length > 0) {
-          await database
-            .update(mcpServers)
-            .set({
-              lastError:
-                `Nothing else was listed, so the ${held.length} actions already recorded for this app were kept rather than deleted. ${skippedSentence}`.slice(
-                  0,
-                  400,
-                ),
-              skippedTools: skipped,
-              updatedAt: new Date(),
-            })
-            .where(eq(mcpServers.id, serverId));
+          await recordToolList(serverId, {
+            lastError:
+              `Nothing else was listed, so the ${held.length} actions already recorded for this app were kept rather than deleted. ${skippedSentence}`.slice(
+                0,
+                400,
+              ),
+            skippedTools: skipped,
+            updatedAt: new Date(),
+          });
           return { tools: held.length };
         }
       }
@@ -1890,16 +1857,13 @@ export function serverMethods(context: StoreContext) {
         );
       }
 
-      await database
-        .update(mcpServers)
-        .set({
-          toolsRefreshedAt: new Date(),
-          // Cleared: the listing was stored. The names it left out are a warning — see above.
-          lastError: null,
-          skippedTools: skipped.length > 0 ? skipped : null,
-          updatedAt: new Date(),
-        })
-        .where(eq(mcpServers.id, serverId));
+      await recordToolList(serverId, {
+        refreshedAt: new Date(),
+        // Cleared: the listing was stored. The names it left out are a warning — see above.
+        lastError: null,
+        skippedTools: skipped.length > 0 ? skipped : null,
+        updatedAt: new Date(),
+      });
 
       /*
        * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
@@ -1975,11 +1939,38 @@ export function serverMethods(context: StoreContext) {
     },
 
     async listServers(): Promise<ServerRecord[]> {
-      const rows = await database
-        .select()
-        .from(mcpServers)
-        .orderBy(asc(mcpServers.title));
-      if (rows.length === 0) return [];
+      /*
+       * The apps from this instance's vault directory, in memory, with what this deployment's own
+       * cache last learned about each one's tool list (`mcp_tool_lists`) beside them.
+       */
+      const servers = allServers().sort(
+        (left, right) =>
+          left.title.localeCompare(right.title) ||
+          compareText(left.id, right.id),
+      );
+      if (servers.length === 0) return [];
+      const lists = new Map(
+        (
+          await database
+            .select()
+            .from(mcpToolLists)
+            .where(
+              inArray(
+                mcpToolLists.serverId,
+                servers.map((server) => server.id),
+              ),
+            )
+        ).map((list) => [list.serverId, list]),
+      );
+      const rows = servers.map((server) => {
+        const list = lists.get(server.id);
+        return {
+          ...server,
+          toolsRefreshedAt: list?.refreshedAt ?? null,
+          lastError: list?.lastError ?? null,
+          skippedTools: list?.skippedTools ?? null,
+        };
+      });
 
       const tools = await database
         .select()
@@ -2031,17 +2022,9 @@ export function serverMethods(context: StoreContext) {
        * two rows at one url are one Composio app with one deployment account behind it.
        */
       const deploymentHeld = new Set(
-        (
-          await database
-            .select({ app: brokeredConnections.app })
-            .from(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.provider, brokerProvider),
-                eq(brokeredConnections.holder, "deployment"),
-              ),
-            )
-        ).map((held) => held.app),
+        allBrokered(brokerProvider)
+          .filter((held) => held.holder === "deployment")
+          .map((held) => held.app),
       );
 
       return rows.map((row) => {
@@ -2193,17 +2176,14 @@ export function serverMethods(context: StoreContext) {
      * took.
      */
     async serverAddress(serverId: string): Promise<ServerAddress | undefined> {
-      const [row] = await database
-        .select({
-          id: mcpServers.id,
-          title: mcpServers.title,
-          url: mcpServers.url,
-          authScheme: mcpServers.authScheme,
-        })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
-      if (!row) return undefined;
+      const found = await findServer(serverId);
+      if (!found) return undefined;
+      const row = {
+        id: found.id,
+        title: found.title,
+        url: found.url,
+        authScheme: found.authScheme,
+      };
       const toolkit = toolkitOfFor(brokerProvider, row.url);
       if (!toolkit) return { ...row, accountMode: null };
       const app = await brokeredAppRow(toolkit);
@@ -2228,11 +2208,7 @@ export function serverMethods(context: StoreContext) {
      * Ordered, so two readings of an unchanged deployment answer alike.
      */
     async serverUrls(): Promise<string[]> {
-      const rows = await database
-        .select({ url: mcpServers.url })
-        .from(mcpServers)
-        .orderBy(asc(mcpServers.id));
-      return rows.map((row) => row.url);
+      return allServers().map((row) => row.url);
     },
 
     /**
@@ -2252,26 +2228,12 @@ export function serverMethods(context: StoreContext) {
     async accountsOn(
       serverId: string,
     ): Promise<{ toolkit: string; accounts: AccountRef[] } | null> {
-      const [row] = await database
-        .select({ url: mcpServers.url })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
+      const row = await findServer(serverId);
       const toolkit = row ? toolkitOfFor(brokerProvider, row.url) : null;
       if (!toolkit) return null;
-      const held = await database
-        .select({
-          holder: brokeredConnections.holder,
-          userId: brokeredConnections.userId,
-          vendorUserId: brokeredConnections.vendorUserId,
-        })
-        .from(brokeredConnections)
-        .where(
-          and(
-            eq(brokeredConnections.provider, brokerProvider),
-            eq(brokeredConnections.app, toolkit),
-          ),
-        );
+      const held = allBrokered(brokerProvider).filter(
+        (connection) => connection.app === toolkit,
+      );
       return {
         toolkit,
         accounts: held.map((row): AccountRef => {
@@ -2300,19 +2262,15 @@ export function serverMethods(context: StoreContext) {
       mode: AccountMode,
       sharedVendorUserId: string | null,
     ) {
-      const [dialled] = await database
-        .select({ url: mcpServers.url })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
+      const dialled = await findServer(serverId);
       const toolkit = dialled
         ? toolkitOfFor(brokerProvider, dialled.url)
         : null;
       const app = toolkit ? await brokeredAppRow(toolkit) : null;
-      await database
-        .update(mcpServers)
-        .set({ accountMode: mode, sharedVendorUserId })
-        .where(eq(mcpServers.id, app?.id ?? serverId));
+      await updateServer(app?.id ?? serverId, {
+        accountMode: mode,
+        sharedVendorUserId,
+      });
     },
   };
 }

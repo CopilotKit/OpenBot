@@ -1,10 +1,36 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "./audit";
-import type { Database } from "./db/client";
 import { reasonWithoutStatement } from "./db/query-failure";
-import { type credentialKind, credentials } from "./db/schema";
+import type { credentialKind } from "./db/schema";
+import {
+  SecretMissingError,
+  SecretNameTakenError,
+  SecretRevokedError,
+  SecretVersionConflictError,
+  type StoredSecret,
+} from "./vault/client";
+import type { ConnectionsDirectory } from "./vault/directory";
 
-type CredentialEnvelope = {
+/*
+ * THE VAULT IS INTELLIGENCE'S. Every credential this deployment holds — model keys, connector keys,
+ * remote Bots' keys, app tokens, OAuth clients, each person's OAuth tokens, webhook secrets — is a
+ * secret in Intelligence's vault (`docs/contracts/vault.md` there), encrypted under a key that
+ * belongs to the organization and read back only through a reveal the vault records: who asked, for
+ * which person and which Bot, and why. This module is OpenBot's view of it, kept in the shape the rest
+ * of the server always called, so a credential is still created, rotated, revoked and spent through
+ * one place.
+ *
+ * NO TRANSACTION OF OURS CAN HOLD IT. A write here is a call to Intelligence. It never joins an
+ * OpenBot transaction, and a caller must never make one with a transaction open: the old `executor`
+ * argument is gone for that reason. What used to be atomic with a credential write is now ordered
+ * around it (store the secret, then point at it; revoke what was replaced last), and a rotation that
+ * must not lose the name is one call (`replaces`), atomic inside the vault.
+ *
+ * The local `credentials` table is kept for one release, unwritten, for the upgrade copy
+ * (`vault/upgrade.ts`). `KEY_ENCRYPTION_KEY` no longer encrypts any credential; it still signs and
+ * seals OAuth state and other values elsewhere.
+ */
+
+type SealedEnvelope = {
   version: 1;
   iv: string;
   ciphertext: string;
@@ -13,13 +39,66 @@ type CredentialEnvelope = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+async function aesKey(encodedKey: string) {
+  return crypto.subtle.importKey(
+    "raw",
+    Buffer.from(encodedKey, "base64"),
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+function parseEnvelope(value: string): SealedEnvelope {
+  try {
+    const envelope = JSON.parse(value) as SealedEnvelope;
+    if (
+      envelope.version !== 1 ||
+      typeof envelope.iv !== "string" ||
+      typeof envelope.ciphertext !== "string"
+    ) {
+      throw new Error("invalid envelope");
+    }
+    return envelope;
+  } catch {
+    throw new Error("Credential envelope is invalid");
+  }
+}
+
 /**
- * Derived from the enum rather than written out again.
+ * AES-256-GCM under a local key, as `{version, iv, ciphertext}` JSON.
  *
- * These were two lists that had to agree, and nothing made them. A kind added to the schema and not
- * here fails at the point of use with a type error about an unrelated call site; a kind removed from
- * the schema and left here compiles and then violates a check constraint at runtime. One source now.
+ * No longer how a credential is stored (the vault is Intelligence's). Still how this deployment seals
+ * values it keeps itself under `KEY_ENCRYPTION_KEY` (OAuth state, SSO configuration, the Recorder's
+ * session), and how the upgrade copy reads the rows the local vault wrote before this release.
  */
+export async function encryptSecret(encodedKey: string, plaintext: string) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await aesKey(encodedKey),
+    encoder.encode(plaintext),
+  );
+
+  return JSON.stringify({
+    version: 1,
+    iv: Buffer.from(iv).toString("base64"),
+    ciphertext: Buffer.from(ciphertext).toString("base64"),
+  } satisfies SealedEnvelope);
+}
+
+export async function decryptSecret(encodedKey: string, value: string) {
+  const envelope = parseEnvelope(value);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: Buffer.from(envelope.iv, "base64") },
+    await aesKey(encodedKey),
+    Buffer.from(envelope.ciphertext, "base64"),
+  );
+
+  return decoder.decode(plaintext);
+}
+
+/** OpenBot's credential kinds, from the enum the local table was created with. */
 export type CredentialKind = (typeof credentialKind.enumValues)[number];
 
 export type CredentialStatus = {
@@ -41,87 +120,69 @@ export type CredentialStoreValue = {
   provider: string;
   keyId: string;
   metadata: Record<string, unknown>;
-  encryptedValue: string;
+  plaintext: string;
+  /**
+   * The person whose secret this is, when it is a person's. Derived from the kind's own conventions
+   * when not given (see {@link credentialOwner}).
+   */
+  ownerUserId?: string | null;
 };
 
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-/**
- * Where a credential write runs.
- *
- * A caller already inside a transaction passes it here, so the write joins that
- * transaction rather than opening one of its own on a second pooled connection.
- * Two connections would mean the credential committing separately from the
- * change that asked for it, and, since the caller is usually holding row locks
- * by then, a pool with nothing spare to hand out deadlocks instead. See the
- * note on `max` in `db/client.ts`.
- */
-export type CredentialExecutor =
-  | Pick<Database, "select" | "insert" | "update">
-  | Pick<Transaction, "select" | "insert" | "update">;
+/** Who reads a credential's value and why: the vault records it with every reveal. */
+export type CredentialAccessor = {
+  purpose: string;
+  userId?: string | null;
+  botId?: string | null;
+};
 
 export type CredentialStore = {
-  create: (
-    value: CredentialStoreValue,
-    executor?: CredentialExecutor,
-  ) => Promise<StoredCredential>;
+  create: (value: CredentialStoreValue) => Promise<StoredCredential>;
   /**
-   * Re-encrypt a live row in place, keeping the id everything already points at.
+   * Replace a live credential's value in place, keeping the id everything already points at.
    *
-   * A vendor whose refresh token ROTATES is the one caller. It has already killed the old token at
-   * its end by the time it answers, so there is no second grant left to withdraw and nothing to
-   * learn from a new row — only a row per tool call, forever. A person RECONNECTING still goes
-   * through `rotate`, because that is the act that leaves a live grant behind for us to withdraw at
-   * our side too.
+   * A vendor whose refresh token ROTATES is the one caller: it has already killed the old token at
+   * its end by the time it answers, so there is no second grant to withdraw, only a new value to keep.
+   * A person RECONNECTING still goes through `rotate`, because that leaves a live grant behind for us
+   * to withdraw at our side too.
    *
-   * A revoked or missing row is refused rather than written through: a grant somebody withdrew must
-   * not come back to life by being handed a fresh secret.
-   *
-   * Without an executor this writes on its own connection. With one it joins the caller's
-   * transaction, which is how the caller that has locked this row spends the token under that lock:
-   * the write has to commit with the lock rather than beside it.
+   * A revoked or missing credential is refused rather than written through: a grant somebody
+   * withdrew must not come back to life by being handed a fresh secret. `version`, when given, is the
+   * version the caller read; a credential changed since is refused too, so two writers cannot both
+   * believe their token is the current one.
    */
   updateSecret: (
     id: string,
-    encryptedValue: string,
-    executor?: CredentialExecutor,
-  ) => Promise<void>;
+    plaintext: string,
+    version?: number,
+  ) => Promise<{ version: number }>;
   /**
-   * Replace one credential with another, atomically.
-   *
-   * Retiring the old secret and storing the new one are one decision, so they
-   * are one write. Two separate calls cannot be made safe from the outside:
-   * an `UPDATE` can commit and still throw on the way back, and no compensating
-   * revoke survives the process being killed between them.
-   *
-   * Without an executor this opens its own transaction. With one it runs inside
-   * the caller's, and is atomic with whatever else that transaction is doing.
+   * Replace one credential with another, atomically: the vault revokes the previous one and stores
+   * the new one in one step, so the key never has two live credentials and never has none.
    */
   rotate: (
     input: CredentialStoreValue & { previousCredentialId: string },
-    executor?: CredentialExecutor,
   ) => Promise<StoredCredential>;
-  revoke: (id: string, executor?: CredentialExecutor) => Promise<Date>;
+  revoke: (id: string) => Promise<Date>;
   /** Whether this credential exists and has not been revoked. */
-  isLive: (id: string, executor?: CredentialExecutor) => Promise<boolean>;
-  /**
-   * The live credential for a key, if this deployment holds one.
-   *
-   * At most one can exist, which is what `credentials_active_key_idx`
-   * enforces, so a caller about to store a secret for a key can ask whether it
-   * is replacing something rather than finding out from a failed insert.
-   */
-  findLiveByKey: (
-    key: { kind: CredentialKind; provider: string; keyId: string },
-    executor?: CredentialExecutor,
-  ) => Promise<{ id: string } | null>;
+  isLive: (id: string) => Promise<boolean>;
+  /** The live credential for a key, if this deployment holds one. At most one can exist. */
+  findLiveByKey: (key: {
+    kind: CredentialKind;
+    provider: string;
+    keyId: string;
+  }) => Promise<{ id: string } | null>;
 };
 
 export type CredentialSecretReader = {
-  readSecret: (id: string) => Promise<{
-    encryptedValue: string;
-    revokedAt: Date | null;
-  } | null>;
+  /**
+   * The value of a live credential, for this reader.
+   *
+   * @throws CredentialUnusableError when it is missing or revoked; any other throw is a fault.
+   */
+  reveal: (
+    id: string,
+    accessor: CredentialAccessor,
+  ) => Promise<{ value: string; version: number }>;
 };
 
 export type CredentialStatusReader = {
@@ -129,91 +190,25 @@ export type CredentialStatusReader = {
 };
 
 export type ModelCredentialSecretReader = {
-  readModelSecret: (input: {
-    provider: "openai" | "anthropic";
-    keyId: string;
-  }) => Promise<{ encryptedValue: string } | null>;
+  /** The newest live model key under a name, or null when the vault holds none. */
+  revealModelSecret: (
+    input: { provider: "openai" | "anthropic"; keyId: string },
+    accessor: CredentialAccessor,
+  ) => Promise<string | null>;
 };
-
-type CredentialService = {
-  encryptionKey: string;
-  store: CredentialStore;
-  auditStore: AuditStore;
-};
-
-async function aesKey(encodedKey: string) {
-  return crypto.subtle.importKey(
-    "raw",
-    Buffer.from(encodedKey, "base64"),
-    { name: "AES-GCM" },
-    false,
-    ["encrypt", "decrypt"],
-  );
-}
-
-function parseEnvelope(value: string): CredentialEnvelope {
-  try {
-    const envelope = JSON.parse(value) as CredentialEnvelope;
-    if (
-      envelope.version !== 1 ||
-      typeof envelope.iv !== "string" ||
-      typeof envelope.ciphertext !== "string"
-    ) {
-      throw new Error("invalid envelope");
-    }
-    return envelope;
-  } catch {
-    throw new Error("Credential envelope is invalid");
-  }
-}
-
-export async function encryptSecret(encodedKey: string, plaintext: string) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    await aesKey(encodedKey),
-    encoder.encode(plaintext),
-  );
-
-  return JSON.stringify({
-    version: 1,
-    iv: Buffer.from(iv).toString("base64"),
-    ciphertext: Buffer.from(ciphertext).toString("base64"),
-  } satisfies CredentialEnvelope);
-}
-
-export async function decryptSecret(encodedKey: string, value: string) {
-  const envelope = parseEnvelope(value);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: Buffer.from(envelope.iv, "base64") },
-    await aesKey(encodedKey),
-    Buffer.from(envelope.ciphertext, "base64"),
-  );
-
-  return decoder.decode(plaintext);
-}
 
 /**
- * The vault answered, and what it holds cannot be spent: the row is gone, or it is revoked.
+ * The vault answered, and what it holds cannot be spent: the secret is gone, or it is revoked.
  *
- * CRITERION. This is the ONLY thing {@link decryptCredentialForUse} raises that means "access was
- * withdrawn". Everything else it can raise — a query this database refused, a connection it could
- * not open, an envelope that would not decrypt — is a fault, and a caller must be able to tell the
- * two apart without reading either message.
+ * CRITERION. This is the ONLY thing {@link revealCredentialForUse} raises that means "access was
+ * withdrawn". Everything else it can raise — Intelligence unreachable, a refused request, a key the
+ * vault could not unwrap — is a fault, and a caller must be able to tell the two apart without
+ * reading either message. A class cannot be produced by accident, and it survives a reworded
+ * sentence, which is the same argument `TokenRefusedError` carries a `code` for.
  *
- * REASON. The two used to be plain `Error`s and the only thing separating them from a fault was
- * their wording, which `plugins/store.ts` matched on: a message containing "revoked" or "not found"
- * was a withdrawal, anything else was an error. drizzle reports a failed query as a message that
- * BEGINS `Failed query: select "encrypted_value", "revoked_at" from "credentials" …`, so the column
- * this function reads put the substring into every database fault on this very read — Postgres
- * down, a wrong address, a cancelled statement — and each was announced to the person, the model and
- * the operator as an administrator having taken the credential away. A class cannot be produced by
- * accident that way, and it survives a reworded sentence, which is the same argument
- * `TokenRefusedError` carries a `code` for rather than a phrase in its prose.
- *
- * ONE CLASS FOR BOTH STATES, because no caller acts on the difference: the row being absent and the
- * row being retired are both "this credential is not available and will not become available", and
- * the step is the same. The messages stay distinct for whoever is reading a log.
+ * ONE CLASS FOR BOTH STATES, because no caller acts on the difference: the secret being absent and
+ * being retired are both "this credential is not available and will not become available". The
+ * messages stay distinct for whoever is reading a log.
  */
 export class CredentialUnusableError extends Error {
   constructor(message: string) {
@@ -240,36 +235,69 @@ export class CredentialRefusedError extends Error {
   }
 }
 
-export async function decryptCredentialForUse(
-  encodedKey: string,
+/**
+ * Whose secret a credential is, from the conventions each kind already keeps: a person's MCP token is
+ * named by their id, a GitHub link's name starts with it, and a responsibility's secrets carry it in
+ * their metadata. Everything else is the deployment's.
+ */
+export function credentialOwner(value: {
+  kind: CredentialKind;
+  provider: string;
+  keyId: string;
+  metadata: Record<string, unknown>;
+  ownerUserId?: string | null;
+}): string | null {
+  if (value.ownerUserId !== undefined) return value.ownerUserId;
+  if (value.kind === "mcp_user_token") return value.keyId;
+  if (value.provider === "github-user-token") {
+    const [userId] = value.keyId.split(":");
+    return userId || null;
+  }
+  const owner = value.metadata.ownerUserId;
+  return typeof owner === "string" && owner.length > 0 ? owner : null;
+}
+
+function credentialKindOf(secret: StoredSecret): CredentialKind {
+  if (secret.kind === "website_login")
+    throw new Error(`Secret ${secret.id} is a saved login, not a credential.`);
+  return secret.kind;
+}
+
+function statusOf(secret: StoredSecret): CredentialStatus {
+  return {
+    id: secret.id,
+    kind: credentialKindOf(secret),
+    provider: secret.provider,
+    keyId: secret.keyId,
+    metadata: secret.metadata,
+    revokedAt: secret.revokedAt,
+  };
+}
+
+/**
+ * Spend a credential: its value, for this reader, or {@link CredentialUnusableError} when the vault
+ * holds it no longer or holds it revoked.
+ */
+export async function revealCredentialForUse(
   reader: CredentialSecretReader,
   credentialId: string,
-) {
-  const credential = await reader.readSecret(credentialId);
-  if (!credential) {
-    throw new CredentialUnusableError("Credential was not found");
-  }
-  if (credential.revokedAt) {
-    throw new CredentialUnusableError("Credential is revoked");
-  }
-
-  return decryptSecret(encodedKey, credential.encryptedValue);
+  accessor: CredentialAccessor,
+): Promise<string> {
+  return (await reader.reveal(credentialId, accessor)).value;
 }
 
 export async function resolveModelApiKey(input: {
-  encryptionKey: string;
   reader: ModelCredentialSecretReader;
   provider: "openai" | "anthropic";
   keyId: string;
   environment: Record<string, string | undefined>;
+  accessor: CredentialAccessor;
 }) {
-  const stored = await input.reader.readModelSecret({
-    provider: input.provider,
-    keyId: input.keyId,
-  });
-  if (stored) {
-    return decryptSecret(input.encryptionKey, stored.encryptedValue);
-  }
+  const stored = await input.reader.revealModelSecret(
+    { provider: input.provider, keyId: input.keyId },
+    input.accessor,
+  );
+  if (stored) return stored;
 
   const environmentKey =
     input.environment[
@@ -278,223 +306,189 @@ export async function resolveModelApiKey(input: {
   return environmentKey || null;
 }
 
+/** The credential kinds; a secret of any other kind (a saved login) is not one. */
+const CREDENTIAL_KINDS = new Set<string>([
+  "model",
+  "connector",
+  "agent",
+  "mcp",
+  "mcp_oauth_client",
+  "mcp_user_token",
+]);
+
 export function createCredentialStore(
-  database: Database,
+  directory: ConnectionsDirectory,
 ): CredentialStore &
   CredentialSecretReader &
   CredentialStatusReader &
   ModelCredentialSecretReader {
+  const draftOf = (value: CredentialStoreValue) => ({
+    id: crypto.randomUUID(),
+    kind: value.kind,
+    provider: value.provider,
+    keyId: value.keyId,
+    ownerUserId: credentialOwner(value),
+    metadata: value.metadata,
+    plaintext: value.plaintext,
+  });
+
   return {
-    create: async (value, executor = database) => {
-      const [credential] = await executor
-        .insert(credentials)
-        .values(value)
-        .returning({ id: credentials.id, revokedAt: credentials.revokedAt });
-
-      if (!credential) {
-        throw new Error("Credential could not be stored");
-      }
-      return credential;
+    create: async (value) => {
+      const secret = await directory.createSecret(draftOf(value));
+      return { id: secret.id, revokedAt: secret.revokedAt };
     },
-    updateSecret: async (id, encryptedValue, executor = database) => {
-      const [credential] = await executor
-        .update(credentials)
-        .set({ encryptedValue, updatedAt: new Date() })
-        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)))
-        .returning({ id: credentials.id });
 
-      /*
-       * One statement, so nothing can revoke the row between a check and the write.
-       *
-       * The cost is that "no such row" and "revoked" arrive as the same answer, hence the one
-       * message naming both. The caller acts identically on either: it refuses its call.
-       */
-      if (!credential) {
+    updateSecret: async (id, plaintext, version) => {
+      const current =
+        version === undefined ? await directory.findSecret(id) : undefined;
+      if (version === undefined && (!current || current.revokedAt)) {
         throw new Error("Credential was not found or is revoked");
       }
-    },
-    rotate: async (input, executor) => {
-      const write = async (transaction: CredentialExecutor) => {
-        /**
-         * The previous credential, locked for the rest of the transaction.
-         *
-         * Two replicas rotating the same secret would otherwise both read it
-         * as live and both act; the second waits here and then finds it
-         * revoked. Its identity is read alongside its state so a rotation
-         * aimed at the wrong id is refused rather than silently retiring a
-         * secret the caller never named.
-         */
-        const [previous] = await transaction
-          .select({
-            revokedAt: credentials.revokedAt,
-            kind: credentials.kind,
-            provider: credentials.provider,
-            keyId: credentials.keyId,
-          })
-          .from(credentials)
-          .where(eq(credentials.id, input.previousCredentialId))
-          .for("update");
-        if (!previous) {
-          throw new CredentialRefusedError(
-            "Previous credential was not found",
-            404,
-          );
+      try {
+        const updated = await directory.updateSecret(
+          id,
+          version ?? (current as StoredSecret).version,
+          { plaintext },
+        );
+        return { version: updated.version };
+      } catch (error) {
+        if (
+          error instanceof SecretMissingError ||
+          error instanceof SecretRevokedError
+        ) {
+          throw new Error("Credential was not found or is revoked");
         }
-        if (previous.revokedAt) {
+        throw error;
+      }
+    },
+
+    rotate: async (input) => {
+      const previous = await directory.findSecret(input.previousCredentialId);
+      if (!previous || !CREDENTIAL_KINDS.has(previous.kind)) {
+        throw new CredentialRefusedError(
+          "Previous credential was not found",
+          404,
+        );
+      }
+      if (previous.revokedAt) {
+        throw new CredentialRefusedError(
+          "Previous credential is already revoked",
+          409,
+        );
+      }
+      const draft = draftOf(input);
+      if (
+        previous.kind !== input.kind ||
+        previous.provider !== input.provider ||
+        previous.keyId !== input.keyId ||
+        previous.ownerUserId !== draft.ownerUserId
+      ) {
+        throw new CredentialRefusedError(
+          "Previous credential does not match the input's kind, provider or keyId",
+          409,
+        );
+      }
+      try {
+        const secret = await directory.createSecret({
+          ...draft,
+          replaces: input.previousCredentialId,
+        });
+        return { id: secret.id, revokedAt: secret.revokedAt };
+      } catch (error) {
+        // Another replica rotated or revoked it between the read above and the vault's own check.
+        if (error instanceof SecretRevokedError)
           throw new CredentialRefusedError(
             "Previous credential is already revoked",
             409,
           );
-        }
+        if (error instanceof SecretMissingError)
+          throw new CredentialRefusedError(
+            "Previous credential was not found",
+            404,
+          );
+        throw error;
+      }
+    },
+
+    revoke: async (id) => {
+      try {
+        const secret = await directory.revokeSecret(id);
+        if (!secret.revokedAt) throw new Error("The vault did not revoke it.");
+        return secret.revokedAt;
+      } catch (error) {
+        // Only a live secret is revoked. A second revoke would otherwise report success, so a caller
+        // could not tell retiring a credential from finding it already gone.
         if (
-          previous.kind !== input.kind ||
-          previous.provider !== input.provider ||
-          previous.keyId !== input.keyId
+          error instanceof SecretMissingError ||
+          error instanceof SecretRevokedError ||
+          error instanceof SecretVersionConflictError
         ) {
           throw new CredentialRefusedError(
-            "Previous credential does not match the input's kind, provider or keyId",
-            409,
+            "Credential was not found or already revoked",
+            404,
           );
         }
-
-        // Revoke, then insert. Both orders are invisible from outside the
-        // transaction, and this one never holds two live rows for one key even
-        // in the middle of it, which is the invariant a uniqueness constraint
-        // on live credentials would later depend on.
-        const revokedAt = new Date();
-        const [revoked] = await transaction
-          .update(credentials)
-          .set({ revokedAt, updatedAt: revokedAt })
-          .where(
-            and(
-              eq(credentials.id, input.previousCredentialId),
-              isNull(credentials.revokedAt),
-            ),
-          )
-          .returning({ revokedAt: credentials.revokedAt });
-        if (!revoked?.revokedAt) {
-          // Ruled out by the lock above under contention; reaching here means
-          // the row was deleted outright between the two statements, which
-          // aborts the transaction and leaves nothing committed.
-          throw new Error("Previous credential was not found");
-        }
-
-        const [inserted] = await transaction
-          .insert(credentials)
-          .values({
-            kind: input.kind,
-            provider: input.provider,
-            keyId: input.keyId,
-            metadata: input.metadata,
-            encryptedValue: input.encryptedValue,
-          })
-          .returning({
-            id: credentials.id,
-            revokedAt: credentials.revokedAt,
-          });
-        if (!inserted) {
-          throw new Error("Credential could not be stored");
-        }
-
-        return inserted;
-      };
-
-      // A caller already in a transaction has its own atomicity to keep, and
-      // the credential belongs to it rather than to a transaction of its own.
-      return executor ? write(executor) : database.transaction(write);
-    },
-    revoke: async (id, executor = database) => {
-      const revokedAt = new Date();
-      const [credential] = await executor
-        .update(credentials)
-        .set({ revokedAt, updatedAt: revokedAt })
-        // Only a live row is stamped. Without the guard a second revoke would
-        // overwrite the first one's timestamp and report success, so a caller
-        // could not tell retiring a credential from finding it already gone.
-        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)))
-        .returning({ revokedAt: credentials.revokedAt });
-
-      if (!credential?.revokedAt) {
-        throw new CredentialRefusedError(
-          "Credential was not found or already revoked",
-          404,
-        );
+        throw error;
       }
-      return credential.revokedAt;
     },
-    isLive: async (id, executor = database) => {
-      const [credential] = await executor
-        .select({ id: credentials.id })
-        .from(credentials)
-        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)));
 
-      return credential !== undefined;
+    isLive: async (id) => {
+      const secret = await directory.findSecret(id);
+      return (
+        secret !== null &&
+        secret.revokedAt === null &&
+        CREDENTIAL_KINDS.has(secret.kind)
+      );
     },
-    findLiveByKey: async ({ kind, provider, keyId }, executor = database) => {
-      const [credential] = await executor
-        .select({ id: credentials.id })
-        .from(credentials)
-        .where(
-          and(
-            eq(credentials.kind, kind),
-            eq(credentials.provider, provider),
-            eq(credentials.keyId, keyId),
-            isNull(credentials.revokedAt),
-          ),
-        );
 
-      return credential ?? null;
+    findLiveByKey: async (key) => {
+      const secret = directory.liveSecretByKey(key);
+      return secret ? { id: secret.id } : null;
     },
-    readSecret: async (id) => {
-      const [credential] = await database
-        .select({
-          encryptedValue: credentials.encryptedValue,
-          revokedAt: credentials.revokedAt,
-        })
-        .from(credentials)
-        .where(eq(credentials.id, id));
 
-      return credential ?? null;
+    reveal: async (id, accessor) => {
+      try {
+        const revealed = await directory.reveal(id, accessor);
+        return { value: revealed.value, version: revealed.version };
+      } catch (error) {
+        if (error instanceof SecretMissingError)
+          throw new CredentialUnusableError("Credential was not found");
+        if (error instanceof SecretRevokedError)
+          throw new CredentialUnusableError("Credential is revoked");
+        throw error;
+      }
     },
-    readModelSecret: async ({ provider, keyId }) => {
-      const [credential] = await database
-        .select({ encryptedValue: credentials.encryptedValue })
-        .from(credentials)
-        .where(
-          and(
-            eq(credentials.kind, "model"),
-            eq(credentials.provider, provider),
-            eq(credentials.keyId, keyId),
-            isNull(credentials.revokedAt),
-          ),
+
+    revealModelSecret: async ({ provider, keyId }, accessor) => {
+      const secret = directory.liveSecretByKey({
+        kind: "model",
+        provider,
+        keyId,
+      });
+      if (!secret) return null;
+      try {
+        return (await directory.reveal(secret.id, accessor)).value;
+      } catch (error) {
+        // Revoked or removed a moment ago, on another instance: no stored key, as the read used to say.
+        if (
+          error instanceof SecretMissingError ||
+          error instanceof SecretRevokedError
         )
-        .orderBy(
-          desc(credentials.createdAt),
-          // UUID descending selects the lexicographically greatest ID on a timestamp tie.
-          desc(credentials.id),
+          return null;
+        throw error;
+      }
+    },
+
+    list: async () =>
+      directory
+        .secrets()
+        .filter((secret) => CREDENTIAL_KINDS.has(secret.kind))
+        .sort(
+          (left, right) =>
+            left.createdAt.getTime() - right.createdAt.getTime() ||
+            left.id.localeCompare(right.id),
         )
-        .limit(1);
-
-      return credential ?? null;
-    },
-    list: async () => {
-      const records = await database
-        .select({
-          id: credentials.id,
-          kind: credentials.kind,
-          provider: credentials.provider,
-          keyId: credentials.keyId,
-          metadata: credentials.metadata,
-          revokedAt: credentials.revokedAt,
-        })
-        .from(credentials)
-        .orderBy(credentials.createdAt);
-
-      return records.map((credential) => ({
-        ...credential,
-        metadata: credential.metadata as Record<string, unknown>,
-      }));
-    },
+        .map(statusOf),
   };
 }
 
@@ -521,41 +515,21 @@ export type CredentialAdminService = CredentialStatusReader & {
   }>;
 };
 
-async function persistCredential(
-  service: CredentialService,
-  input: CredentialInput,
-): Promise<CredentialStatus> {
-  const stored = await service.store.create({
-    kind: input.kind,
-    provider: input.provider,
-    keyId: input.keyId,
-    metadata: input.metadata,
-    encryptedValue: await encryptSecret(service.encryptionKey, input.plaintext),
-  });
-
-  return {
-    id: stored.id,
-    kind: input.kind,
-    provider: input.provider,
-    keyId: input.keyId,
-    metadata: input.metadata,
-    revokedAt: stored.revokedAt,
-  };
-}
+type CredentialService = {
+  store: CredentialStore;
+  auditStore: AuditStore;
+};
 
 /**
  * Store a credential for a key.
  *
- * A key holds one live credential, so storing a second one for a key that
- * already has one is a replacement rather than an addition, and it is carried
- * out as a rotation: the two writes are atomic and the trail records
- * `credential.rotated` naming what was replaced.
+ * A key holds one live credential, so storing a second one for a key that already has one is a
+ * replacement rather than an addition, and it is carried out as a rotation: the vault revokes the old
+ * one and stores the new one in one step, and the trail records `credential.rotated` naming what was
+ * replaced.
  *
- * This is the shape the product asks for. The Credentials page offers Add and
- * Revoke and has no rotate control, so replacing a model key is done by adding
- * one for the same provider and keyId. Refusing that would leave no way to
- * replace a key at all, and inserting it would raise a bare unique violation
- * from `credentials_active_key_idx`.
+ * This is the shape the product asks for. The Credentials page offers Add and Revoke and has no
+ * rotate control, so replacing a model key is done by adding one for the same provider and keyId.
  */
 export async function createCredential(
   service: CredentialService,
@@ -573,12 +547,34 @@ export async function createCredential(
     });
   }
 
-  const credential = await persistCredential(service, input);
+  let stored: StoredCredential;
+  try {
+    stored = await service.store.create({
+      kind: input.kind,
+      provider: input.provider,
+      keyId: input.keyId,
+      metadata: input.metadata,
+      plaintext: input.plaintext,
+    });
+  } catch (error) {
+    // Another replica stored one for this key between the lookup and here: replace it instead.
+    if (!(error instanceof SecretNameTakenError)) throw error;
+    const winner = await service.store.findLiveByKey({
+      kind: input.kind,
+      provider: input.provider,
+      keyId: input.keyId,
+    });
+    if (!winner) throw error;
+    return rotateCredential(service, {
+      ...input,
+      previousCredentialId: winner.id,
+    });
+  }
 
   await recordAuditEvent(service.auditStore, {
     eventType: "credential.created",
     targetType: "credential",
-    targetId: credential.id,
+    targetId: stored.id,
     actorUserId: input.actorUserId,
     payload: {
       kind: input.kind,
@@ -587,17 +583,20 @@ export async function createCredential(
     },
   });
 
-  return credential;
+  return {
+    id: stored.id,
+    kind: input.kind,
+    provider: input.provider,
+    keyId: input.keyId,
+    metadata: input.metadata,
+    revokedAt: stored.revokedAt,
+  };
 }
 
 export async function rotateCredential(
   service: CredentialService,
   input: CredentialInput & { previousCredentialId: string },
 ): Promise<CredentialStatus> {
-  // Encryption happens before the transaction opens, so no database connection
-  // is held while it runs. The store then performs both writes atomically, and
-  // a failure leaves the vault as it was, which is why the success event below
-  // is written only once that has returned.
   let stored: StoredCredential;
   try {
     stored = await service.store.rotate({
@@ -606,33 +605,17 @@ export async function rotateCredential(
       provider: input.provider,
       keyId: input.keyId,
       metadata: input.metadata,
-      encryptedValue: await encryptSecret(
-        service.encryptionKey,
-        input.plaintext,
-      ),
+      plaintext: input.plaintext,
     });
   } catch (error) {
     /*
-     * A refused rotation is worth a row of its own.
+     * A refused rotation is worth a row of its own: one aimed at a revoked or missing credential, or
+     * one whose key does not match, is either a caller with a bug or an attempt to retire a key the
+     * caller was not asked to retire.
      *
-     * The vault refuses one aimed at a credential that is already revoked, one aimed at a credential
-     * that does not exist, and one whose key does not match the credential it names. Each of those is
-     * either a caller with a bug or an attempt to retire a key the caller was not asked to retire,
-     * and each of them left nothing behind while only successes were recorded.
-     *
-     * Written outside the transaction that has just rolled back, so the row survives the failure it
-     * describes.
-     *
-     * THE REASON IS ASKED FOR THROUGH {@link reasonWithoutStatement}, and the sentence this comment
-     * used to carry — "the vault's own message and never the secret, which never left this
-     * function" — was false. Not every throw caught here is the vault's own: the rotation runs
-     * three statements, and a `DrizzleQueryError` from any of them has `Failed query: <the
-     * statement>` and `params: <every bound value>` for a message. The insert binds
-     * `encryptedValue`, so the values in that message include the credential envelope this function
-     * had just built — and `audit_events` is append-only by trigger, exported, and kept for the
-     * deployment's whole retention window, so a secret landing there is not one anybody can take
-     * back out. A refusal the vault itself wrote still arrives here word for word; only the shape
-     * that carries a statement is answered with the driver's complaint instead.
+     * The reason is asked for through {@link reasonWithoutStatement}, so a failure that quotes what it
+     * was sending can never carry the plaintext into `audit_events`, which is append-only and kept for
+     * the deployment's whole retention window. The vault's own refusals never carry a value.
      */
     await recordAuditEvent(service.auditStore, {
       eventType: "credential.rotation_refused",
@@ -691,11 +674,10 @@ export async function revokeCredential(
 }
 
 export function createCredentialAdminService(
-  encryptionKey: string,
   store: CredentialStore & CredentialStatusReader,
   auditStore: AuditStore,
 ): CredentialAdminService {
-  const service = { encryptionKey, store, auditStore };
+  const service = { store, auditStore };
 
   return {
     list: store.list,

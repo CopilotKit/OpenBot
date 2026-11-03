@@ -18,7 +18,7 @@ import type {
   ResponsibilitySource,
   ResponsibilitySubscription,
 } from "../../responsibilities/types";
-import { credentials, users } from "./core";
+import { users } from "./core";
 import { jsonb } from "./json";
 
 export const responsibilityStatus = pgEnum("responsibility_status", [
@@ -133,9 +133,8 @@ export const responsibilitySourceBindings = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     source: text("source").$type<"github">().notNull(),
     repository: text("repository").notNull(),
-    credentialId: uuid("credential_id")
-      .notNull()
-      .references(() => credentials.id),
+    // A vault secret's id in Intelligence. No foreign key: the vault is not in this database.
+    credentialId: uuid("credential_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -166,7 +165,8 @@ export const responsibilityTriggers = pgTable(
       .references(() => responsibilities.id, { onDelete: "cascade" }),
     kind: text("kind").$type<TriggerKind>().notNull(),
     config: jsonb("config").$type<TriggerConfig>().notNull(),
-    credentialId: uuid("credential_id").references(() => credentials.id),
+    // A vault secret's id in Intelligence. No foreign key: the vault is not in this database.
+    credentialId: uuid("credential_id"),
     /** Paused triggers acknowledge deliveries but never queue a run. */
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })

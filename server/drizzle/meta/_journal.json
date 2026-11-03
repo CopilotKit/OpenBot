@@ -533,6 +533,13 @@
       "when": 1793731463963,
       "tag": "0075_bots_in_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1793746624356,
+      "tag": "0076_vault_and_connections_in_intelligence",
+      "breakpoints": true
     }
   ]
 }

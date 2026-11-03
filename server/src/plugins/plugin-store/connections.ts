@@ -1,12 +1,8 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
 import type { Database } from "../../db/client";
 import {
-  brokeredConnections,
-  credentials as credentialRows,
-  mcpServers,
   mcpTools,
-  mcpUserCredentials,
   pendingAuthorizations,
   users,
   vendorNameOf,
@@ -26,6 +22,18 @@ import {
 } from "../composio";
 import type { AccountRef } from "../shared-accounts";
 import type { StoreContext } from "./context";
+import {
+  allBrokered,
+  allServers,
+  findBrokered,
+  findServer,
+  grantsOf,
+  removeBrokered,
+  removeGrants,
+  updateBrokered,
+  upsertBrokered,
+} from "./records";
+import { vault } from "../../vault/directory";
 import {
   attemptNamed,
   type BrokeredProbe,
@@ -98,8 +106,9 @@ export function connectionMethods(context: StoreContext) {
      * {@link withOAuthClientLock}, with the "do we hold one" question asked AGAIN inside it, and the
      * second caller finds the first one's client and is handed the same one.
      *
-     * The lock is held across the registration request to the vendor, deliberately. It is one round
-     * trip with its own timeout, and a lock released before it would serialise nothing.
+     * The lease is held across the registration request to the vendor, deliberately. It is one round
+     * trip with its own timeout, and a lease released before it would serialise nothing. No database
+     * transaction is open across it: the lease is a row taken and released by one statement each.
      */
     async ensureOAuthClient(
       serverId: string,
@@ -121,30 +130,30 @@ export function connectionMethods(context: StoreContext) {
       const { registrationUrl } = entry.auth;
       const { redirectUri } = options;
 
-      const outcome = await withOAuthClientLock(
-        serverId,
-        async (transaction) => {
-          /*
-           * Asked again, under the lock. The read above was a fast path taken without one, and by now
-           * the caller we were racing has committed a client of its own — which is the one this
-           * deployment holds, so it is the one to consent against.
-           */
-          const held = await heldOAuthClient(transaction, serverId);
-          if (held) return { client: held, registered: false, replaced: false };
+      const outcome = await withOAuthClientLock(serverId, async () => {
+        /*
+         * Asked again, under the lease. The read above was a fast path taken without one, and by now
+         * the caller we were racing has stored a client of its own — which is the one this
+         * deployment holds, so it is the one to consent against.
+         */
+        const held = await heldOAuthClient(serverId, {
+          purpose: "mcp_oauth_client",
+          userId: by,
+        });
+        if (held) return { client: held, registered: false, replaced: false };
 
-          const registered = await registerClient({
-            registrationUrl,
-            redirectUri,
-          });
-          if (!registered) return null;
+        const registered = await registerClient({
+          registrationUrl,
+          redirectUri,
+        });
+        if (!registered) return null;
 
-          const { replaced } = await writeOAuthClient(
-            { serverId, client: registered },
-            transaction,
-          );
-          return { client: registered, registered: true, replaced };
-        },
-      );
+        const { replaced } = await writeOAuthClient({
+          serverId,
+          client: registered,
+        });
+        return { client: registered, registered: true, replaced };
+      });
 
       if (!outcome) return null;
       // Only what this call actually did. A trail row for handing back somebody else's client would
@@ -237,33 +246,28 @@ export function connectionMethods(context: StoreContext) {
         revoked: boolean;
       }[]
     > {
-      const rows = await database
-        .select({
-          serverId: mcpUserCredentials.serverId,
-          scope: mcpUserCredentials.scope,
-          connectedAt: mcpUserCredentials.connectedAt,
-          revokedAt: credentialRows.revokedAt,
-        })
-        .from(mcpUserCredentials)
-        /*
-         * Inner, and total because of the foreign key: `credential_id` is a real reference that
-         * does not cascade, so a join row cannot outlive the credential it points at — a deletion
-         * is refused while the row is there. That is why there is no "the credential is gone" case
-         * to report here, and why a revoked credential is the only way this answer goes false.
-         */
-        .innerJoin(
-          credentialRows,
-          eq(credentialRows.id, mcpUserCredentials.credentialId),
-        )
-        .where(eq(mcpUserCredentials.userId, userId))
-        .orderBy(asc(mcpUserCredentials.serverId));
+      /*
+       * From memory: the grants and the secrets they name are Intelligence's, held by this
+       * instance's vault directory. A grant whose secret the vault no longer holds at all (purged)
+       * reads as revoked, the same answer a revoked one gets: either way it cannot be spent.
+       */
+      const rows = grantsOf(userId).sort((left, right) =>
+        left.serverId < right.serverId
+          ? -1
+          : left.serverId > right.serverId
+            ? 1
+            : 0,
+      );
 
-      return rows.map((row) => ({
-        serverId: row.serverId,
-        scope: row.scope,
-        connectedAt: iso(row.connectedAt) ?? "",
-        revoked: row.revokedAt !== null,
-      }));
+      return rows.map((row) => {
+        const secret = vault().peekSecret(row.credentialId);
+        return {
+          serverId: row.serverId,
+          scope: row.scope,
+          connectedAt: iso(row.connectedAt) ?? "",
+          revoked: !secret || secret.revokedAt !== null,
+        };
+      });
     },
 
     /**
@@ -432,22 +436,15 @@ export function connectionMethods(context: StoreContext) {
        * from the one on the existing rows — so this predicate costs nothing now, and is already
        * right when any flow relaxes that refusal (#783).
        */
-      const connections = await database
-        .select({
-          toolkit: brokeredConnections.app,
-          connectedAt: brokeredConnections.connectedAt,
-          verified: brokeredConnections.verified,
-          verifiedAt: brokeredConnections.verifiedAt,
-          probeAction: brokeredConnections.probeAction,
-        })
-        .from(brokeredConnections)
-        .where(
-          and(
-            eq(brokeredConnections.provider, brokerProvider),
-            eq(brokeredConnections.holder, "person"),
-            eq(brokeredConnections.userId, userId),
-          ),
-        );
+      const connections = allBrokered(brokerProvider)
+        .filter((row) => row.holder === "person" && row.userId === userId)
+        .map((row) => ({
+          toolkit: row.app,
+          connectedAt: row.connectedAt,
+          verified: row.verified,
+          verifiedAt: row.verifiedAt,
+          probeAction: row.probeAction,
+        }));
 
       /*
        * THE APP IS RESOLVED PER CONNECTION, NOT JOINED TO IT, BECAUSE THE URL IS NOT A KEY.
@@ -559,45 +556,24 @@ export function connectionMethods(context: StoreContext) {
      */
     async ownConnections(userId: string): Promise<Set<string>> {
       if (!userId) return new Set();
-      const granted = await database
-        .select({ serverId: mcpUserCredentials.serverId })
-        .from(mcpUserCredentials)
-        .innerJoin(
-          credentialRows,
-          eq(credentialRows.id, mcpUserCredentials.credentialId),
-        )
-        .where(
-          and(
-            eq(mcpUserCredentials.userId, userId),
-            isNull(credentialRows.revokedAt),
-          ),
-        );
+      const granted = grantsOf(userId).filter((row) => {
+        const secret = vault().peekSecret(row.credentialId);
+        return secret !== undefined && secret.revokedAt === null;
+      });
       const apps = new Set(
-        (
-          await database
-            .select({ app: brokeredConnections.app })
-            .from(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.provider, brokerProvider),
-                eq(brokeredConnections.holder, "person"),
-                eq(brokeredConnections.userId, userId),
-              ),
-            )
-        ).map((row) => row.app),
+        allBrokered(brokerProvider)
+          .filter((row) => row.holder === "person" && row.userId === userId)
+          .map((row) => row.app),
       );
       const brokered =
         apps.size === 0
           ? []
-          : (
-              await database
-                .select({ id: mcpServers.id, url: mcpServers.url })
-                .from(mcpServers)
-                .where(eq(mcpServers.provenance, brokerProvider))
-            ).filter((row) => {
-              const app = toolkitOfFor(brokerProvider, row.url);
-              return app !== null && apps.has(app);
-            });
+          : allServers()
+              .filter((row) => row.provenance === brokerProvider)
+              .filter((row) => {
+                const app = toolkitOfFor(brokerProvider, row.url);
+                return app !== null && apps.has(app);
+              });
       return new Set([
         ...granted.map((row) => row.serverId),
         ...brokered.map((row) => row.id),
@@ -624,35 +600,25 @@ export function connectionMethods(context: StoreContext) {
       probe: string | null;
       displayName: string | null;
     } | null> {
-      const [server] = await database
-        .select({ url: mcpServers.url })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
+      const server = await findServer(serverId);
       const toolkit = server ? toolkitOfFor(brokerProvider, server.url) : null;
       if (!toolkit) return null;
 
-      const [row] = await database
-        .select({
-          vendorUserId: brokeredConnections.vendorUserId,
-          connectedBy: brokeredConnections.connectedBy,
-          connectedByEmail: users.email,
-          connectedAt: brokeredConnections.connectedAt,
-          verified: brokeredConnections.verified,
-          verifiedAt: brokeredConnections.verifiedAt,
-          probeAction: brokeredConnections.probeAction,
-        })
-        .from(brokeredConnections)
-        .leftJoin(users, eq(users.id, brokeredConnections.connectedBy))
-        .where(
-          and(
-            eq(brokeredConnections.provider, brokerProvider),
-            eq(brokeredConnections.app, toolkit),
-            eq(brokeredConnections.holder, "deployment"),
-          ),
-        )
-        .limit(1);
-      if (!row) return null;
+      const held = await findBrokered({
+        provider: brokerProvider,
+        app: toolkit,
+        holder: "deployment",
+      });
+      if (!held) return null;
+      // The administrator who connected it, by email where they are still here.
+      const [connector] = held.connectedBy
+        ? await database
+            .select({ email: users.email })
+            .from(users)
+            .where(eq(users.id, held.connectedBy))
+            .limit(1)
+        : [];
+      const row = { ...held, connectedByEmail: connector?.email ?? null };
 
       const displayName = broker
         ? await broker
@@ -706,11 +672,7 @@ export function connectionMethods(context: StoreContext) {
        * a duplicate at some app's url is not the app — the app is Shared only if its answering row
        * says so — and listing it would offer a Connect for an account no call would use.
        */
-      const marked = await database
-        .select({ id: mcpServers.id, url: mcpServers.url })
-        .from(mcpServers)
-        .where(eq(mcpServers.accountMode, "shared"))
-        .orderBy(asc(mcpServers.id));
+      const marked = allServers().filter((row) => row.accountMode === "shared");
       const answering = await brokeredAppRowsAt(
         marked
           .filter((row) => toolkitOfFor(brokerProvider, row.url) !== null)
@@ -770,11 +732,7 @@ export function connectionMethods(context: StoreContext) {
       toolkit: string;
       account: AccountRef;
     }): Promise<{ connectedAt: string } | null> {
-      const [row] = await database
-        .select({ connectedAt: brokeredConnections.connectedAt })
-        .from(brokeredConnections)
-        .where(accountRow(input.toolkit, input.account))
-        .limit(1);
+      const row = await findBrokered(accountRow(input.toolkit, input.account));
 
       if (!row) return null;
       return { connectedAt: iso(row.connectedAt) ?? "" };
@@ -976,7 +934,6 @@ export function connectionMethods(context: StoreContext) {
         verified: input.verified,
         verifiedAt,
         probeAction: input.probeAction,
-        updatedAt: new Date(),
       };
 
       if (input.only === "a row that is still there") {
@@ -990,12 +947,11 @@ export function connectionMethods(context: StoreContext) {
          * different vendor identity, because only a connect or a confirm (the upsert below) is
          * evidence of a grant held under the identity it names.
          */
-        const written = await database
-          .update(brokeredConnections)
-          .set(set)
-          .where(accountRow(input.toolkit, input.account))
-          .returning({ vendorUserId: brokeredConnections.vendorUserId });
-        return { verifiedAt, wrote: written.length > 0 };
+        const written = await updateBrokered(
+          accountRow(input.toolkit, input.account),
+          set,
+        );
+        return { verifiedAt, wrote: written !== null };
       }
 
       /*
@@ -1012,28 +968,32 @@ export function connectionMethods(context: StoreContext) {
        * in the account the evidence was not about. The insert always set it; the arms did not.
        */
       const connectedAs = input.account.vendorUserId;
-      await database
-        .insert(brokeredConnections)
-        .values({
-          /*
-           * THE BROKER THIS ROW WAS ACTUALLY MINTED AT, which is this store's own, because this
-           * insert only ever runs behind a connection just made at the broker this store holds.
-           *
-           * CRITERION. A row inserted here carries the provider whose grant it stands for, so the
-           * reads keyed on `provider` above find exactly the rows this writer wrote.
-           *
-           * REASON. The literal `composio` here was the one line that could not fail loudly. An
-           * Arcade deployment writing it would read its own rows back through a `composio` filter
-           * and APPEAR TO WORK, while the refusal that is supposed to fire when the other provider
-           * holds rows never fired — nothing would ever be filed under the other name — and the
-           * offboarding sweep, keyed the same way, would sweep a slice of the table that was not
-           * this deployment's. Every symptom of that is silence.
-           */
-          provider: brokerProvider,
-          app: input.toolkit,
-          holder: input.account.holder,
-          userId:
-            input.account.holder === "person" ? input.account.userId : null,
+      /*
+       * THE BROKER THIS ACCOUNT WAS ACTUALLY MINTED AT, which is this store's own, because this
+       * write only ever runs behind a connection just made at the broker this store holds. An
+       * Arcade deployment filing its accounts under `composio` would read its own back through a
+       * `composio` filter and appear to work, while the refusal that is supposed to fire when the
+       * other provider holds accounts never fired. Every symptom of that is silence.
+       *
+       * Keyed on the holder alone, as the old unique indexes were: a person's account by their id,
+       * the deployment's one account per app whatever identity it was last filed under.
+       */
+      const key =
+        input.account.holder === "person"
+          ? ({
+              provider: brokerProvider,
+              app: input.toolkit,
+              holder: "person",
+              userId: input.account.userId,
+            } as const)
+          : ({
+              provider: brokerProvider,
+              app: input.toolkit,
+              holder: "deployment",
+            } as const);
+      await upsertBrokered(
+        key,
+        {
           vendorUserId: input.account.vendorUserId,
           connectedBy:
             input.account.holder === "deployment"
@@ -1042,37 +1002,23 @@ export function connectionMethods(context: StoreContext) {
           verified: input.verified,
           verifiedAt,
           probeAction: input.probeAction,
-        })
-        .onConflictDoUpdate(
+        },
+        () =>
           input.account.holder === "person"
-            ? {
-                target: [
-                  brokeredConnections.provider,
-                  brokeredConnections.app,
-                  brokeredConnections.userId,
-                ],
-                targetWhere: sql`${brokeredConnections.holder} = 'person'`,
-                set: { ...set, vendorUserId: connectedAs },
-              }
-            : {
-                target: [brokeredConnections.provider, brokeredConnections.app],
-                targetWhere: sql`${brokeredConnections.holder} = 'deployment'`,
-                // WHO CONNECTED IT MEANS THE LATEST CONNECTION. A deployment account is
-                // shared, so a second administrator reconnecting it supersedes the first —
-                // which `set` otherwise never said, leaving the row crediting whoever
-                // connected it the first time. Added only when this call names a
-                // `connectedBy` at all, so a re-check or a confirm that passes none does not
-                // blank out the administrator an earlier connect already recorded. That
-                // condition is the point: do NOT make this unconditional.
-                set: input.connectedBy
-                  ? {
-                      ...set,
-                      vendorUserId: connectedAs,
-                      connectedBy: input.connectedBy,
-                    }
-                  : { ...set, vendorUserId: connectedAs },
-              },
-        );
+            ? { ...set, vendorUserId: connectedAs }
+            : // WHO CONNECTED IT MEANS THE LATEST CONNECTION. A deployment account is shared, so a
+              // second administrator reconnecting it supersedes the first. Added only when this
+              // call names a `connectedBy` at all, so a re-check or a confirm that passes none
+              // does not blank out the administrator an earlier connect already recorded. That
+              // condition is the point: do NOT make this unconditional.
+              input.connectedBy
+              ? {
+                  ...set,
+                  vendorUserId: connectedAs,
+                  connectedBy: input.connectedBy,
+                }
+              : { ...set, vendorUserId: connectedAs },
+      );
       return { verifiedAt, wrote: true };
     },
 
@@ -1328,13 +1274,17 @@ export function connectionMethods(context: StoreContext) {
      * connected. Which one it was is not this method's to decide: a caller holding `false` asks
      * {@link authorizationAttemptCompleted} whether the row says `completed`.
      *
-     * THE CONNECTION AND THE AUDIT ROW ARE IN THE SAME TRANSACTION AS THAT UPDATE and not merely
-     * after it. A failure between them used to leave the attempt consumed and nothing recording
-     * what it was consumed FOR: the person's account is live at the vendor, this deployment holds
-     * no `brokered_connections` row — which is the whole of the permission a brokered call is
-     * decided on — and the attempt can never be completed again. The audit insert is bound to the
-     * transaction for the same reason, through {@link createAuditStore} over the transaction handle
-     * rather than the store's own `auditStore`, which holds the pool and would commit on its own.
+     * THE CONNECTION IS WRITTEN FIRST, AND THE CLAIM AND THE AUDIT ROW AFTER IT, IN ONE
+     * TRANSACTION. The connection is Intelligence's now, so it cannot share a transaction with the
+     * attempt, and the order is what keeps the old guarantee. A failure between the two used to
+     * leave the attempt consumed and nothing recording what it was consumed FOR: the person's
+     * account live at the vendor, no connection here — which is the whole of the permission a
+     * brokered call is decided on — and the attempt never completable again. Written first, a
+     * failure leaves the attempt open and a retry of the return completes it; and a claim that then
+     * loses to the other leg finds the same connection already written, since both legs write the
+     * same account. The audit insert is bound to the claim's transaction, through
+     * {@link createAuditStore} over the transaction handle rather than the store's own `auditStore`,
+     * so an attempt is completed exactly when its `mcp.account_connected` row is written.
      *
      * `scopes` IS WHAT THE VENDOR GRANTED, AND IT IS THE ONLY THING FROM THAT ANSWER THAT IS
      * WRITTEN ANYWHERE. Arcade's `auth.status` carries a live provider access token and an
@@ -1358,13 +1308,89 @@ export function connectionMethods(context: StoreContext) {
       scopes: string[];
       authProvider: string;
     }): Promise<{ claimed: boolean }> {
+      // Still open: a return for an attempt that has settled writes nothing at all.
+      const open = await database.execute<{ actor_id: string }>(sql`
+        SELECT actor_id FROM pending_authorizations
+         WHERE actor_id = ${input.actorId}
+           AND auth_id = ${input.authId}
+           AND completed_at IS NULL
+      `);
+      if (open.length === 0) return { claimed: false };
+
+      // Read before the write, so the answer the audit row carries is the one this write acted on.
+      const key =
+        input.account.holder === "person"
+          ? ({
+              provider: brokerProvider,
+              app: input.toolkit,
+              holder: "person",
+              userId: input.account.userId,
+            } as const)
+          : ({
+              provider: brokerProvider,
+              app: input.toolkit,
+              holder: "deployment",
+            } as const);
+      const existing = await findBrokered(
+        accountRow(input.toolkit, input.account),
+      );
+
+      const verifiedAt = new Date();
+      const set = {
+        verified: true,
+        verifiedAt,
+        // NOTHING WAS SPENT TO EARN THAT FLAG. A consent screen is the vendor's own yes, and no
+        // action of the app's is ever called against it; see `confirmBrokeredConnection`, which
+        // writes the same pair for the same reason.
+        probeAction: null,
+      };
+      /*
+       * WHO CONNECTED THE TEAM ACCOUNT, WRITTEN HERE FOR THE SAME REASON EVERY OTHER WRITER
+       * WRITES IT. `connectedBy` is only ever a deployment-held account's field — a person's is
+       * attributed by its user id already — and for a Shared app it is the attribution an
+       * administrator reads off `deploymentConnectionFor` to decide whether a team connection is
+       * legitimate and who to ask about it. The re-consent supersedes, which is
+       * `recordBrokeredConnection`'s rule spelled the same way, unconditional here because this path
+       * always holds an actor.
+       */
+      const connectedBy =
+        input.account.holder === "deployment" ? input.actorId : null;
+      /*
+       * The broker this account was actually minted at, which is this store's own, for the reason
+       * `recordBrokeredConnection` sets out. Over a standing account, the identity the grant was just
+       * made under and WHEN: calls go out under the account's id, and a consent over a standing
+       * account is a reconnection, which `connectedAt` newer than an earlier refusal is how the card
+       * knows has happened (see `AppAccess.connectedAt`).
+       */
+      await upsertBrokered(
+        key,
+        {
+          vendorUserId: input.account.vendorUserId,
+          connectedBy,
+          connectedAt: verifiedAt,
+          ...set,
+        },
+        () =>
+          input.account.holder === "person"
+            ? {
+                ...set,
+                vendorUserId: input.account.vendorUserId,
+                connectedAt: verifiedAt,
+              }
+            : {
+                ...set,
+                vendorUserId: input.account.vendorUserId,
+                connectedBy,
+                connectedAt: verifiedAt,
+              },
+      );
+
       return await database.transaction(async (transaction) => {
         /*
          * ONE STATEMENT, AND THE FIRST ONE. `completed_at` is truncated to milliseconds for the
          * reason `claimAuthorizationAttempt` truncates `created_at`: a `Date` carries only
          * milliseconds, and a column this deployment writes at microsecond precision is one no
-         * later `Date`-valued filter can ever match. Nothing matches on this column today; writing
-         * it the same way is what keeps that true if something does.
+         * later `Date`-valued filter can ever match.
          */
         const claimed = await transaction.execute(sql`
           UPDATE pending_authorizations
@@ -1376,94 +1402,6 @@ export function connectionMethods(context: StoreContext) {
           RETURNING actor_id
         `);
         if (claimed.length === 0) return { claimed: false };
-
-        // Read inside the transaction, under the attempt's lock, so the answer the audit row
-        // carries is the one this very write acted on rather than one a rival moved underneath it.
-        const [existing] = await transaction
-          .select({ app: brokeredConnections.app })
-          .from(brokeredConnections)
-          .where(accountRow(input.toolkit, input.account));
-
-        const verifiedAt = new Date();
-        const set = {
-          verified: true,
-          verifiedAt,
-          // NOTHING WAS SPENT TO EARN THAT FLAG. A consent screen is the vendor's own yes, and no
-          // action of the app's is ever called against it; see `confirmBrokeredConnection`, which
-          // writes the same pair for the same reason.
-          probeAction: null,
-          updatedAt: verifiedAt,
-        };
-        /*
-         * WHO CONNECTED THE TEAM ACCOUNT, WRITTEN HERE FOR THE SAME REASON EVERY OTHER WRITER
-         * WRITES IT. `connectedBy` is only ever a deployment-held row's column — a person's row is
-         * attributed by `user_id` already — and for a Shared app it is the attribution an
-         * administrator reads off `deploymentConnectionFor` to decide whether a team connection is
-         * legitimate and who to ask about it. This writer held `actorId`, the session subject
-         * (`users.id`) the attempt is keyed on and the id the admin read joins `users` on, and
-         * recorded none of it: an Arcade-consented Shared app's row was permanently null, and the
-         * page then said nobody connected it. The null is a real state for rows written before
-         * this, which is why both readers keep answering `null` rather than inventing a name.
-         *
-         * AND THE RE-CONSENT SUPERSEDES, which is `recordBrokeredConnection`'s rule spelled the
-         * same way: a deployment account is shared, so the administrator who most recently
-         * completed a consent for it is the one the row credits. Unconditional here, unlike there,
-         * because this path always holds an actor — there is no caller that passes none.
-         */
-        const connectedBy =
-          input.account.holder === "deployment" ? input.actorId : null;
-        await transaction
-          .insert(brokeredConnections)
-          .values({
-            // The broker this row was actually minted at, which is this store's own — never a
-            // literal, for the reason `recordBrokeredConnection` sets out at length.
-            provider: brokerProvider,
-            app: input.toolkit,
-            holder: input.account.holder,
-            userId:
-              input.account.holder === "person" ? input.account.userId : null,
-            vendorUserId: input.account.vendorUserId,
-            connectedBy,
-            ...set,
-          })
-          .onConflictDoUpdate(
-            input.account.holder === "person"
-              ? {
-                  target: [
-                    brokeredConnections.provider,
-                    brokeredConnections.app,
-                    brokeredConnections.userId,
-                  ],
-                  targetWhere: sql`${brokeredConnections.holder} = 'person'`,
-                  // The identity the grant was just made under, for `recordBrokeredConnection`'s
-                  // reason: calls go out under the row's id, so a re-consent that left the old one
-                  // standing sent them to an account this consent says nothing about.
-                  //
-                  // AND WHEN, because a consent over a standing row is a reconnection. A call Arcade
-                  // refused one action keeps its row and shows Reconnect; `connectedAt` newer than
-                  // that refusal is how the card knows the Connect it offered has happened (see
-                  // `AppAccess.connectedAt`). Left at the first consent, the card went on offering
-                  // Reconnect over an account that now allowed the action.
-                  set: {
-                    ...set,
-                    vendorUserId: input.account.vendorUserId,
-                    connectedAt: verifiedAt,
-                  },
-                }
-              : {
-                  target: [
-                    brokeredConnections.provider,
-                    brokeredConnections.app,
-                  ],
-                  targetWhere: sql`${brokeredConnections.holder} = 'deployment'`,
-                  set: {
-                    ...set,
-                    vendorUserId: input.account.vendorUserId,
-                    connectedBy,
-                    connectedAt: verifiedAt,
-                  },
-                },
-          );
 
         await recordAuditEvent(
           createAuditStore(transaction as unknown as Database),
@@ -1625,11 +1563,7 @@ export function connectionMethods(context: StoreContext) {
       actorId: string;
       attempt: PendingAuthorization;
     }): Promise<void> {
-      const [row] = await database
-        .select({ url: mcpServers.url })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, input.attempt.serverId))
-        .limit(1);
+      const row = await findServer(input.attempt.serverId);
       const toolkit = row ? toolkitOfFor(brokerProvider, row.url) : null;
       await recordAuditEvent(auditStore, {
         eventType: "mcp.authorization_cancelled",
@@ -1974,9 +1908,7 @@ export function connectionMethods(context: StoreContext) {
         // account ended in Composio's own dashboard reaches this deployment as the no above and
         // as nothing else, and a row that outlived it would go on saying yes about an account the
         // vendor has just denied.
-        await database
-          .delete(brokeredConnections)
-          .where(accountRow(input.toolkit, input.account));
+        await removeBrokered(accountRow(input.toolkit, input.account));
         return { connected: false };
       }
 
@@ -1990,11 +1922,9 @@ export function connectionMethods(context: StoreContext) {
        * cannot re-date a consent that was recorded days ago. The column is read directly rather
        * than through {@link brokeredConnection}, which answers with the connection date alone.
        */
-      const [held] = await database
-        .select({ verified: brokeredConnections.verified })
-        .from(brokeredConnections)
-        .where(accountRow(input.toolkit, input.account))
-        .limit(1);
+      const held =
+        (await findBrokered(accountRow(input.toolkit, input.account))) ??
+        undefined;
       const existing = held !== undefined;
 
       /*
@@ -2204,10 +2134,9 @@ export function connectionMethods(context: StoreContext) {
        * read to that card as a reconnection nobody made. A new row is dated by its insert.
        */
       if (input.pressed === "connect" && existing) {
-        await database
-          .update(brokeredConnections)
-          .set({ connectedAt: new Date(), updatedAt: new Date() })
-          .where(accountRow(input.toolkit, input.account));
+        await updateBrokered(accountRow(input.toolkit, input.account), {
+          connectedAt: new Date(),
+        });
       }
 
       if (!existing) {
@@ -2741,14 +2670,7 @@ export function connectionMethods(context: StoreContext) {
         );
       }
 
-      const [held] = await database
-        .select({
-          verified: brokeredConnections.verified,
-          verifiedAt: brokeredConnections.verifiedAt,
-        })
-        .from(brokeredConnections)
-        .where(accountRow(input.toolkit, input.account))
-        .limit(1);
+      const held = await findBrokered(accountRow(input.toolkit, input.account));
 
       if (!held) {
         throw new PluginRefusedError(
@@ -3101,10 +3023,8 @@ export function connectionMethods(context: StoreContext) {
        * disconnected, and a delete that answered nothing would leave the two cases
        * indistinguishable.
        */
-      const [deleted] = await database
-        .delete(brokeredConnections)
-        .where(accountRow(input.toolkit, input.account))
-        .returning({ app: brokeredConnections.app });
+      const deleted =
+        (await removeBrokered(accountRow(input.toolkit, input.account))) > 0;
 
       if (deleted || ended) {
         await recordAuditEvent(auditStore, {
@@ -3221,10 +3141,8 @@ export function connectionMethods(context: StoreContext) {
        * directly — this was the one site that compared the kind for itself (round 2, K5).
        */
       if (await consentRevokeReaches(input.toolkit)) {
-        const [deleted] = await database
-          .delete(brokeredConnections)
-          .where(accountRow(input.toolkit, input.account))
-          .returning({ app: brokeredConnections.app });
+        const deleted =
+          (await removeBrokered(accountRow(input.toolkit, input.account))) > 0;
         if (deleted) {
           cleared.push(input.toolkit);
           await recordAuditEvent(auditStore, {
@@ -3319,18 +3237,13 @@ export function connectionMethods(context: StoreContext) {
     ): Promise<{ retired: number }> {
       if (!userId) return { retired: 0 };
 
-      const owned = await database
-        .select({
-          id: credentialRows.id,
-          provider: credentialRows.provider,
-          revokedAt: credentialRows.revokedAt,
-        })
-        .from(credentialRows)
-        .where(
-          and(
-            eq(credentialRows.kind, "mcp_user_token"),
-            eq(credentialRows.keyId, userId),
-          ),
+      // From the vault's metadata, which this instance holds in memory: every token this person
+      // was ever granted, by the name a person's MCP token is stored under (their own id).
+      const owned = vault()
+        .secrets()
+        .filter(
+          (secret) =>
+            secret.kind === "mcp_user_token" && secret.keyId === userId,
         );
 
       let retired = 0;
@@ -3360,9 +3273,7 @@ export function connectionMethods(context: StoreContext) {
         });
       }
 
-      await database
-        .delete(mcpUserCredentials)
-        .where(eq(mcpUserCredentials.userId, userId));
+      await removeGrants({ userId });
 
       /*
        * Every app this person connected at the broker, where there is no secret to scan the vault
@@ -3402,17 +3313,16 @@ export function connectionMethods(context: StoreContext) {
        * from `server/src/index.ts`) will not boot a deployment holding both providers' rows; the
        * predicate keeps the sweep correct the moment any flow relaxes that refusal (#783).
        */
-      const brokered = await database
-        .select({ toolkit: brokeredConnections.app })
-        .from(brokeredConnections)
-        .where(
-          and(
-            eq(brokeredConnections.provider, brokerProvider),
-            eq(brokeredConnections.holder, "person"),
-            eq(brokeredConnections.userId, userId),
-          ),
-        )
-        .orderBy(asc(brokeredConnections.app));
+      const brokered = allBrokered(brokerProvider)
+        .filter((row) => row.holder === "person" && row.userId === userId)
+        .map((row) => ({ toolkit: row.app }))
+        .sort((left, right) =>
+          left.toolkit < right.toolkit
+            ? -1
+            : left.toolkit > right.toolkit
+              ? 1
+              : 0,
+        );
 
       /*
        * THE APPS EACH OF THIS PERSON'S REVOCATIONS ENDS BESIDES THE ONE ASKED ABOUT, read BEFORE a
@@ -3547,16 +3457,13 @@ export function connectionMethods(context: StoreContext) {
        * deleting it would drop the only record of a connection that is still live at that vendor.
        */
       if (withdrawn.length > 0) {
-        await database.delete(brokeredConnections).where(
-          and(
-            eq(brokeredConnections.provider, brokerProvider),
-            eq(brokeredConnections.holder, "person"),
-            eq(brokeredConnections.userId, userId),
-            inArray(
-              brokeredConnections.app,
-              withdrawn.map((entry) => entry.toolkit),
-            ),
-          ),
+        const apps = new Set(withdrawn.map((entry) => entry.toolkit));
+        await removeBrokered(
+          (row) =>
+            row.provider === brokerProvider &&
+            row.holder === "person" &&
+            row.userId === userId &&
+            apps.has(row.app),
         );
       }
 

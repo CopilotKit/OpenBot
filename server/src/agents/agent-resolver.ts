@@ -49,7 +49,11 @@ export type ActorAgentResolverDependencies = {
   loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
-  resolveModelApiKey: () => Promise<string | null>;
+  /** The deployment's model key, for this person's run of this Bot: the vault records who read it. */
+  resolveModelApiKey: (reader?: {
+    userId?: string;
+    botId?: string;
+  }) => Promise<string | null>;
   stallGuard?: StallGuard;
   loadToolsForActor?: (
     actorId: string,
@@ -132,7 +136,11 @@ export function createActorAgentResolver(
     return resolveRuntimeAgents(
       () => Promise.resolve(runnable),
       deps.model,
-      deps.resolveModelApiKey,
+      () =>
+        deps.resolveModelApiKey({
+          userId: actor.id,
+          ...(onlyAgentId ? { botId: onlyAgentId } : {}),
+        }),
       deps.stallGuard,
       deps.loadToolsForActor?.(actor.id, context?.initiator),
       deps.signRunForActor?.(actor.id, context?.initiator, context?.depth),

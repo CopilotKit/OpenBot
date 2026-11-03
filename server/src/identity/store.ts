@@ -1,12 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, lt, notInArray, sql } from "drizzle-orm";
+import { and, eq, gt, lt, notInArray, sql } from "drizzle-orm";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
-import {
-  credentials as credentialRows,
-  identityLinkChallenges,
-  identityLinks,
-} from "../db/schema";
+import { vault } from "../vault/directory";
+import { identityLinkChallenges, identityLinks } from "../db/schema";
 import {
   acceptsMethod,
   isIdentityProvider,
@@ -102,14 +99,14 @@ function uniqueViolationConstraint(error: unknown): string | null {
   return null;
 }
 
-async function revokeQuietly(
-  credentials: Revoke,
-  id: string | null,
-  executor: Transaction,
-) {
+/**
+ * Revokes a token a link no longer names. Called after the link's transaction commits: the vault is
+ * Intelligence's, and no transaction here may stay open across a call to it.
+ */
+async function revokeQuietly(credentials: Revoke, id: string | null) {
   if (!id) return;
   try {
-    await credentials.revoke(id, executor);
+    await credentials.revoke(id);
   } catch (error) {
     // Already revoked is the outcome we wanted.
     if (!(error instanceof CredentialRefusedError)) throw error;
@@ -142,14 +139,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
 
 /**
- * Claim `credentialId` for the link being written, inside its transaction: the credential row is
- * locked live (`for update`, so a concurrent revoke waits for this link to commit or sees it), it
- * must be this provider's own user token (kind "connector", vault provider equal to the registry's
+ * Claim `credentialId` for the link being written, inside its transaction: it must be a live secret
+ * this provider's own user token (kind "connector", vault provider equal to the registry's
  * `credentialProvider`) so a link can never adopt, and a later unlink or replace never revoke, some
  * other secret such as an operator key, and it must not already belong to any link outside `own`
  * (the one link this write updates or replaces: the identity's own link on a relink, else the
  * person's older link in the realm, if any).
- * The partial unique index identity_links_credential_idx is the backstop.
+ *
+ * The secret is checked from this instance's vault directory, in memory: `linkVerified` reads it
+ * through from Intelligence before the transaction opens, so nothing here waits on Intelligence with
+ * a transaction open. The partial unique index identity_links_credential_idx is the backstop for the
+ * one-link-per-token rule.
  */
 async function claimCredential(
   transaction: Transaction,
@@ -159,19 +159,14 @@ async function claimCredential(
 ) {
   const credentialProvider = PROVIDERS[provider].credentialProvider;
   if (!credentialProvider) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
-  const [live] = await transaction
-    .select({ id: credentialRows.id })
-    .from(credentialRows)
-    .where(
-      and(
-        eq(credentialRows.id, credentialId),
-        isNull(credentialRows.revokedAt),
-        eq(credentialRows.kind, "connector"),
-        eq(credentialRows.provider, credentialProvider),
-      ),
-    )
-    .for("update");
-  if (!live) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
+  const live = vault().peekSecret(credentialId);
+  if (
+    !live ||
+    live.revokedAt !== null ||
+    live.kind !== "connector" ||
+    live.provider !== credentialProvider
+  )
+    throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
   const [taken] = await transaction
     .select({ id: identityLinks.id })
     .from(identityLinks)
@@ -211,7 +206,8 @@ async function claimCredential(
  */
 async function writeLink(
   transaction: Transaction,
-  credentials: Revoke,
+  /** Tokens the link stops naming: revoked by the caller once the transaction commits. */
+  retire: string[],
   identity: Identity,
   userId: string,
   proof: {
@@ -221,13 +217,7 @@ async function writeLink(
   },
 ): Promise<IdentityLink> {
   try {
-    return await writeLinkLocked(
-      transaction,
-      credentials,
-      identity,
-      userId,
-      proof,
-    );
+    return await writeLinkLocked(transaction, retire, identity, userId, proof);
   } catch (error) {
     const constraint = uniqueViolationConstraint(error);
     if (constraint === "identity_links_identity_idx")
@@ -240,7 +230,7 @@ async function writeLink(
 
 async function writeLinkLocked(
   transaction: Transaction,
-  credentials: Revoke,
+  retire: string[],
   identity: Identity,
   userId: string,
   proof: {
@@ -272,7 +262,7 @@ async function writeLinkLocked(
       );
     const credentialId = proof.credentialId ?? existing.credentialId;
     if (existing.credentialId && existing.credentialId !== credentialId)
-      await revokeQuietly(credentials, existing.credentialId, transaction);
+      retire.push(existing.credentialId);
     const [updated] = await transaction
       .update(identityLinks)
       .set({
@@ -312,8 +302,8 @@ async function writeLinkLocked(
       .delete(identityLinks)
       .where(eq(identityLinks.id, previous.id));
     // The new link may be taking this very credential: then it is moved, not revoked.
-    if (previous.credentialId !== proof.credentialId)
-      await revokeQuietly(credentials, previous.credentialId, transaction);
+    if (previous.credentialId && previous.credentialId !== proof.credentialId)
+      retire.push(previous.credentialId);
   }
   const [inserted] = await transaction
     .insert(identityLinks)
@@ -438,13 +428,18 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       // Lowercase: uuid columns read back lowercase, and keep/move compare ids as strings.
       const credentialId = proof.credentialId?.toLowerCase() ?? undefined;
       const handle = normalizeHandle(proof.handle);
-      return database.transaction((transaction) =>
-        writeLink(transaction, credentials, identity, userId, {
+      // Read through to Intelligence now, so the claim inside the transaction finds it in memory.
+      if (credentialId) await vault().findSecret(credentialId);
+      const retire: string[] = [];
+      const link = await database.transaction((transaction) =>
+        writeLink(transaction, retire, identity, userId, {
           method: proof.method,
           handle,
           credentialId,
         }),
       );
+      for (const id of retire) await revokeQuietly(credentials, id);
+      return link;
     },
 
     async markNeedsReconnect(linkId: string): Promise<void> {
@@ -459,20 +454,18 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       userId: string,
       linkId: string,
     ): Promise<{ provider: string } | null> {
-      return database.transaction(async (transaction) => {
-        const [removed] = await transaction
-          .delete(identityLinks)
-          .where(
-            and(eq(identityLinks.id, linkId), eq(identityLinks.userId, userId)),
-          )
-          .returning({
-            credentialId: identityLinks.credentialId,
-            provider: identityLinks.provider,
-          });
-        if (!removed) return null;
-        await revokeQuietly(credentials, removed.credentialId, transaction);
-        return { provider: removed.provider };
-      });
+      const [removed] = await database
+        .delete(identityLinks)
+        .where(
+          and(eq(identityLinks.id, linkId), eq(identityLinks.userId, userId)),
+        )
+        .returning({
+          credentialId: identityLinks.credentialId,
+          provider: identityLinks.provider,
+        });
+      if (!removed) return null;
+      await revokeQuietly(credentials, removed.credentialId);
+      return { provider: removed.provider };
     },
 
     /**
@@ -574,7 +567,8 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       const hash = codeHash(code);
       const identity = parseIdentity(value);
       const normalized = normalizeHandle(handle);
-      return database.transaction(async (transaction) => {
+      const retire: string[] = [];
+      const link = await database.transaction(async (transaction) => {
         const [challenge] = await transaction
           .select()
           .from(identityLinkChallenges)
@@ -593,11 +587,13 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
           )
           .returning({ userId: identityLinkChallenges.userId });
         if (!consumed) throw new IdentityLinkError();
-        return writeLink(transaction, credentials, identity, consumed.userId, {
+        return writeLink(transaction, retire, identity, consumed.userId, {
           method: "challenge",
           handle: normalized,
         });
       });
+      for (const id of retire) await revokeQuietly(credentials, id);
+      return link;
     },
   };
 }

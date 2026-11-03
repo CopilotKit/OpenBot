@@ -14,7 +14,6 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { credentials } from "./core";
 
 const at = (name: string) =>
   timestamp(name, { withTimezone: true }).notNull().defaultNow();
@@ -30,7 +29,8 @@ export const identityLinks = pgTable(
     userId: text("user_id").notNull(),
     handle: text("handle"),
     verifiedBy: text("verified_by").$type<"challenge" | "oauth">().notNull(),
-    credentialId: uuid("credential_id").references(() => credentials.id),
+    // A vault secret's id in Intelligence. No foreign key: the vault is not in this database.
+    credentialId: uuid("credential_id"),
     status: text("status")
       .$type<"active" | "needs_reconnect">()
       .notNull()

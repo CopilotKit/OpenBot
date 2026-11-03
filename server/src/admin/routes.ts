@@ -19,7 +19,7 @@ import {
   DEFAULT_EGRESS_DESTINATIONS,
   parseEgressRules,
 } from "../computer/policy-network";
-import { mcpServers } from "../db/schema";
+import { allServers } from "../plugins/plugin-store/records";
 import { parsePageLimit } from "../paging";
 import { otelConfigured } from "../telemetry/otel";
 import {
@@ -153,13 +153,12 @@ export function createEnterpriseAdminRoutes(
     const settings = await controls.store.settings();
     const groups = await controls.store.groups();
     const network = await controls.store.networkPolicies();
-    const servers = await controls.deps.database
-      .select({
-        id: mcpServers.id,
-        title: mcpServers.title,
-        url: mcpServers.url,
-      })
-      .from(mcpServers);
+    // The apps are Intelligence's, held in memory by this instance's vault directory.
+    const servers = allServers().map((server) => ({
+      id: server.id,
+      title: server.title,
+      url: server.url,
+    }));
     return context.json({
       capabilities: CAPABILITIES.map((capability) => ({
         capability,

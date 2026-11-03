@@ -8,22 +8,18 @@ import {
   EntraTokenRefusedError,
 } from "../../auth/entra-refusal";
 import {
-  type CredentialExecutor,
+  type CredentialAccessor,
   CredentialUnusableError,
-  decryptCredentialForUse,
-  decryptSecret,
-  encryptSecret,
+  revealCredentialForUse,
 } from "../../credentials";
 import {
-  brokeredConnections,
-  credentials as credentialRows,
-  mcpServers,
   mcpTools,
-  mcpUserCredentials,
   pendingAuthorizations,
   pluginGrants,
   skillTools,
 } from "../../db/schema";
+import { vault } from "../../vault/directory";
+import { holdSecretLease } from "../../vault/leases";
 import {
   accessFor,
   BROKERED_PROFILE,
@@ -61,8 +57,19 @@ import {
   type PluginStoreOptions,
   type StoredClient,
   TokenRefusedError,
-  type Transaction,
 } from "./model";
+import {
+  allBrokered,
+  type BrokeredKey,
+  findBrokered,
+  findGrant,
+  findServer,
+  peekServer,
+  removeBrokered,
+  serversAt,
+  updateServer,
+  upsertGrant,
+} from "./records";
 
 /** What a person is told when Entra will not issue a token for them, in words they can act on. */
 function entraRefusal(reason: EntraRefusal, title: string): string {
@@ -90,7 +97,7 @@ function entraRefusal(reason: EntraRefusal, title: string): string {
  * Made once per store by `createPluginStore`, so that state is still one per store.
  */
 export function createStoreContext(options: PluginStoreOptions) {
-  const { database, auditStore, credentials, encryptionKey } = options;
+  const { database, auditStore, credentials } = options;
   /*
    * Held rather than resolved, because the transport is a property of the entry and is not known
    * until a call names one. An injected vendor still wins over both, which is what keeps a test able
@@ -250,13 +257,10 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function secretFor(
     credentialId: string,
     onRevoked: string,
+    accessor: CredentialAccessor,
   ): Promise<string> {
     try {
-      return await decryptCredentialForUse(
-        encryptionKey,
-        credentials,
-        credentialId,
-      );
+      return await revealCredentialForUse(credentials, credentialId, accessor);
     } catch (error) {
       if (error instanceof CredentialUnusableError) {
         throw new PluginRefusedError(onRevoked, null);
@@ -279,9 +283,7 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function personAccountOf(userId: string): Promise<AccountRef> {
     return personAccount(
       userId,
-      userId === DEV_ACTOR.id
-        ? await filedUnder(database, brokerProvider, userId)
-        : null,
+      userId === DEV_ACTOR.id ? await filedUnder(brokerProvider, userId) : null,
     );
   }
 
@@ -296,18 +298,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     | { ref: AccountRef; title: string; mode: AccountMode; appId: string }
     | { refusal: string }
   > {
-    const [dialled] = await database
-      .select({
-        title: mcpServers.title,
-        provenance: mcpServers.provenance,
-        url: mcpServers.url,
-        authScheme: mcpServers.authScheme,
-        accountMode: mcpServers.accountMode,
-        sharedVendorUserId: mcpServers.sharedVendorUserId,
-      })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
+    const dialled = await findServer(serverId);
     if (!dialled)
       return {
         refusal: `OpenBot has no app called ${serverId}.`,
@@ -405,20 +396,20 @@ export function createStoreContext(options: PluginStoreOptions) {
    * `brokered_identities` holds for them, and it never changes while they hold a row
    * ({@link personAccountOf}).
    */
-  const accountRow = (toolkit: string, account: AccountRef) =>
+  const accountRow = (toolkit: string, account: AccountRef): BrokeredKey =>
     account.holder === "person"
-      ? and(
-          eq(brokeredConnections.provider, brokerProvider),
-          eq(brokeredConnections.app, toolkit),
-          eq(brokeredConnections.holder, "person"),
-          eq(brokeredConnections.userId, account.userId),
-        )
-      : and(
-          eq(brokeredConnections.provider, brokerProvider),
-          eq(brokeredConnections.app, toolkit),
-          eq(brokeredConnections.holder, "deployment"),
-          eq(brokeredConnections.vendorUserId, account.vendorUserId),
-        );
+      ? {
+          provider: brokerProvider,
+          app: toolkit,
+          holder: "person",
+          userId: account.userId,
+        }
+      : {
+          provider: brokerProvider,
+          app: toolkit,
+          holder: "deployment",
+          vendorUserId: account.vendorUserId,
+        };
 
   /**
    * The shared transition behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
@@ -478,11 +469,8 @@ export function createStoreContext(options: PluginStoreOptions) {
         });
       if (!attempt) return false;
       if (outcome === "unreconciled") {
-        const [server] = await transaction
-          .select({ url: mcpServers.url })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, attempt.serverId))
-          .limit(1);
+        // From memory: this transaction must not wait on Intelligence.
+        const server = peekServer(attempt.serverId);
         const toolkit = server
           ? toolkitOfFor(brokerProvider, server.url)
           : null;
@@ -567,6 +555,8 @@ export function createStoreContext(options: PluginStoreOptions) {
      * {@link accountRefFor} below. Absent for a path with no such gate, the tool refresh.
      */
     gatedMode?: AccountMode | null,
+    /** The Bot the call is for, recorded by the vault with every secret read for it. */
+    botId?: string,
   ): Promise<{ token?: string; vendorUserId?: string }> {
     /*
      * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
@@ -757,11 +747,9 @@ export function createStoreContext(options: PluginStoreOptions) {
        */
       if (broker && !broker.grantIsLocal && access.transport === brokerProvider)
         return { vendorUserId: resolved.ref.vendorUserId };
-      const [connected] = await database
-        .select({ vendorUserId: brokeredConnections.vendorUserId })
-        .from(brokeredConnections)
-        .where(accountRow(access.toolkit, resolved.ref))
-        .limit(1);
+      const connected = await findBrokered(
+        accountRow(access.toolkit, resolved.ref),
+      );
       if (!connected) {
         /*
          * BOTH HALVES CARRY A PROMPT, AND ONLY ONE OF THEM OFFERS A CONNECT BUTTON. A Shared app's
@@ -833,6 +821,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         ? await secretFor(
             row.credentialId,
             `${row.id} is missing its key, so this can't be done. Ask an admin to add it again.`,
+            {
+              purpose: "mcp_tool_call",
+              userId: actorId || null,
+              botId: botId ?? null,
+            },
           )
         : undefined;
       return { token };
@@ -876,16 +869,7 @@ export function createStoreContext(options: PluginStoreOptions) {
      * section below, because a reconnection can move it while this call waits its turn — and even
      * when the row stays put, the secret inside it does not.
      */
-    const [held] = await database
-      .select({ credentialId: mcpUserCredentials.credentialId })
-      .from(mcpUserCredentials)
-      .where(
-        and(
-          eq(mcpUserCredentials.serverId, row.id),
-          eq(mcpUserCredentials.userId, actorId),
-        ),
-      )
-      .limit(1);
+    const held = await findGrant(row.id, actorId);
 
     if (!held) {
       throw new PluginRefusedError(
@@ -958,31 +942,26 @@ export function createStoreContext(options: PluginStoreOptions) {
      */
     async function currentClient(): Promise<StoredClient> {
       /*
-       * When the client was stored comes back with it, from the vault row itself rather than from a
-       * column of our own. It is what the retry below measures its backoff against, and a left join
-       * keeps it one query: a server pointing at nothing is the refusal on the next line, and a
-       * pointer to a row that is no longer there is `secretFor`'s to refuse.
+       * When the client was stored comes back with it, from the vault's own record of the secret
+       * rather than from a column of our own. It is what the retry below measures its backoff
+       * against. A server pointing at nothing is the refusal on the next line, and a pointer to a
+       * secret that is no longer there is `secretFor`'s to refuse.
        */
-      const [server] = await database
-        .select({
-          credentialId: mcpServers.credentialId,
-          registeredAt: credentialRows.createdAt,
-        })
-        .from(mcpServers)
-        .leftJoin(
-          credentialRows,
-          eq(credentialRows.id, mcpServers.credentialId),
-        )
-        .where(eq(mcpServers.id, row.id))
-        .limit(1);
+      const server = await findServer(row.id);
       if (!server?.credentialId) {
         throw new PluginRefusedError(noClient, null);
       }
+      const registeredAt =
+        (await vault().findSecret(server.credentialId))?.createdAt ?? null;
       /*
        * Decrypted outside the guard below, so that `secretFor`'s own refusal for a revoked or
        * missing row is not caught here and relabelled. Only the parse is guarded.
        */
-      const decrypted = await secretFor(server.credentialId, unusableClient);
+      const decrypted = await secretFor(server.credentialId, unusableClient, {
+        purpose: "mcp_oauth_client",
+        userId: actorId,
+        botId: botId ?? null,
+      });
       let parsed: unknown;
       try {
         parsed = JSON.parse(decrypted);
@@ -1020,7 +999,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       if (!isUsableClient(parsed)) {
         throw new PluginRefusedError(unusableClient, null);
       }
-      return { client: parsed, registeredAt: server.registeredAt };
+      return { client: parsed, registeredAt };
     }
 
     /*
@@ -1033,103 +1012,98 @@ export function createStoreContext(options: PluginStoreOptions) {
      * evicted one would have every queued call discover that separately and register around it.
      *
      * TWO things serialise this, and they are not redundant. The map above queues calls made in THIS
-     * process; the row lock below serialises the whole deployment. Only the lock is a correctness
+     * process; the lease below serialises the whole deployment. Only the lease is a correctness
      * property — a second replica has a map of its own and is not in ours — and the map is what
-     * keeps a burst of calls on one connection from piling N transactions onto that one row lock,
-     * each of them holding a pooled connection while it waits its turn.
+     * keeps a burst of calls on one connection from polling one lease N times over.
      *
-     * An evicted client is handled AFTER the transaction rather than inside it. Nothing about
-     * re-registering needs this person's lock — the client is per server — and doing it inside would
-     * have a second pooled connection opened while this one holds a row lock, which is the shape the
-     * pool note in `db/client.ts` is about.
+     * An evicted client is handled AFTER the lease is released rather than under it. Nothing about
+     * re-registering needs this person's lease — the client is per server.
      */
     return await serialized(`${row.id}:${actorId}`, async () => {
       /*
-       * The client, read before the transaction opens rather than inside it.
+       * The client, read before the lease is taken.
        *
-       * It is per SERVER and is not what the lock protects, and reading it here keeps the vault read
-       * off a second pooled connection while this call holds one open for the whole exchange. Still
-       * inside the critical section, so the ordering that matters is unchanged: a queued call reads
-       * the client after whatever ran before it replaced it.
+       * It is per SERVER and is not what the lease protects. Still inside the in-process queue, so
+       * the ordering that matters is unchanged: a queued call reads the client after whatever ran
+       * before it replaced it.
        */
       const stored = await currentClient();
 
       /*
-       * The vault row, locked for as long as the token it holds is being spent.
+       * The secret, held for as long as the token it holds is being spent.
        *
        * A rotating vendor kills the refresh token it was shown, so two replicas that both read the
        * stored token and both present it do not merely race: the second presentation looks to the
        * vendor like a stolen token being replayed, and refresh-token-reuse detection answers it by
        * revoking the whole token family. The connection is then bricked, and nobody did anything
-       * wrong. `SELECT … FOR UPDATE` is what makes the second replica wait for the first, exactly as
-       * a person reconnecting already waits (`credentials.rotate`).
+       * wrong. A lease on the secret (`vault/leases.ts`) is what makes the second replica wait for the
+       * first. It used to be a `FOR UPDATE` lock on the local vault row; the vault is Intelligence's
+       * now, and no transaction here may stay open across a call to the vendor or to Intelligence, so
+       * the exclusion is a row taken and released by one statement each, expiring on its own if its
+       * holder dies.
        *
-       * Yes, the lock is held across an HTTP call to the vendor — bounded by the exchange's own
-       * timeout. That is the point rather than an oversight: the lock IS the cross-replica
-       * serialisation, and a lock released before the exchange would serialise nothing.
-       *
-       * The read comes AFTER the lock, never before. A replica that woke from the lock and used a
+       * The read comes AFTER the lease, never before. A replica that woke from the lease and used a
        * token it had read on the way in would present the one the first replica just spent, which is
-       * the very double-spend this exists to prevent.
+       * the very double-spend this exists to prevent. The lease carries the vault version its last
+       * holder wrote, so a value this instance holds in memory from before that write is read again
+       * rather than spent.
        */
       /** The credential whose refresh token went to the vendor, once one has. */
       let presented: string | null = null;
       try {
-        return await database.transaction(async (transaction) => {
-          const [current] = await transaction
-            .select({
-              credentialId: mcpUserCredentials.credentialId,
-              scope: mcpUserCredentials.scope,
-            })
-            .from(mcpUserCredentials)
-            .where(
-              and(
-                eq(mcpUserCredentials.serverId, row.id),
-                eq(mcpUserCredentials.userId, actorId),
-              ),
-            )
-            .limit(1);
+        const current = await findGrant(row.id, actorId);
 
-          // Disconnected while this call was queued. The same sentence as above: nothing is broken,
-          // and connecting again is the thing to do.
-          if (!current) {
-            throw new PluginRefusedError(
-              connectAppRefusal({
-                serverId: row.id,
-                title,
-                message: `You have not connected your ${title} account. Connect it and ask again.`,
-              }),
-              null,
-            );
-          }
-
-          const [locked] = await transaction
-            .select({
-              encryptedValue: credentialRows.encryptedValue,
-              revokedAt: credentialRows.revokedAt,
-            })
-            .from(credentialRows)
-            .where(eq(credentialRows.id, current.credentialId))
-            .for("update");
-          /*
-           * A row that is gone or revoked, said the way `secretFor` says it: withdrawn access is
-           * nobody's fault and connecting again is the step. Reached by a replica that waited here
-           * while somebody disconnected, as well as by one that was told after the fact.
-           */
-          if (!locked || locked.revokedAt) {
-            throw new PluginRefusedError(
-              connectAppRefusal({
-                serverId: row.id,
-                title,
-                message: `Your ${title} access was withdrawn. Connect it again.`,
-              }),
-              null,
-            );
-          }
-          const refreshToken = await decryptSecret(
-            encryptionKey,
-            locked.encryptedValue,
+        // Disconnected while this call was queued. The same sentence as above: nothing is broken,
+        // and connecting again is the thing to do.
+        if (!current) {
+          throw new PluginRefusedError(
+            connectAppRefusal({
+              serverId: row.id,
+              title,
+              message: `You have not connected your ${title} account. Connect it and ask again.`,
+            }),
+            null,
           );
+        }
+
+        const withdrawn = () =>
+          new PluginRefusedError(
+            connectAppRefusal({
+              serverId: row.id,
+              title,
+              message: `Your ${title} access was withdrawn. Connect it again.`,
+            }),
+            null,
+          );
+        const reader = {
+          purpose: "mcp_token_exchange",
+          userId: actorId,
+          botId: botId ?? null,
+        };
+        const lease = await holdSecretLease(
+          database,
+          `connection-token:${current.credentialId}`,
+        );
+        let written: number | undefined;
+        try {
+          let held: { value: string; version: number };
+          try {
+            held = await credentials.reveal(current.credentialId, reader);
+            if (lease.version !== null && held.version < lease.version) {
+              // Another replica rotated it and this one has not heard yet: ask the vault again.
+              vault().forgetValues(current.credentialId);
+              held = await credentials.reveal(current.credentialId, reader);
+            }
+          } catch (error) {
+            /*
+             * A secret that is gone or revoked, said the way `secretFor` says it: withdrawn access is
+             * nobody's fault and connecting again is the step. Reached by a replica that waited here
+             * while somebody disconnected, as well as by one that was told after the fact.
+             */
+            if (error instanceof CredentialUnusableError) throw withdrawn();
+            throw error;
+          }
+          const refreshToken = held.value;
 
           presented = current.credentialId;
           const minted = await exchangeRefreshToken({
@@ -1140,8 +1114,8 @@ export function createStoreContext(options: PluginStoreOptions) {
 
           /*
            * A vendor that sent nothing back, or sent back the token we presented, rotated nothing —
-           * and writing either would be inventing a rotation, at the cost of a needless
-           * re-encryption of every connection on every call.
+           * and writing either would be inventing a rotation, at the cost of a needless write of
+           * every connection on every call.
            */
           if (minted.refreshToken && minted.refreshToken !== refreshToken) {
             /*
@@ -1150,27 +1124,27 @@ export function createStoreContext(options: PluginStoreOptions) {
              * the next call — so a failure here refuses THIS call rather than returning an access
              * token whose refresh token is already spent.
              *
-             * In this transaction, so it commits with the lock that made the exchange ours: written
-             * outside it, the next replica in line would wake to the token this one just spent.
+             * Under the lease, and conditional on the version that was spent, so the next replica in
+             * line wakes to the token this one was given and never the one it just spent.
              */
-            await rotateConnectionToken(
-              {
-                credentialId: current.credentialId,
-                refreshToken: minted.refreshToken,
-              },
-              transaction,
-            );
+            written = await rotateConnectionToken({
+              credentialId: current.credentialId,
+              refreshToken: minted.refreshToken,
+              version: held.version,
+            });
           }
 
           return { token: minted.accessToken };
-        });
+        } finally {
+          await lease.release(written);
+        }
       } catch (error) {
         /*
          * THE VENDOR DISOWNED THE GRANT, NOT THE CLIENT. A refresh token answered `invalid_grant`
          * will never be honoured again, and until now nothing here wrote that down: the connection
          * read as connected on every screen, and every call came back as the same folded tool
-         * error. Revoked here — after the transaction, for the reason the recovery below gives — the
-         * connection reads as withdrawn, which is Reconnect on the Bot page and on the card this
+         * error. Revoked here — after the lease is released, for the reason the recovery below
+         * gives — the connection reads as withdrawn, which is Reconnect on the Bot page and on the card this
          * refusal draws, and the consent that fixes it replaces the credential as any reconnect does.
          */
         if (
@@ -1191,8 +1165,7 @@ export function createStoreContext(options: PluginStoreOptions) {
           );
         }
         /*
-         * Outside the transaction, so the row lock is already released and the vault read this does
-         * is not a second connection held behind this one's.
+         * Outside the lease, so the re-registration below never holds this person's exchange up.
          *
          * Rethrows anything that is not the vendor disowning our client, which is every ordinary
          * failure: a withdrawn grant, a vendor being down, a disconnect mid-queue.
@@ -1286,12 +1259,13 @@ export function createStoreContext(options: PluginStoreOptions) {
    * Says whether it replaced something, which is the one fact the caller writing the trail needs
    * and cannot recover afterwards.
    *
-   * ONE TRANSACTION, because these are two writes and one decision. The secret goes into the vault
-   * and the connection row is pointed at it; separately, a failure between them leaves the pointer
-   * naming the credential the rotation had just revoked — a connection that reads as live on the
-   * settings page and refuses every call, with the person's actual grant retired and no way back to
-   * it. `credentials.rotate` and `credentials.create` already accept the caller's executor for
-   * exactly this, and the pointer write runs on the same one.
+   * TWO WRITES, IN THIS ORDER, because the vault and the connection are both Intelligence's and no
+   * transaction spans them. The secret goes into the vault first — a rotation there revokes the
+   * person's previous grant and stores the new one in one step — and the connection is pointed at it
+   * second. A failure between the two leaves the connection naming the grant the rotation just
+   * revoked, which reads as withdrawn and asks the person to connect again; connecting again finds
+   * the new grant live under the key, replaces it, and points the connection at the replacement.
+   * Nothing is left live that nothing names.
    */
   async function swapUserCredential(input: {
     serverId: string;
@@ -1307,45 +1281,25 @@ export function createStoreContext(options: PluginStoreOptions) {
     const value = {
       ...key,
       metadata: { server: input.serverId, scope: input.scope },
-      // Encrypted before the transaction opens: it is arithmetic, and it has no business happening
-      // while a pooled connection is held open behind row locks.
-      encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
+      ownerUserId: input.userId,
+      plaintext: input.refreshToken,
     };
-
-    return await database.transaction(async (transaction) => {
-      /*
-       * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
-       * same person and server would be refused. Asked of the key rather than of the connection row,
-       * because the row can name a credential that has already been revoked while the key itself is
-       * free, and it is the key the index constrains.
-       */
-      const live = await credentials.findLiveByKey(key, transaction);
-      const stored = live
-        ? await credentials.rotate(
-            { ...value, previousCredentialId: live.id },
-            transaction,
-          )
-        : await credentials.create(value, transaction);
-
-      await transaction
-        .insert(mcpUserCredentials)
-        .values({
-          serverId: input.serverId,
-          userId: input.userId,
-          credentialId: stored.id,
-          scope: input.scope,
-        })
-        .onConflictDoUpdate({
-          target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
-          set: {
-            credentialId: stored.id,
-            scope: input.scope,
-            updatedAt: new Date(),
-          },
-        });
-
-      return { replaced: live !== null };
+    /*
+     * One live credential per key, so a second one for the same person and server is a rotation.
+     * Asked of the key rather than of the connection, because the connection can name a credential
+     * that has already been revoked while the key itself is free.
+     */
+    const live = await credentials.findLiveByKey(key);
+    const stored = live
+      ? await credentials.rotate({ ...value, previousCredentialId: live.id })
+      : await credentials.create(value);
+    await upsertGrant({
+      serverId: input.serverId,
+      userId: input.userId,
+      credentialId: stored.id,
+      scope: input.scope,
     });
+    return { replaced: live !== null };
   }
 
   /**
@@ -1364,26 +1318,18 @@ export function createStoreContext(options: PluginStoreOptions) {
    * The scope and the row are left alone. Nothing about what the vendor granted has changed — only
    * which token presents it.
    */
-  async function rotateConnectionToken(
-    input: {
-      credentialId: string;
-      refreshToken: string;
-    },
-    /**
-     * The transaction the caller spent the token in, and this write belongs to it.
-     *
-     * The caller holds a `FOR UPDATE` lock on the very row being written. On its own pooled
-     * connection this write would be a second session waiting for a lock only the caller can
-     * release, and the caller cannot release it while awaiting this — so it would hang to the
-     * statement timeout rather than rotate.
-     */
-    executor?: CredentialExecutor,
-  ): Promise<void> {
-    await credentials.updateSecret(
+  async function rotateConnectionToken(input: {
+    credentialId: string;
+    refreshToken: string;
+    /** The version that was spent: a secret changed since is refused rather than overwritten. */
+    version: number;
+  }): Promise<number> {
+    const { version } = await credentials.updateSecret(
       input.credentialId,
-      await encryptSecret(encryptionKey, input.refreshToken),
-      executor,
+      input.refreshToken,
+      input.version,
     );
+    return version;
   }
 
   /** The one vault key a server's OAuth client is ever stored under. */
@@ -1437,102 +1383,87 @@ export function createStoreContext(options: PluginStoreOptions) {
    * where a consent URL belonged — or, when there was a client to replace, the second `rotate` finds
    * its own predecessor already revoked and says so.
    *
-   * An ADVISORY lock rather than a row lock, because the thing being protected is the ABSENCE of a
-   * row as much as a row: there is nothing to lock `FOR UPDATE` on a first registration. Held for
-   * the transaction, so it is released by the commit or the rollback and never by us forgetting.
-   *
-   * `hashtext` collisions are harmless here. Two servers sharing a hash would take turns registering
-   * clients, which is slower and not wrong.
+   * A LEASE (`vault/leases.ts`) rather than a row lock, because the thing being protected is the
+   * ABSENCE of a secret as much as a secret: there is nothing to lock on a first registration, and
+   * the secret and the pointer to it are both Intelligence's now, which no OpenBot transaction may
+   * stay open across. The lease is taken and released by one statement each and expires on its own
+   * if its holder dies.
    */
   async function withOAuthClientLock<T>(
     serverId: string,
-    work: (transaction: Transaction) => Promise<T>,
+    work: () => Promise<T>,
   ): Promise<T> {
-    return await database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select pg_advisory_xact_lock(hashtext(${`oauth-client-${serverId}`}))`,
-      );
-      return await work(transaction);
-    });
+    const lease = await holdSecretLease(database, `oauth-client:${serverId}`);
+    try {
+      return await work();
+    } finally {
+      await lease.release();
+    }
   }
 
   /**
-   * {@link storedOAuthClient}'s question, asked on the caller's own transaction.
+   * {@link storedOAuthClient}'s question, asked again under {@link withOAuthClientLock}.
    *
-   * The same question deliberately — the server row's pointer, and the row it names being live —
+   * The same question deliberately — the server's pointer, and the secret it names being live —
    * because the callback redeems against `oauthClientFor`, which reads exactly that. A read that
-   * accepted a live client the server row does NOT name would hand somebody a consent screen for a
+   * accepted a live client the server does NOT name would hand somebody a consent screen for a
    * client the callback then cannot find, and the connect would fail after the vendor said yes.
    *
-   * On the transaction rather than through `storedOAuthClient` because the caller is inside
-   * {@link withOAuthClientLock} and holding a pooled connection: a read on a second connection would
-   * be a session queueing behind sessions that cannot finish until it returns.
+   * The pointer is read from Intelligence rather than from memory: the holder before this one may
+   * have just written it on another replica, and its announcement may not have arrived.
    */
   async function heldOAuthClient(
-    transaction: Transaction,
     serverId: string,
+    reader: CredentialAccessor,
   ): Promise<OAuthClient | null> {
     return readClient(serverId, async () => {
-      const [server] = await transaction
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
+      const server = await vault().refreshServer(serverId);
       if (!server?.credentialId) return null;
-
-      const [held] = await transaction
-        .select({
-          encryptedValue: credentialRows.encryptedValue,
-          revokedAt: credentialRows.revokedAt,
-        })
-        .from(credentialRows)
-        .where(eq(credentialRows.id, server.credentialId))
-        .limit(1);
-      if (!held || held.revokedAt) return null;
-
-      // A decryption fault does not mean the vendor forgot this client. Re-registering would replace
-      // the live client for every replica, including those that can still decrypt it.
-      const plaintext = await decryptSecret(encryptionKey, held.encryptedValue);
+      const secret = await vault().findSecret(server.credentialId);
+      if (!secret || secret.revokedAt) return null;
+      let plaintext: string;
+      try {
+        plaintext = await revealCredentialForUse(
+          credentials,
+          server.credentialId,
+          reader,
+        );
+      } catch (error) {
+        // Revoked a moment ago: there is no client to present. A read that failed otherwise is a
+        // fault, and must not turn a working registration into a new client for every replica.
+        if (error instanceof CredentialUnusableError) return null;
+        throw error;
+      }
       return clientFromStoredJson(plaintext);
     });
   }
 
   /**
-   * The two writes that store a client, on one transaction: the vault row, and the pointer to it.
+   * The two writes that store a client: the secret, and the pointer to it.
    *
-   * One transaction because they are one decision. Separately, a failure between them leaves
-   * `mcp_servers.credential_id` naming the credential the rotation had just revoked — a connector
-   * that looks configured on every screen and cannot complete a consent flow.
-   *
-   * The caller is expected to hold {@link withOAuthClientLock}, which is what makes the read below
-   * safe to act on.
+   * In this order, and under {@link withOAuthClientLock}, which is what makes the read of the live
+   * client safe to act on. A rotation in the vault revokes the previous client and stores the new
+   * one in one step; the server is then pointed at it. A failure between the two leaves the server
+   * naming the revoked client, which reads as "no client" and is put right by the next registration
+   * under the same lease.
    */
-  async function writeOAuthClient(
-    input: { serverId: string; client: OAuthClient },
-    transaction: Transaction,
-  ): Promise<{ replaced: boolean }> {
+  async function writeOAuthClient(input: {
+    serverId: string;
+    client: OAuthClient;
+  }): Promise<{ replaced: boolean }> {
     const key = oauthClientKey(input.serverId);
     const value = {
       ...key,
       metadata: { server: input.serverId, clientId: input.client.clientId },
-      encryptedValue: await encryptSecret(
-        encryptionKey,
-        JSON.stringify(input.client),
-      ),
+      plaintext: JSON.stringify(input.client),
     };
 
-    const live = await credentials.findLiveByKey(key, transaction);
+    const live = await credentials.findLiveByKey(key);
     const stored = live
-      ? await credentials.rotate(
-          { ...value, previousCredentialId: live.id },
-          transaction,
-        )
-      : await credentials.create(value, transaction);
+      ? await credentials.rotate({ ...value, previousCredentialId: live.id })
+      : await credentials.create(value);
 
-    await transaction
-      .update(mcpServers)
-      .set({ credentialId: stored.id, updatedAt: new Date() })
-      .where(eq(mcpServers.id, input.serverId));
+    await updateServer(input.serverId, { credentialId: stored.id });
 
     return { replaced: live !== null };
   }
@@ -1540,11 +1471,9 @@ export function createStoreContext(options: PluginStoreOptions) {
   /**
    * The trail row for a client this deployment now holds.
    *
-   * Written AFTER the transaction that stored it, not inside. The audit store has its own handle on
-   * the database, so writing from inside would open a second pooled connection while the first is
-   * held — the shape the pool note in `db/client.ts` warns about, and the one that turns a busy
-   * deployment into a hang. A trail row lost to a crash in that window is a worse trade than a
-   * deadlock, but only just, and this way round the client is at least the thing that is certain.
+   * Written AFTER the client is stored, once the lease is released. A trail row lost to a crash in
+   * that window is the trade for never holding a database connection across the vault's writes, and
+   * this way round the client is at least the thing that is certain.
    */
   async function recordClientRegistered(
     input: { serverId: string; client: OAuthClient; by: string },
@@ -1593,13 +1522,8 @@ export function createStoreContext(options: PluginStoreOptions) {
       );
     }
 
-    const { replaced } = await withOAuthClientLock(
-      input.serverId,
-      (transaction) =>
-        writeOAuthClient(
-          { serverId: input.serverId, client: input.client },
-          transaction,
-        ),
+    const { replaced } = await withOAuthClientLock(input.serverId, () =>
+      writeOAuthClient({ serverId: input.serverId, client: input.client }),
     );
 
     await recordClientRegistered(input, replaced);
@@ -1616,19 +1540,17 @@ export function createStoreContext(options: PluginStoreOptions) {
     serverId: string,
   ): Promise<OAuthClient | null> {
     return readClient(serverId, async () => {
-      const [row] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
+      const row = await findServer(serverId);
       if (!row?.credentialId) return null;
 
       let plaintext: string;
       try {
-        plaintext = await decryptCredentialForUse(
-          encryptionKey,
+        plaintext = await revealCredentialForUse(
           credentials,
           row.credentialId,
+          {
+            purpose: "mcp_oauth_client",
+          },
         );
       } catch (error) {
         // Only a confirmed missing or revoked credential permits obtaining a replacement. A failed
@@ -1686,20 +1608,8 @@ export function createStoreContext(options: PluginStoreOptions) {
      * fails on its next call. Refusing it here says so at the moment somebody can still act on it,
      * and it closes the case where a token was retired precisely because it should stop being used.
      */
-    const [named] = looksLikeId
-      ? await database
-          .select({
-            kind: credentialRows.kind,
-            provider: credentialRows.provider,
-          })
-          .from(credentialRows)
-          .where(
-            and(
-              eq(credentialRows.id, credentialId),
-              isNull(credentialRows.revokedAt),
-            ),
-          )
-      : [];
+    const found = looksLikeId ? await vault().findSecret(credentialId) : null;
+    const named = found && found.revokedAt === null ? found : undefined;
 
     /*
      * Whose it is, as well as what it is.
@@ -1762,11 +1672,7 @@ export function createStoreContext(options: PluginStoreOptions) {
   }
 
   async function requireServer(serverId: string) {
-    const [row] = await database
-      .select()
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
+    const row = await findServer(serverId);
     if (!row) throw new CatalogueEntryUnknownError(serverId);
 
     // Null for a custom server, and every caller handles that by assuming the worst about it.
@@ -1869,40 +1775,32 @@ export function createStoreContext(options: PluginStoreOptions) {
   /**
    * The same answer for several urls at once, and the ONE PLACE the ordering rule is written.
    *
-   * THE RULE IS SQL'S `order by id` AND THE FIRST ROW SEEN PER URL, which is what
+   * THE RULE IS THE APPS IN ID ORDER AND THE FIRST ONE SEEN PER URL, which is what
    * {@link brokeredAppRow} asks for one app and what {@link brokeredConnectionsFor} and
-   * {@link listServers} ask for many. Those three had their own spellings of it, and one of them —
-   * the listing — spelled it as a JavaScript `<` over rows it had already fetched. That is UTF-16
-   * code unit order; this is the deployment's collation. They agree for ASCII on a `C` database and
-   * are free to disagree anywhere else, and where they disagreed the settings page named an app
-   * under one row while every read behind its buttons was about another. So the rule is a function
-   * and the callers have nothing left to re-derive.
+   * {@link listServers} ask for many. Those three once had their own spellings of it, and where they
+   * disagreed the settings page named an app under one row while every read behind its buttons was
+   * about another. So the rule is one function over one ordering, `allServers` in `./records`, and the
+   * callers have nothing left to re-derive.
    *
    * A URL WITH NO ROW IS SIMPLY ABSENT from the map, which is the null {@link brokeredAppRow}
    * answers and the connection {@link brokeredConnectionsFor} drops: a person can hold an account
    * at an app this deployment has since removed, and there is no row to name it by.
    *
-   * EMPTY IN, EMPTY OUT AND NO QUERY, because `inArray` with no values is a statement no database
-   * needs to be asked.
+   * From memory: apps are Intelligence's, held by this instance's vault directory.
    */
   async function brokeredAppRowsAt(
     urls: string[],
   ): Promise<Map<string, BrokeredAppRow>> {
     const answering = new Map<string, BrokeredAppRow>();
     if (urls.length === 0) return answering;
-    const rows = await database
-      .select({
-        id: mcpServers.id,
-        url: mcpServers.url,
-        authScheme: mcpServers.authScheme,
-        accountMode: mcpServers.accountMode,
-        sharedVendorUserId: mcpServers.sharedVendorUserId,
-      })
-      .from(mcpServers)
-      .where(inArray(mcpServers.url, urls))
-      .orderBy(asc(mcpServers.id));
-    for (const { url, ...row } of rows) {
-      if (!answering.has(url)) answering.set(url, row);
+    for (const server of serversAt(urls)) {
+      if (answering.has(server.url)) continue;
+      answering.set(server.url, {
+        id: server.id,
+        authScheme: server.authScheme,
+        accountMode: server.accountMode,
+        sharedVendorUserId: server.sharedVendorUserId,
+      });
     }
     return answering;
   }
@@ -1984,18 +1882,9 @@ export function createStoreContext(options: PluginStoreOptions) {
       return asking;
     };
     const authProvider = await authProviderOf(input.toolkit);
-    const held = await database
-      .select({
-        app: brokeredConnections.app,
-        vendorUserId: brokeredConnections.vendorUserId,
-      })
-      .from(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.provider, brokerProvider),
-          eq(brokeredConnections.vendorUserId, input.account.vendorUserId),
-        ),
-      );
+    const held = allBrokered(brokerProvider)
+      .filter((row) => row.vendorUserId === input.account.vendorUserId)
+      .map((row) => ({ app: row.app, vendorUserId: row.vendorUserId }));
     if (!authProvider) {
       const others = new Set(
         held.map((row) => row.app).filter((app) => app !== input.toolkit),
@@ -2168,13 +2057,10 @@ export function createStoreContext(options: PluginStoreOptions) {
     const ended = await siblingsEndedBy(input);
     const cleared: string[] = [];
     for (const app of ended) {
-      // `returning` because whether a row was here is the whole of rule 3, and a delete that
+      // Counted, because whether an account was here is the whole of rule 3, and a removal that
       // answered nothing would leave the two cases indistinguishable.
-      const [deleted] = await database
-        .delete(brokeredConnections)
-        .where(accountRow(app, input.account))
-        .returning({ app: brokeredConnections.app });
-      if (!deleted) continue;
+      if ((await removeBrokered(accountRow(app, input.account))) === 0)
+        continue;
       cleared.push(app);
       await recordAuditEvent(auditStore, {
         eventType: "mcp.account_disconnected",
@@ -2204,7 +2090,6 @@ export function createStoreContext(options: PluginStoreOptions) {
     database,
     auditStore,
     credentials,
-    encryptionKey,
     injectedVendor,
     exchangeRefreshToken,
     registerClient,

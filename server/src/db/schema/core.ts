@@ -429,6 +429,28 @@ export const credentials = pgTable(
   ],
 );
 
+/**
+ * Who is spending a vault secret right now, across every replica of this deployment.
+ *
+ * OPERATIONAL, and disposable: losing a row loses nothing but a moment's exclusion. The vault is
+ * Intelligence's, so the row lock `connectionTokenFor` used to take on the credential while it traded
+ * a refresh token with the vendor cannot be taken any more, and no transaction here may be held open
+ * across a call to Intelligence. A vendor that rotates refresh tokens refuses the second of two
+ * replicas presenting the same one, so the trade is still one at a time: a replica takes the lease
+ * (an insert, or an update of an expired one), trades, writes the new token to the vault, records the
+ * vault version it wrote, and lets go. `version` is how the next holder knows whether the value it
+ * holds in memory is still the current one without asking the vault.
+ */
+export const secretLeases = pgTable("secret_leases", {
+  key: text("key").primaryKey(),
+  holder: text("holder"),
+  expiresAt: timestamp("expires_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  /** The last vault version a holder wrote for the secret, or null when none has been written. */
+  version: integer("version"),
+});
+
 export const auditEvents = pgTable(
   "audit_events",
   {

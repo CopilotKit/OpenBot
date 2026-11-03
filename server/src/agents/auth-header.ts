@@ -1,9 +1,7 @@
 import {
-  type CredentialExecutor,
   type CredentialSecretReader,
   type CredentialStore,
-  decryptSecret,
-  encryptSecret,
+  CredentialUnusableError,
 } from "../credentials";
 
 /**
@@ -55,7 +53,6 @@ export function authFromConfiguration(
  */
 export async function storeAgentAuth(input: {
   store: CredentialStore;
-  encryptionKey: string;
   agentId: string;
   header: string;
   value: string;
@@ -70,14 +67,6 @@ export async function storeAgentAuth(input: {
    * replace: every later edit would fail on the same stale id.
    */
   previousCredentialId?: string;
-  /**
-   * The transaction to write in, when the caller has one.
-   *
-   * The Bot itself is in Intelligence and is written after this, never inside an
-   * OpenBot transaction; a caller that has its own transaction for other rows
-   * passes it here so the key commits with them.
-   */
-  executor?: CredentialExecutor;
 }): Promise<AgentAuth> {
   const value = {
     kind: "agent" as const,
@@ -86,7 +75,7 @@ export async function storeAgentAuth(input: {
     // The header name is metadata precisely because it is not a secret; keeping it here makes the
     // vault row self-describing for later audit.
     metadata: { header: input.header },
-    encryptedValue: await encryptSecret(input.encryptionKey, input.value),
+    plaintext: input.value,
   };
 
   // A live previous credential is rotated, so the agent never holds two. Any
@@ -100,21 +89,19 @@ export async function storeAgentAuth(input: {
   // by the index on every save after.
   const previous =
     input.previousCredentialId !== undefined &&
-    (await input.store.isLive(input.previousCredentialId, input.executor))
+    (await input.store.isLive(input.previousCredentialId))
       ? input.previousCredentialId
       : (
-          await input.store.findLiveByKey(
-            { kind: value.kind, provider: value.provider, keyId: value.keyId },
-            input.executor,
-          )
+          await input.store.findLiveByKey({
+            kind: value.kind,
+            provider: value.provider,
+            keyId: value.keyId,
+          })
         )?.id;
 
   const credential = previous
-    ? await input.store.rotate(
-        { ...value, previousCredentialId: previous },
-        input.executor,
-      )
-    : await input.store.create(value, input.executor);
+    ? await input.store.rotate({ ...value, previousCredentialId: previous })
+    : await input.store.create(value);
   return { header: input.header, credentialId: credential.id };
 }
 
@@ -133,25 +120,19 @@ export async function storeAgentAuth(input: {
  *
  * Never throws. The new key is already stored and the Bot already works; a vault that would not
  * accept the revocation is worth saying loudly and is not worth failing an edit that has succeeded.
- *
- * Takes the caller's transaction where there is one, and must be given it whenever the caller holds
- * a lock on the row being retired. On a pooled connection the revoke is a second session competing
- * with the caller's own open transaction: it waits for a lock only that transaction can release, and
- * the transaction cannot commit while it is awaiting this call. Nothing breaks that, so the edit
- * hangs to the statement timeout and the timeout is then reported here as a key still live.
+ * The vault is Intelligence's, so this is a call to it: never made with an OpenBot transaction open.
  */
 export async function retireReplacedKey(
   store: Pick<CredentialStore, "revoke">,
   previous: Record<string, unknown>,
   next: Record<string, unknown>,
-  executor?: CredentialExecutor,
 ): Promise<void> {
   const before = credentialIdOf(previous);
   const after = credentialIdOf(next);
   if (!before || before === after) return;
 
   try {
-    await store.revoke(before, executor);
+    await store.revoke(before);
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -182,16 +163,21 @@ function credentialIdOf(
  */
 export async function agentAuthHeaders(input: {
   reader: CredentialSecretReader;
-  encryptionKey: string;
   auth: AgentAuth | null;
+  /** The Bot the key belongs to and the person whose request calls it: recorded with the read. */
+  botId: string;
+  userId?: string | null;
 }): Promise<Record<string, string> | undefined> {
   if (!input.auth) return undefined;
-  const stored = await input.reader.readSecret(input.auth.credentialId);
-  if (!stored || stored.revokedAt) return undefined;
-  return {
-    [input.auth.header]: await decryptSecret(
-      input.encryptionKey,
-      stored.encryptedValue,
-    ),
-  };
+  try {
+    const { value } = await input.reader.reveal(input.auth.credentialId, {
+      purpose: "remote_bot_call",
+      botId: input.botId,
+      userId: input.userId ?? null,
+    });
+    return { [input.auth.header]: value };
+  } catch (error) {
+    if (error instanceof CredentialUnusableError) return undefined;
+    throw error;
+  }
 }

@@ -1,10 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
-import {
-  type CredentialExecutor,
-  CredentialRefusedError,
-  type CredentialStore,
-} from "../credentials";
+import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinkChallenges, identityLinks } from "../db/schema";
 import { identityRealmLock, identityUserLock } from "./store";
@@ -13,11 +9,10 @@ import { identityRealmLock, identityUserLock } from "./store";
 async function revokeIfLive(
   credentials: Pick<CredentialStore, "revoke">,
   id: string | null,
-  executor: CredentialExecutor,
 ): Promise<boolean> {
   if (!id) return false;
   try {
-    await credentials.revoke(id, executor);
+    await credentials.revoke(id);
     return true;
   } catch (error) {
     // Already revoked is the outcome wanted, but not this call's doing.
@@ -71,7 +66,23 @@ export async function retireIdentityLinks(
   userId: string,
   by: string,
 ): Promise<number> {
-  return database.transaction(async (transaction) => {
+  /*
+   * The tokens are revoked first, outside the transaction: the vault is Intelligence's, and no
+   * transaction here may stay open across a call to it. A retirement that then fails leaves links
+   * naming revoked tokens, which the retry detaches; it never leaves a detached token live.
+   */
+  const named = await database
+    .select({ credentialId: identityLinks.credentialId })
+    .from(identityLinks)
+    .where(eq(identityLinks.userId, userId));
+  const revokedHere = new Set<string>();
+  for (const { credentialId } of named) {
+    if (credentialId && (await revokeIfLive(credentials, credentialId)))
+      revokedHere.add(credentialId);
+  }
+
+  const detached: string[] = [];
+  const changed = await database.transaction(async (transaction) => {
     const auditStore = auditFor(transaction as unknown as Database);
     await identityUserLock(transaction, userId);
     await transaction
@@ -101,14 +112,10 @@ export async function retireIdentityLinks(
       .orderBy(asc(identityLinks.id))
       .for("update");
 
-    let changed = 0;
+    let count = 0;
     for (const link of links) {
       if (!link.credentialId && link.status === "needs_reconnect") continue;
-      const credentialRevoked = await revokeIfLive(
-        credentials,
-        link.credentialId,
-        transaction,
-      );
+      if (link.credentialId) detached.push(link.credentialId);
       await transaction
         .update(identityLinks)
         .set({
@@ -126,13 +133,19 @@ export async function retireIdentityLinks(
           owner: userId,
           provider: link.provider,
           reason: "person_removed",
-          credentialRevoked,
+          credentialRevoked:
+            link.credentialId !== null && revokedHere.has(link.credentialId),
         },
       });
-      changed += 1;
+      count += 1;
     }
-    return changed;
+    return count;
   });
+  // A link written between the first read and the transaction named a token nothing revoked yet.
+  for (const credentialId of detached)
+    if (!revokedHere.has(credentialId))
+      await revokeIfLive(credentials, credentialId);
+  return changed;
 }
 
 /**

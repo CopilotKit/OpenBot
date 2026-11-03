@@ -2,7 +2,6 @@ import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import { bots } from "../../agents/bot-registry/directory";
 import {
-  mcpServers,
   mcpTools,
   pluginGrants,
   skills,
@@ -10,6 +9,7 @@ import {
   vendorNameOf,
 } from "../../db/schema";
 import type { StoreContext } from "./context";
+import { findServer } from "./records";
 import { PluginRefusedError, type SkillActor, type SkillRecord } from "./model";
 
 /** Skills, and what the store answers about Bots and servers for the routes and the desk. */
@@ -109,12 +109,7 @@ export function skillMethods(context: StoreContext) {
      */
     async serverExists(serverId: string): Promise<boolean> {
       if (!serverId) return false;
-      const [row] = await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
-      return row !== undefined;
+      return (await findServer(serverId)) !== null;
     },
 
     /**
