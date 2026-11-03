@@ -106,7 +106,7 @@ test("the team edition gives nothing by default", async () => {
   expect(grants).toEqual([]);
 });
 
-describe("Routines in the personal edition", () => {
+describe("Routines, in every edition", () => {
   const routines = () => [
     [
       { ref: "routines/list_routines", read: true },
@@ -156,14 +156,14 @@ describe("Routines in the personal edition", () => {
     expect(isAlwaysOn("routines/create_routine")).toBe(true);
     expect(isAlwaysOn("notion")).toBe(false);
     setEdition("team");
-    expect(isAlwaysOn("routines")).toBe(false);
+    expect(isAlwaysOn("routines")).toBe(true);
   });
 
-  test("the team edition adds nothing at startup", async () => {
+  test("the team edition adds it and gives every Bot all its tools too", async () => {
     const { store, grants, added, deps } = fakeStore(routines());
     await ensureAlwaysOnApp(store, deps);
-    await store.listForAgent("assistant");
-    expect(added).toEqual([]);
-    expect(grants).toEqual([]);
+    expect(added).toEqual(["routines"]);
+    expect(grants).toHaveLength(4);
+    expect(await store.listForAgent("travel")).toHaveLength(2);
   });
 });

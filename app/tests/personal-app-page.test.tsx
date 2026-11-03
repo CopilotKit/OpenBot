@@ -109,7 +109,11 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function draw(edition: "team" | "personal", drawn: PluginServer[]) {
+function draw(
+  edition: "team" | "personal",
+  drawn: PluginServer[],
+  pluginKey = "notion",
+) {
   servers = drawn;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -127,7 +131,7 @@ function draw(edition: "team" | "personal", drawn: PluginServer[]) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <PluginPage pluginKey="notion" />,
+      component: () => <PluginPage pluginKey={pluginKey} />,
     }),
   });
   return render(
@@ -179,4 +183,18 @@ test("the team edition's page is unchanged", async () => {
   const view = draw("team", [notionServer]);
   expect(await view.findByText("Enable for this deployment")).toBeTruthy();
   expect(view.getByText("Bot owners can give it to their Bots")).toBeTruthy();
+});
+
+test("Routines is always on in the team edition too, with no switch to turn it off", async () => {
+  const routines = {
+    ...notionServer,
+    id: "routines",
+    title: "Routines",
+    url: "builtin://routines/",
+    dynamicClient: false,
+  } as PluginServer;
+  const view = draw("team", [routines], "routines");
+  expect(await view.findByText("Always on")).toBeTruthy();
+  expect(view.queryByText("Enable for this deployment")).toBeNull();
+  expect(view.queryByRole("switch", { name: /Routines/ })).toBeNull();
 });

@@ -1064,7 +1064,8 @@ await ensureSingleUserIdentity(database, {
   provider: composio?.provider ?? null,
 });
 
-// In the personal edition, an app's newly listed read-only tools go to every Bot. See personal-defaults.ts.
+// In the personal edition, an app's newly listed read-only tools go to every Bot; in every edition,
+// Routines is given to every Bot. See personal-defaults.ts.
 const pluginStore = withPersonalDefaults(
   createPluginStore({
     database,
@@ -1142,7 +1143,7 @@ if (composio) {
  */
 const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
-// In the personal edition Routines is on from the start, for every Bot. See personal-defaults.ts.
+// Routines is on from the start in every edition, for every Bot. See personal-defaults.ts.
 await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {

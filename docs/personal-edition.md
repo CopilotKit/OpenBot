@@ -66,9 +66,8 @@ are the same decision when one person makes both:
   works straight away. Tools that change things are left for you to give, and a Bot still asks
   before it uses one. Tools you take away are not given back when the app is refreshed. See
   `server/src/plugins/personal-defaults.ts`.
-- **Routines is always on.** The server adds it at startup and gives every Bot all of its tools,
-  including the ones that schedule work. A Bot made later gets them the first time it runs. Routines
-  can't be turned off or taken from a Bot: the server refuses with `403`.
+- **Routines is always on**, here as in the team edition: every Bot has all of its tools, and it
+  can't be turned off. See [Routines](routines.md).
 
 The rest of what a person running OpenBot for themselves needs is under Settings: Skills for every
 Bot, Credentials, Computer and Activity (the audit trail). Where Admin was, **Team features** opens

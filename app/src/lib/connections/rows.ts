@@ -157,7 +157,7 @@ export function connectionRows(input: {
 }
 
 /**
- * The app the personal edition turns on for every Bot at startup and never turns off. The server
+ * The app every edition turns on for every Bot at startup and never turns off. The server
  * names the same one in `server/src/plugins/personal-defaults.ts`.
  */
 export const ALWAYS_ON_APP = "routines";

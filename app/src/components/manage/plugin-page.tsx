@@ -218,8 +218,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  // Routines is on for every Bot in the personal edition and has no off switch. See personal-defaults.ts.
-  const alwaysOn = personal && key === ALWAYS_ON_APP;
+  // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
+  const alwaysOn = key === ALWAYS_ON_APP;
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const provider = pluginsProvider(plugins.data);
@@ -716,7 +716,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
            * account, where the grant lets the people who can use the Bot use the team account.
            * Not in the personal edition, where the owner of every Bot is the one person.
            */}
-          {server && !personal ? (
+          {server && !personal && !alwaysOn ? (
             <>
               <Separator />
               <Item size="sm">

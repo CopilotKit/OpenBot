@@ -32,23 +32,22 @@ export type PersonalDefaultsDeps = {
 const GRANTED_BY = "openbot:personal-defaults";
 
 /**
- * The app that is on in the personal edition from the start, with all its tools given to every Bot,
- * and that cannot be turned off or taken from a Bot. A personal assistant that cannot schedule its
- * own reminders and check-ins is missing half of what it is for.
+ * The app that is on in every edition from the start, with all its tools given to every Bot, and
+ * that cannot be turned off or taken from a Bot. A Bot that cannot schedule its own reminders and
+ * check-ins is missing half of what it is for.
  */
 export const ALWAYS_ON_APP = "routines";
 
-/** Whether an app, or one of its tools (`app/tool`), is the one that is always on here. */
+/** Who the trail names for an always-on grant. */
+const ALWAYS_ON_BY = "openbot:always-on";
+
+/** Whether an app, or one of its tools (`app/tool`), is the one that is always on. */
 export function isAlwaysOn(ref: string): boolean {
-  return (
-    currentEdition() === "personal" &&
-    (ref === ALWAYS_ON_APP || ref.startsWith(`${ALWAYS_ON_APP}/`))
-  );
+  return ref === ALWAYS_ON_APP || ref.startsWith(`${ALWAYS_ON_APP}/`);
 }
 
 /** What the server answers when somebody tries to turn it off or take it from a Bot. */
-export const ALWAYS_ON_REFUSAL =
-  "Routines are always on in OpenBot Personal, for every Bot.";
+export const ALWAYS_ON_REFUSAL = "Routines are always on, for every Bot.";
 
 /** Gives Bots every always-on tool they don't hold yet. Writes nothing when they hold them all. */
 async function grantAlwaysOn(
@@ -61,14 +60,14 @@ async function grantAlwaysOn(
     const held = await deps.granted(bot, ALWAYS_ON_APP);
     for (const tool of tools)
       if (!held.has(tool.ref))
-        await store.grant("mcp", tool.ref, bot, GRANTED_BY);
+        await store.grant("mcp", tool.ref, bot, ALWAYS_ON_BY);
   }
 }
 
 /**
- * At startup in the personal edition: add Routines if it isn't added, and give every Bot all of its
- * tools. The ones that change things too, because scheduling is the point; a Bot still asks before
- * each one runs while Ask before acting is on.
+ * At startup, in every edition: add Routines if it isn't added, and give every Bot all of its tools.
+ * The ones that change things too, because scheduling is the point; a Bot still asks before each one
+ * runs while Ask before acting is on.
  */
 export async function ensureAlwaysOnApp(
   store: Pick<Store, "grant"> & {
@@ -77,9 +76,8 @@ export async function ensureAlwaysOnApp(
   },
   deps: PersonalDefaultsDeps,
 ): Promise<void> {
-  if (currentEdition() !== "personal") return;
   if (!(await store.serverAddress(ALWAYS_ON_APP)))
-    await store.addServer({ key: ALWAYS_ON_APP, by: GRANTED_BY });
+    await store.addServer({ key: ALWAYS_ON_APP, by: ALWAYS_ON_BY });
   await grantAlwaysOn(store, deps, await deps.bots());
 }
 
@@ -126,13 +124,12 @@ export function withPersonalDefaults<S extends Store>(
   } as S["refreshTools"];
 
   /*
-   * A Bot made after startup gets Routines the first time it runs: what a run is offered is what
-   * this answers, so it is the one moment every Bot, new or old, passes through.
+   * In every edition, a Bot made after startup gets Routines the first time it runs: what a run is
+   * offered is what this answers, so it is the one moment every Bot, new or old, passes through.
    */
   const list = store.listForAgent;
   store.listForAgent = async function (this: S, agentId: string) {
-    if (currentEdition() === "personal")
-      await grantAlwaysOn(this, deps, [agentId]);
+    await grantAlwaysOn(this, deps, [agentId]);
     return list.call(this, agentId);
   } as S["listForAgent"];
   return store;
