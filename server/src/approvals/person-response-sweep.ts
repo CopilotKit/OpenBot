@@ -5,6 +5,7 @@ import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
 import type { DeliveryScope } from "../delivery/types";
 import type { ResponsibilityStore } from "../responsibilities/types";
+import { PERSON_RESPONSE_KIND, TASK_TURN_ORDER } from "../tasks/state";
 import type { WorkQueue } from "../work/queue";
 import { resumePersonQuestion } from "./question-resume";
 import {
@@ -55,11 +56,13 @@ export function createPersonResponseTick(deps: {
   return async () => {
     try {
       const [item] = await approvalQueue.claim({
-        kind: "person.response",
+        kind: PERSON_RESPONSE_KIND,
         owner: personResponseOwner,
         leaseMs: 10 * 60_000,
         limit: 1,
         maxAttempts: 1,
+        // An answer to a question asked in a task's conversation takes its turn there, in order.
+        serialBy: TASK_TURN_ORDER,
       });
       if (!item) return;
       try {

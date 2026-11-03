@@ -1,9 +1,31 @@
+import { TASK_ENDING, TASK_FRAME } from "@openbot/shared/task-brief";
+import type { TaskReplyContext } from "@openbot/shared/task-reply";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
+import {
+  isThreadAlreadyRunning,
+  ThreadLockBusyError,
+} from "@openbot/toolkit/lease";
+import {
+  HEADLESS_WAITING_FALLBACK,
+  type TurnRunner,
+} from "@openbot/toolkit/run-turn";
 import type { AgentActor } from "../agents/profile-types";
 import { PERSON_INITIATOR } from "../audit";
 import type { ChannelStore } from "../channels/routes";
-import { ASK_LINE, FAILED_LINE, plainFailure, replyTail } from "./state";
+import type { TaskReplyContextReader } from "./reply-context";
+import {
+  ASK_LINE,
+  FAILED_LINE,
+  plainFailure,
+  replyEnding,
+  type TaskTurnEnding,
+  TaskTurnTimeoutError,
+} from "./state";
+
+/** What the model is told `TASK_FRAME` is, in its context. */
+export const TASK_FRAME_DESCRIPTION = "This conversation is a task";
+/** What the model is told `TASK_ENDING` is, in its context. Never "Selected skill". */
+export const TASK_ENDING_DESCRIPTION = "How to end your reply in this task";
 
 /** A task's conversation, as its turn runs in it. */
 export type TaskScope = {
@@ -22,16 +44,30 @@ export type TaskTurnInput = {
    * putting it in the conversation, and in front of the model, a second time.
    */
   askId: string;
-  /** The person's ask, as their message in the conversation. */
+  /** The person's ask, or their reply, as their message in the conversation. */
   text: string;
   signal: AbortSignal;
   final: boolean;
-};
+} & TaskReplyContext;
 
+/** Answers how its reply ended, when it wrote one: kept on the turn's work item. */
 export type TaskTurn = (
   scope: TaskScope,
   input: TaskTurnInput,
-) => Promise<void>;
+) => Promise<TaskTurnEnding | undefined>;
+
+/**
+ * What a task's conversation says while its turn waits on the person. The line becomes the task's
+ * next step on Tasks, so a turn stopped with no words of its own is named for what it waits on,
+ * never by the toolkit's "The turn is waiting for human input."
+ */
+function waitingLine(suspension: HeadlessToolSuspension): string {
+  if (suspension.message !== HEADLESS_WAITING_FALLBACK)
+    return suspension.message;
+  return suspension.waiting.kind === "approval"
+    ? "Waiting for you to allow a step."
+    : "Waiting for your answer.";
+}
 
 /**
  * A task's turn: the person's ask as their message in the task's conversation, a person-started turn
@@ -57,13 +93,26 @@ export type TaskTurn = (
  *
  * FAILING ON ITS LAST RUN IS SAID. A turn that throws is thrown on, for the queue to hold and retry.
  * On its last run (`final`) the Bot's line says it couldn't finish and why, in plain words, so the
- * conversation does not end on the person's ask with nothing after it.
+ * conversation does not end on the person's ask with nothing after it. A turn refused the
+ * conversation's lock on its first ask, or refused by the runner while a run before it winds down,
+ * never ran, and is put back on the queue without a word. A turn the runner stopped for taking too
+ * long says so (`TaskTurnTimeoutError`), not that it was cancelled.
+ *
+ * TOLD IT IS A TASK. The frame (`TASK_FRAME`) and how to end its reply (`TASK_ENDING`) go to the model
+ * as instructions of their own, named for what they are, never in the person's message, so the
+ * conversation shows the ask in their words. A reply's files and skills are read and checked again
+ * as it runs, so a grant taken away while it waited is not used.
  */
 export function createTaskTurn(deps: {
   channels: Pick<ChannelStore, "recordActivity" | "signalBusy">;
   actorFor: (ownerUserId: string) => Promise<AgentActor>;
-  /** The approval continuation runner, so a write the Bot tries is held for the person. */
+  /**
+   * The runner a task's own turns use: the approval continuation runner's, with the Bot built for a
+   * task's turn, so a write the Bot tries is held for the person and `start_task` is not offered.
+   */
   runTurn: TurnRunner;
+  /** Resolves a reply's files and skills. Absent, a reply with either fails. */
+  replyContext?: Pick<TaskReplyContextReader, "resolve">;
 }): TaskTurn {
   return async (scope, input) => {
     const actor = await deps.actorFor(scope.ownerUserId);
@@ -74,9 +123,26 @@ export function createTaskTurn(deps: {
         { text, agentId, at: new Date() },
         { id },
       );
-    await record(input.text, null, `${input.askId}${ASK_LINE}`);
+    await record(
+      input.text || "Sent attachments",
+      null,
+      `${input.askId}${ASK_LINE}`,
+    );
     await deps.channels.signalBusy(scope.threadId, true).catch(() => {});
     try {
+      const context =
+        input.attachmentIds?.length || input.skillIds?.length
+          ? await (deps.replyContext?.resolve(scope, input) ??
+              Promise.reject(
+                new Error("Files and skills are unavailable for this task."),
+              ))
+          : { attachments: [], skillInstructions: [] };
+      const content = context.attachments.length
+        ? [
+            ...(input.text ? [{ type: "text" as const, text: input.text }] : []),
+            ...context.attachments,
+          ]
+        : input.text;
       const result = await deps.runTurn({
         ...scope,
         routineId: input.runId,
@@ -86,7 +152,27 @@ export function createTaskTurn(deps: {
           rootTaskId: input.askId,
         },
         instruction: input.text,
-        userMessage: { id: input.askId, role: "user", content: input.text },
+        userMessage: { id: input.askId, role: "user", content },
+        systemMessages: [
+          // One id each for every turn of the task, so its conversation holds them once.
+          {
+            id: "task:frame",
+            role: "system" as const,
+            content: TASK_FRAME.join("\n"),
+            description: TASK_FRAME_DESCRIPTION,
+          },
+          {
+            id: "task:ending",
+            role: "system" as const,
+            content: TASK_ENDING,
+            description: TASK_ENDING_DESCRIPTION,
+          },
+          ...context.skillInstructions.map((instructions, index) => ({
+            id: `${input.runId}:skill:${index}`,
+            role: "system" as const,
+            content: instructions,
+          })),
+        ],
         initiator: PERSON_INITIATOR,
         signal: input.signal,
       });
@@ -95,24 +181,36 @@ export function createTaskTurn(deps: {
        * line after the task's status (`TaskPayload.next`), and the conversation keeps only its
        * first 200 characters, which for a long reply would be its opening, not where it leaves
        * things.
+       *
+       * Whether it asks is read here, from the whole reply, and answered for the turn's work item:
+       * the line recorded is cut short, and a long closing question loses its question mark there.
        */
-      if (result.replyText)
-        await record(
-          replyTail(result.replyText) ?? result.replyText,
-          scope.agentId,
-          `${input.runId}:reply`,
-        );
+      if (result.replyText) {
+        const ending = replyEnding(result.replyText);
+        const messageId = `${input.runId}:reply`;
+        await record(ending.tail ?? result.replyText, scope.agentId, messageId);
+        return { messageId, asks: ending.asks };
+      }
+      return undefined;
     } catch (error) {
       if (!(error instanceof HeadlessToolSuspension)) {
-        if (input.final)
+        const busy =
+          error instanceof ThreadLockBusyError || isThreadAlreadyRunning(error);
+        // Stopped by the runner's time limit, the turn says only that it was cancelled.
+        const reason =
+          input.signal.reason instanceof TaskTurnTimeoutError
+            ? input.signal.reason
+            : error;
+        if (input.final && !busy)
           await record(
-            `I couldn't finish this: ${plainFailure(error instanceof Error ? error.message : String(error))}.`,
+            `I couldn't finish this: ${plainFailure(reason instanceof Error ? reason.message : String(reason))}.`,
             scope.agentId,
             `${input.runId}${FAILED_LINE}`,
           ).catch(() => {});
         throw error;
       }
-      await record(error.message, scope.agentId, `${input.runId}:waiting`);
+      await record(waitingLine(error), scope.agentId, `${input.runId}:waiting`);
+      return undefined;
     } finally {
       await deps.channels.signalBusy(scope.threadId, false).catch(() => {});
     }

@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { pendingPersonQuestion } from "../approvals/questions";
 import type { Database } from "../db/client";
-import { botTasks, channels, workItems } from "../db/schema";
+import {
+  botTasks,
+  channels,
+  intelligenceChannelMappings,
+  workItems,
+} from "../db/schema";
 import type { BotTaskOrigin } from "../db/schema/tasks";
 import type { BotTaskCounts, TaskPayload } from "../proactive/contracts";
 import {
+  MARKED_DONE,
   PROACTIVE_TASK_KIND,
   readTaskStates,
   type TaskRow,
@@ -14,8 +21,9 @@ import {
 
 /*
  * The person's tasks: work a Bot does for them in a conversation of its own, opened when they start
- * an item a check-in raised. The task's page is its conversation, where the person reads it and
- * replies; the list shows where each one stands.
+ * an item a check-in raised, or when they ask for it in so many words (`start_task`, or the + on
+ * Tasks). The task's page is its conversation, where the person reads it and replies; the list shows
+ * where each one stands.
  *
  * Every read and write is the owner's: another person's task is the same as no task.
  */
@@ -50,6 +58,11 @@ export type NewTask = {
   suggestionId: string | null;
   sourceApp: string | null;
   sourceLink: string | null;
+  /**
+   * The id the browser made for a Start on Tasks. A second task with the same one from the same
+   * person is never opened: the first is answered instead (`byClientId`).
+   */
+  clientId?: string | null;
 };
 
 /** The transaction a task row is written on, beside its conversation. */
@@ -72,6 +85,22 @@ export function itemAsk(item: {
 /** A turn's payload names its ask as `text`; anything else on it is not this module's. */
 const askIn = (input: Record<string, unknown> | null) =>
   typeof input?.text === "string" && input.text.trim() ? input.text : null;
+
+/** The files and skills a reply's turn carried, as ids. */
+function contextIn(input: Record<string, unknown> | null) {
+  const ids = (value: unknown) =>
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((id) => typeof id === "string")
+      ? (value as string[])
+      : undefined;
+  const attachmentIds = ids(input?.attachmentIds);
+  const skillIds = ids(input?.skillIds);
+  return {
+    ...(attachmentIds ? { attachmentIds } : {}),
+    ...(skillIds ? { skillIds } : {}),
+  };
+}
 
 /*
  * Listed: every task not marked done, those marked done in the last week, and any marked done
@@ -129,7 +158,9 @@ export function createTaskStore(
       // Kept while it is marked done, too: Reopen brings the failure back.
       failure: failedOrDone ? (state?.failure ?? null) : null,
       failedAt: failedOrDone ? (state?.failedAt?.toISOString() ?? null) : null,
-      next: state?.next ?? null,
+      next: status === "resolved" ? MARKED_DONE : (state?.next ?? null),
+      queuedReplies: state?.queuedReplies ?? [],
+      answeredQuestionIds: [...(state?.answeredQuestionIds ?? [])],
       resolvedAt: resolvedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -190,20 +221,103 @@ export function createTaskStore(
 
   return {
     /**
-     * Write a task row, on the transaction that makes its conversation. An item already started
-     * keeps the task it opened: `null` here, and the caller rolls its conversation back.
+     * Write a task row, on the transaction that makes its conversation. An item already started, or
+     * a Start already sent with this `clientId`, keeps the task it opened: `null` here, and the
+     * caller rolls its conversation back.
      */
     async create(
       input: NewTask,
       transaction: TaskTransaction,
-    ): Promise<{ id: string; channelId: string } | null> {
+    ): Promise<{ id: string; channelId: string; title: string } | null> {
       const at = now();
       const [row] = await transaction
         .insert(botTasks)
         .values({ id: randomUUID(), ...input, createdAt: at, updatedAt: at })
-        .onConflictDoNothing({ target: botTasks.suggestionId })
-        .returning({ id: botTasks.id, channelId: botTasks.channelId });
+        // Either unique index: the item's, or the person's Start id.
+        .onConflictDoNothing()
+        .returning({
+          id: botTasks.id,
+          channelId: botTasks.channelId,
+          title: botTasks.title,
+        });
       return row ?? null;
+    },
+    /** The task a Start with this browser-made id opened. */
+    async byClientId(
+      owner: string,
+      clientId: string,
+    ): Promise<{ id: string; channelId: string; title: string } | null> {
+      const [row] = await database
+        .select({
+          id: botTasks.id,
+          channelId: botTasks.channelId,
+          title: botTasks.title,
+        })
+        .from(botTasks)
+        .where(
+          and(eq(botTasks.ownerUserId, owner), eq(botTasks.clientId, clientId)),
+        )
+        .limit(1);
+      return row ?? null;
+    },
+    /**
+     * The person's questions waiting in a task's conversation, less any a reply already answered:
+     * the ones a reply taken now answers.
+     */
+    async pendingQuestions(owner: string, id: string): Promise<string[]> {
+      const task = await one(owner, id);
+      const rows = await database
+        .select({ key: workItems.key })
+        .from(workItems)
+        .where(
+          and(
+            pendingPersonQuestion(owner),
+            sql`${workItems.payload}->>'mode' = 'completed_question'`,
+            or(
+              sql`${workItems.payload}->>'channelId' = ${task.channelId}`,
+              task.threadId
+                ? sql`${workItems.payload}->>'threadId' = ${task.threadId}`
+                : sql`false`,
+            ),
+          ),
+        );
+      return rows.map((row) => row.key);
+    },
+    /** Marks the person's questions answered, by a reply that is now running. */
+    async answerQuestions(owner: string, ids: readonly string[]) {
+      if (ids.length === 0) return;
+      await database
+        .update(workItems)
+        .set({ finishedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(workItems.kind, "person.question"),
+            inArray(workItems.key, [...ids]),
+            sql`${workItems.payload}->>'actorId' = ${owner}`,
+            isNull(workItems.finishedAt),
+          ),
+        );
+    },
+    /** Whether this thread of the person's is a task's own conversation. */
+    async isTaskThread(owner: string, threadId: string): Promise<boolean> {
+      const [row] = await database
+        .select({ id: botTasks.id })
+        .from(botTasks)
+        .innerJoin(
+          intelligenceChannelMappings,
+          and(
+            eq(intelligenceChannelMappings.channelId, botTasks.channelId),
+            eq(intelligenceChannelMappings.userId, owner),
+          ),
+        )
+        .where(
+          and(
+            eq(botTasks.ownerUserId, owner),
+            eq(intelligenceChannelMappings.threadId, threadId),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
     },
     /** The task an item opened, if it opened one. */
     async byItem(
@@ -244,7 +358,12 @@ export function createTaskStore(
     async failedTurn(
       owner: string,
       id: string,
-    ): Promise<{ ask: string; turns: number }> {
+    ): Promise<{
+      ask: string;
+      turns: number;
+      /** The files and skills the failed turn carried, a reply's, to carry them again. */
+      context: { attachmentIds?: string[]; skillIds?: string[] };
+    }> {
       const { row, record, state } = await oneWithState(owner, id);
       const failed =
         record.status === "failed" ||
@@ -262,6 +381,7 @@ export function createTaskStore(
             sourceLink: row.sourceLink,
           }),
         turns: state.turns,
+        context: contextIn(state.turnInput),
       };
     },
     /** The person is done with it. Its conversation stays, and Reopen brings it back. */
