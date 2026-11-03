@@ -199,6 +199,13 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
     );
   }
 
+  override abortRun(): void {
+    super.abortRun();
+    // A suspension already stopped the provider. Stop must also close its tool-settlement wait,
+    // even when a tool is still finishing work that does not observe the provider's abort signal.
+    this.scope.run?.abort();
+  }
+
   /**
    * Carried by hand, for the same reason {@link RunBuiltAgent.clone} is.
    *
