@@ -39,6 +39,7 @@ export type WireAuditEvent = {
   occurredAt: string;
   eventType: string;
   actorUserId: string | null;
+  agentId: string | null;
   initiator: { kind: string; id: string | null };
   target: { type: string; id: string | null };
   payload: Record<string, unknown>;
@@ -77,6 +78,7 @@ export type AuditEventFilter = {
   eventType?: readonly string[];
   eventTypePrefix?: string;
   actorUserId?: string;
+  agentId?: string;
   initiatorKind?: readonly string[];
   initiatorId?: string;
   targetType?: string;
@@ -212,6 +214,7 @@ export function createAuditTrailClient(settings: AuditTrailSettings) {
       if (filter.eventTypePrefix)
         query.set("eventTypePrefix", filter.eventTypePrefix);
       if (filter.actorUserId) query.set("actorUserId", filter.actorUserId);
+      if (filter.agentId) query.set("agentId", filter.agentId);
       if (filter.initiatorKind)
         query.set("initiatorKind", filter.initiatorKind.join(","));
       if (filter.initiatorId) query.set("initiatorId", filter.initiatorId);
@@ -223,6 +226,23 @@ export function createAuditTrailClient(settings: AuditTrailSettings) {
         await request("GET", `/api/audit/events?${query}`),
         "list audit events",
       );
+    },
+
+    /** Events per agent after `since`, busiest first, at most `limit` agents. */
+    async agentActivity(
+      since: string,
+      limit: number,
+    ): Promise<{ agentId: string; events: number }[]> {
+      const body = await json<{
+        agents: { agentId: string; events: number }[];
+      }>(
+        await request(
+          "GET",
+          `/api/audit/agent-activity?${new URLSearchParams({ since, limit: String(limit) })}`,
+        ),
+        "count agent activity",
+      );
+      return body.agents;
     },
 
     async actions(

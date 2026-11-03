@@ -63,6 +63,7 @@ export type AuditRow = {
   createdAt: Date;
   eventType: string;
   actorUserId: string | null;
+  agentId: string | null;
   initiatorKind: string;
   initiatorId: string | null;
   targetType: string;
@@ -74,6 +75,7 @@ export type AuditRowFilter = {
   eventType?: string | readonly string[];
   eventTypePrefix?: string;
   actorUserId?: string;
+  agentId?: string;
   initiatorKind?: string | readonly string[];
   initiatorId?: string;
   targetType?: string;
@@ -109,6 +111,7 @@ export async function auditRows(filter: AuditRowFilter): Promise<AuditRow[]> {
         ? { eventTypePrefix: filter.eventTypePrefix }
         : {}),
       ...(filter.actorUserId ? { actorUserId: filter.actorUserId } : {}),
+      ...(filter.agentId ? { agentId: filter.agentId } : {}),
       ...(filter.initiatorKind
         ? { initiatorKind: asSet(filter.initiatorKind) }
         : {}),
@@ -124,6 +127,7 @@ export async function auditRows(filter: AuditRowFilter): Promise<AuditRow[]> {
         createdAt: new Date(event.occurredAt.replace(/\.(\d{3})\d*Z$/, ".$1Z")),
         eventType: event.eventType,
         actorUserId: event.actorUserId,
+        agentId: event.agentId,
         initiatorKind: event.initiator.kind,
         initiatorId: event.initiator.id,
         targetType: event.target.type,
@@ -142,6 +146,8 @@ export type SeedAuditEvent = {
   occurredAt?: Date | string;
   eventType: string;
   actorUserId?: string | null;
+  /** The Bot that acted. Defaults to the payload's `bot`, as the audit store records it. */
+  agentId?: string | null;
   initiatorKind?: string;
   initiatorId?: string | null;
   targetType: string;
@@ -165,6 +171,12 @@ export async function seedAuditEvents(
         : (event.occurredAt ?? new Date()).toISOString(),
     eventType: event.eventType,
     actorUserId: event.actorUserId ?? null,
+    agentId:
+      event.agentId !== undefined
+        ? event.agentId
+        : typeof event.payload?.bot === "string"
+          ? event.payload.bot
+          : null,
     initiator: {
       kind: event.initiatorKind ?? "person",
       id: event.initiatorId ?? null,

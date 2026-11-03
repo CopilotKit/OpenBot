@@ -871,6 +871,18 @@ export function addAuditTap(tap: AuditTap): () => void {
 }
 
 /**
+ * Which Bot acted, as Intelligence records it: the payload's `bot`, the field every row about a Bot
+ * already carries. Intelligence counts activity per agent from this (`botActivity`).
+ */
+function agentOf(payload: Record<string, unknown>): string | null {
+  return typeof payload.bot === "string" &&
+    payload.bot.length >= 1 &&
+    payload.bot.length <= 200
+    ? payload.bot
+    : null;
+}
+
+/**
  * Which computer a `computer.*` row is about, as the culler groups them: the computer the row names,
  * or for a row from before computers were per person, its Bot's own (`bot:<id>`).
  */
@@ -909,6 +921,7 @@ export function createAuditStore(database: Database): AuditStore {
         {
           eventType: row.eventType,
           actorUserId: row.actorUserId || null,
+          agentId: agentOf(row.payload),
           initiator: { kind: row.initiatorKind, id: row.initiatorId || null },
           target: { type: row.targetType, id: row.targetId || null },
           payload: row.payload,

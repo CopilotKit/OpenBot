@@ -33,3 +33,29 @@ WHERE "event_type" LIKE 'computer.%'
   AND coalesce("payload"->>'computer', 'bot:' || ("payload"->>'bot')) IS NOT NULL
 GROUP BY 1
 ON CONFLICT ("computer") DO NOTHING;
+--> statement-breakpoint
+-- A record waiting in the outbox is the audit trail, not yet sent: it can be sent and then deleted,
+-- or set aside as refused, but never rewritten. The same rule `audit_events` has always had, on the
+-- row before it reaches Intelligence (whose own trail refuses every change).
+CREATE OR REPLACE FUNCTION prevent_audit_outbox_rewrite()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.seq IS DISTINCT FROM OLD.seq
+     OR NEW.kind IS DISTINCT FROM OLD.kind
+     OR NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.occurred_at IS DISTINCT FROM OLD.occurred_at
+     OR NEW.record IS DISTINCT FROM OLD.record THEN
+    RAISE EXCEPTION 'Audit records are append-only: a record waiting to be sent cannot be changed';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS audit_outbox_append_only ON audit_outbox;
+--> statement-breakpoint
+CREATE TRIGGER audit_outbox_append_only
+BEFORE UPDATE ON audit_outbox
+FOR EACH ROW
+EXECUTE FUNCTION prevent_audit_outbox_rewrite();

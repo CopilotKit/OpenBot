@@ -53,6 +53,7 @@ export const AUDIT_COPIES: readonly CopiedTable[] = [
       'occurredAt', ${MICROS},
       'eventType', event_type,
       'actorUserId', nullif(actor_user_id, ''),
+      'agentId', CASE WHEN char_length(payload->>'bot') BETWEEN 1 AND 200 THEN payload->>'bot' END,
       'initiator', json_build_object('kind', initiator_kind, 'id', nullif(initiator_id, '')),
       'target', json_build_object('type', target_type, 'id', nullif(target_id, '')),
       'payload', payload
