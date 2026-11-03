@@ -140,13 +140,20 @@ test("a signed-in arrival with a handle goes to the verifier, without one to /",
 });
 
 /** The sign screen on `/sign?flow_id=h1`, with whichever ways in the deployment offers. */
-function renderSignScreen(options: {
-  providers: string[];
-  sso: boolean;
-  ssoRequired: boolean;
-}) {
+function renderSignScreen(
+  options: {
+    providers: string[];
+    sso: boolean;
+    ssoRequired: boolean;
+    copilotKit?: boolean;
+  },
+  entry = "/sign?flow_id=h1",
+) {
   const queryClient = new QueryClient();
-  queryClient.setQueryData(authKeys.providers(), options);
+  queryClient.setQueryData(authKeys.providers(), {
+    copilotKit: false,
+    ...options,
+  });
 
   queryClient.setQueryData(authKeys.currentUser(), null);
   const root = createRootRoute();
@@ -159,7 +166,7 @@ function renderSignScreen(options: {
   const router = createRouter({
     routeTree: root.addChildren([sign]),
     context: { queryClient },
-    history: createMemoryHistory({ initialEntries: ["/sign?flow_id=h1"] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   } as never) as never;
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -300,4 +307,34 @@ test("a signed-in arrival with a handle lands on the verifier, not back on the h
       value: realLocation,
     });
   }
+});
+
+/*
+ * Signing in through a CopilotKit organization comes back here when it does not finish, with a code
+ * in `?error=`. Only codes this screen knows are kept, and each is shown as the screen's own
+ * sentence, so a link cannot put words on the sign-in page.
+ */
+test("validateSearch keeps a CopilotKit sign-in error only when it is one this screen knows", () => {
+  const validate = Route.options.validateSearch as (s: unknown) => object;
+  expect(validate({ error: "copilotkit_other_organization" })).toEqual({
+    error: "copilotkit_other_organization",
+  });
+  expect(
+    validate({ error: "Your account was suspended, call 555-0100" }),
+  ).toEqual({});
+  expect(validate({ error: 7 })).toEqual({});
+});
+
+test("an OpenBot signed in through CopilotKit offers only CopilotKit, and says why the last try was refused", async () => {
+  const { view } = renderSignScreen(
+    { providers: [], sso: true, ssoRequired: false, copilotKit: true },
+    "/sign?error=copilotkit_other_organization",
+  );
+
+  expect(await view.findByText("Continue with CopilotKit")).toBeTruthy();
+  expect((await view.findByRole("alert")).textContent).toContain(
+    "This OpenBot belongs to a different CopilotKit organization.",
+  );
+  // No company-account box beside it: the organization is the one way in.
+  expect(view.queryByPlaceholderText("you@company.com")).toBeNull();
 });

@@ -354,6 +354,10 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | `OPENBOT_APP_URL`            | Where the browser app is served. Defaults to the first `TRUSTED_ORIGINS` entry.          |
 | `SIGNIN_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains admitted at sign-in. Empty means no opinion. Exact, no wildcards. |
 | `OPENBOT_ORGANIZATION_AUTH_URL` | An OpenBot deployment that verifies employee identity and roles. Decides sign-in ahead of `OPENBOT_SINGLE_USER`. |
+| `COPILOTKIT_ORGANIZATION_ID` | The CopilotKit organization this OpenBot serves, by its Clerk organization id (`org_...`). With the three below, people sign in through CopilotKit and no other way. See [Signing in through a CopilotKit organization](#signing-in-through-a-copilotkit-organization). |
+| `COPILOTKIT_DASHBOARD_URL` | The CopilotKit dashboard origin people sign in at, such as `https://dashboard.operations.copilotkit.ai`. HTTPS, or HTTP on loopback. |
+| `COPILOTKIT_OPS_API_URL` | The CopilotKit Ops API origin OpenBot redeems sign-in codes at, such as `https://api.operations.copilotkit.ai`. HTTPS, or HTTP on loopback. |
+| `COPILOTKIT_OPS_API_TOKEN` | OpenBot's credential for redeeming them. Equal to `OPS_OPENBOT_INTERNAL_API_TOKEN` on the Ops API. |
 | `OPENBOT_RECORDER_EXTRA_EXTENSION_IDS` | Extra extension ids OpenBot trusts besides the Recorder's own, for a fork or a build signed with another key. Comma separated, each 32 letters from a to p, or the server refuses to start. Unset trusts only the Recorder's own id. |
 
 **Some variables belong to the desktop app, not to you.** A desktop installation writes these into
@@ -453,6 +457,38 @@ refused at start-up rather than at somebody's first attempt to sign in.
 `INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
 address it names becomes an administrator at every sign-in and cannot be demoted from the People
 screen, which is what guarantees a way back in. Everybody else's role is decided there instead.
+
+### Signing in through a CopilotKit organization
+
+A hosted OpenBot serves one CopilotKit organization and signs its people in with their CopilotKit
+account. Set all four of `COPILOTKIT_ORGANIZATION_ID`, `COPILOTKIT_DASHBOARD_URL`,
+`COPILOTKIT_OPS_API_URL` and `COPILOTKIT_OPS_API_TOKEN`, with `BETTER_AUTH_SECRET` and
+`BETTER_AUTH_URL`. The sign-in screen then offers only **Continue with CopilotKit**.
+
+1. The button opens `<BETTER_AUTH_URL>/api/auth/copilotkit/start`, which sends the browser to the
+   CopilotKit dashboard with a callback of `<BETTER_AUTH_URL>/api/auth/copilotkit/callback`. That
+   callback has to be in the Ops API's `OPS_OPENBOT_ALLOWED_DESTINATION_TARGETS`.
+2. The person signs in to CopilotKit with their active organization, and CopilotKit sends them back
+   with a one-time code that lasts 60 seconds.
+3. OpenBot redeems the code with the Ops API using `COPILOTKIT_OPS_API_TOKEN`. Ops answers with the
+   person, their organization and their organization role, read from Clerk at that moment.
+4. A member of `COPILOTKIT_ORGANIZATION_ID` is signed in. Anybody else is sent back to the sign-in
+   screen and told this OpenBot belongs to another organization.
+
+The organization decides roles: `org:admin` is an admin here, and every other member is a user. The
+role is written again at every sign-in, so the People screen does not change roles on such an
+OpenBot. A person removed from the organization cannot sign in again, and a person an admin removes
+here is refused whatever the organization says.
+
+A session started this way lasts eight hours from sign-in and is not extended while it is used, the
+same as a managed Intelligence session. Neither checks the organization again during a session, so
+somebody removed from the organization keeps a session they already had for at most eight hours. To
+end it sooner, remove them on the People screen as well.
+
+It is one way in, so start-up refuses it alongside `GOOGLE_OAUTH_*`, `MICROSOFT_OAUTH_*`,
+`OKTA_OAUTH_*`, `OPENBOT_ORGANIZATION_AUTH_URL`, `OPENBOT_SINGLE_USER=true`, `INITIAL_ADMIN_EMAILS`
+or `SCIM_BEARER_TOKEN`, and identity providers cannot be registered under Admin. Remove the
+`OPENBOT_SINGLE_USER=true` line that `.env.example` ships with.
 
 SAML and OpenID Connect providers are not configured here. They are registered while the deployment
 runs, under Admin → Identity providers, and routed by email domain.

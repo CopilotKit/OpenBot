@@ -541,6 +541,11 @@ export function createApp(
        */
       authProviders: configuredAuthProviders(config.auth),
       /*
+       * Whether people sign in through this OpenBot's CopilotKit organization. Only that it does:
+       * which organization stays on the server.
+       */
+      copilotKitSignIn: config.auth?.copilotKit !== undefined,
+      /*
        * Whether any enterprise identity provider has been registered.
        *
        * A count, not a list. The sign-in screen only needs to know whether to offer the email box
@@ -1008,6 +1013,20 @@ export function createApp(
     }
     if (!peopleStore) {
       return context.json({ error: "People are not available." }, 503);
+    }
+
+    /*
+     * Roles come from the CopilotKit organization and are written again at every sign-in, so a role
+     * set here would last only until the person next signed in.
+     */
+    if (config.auth?.copilotKit) {
+      return context.json(
+        {
+          error:
+            "Roles come from your CopilotKit organization. Change the role there, and it applies the next time they sign in.",
+        },
+        409,
+      );
     }
 
     const body = await context.req.json().catch(() => null);

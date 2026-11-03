@@ -49,6 +49,8 @@ export type SignInOptions = {
   sso: boolean;
   /** An administrator requires SSO; social sign-in stays only as the administrators' break-glass. */
   ssoRequired: boolean;
+  /** People sign in through this OpenBot's CopilotKit organization, and no other way. */
+  copilotKit: boolean;
 };
 
 async function signInOptions(): Promise<SignInOptions> {
@@ -61,12 +63,14 @@ async function signInOptions(): Promise<SignInOptions> {
     authProviders?: AuthProviderId[];
     ssoConfigured?: boolean;
     ssoRequired?: boolean;
+    copilotKitSignIn?: boolean;
   };
 
   return {
     providers: body.authProviders ?? [],
     sso: body.ssoConfigured === true,
     ssoRequired: body.ssoRequired === true,
+    copilotKit: body.copilotKitSignIn === true,
   };
 }
 

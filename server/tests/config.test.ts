@@ -1308,3 +1308,107 @@ test("an Arcade key and a broker provider are read, and an unknown provider is r
     loadConfig({ ...baseEnvironment, OPENBOT_BROKER_PROVIDER: "zapier" }),
   ).toThrow(/OPENBOT_BROKER_PROVIDER must be "composio" or "arcade"/);
 });
+
+describe("sign-in through a CopilotKit organization", () => {
+  const copilotKit = {
+    ...withoutSignIn,
+    BETTER_AUTH_SECRET: "a-long-enough-local-development-auth-secret",
+    BETTER_AUTH_URL: "https://acme.openbot.example",
+    COPILOTKIT_ORGANIZATION_ID: "org_3LblQ8Y538tBX8lj7fvP4FalTyl",
+    COPILOTKIT_DASHBOARD_URL: "https://dashboard.operations.copilotkit.ai",
+    COPILOTKIT_OPS_API_URL: "https://api.operations.copilotkit.ai/",
+    COPILOTKIT_OPS_API_TOKEN: "openbot-ops-token",
+  };
+
+  test("all four settings turn it on, as the only way to sign in", () => {
+    const config = loadConfig(copilotKit);
+
+    expect(config.auth?.copilotKit).toEqual({
+      organizationId: "org_3LblQ8Y538tBX8lj7fvP4FalTyl",
+      dashboardUrl: "https://dashboard.operations.copilotkit.ai",
+      opsApiUrl: "https://api.operations.copilotkit.ai",
+      opsApiToken: "openbot-ops-token",
+    });
+    expect(config.auth?.initialAdminEmails).toEqual([]);
+    expect(configuredAuthProviders(config.auth)).toEqual([]);
+    expect(config.singleUser).toBe(false);
+  });
+
+  test("loopback HTTP is accepted for local development", () => {
+    const config = loadConfig({
+      ...copilotKit,
+      BETTER_AUTH_URL: "http://127.0.0.1:3001",
+      COPILOTKIT_DASHBOARD_URL: "http://127.0.0.1:7066",
+      COPILOTKIT_OPS_API_URL: "http://127.0.0.1:7051",
+    });
+    expect(config.auth?.copilotKit?.opsApiUrl).toBe("http://127.0.0.1:7051");
+  });
+
+  test("a missing setting is named", () => {
+    const { COPILOTKIT_OPS_API_TOKEN: _token, ...partial } = copilotKit;
+    expect(() => loadConfig(partial)).toThrow(
+      "Missing: COPILOTKIT_OPS_API_TOKEN",
+    );
+  });
+
+  test.each([
+    {
+      GOOGLE_OAUTH_CLIENT_ID: "client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "secret",
+    },
+    {
+      MICROSOFT_OAUTH_CLIENT_ID: "client",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "secret",
+      MICROSOFT_OAUTH_TENANT_ID: "00000000-0000-0000-0000-000000000000",
+    },
+    {
+      OKTA_OAUTH_CLIENT_ID: "client",
+      OKTA_OAUTH_CLIENT_SECRET: "secret",
+      OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+    },
+  ])("refuses another identity provider beside it: %o", (provider) => {
+    expect(() => loadConfig({ ...copilotKit, ...provider })).toThrow(
+      "Configure one way to sign in",
+    );
+  });
+
+  test("refuses INITIAL_ADMIN_EMAILS, since the organization's admins are the admins", () => {
+    expect(() =>
+      loadConfig({ ...copilotKit, INITIAL_ADMIN_EMAILS: "a@acme.test" }),
+    ).toThrow("INITIAL_ADMIN_EMAILS must be unset");
+  });
+
+  test("refuses a SCIM directory beside it", () => {
+    expect(() =>
+      loadConfig({ ...copilotKit, SCIM_BEARER_TOKEN: "directory-token" }),
+    ).toThrow("SCIM_BEARER_TOKEN must be unset");
+  });
+
+  test("refuses an organization authority beside it", () => {
+    expect(() =>
+      loadConfig({
+        ...copilotKit,
+        OPENBOT_ORGANIZATION_AUTH_URL: "https://openbot.company.example",
+      }),
+    ).toThrow("two different ways to sign in");
+  });
+
+  test("refuses single-user mode beside it", () => {
+    expect(() =>
+      loadConfig({ ...copilotKit, OPENBOT_SINGLE_USER: "true" }),
+    ).toThrow("OPENBOT_SINGLE_USER=true");
+  });
+
+  test("needs a session secret and an address, as any sign-in does", () => {
+    const { BETTER_AUTH_SECRET: _secret, ...noSecret } = copilotKit;
+    expect(() => loadConfig(noSecret)).toThrow("BETTER_AUTH_SECRET");
+  });
+
+  test.each([
+    ["COPILOTKIT_ORGANIZATION_ID", "acme"],
+    ["COPILOTKIT_OPS_API_URL", "http://ops.internal.example"],
+    ["COPILOTKIT_DASHBOARD_URL", "https://dashboard.example/intelligence"],
+  ])("refuses %s=%s", (name, value) => {
+    expect(() => loadConfig({ ...copilotKit, [name]: value })).toThrow(name);
+  });
+});
