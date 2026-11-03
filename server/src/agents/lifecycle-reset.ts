@@ -28,7 +28,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
-  approvalRules,
   channelAgents,
   channelMemberships,
   channels,
@@ -41,6 +40,7 @@ import {
   workItems,
 } from "../db/schema";
 import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
+import { policy } from "../policy/cache";
 import { PROACTIVE_RUN_KIND } from "../proactive/engine";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
@@ -128,14 +128,18 @@ export function createBotReset(options: {
       eq(proactiveSettings.agentId, agentId),
     );
 
-  /** Grants only: a rule that makes the Bot ask first or hand back is the person's protection. */
+  /**
+   * Grants only: a rule that makes the Bot ask first or hand back is the person's protection. The rules
+   * are Intelligence's (organization policy), held in memory on every server.
+   */
   const standingApprovals = (ownerUserId: string, agentId: string) =>
-    and(
-      eq(approvalRules.ownerUserId, ownerUserId),
-      eq(approvalRules.botId, agentId),
-      inArray(approvalRules.behaviour, ["allow", "pre_approved"]),
-      isNull(approvalRules.revokedAt),
-    );
+    policy()
+      .approvalRules({ ownerUserId })
+      .filter(
+        (rule) =>
+          rule.agentId === agentId &&
+          (rule.behaviour === "allow" || rule.behaviour === "pre_approved"),
+      );
 
   async function count(query: Promise<{ total: number }[]>): Promise<number> {
     const [row] = await query;
@@ -219,12 +223,7 @@ export function createBotReset(options: {
           .from(proactiveSettings)
           .where(research(ownerUserId, agentId)),
       ),
-      standingApprovals: await count(
-        database
-          .select({ total })
-          .from(approvalRules)
-          .where(standingApprovals(ownerUserId, agentId)),
-      ),
+      standingApprovals: standingApprovals(ownerUserId, agentId).length,
     };
   }
 
@@ -238,7 +237,7 @@ export function createBotReset(options: {
       for (const channelId of found.mine)
         await softDeleteChannel(actor, channelId);
 
-      return database.transaction(async (transaction) => {
+      const done = await database.transaction(async (transaction) => {
         // The lock defaults adoption takes, so no default is adopted between these reads and the deletes.
         await lockDefaults(transaction, ownerUserId, agentId);
         const sources = await transaction
@@ -360,11 +359,6 @@ export function createBotReset(options: {
             .delete(proactiveSettings)
             .where(inArray(proactiveSettings.id, ids));
         }
-        const revoked = await transaction
-          .update(approvalRules)
-          .set({ revokedAt: sql`now()` })
-          .where(standingApprovals(ownerUserId, agentId))
-          .returning({ id: approvalRules.id });
         return {
           conversations: found.mine.length,
           sharedConversationsKept: found.kept,
@@ -375,9 +369,19 @@ export function createBotReset(options: {
           followUps: followUps.length,
           formedMemories: formed.length,
           backgroundResearch: settings.length,
-          standingApprovals: revoked.length,
         };
       });
+      /*
+       * The standing grants are revoked in Intelligence once the deletes here have committed: no
+       * transaction here waits on Intelligence. Each revoke stands alone, so one that fails leaves the
+       * others revoked and the reset reports what it did.
+       */
+      let standingRevoked = 0;
+      for (const rule of standingApprovals(ownerUserId, agentId)) {
+        await policy().revokeApprovalRule(rule.id);
+        standingRevoked += 1;
+      }
+      return { ...done, standingApprovals: standingRevoked };
     },
   };
 }

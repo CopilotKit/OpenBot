@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { policy } from "../../policy/cache";
 import { recordAuditEvent } from "../../audit";
 import {
   databaseComplaint,
@@ -1449,6 +1450,11 @@ export function serverMethods(context: StoreContext) {
         await transaction.delete(mcpServers).where(eq(mcpServers.id, serverId));
         return removed.sort((left, right) => left.ref.localeCompare(right.ref));
       });
+      // Its Shared app approvals went with the row by a foreign key; they live in Intelligence now.
+      for (const approval of await policy().readConnectionApprovals({
+        connectionId: serverId,
+      }))
+        await policy().deleteConnectionApproval(approval);
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",

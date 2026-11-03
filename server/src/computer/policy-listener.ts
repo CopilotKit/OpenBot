@@ -2,34 +2,31 @@
  * Keep every server's copy of the boundary current.
  *
  * An administrator changes a rule on whichever server the load balancer picked. That server saves
- * the row and announces it; this is the other end, on every server including the one that wrote it.
+ * it in Intelligence, and Intelligence announces it; the policy cache on every server, including the
+ * one that wrote it, reads the new boundary and tells this, which re-reads it into the store the
+ * gateway asks on every action.
  *
  * Without it the rule applied on one server out of N and nothing said so. The admin screen reported
- * success because the row really was saved, and the `computer.policy_loaded` audit row was written
- * at boot, so both the screen and the trail agreed with each other and disagreed with what the fleet
- * was enforcing. A deny rule that stops roughly one action in N is worse than no deny rule, because
- * it looks like it works.
+ * success because the boundary really was saved, and the `computer.policy_loaded` audit row was
+ * written at boot, so both the screen and the trail agreed with each other and disagreed with what
+ * the fleet was enforcing. A deny rule that stops roughly one action in N is worse than no deny rule,
+ * because it looks like it works.
  *
- * Its own connection, because `LISTEN` holds one for the life of the subscription: taken from the
- * pool it would be a connection the rest of the server never gets back. Same shape, and the same
- * reason, as the channel activity listener.
+ * A missed announcement is the case a live notification cannot cover: a replica that was restarting,
+ * or whose socket had dropped, would go on enforcing the rules it read at boot. The cache reads
+ * everything again whenever its subscription joins, which includes every reconnect, and every minute,
+ * and each of those reads reaches here as a change when the boundary moved. Thanks to
+ * @NathanTarbert, whose #94 caught the reconnect case.
  */
-import postgres from "postgres";
-import { ACTION_POLICY_TOPIC, type PolicyStore } from "./policy-store";
+import type { PolicyCache } from "../policy/cache";
+import type { PolicyStore } from "./policy-store";
 
 export type PolicyListener = { stop: () => Promise<void> };
 
 export async function startPolicyListener(
-  databaseUrl: string,
+  cache: PolicyCache,
   store: PolicyStore,
 ): Promise<PolicyListener> {
-  const connection = postgres(databaseUrl, { max: 1 });
-
-  /*
-   * The payload is ignored on purpose. It says the boundary moved, not what it moved to: a rule list
-   * can outgrow NOTIFY's 8000-byte cap, and a server enforcing whatever fitted in a payload would be
-   * a subtler version of the bug this fixes. The row is the record; this re-reads it.
-   */
   const reread = () => {
     void store.refresh().catch((error) => {
       console.error(
@@ -41,24 +38,15 @@ export async function startPolicyListener(
       );
     });
   };
-
-  /*
-   * Also on reconnect, which is the case a live notification cannot cover.
-   *
-   * A NOTIFY reaches whoever is listening at the time. A replica that was restarting, or whose
-   * connection had dropped, is not, so it misses the announcement and goes on enforcing the rules it
-   * read at boot until something restarts it again. That is the original bug wearing a smaller hat,
-   * and it is worse for being intermittent.
-   *
-   * `onlisten` fires whenever the driver establishes or re-establishes the subscription, so the row
-   * is re-read at exactly the moments this server could have missed something. Thanks to
-   * @NathanTarbert, whose #94 caught this.
-   */
-  await connection.listen(ACTION_POLICY_TOPIC, reread, reread);
+  const stopListening = cache.onChange((resource) => {
+    if (resource === "action_boundary") reread();
+  });
+  // What the cache holds now, in case it changed between the store's load and this subscription.
+  reread();
 
   return {
     stop: async () => {
-      await connection.end();
+      stopListening();
     },
   };
 }
