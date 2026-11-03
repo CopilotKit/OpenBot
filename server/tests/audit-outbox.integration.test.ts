@@ -230,6 +230,63 @@ describe("the audit outbox", () => {
     ).toEqual(["outbox-shape"]);
   });
 
+  test("a record waiting to be sent cannot be rewritten or emptied out, only sent", async () => {
+    /*
+     * The outbox holds the trail until Intelligence has it, so it keeps the trail's rule: a pending
+     * record's content cannot change (here, a person's row re-attributed to a routine), and the table
+     * cannot be truncated. The
+     * drainer's own bookkeeping (setting a refused row aside) and its delete once a row is stored
+     * still work.
+     */
+    const targetId = `outbox-tamper-${randomUUID()}`;
+    await write(targetId, 1);
+    const refusedAsAppendOnly = async (work: () => Promise<unknown>) => {
+      try {
+        await work();
+        return false;
+      } catch (error) {
+        let current: unknown = error;
+        for (let depth = 0; depth < 5 && current; depth += 1) {
+          if (String((current as Error).message ?? "").includes("append-only"))
+            return true;
+          current = (current as { cause?: unknown }).cause;
+        }
+        return false;
+      }
+    };
+
+    expect(
+      await refusedAsAppendOnly(() =>
+        database.execute(
+          sql`update audit_outbox set record = jsonb_set(record, '{initiator}', '{"kind":"routine","id":"forged"}')
+              where record->'target'->>'id' = ${targetId}`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      await refusedAsAppendOnly(() =>
+        database.transaction(async (tx) => {
+          await tx.execute(sql`truncate table audit_outbox`);
+          throw new Error("rolled back on purpose, never committed");
+        }),
+      ),
+    ).toBe(true);
+    const [pending] = await outboxRows(targetId);
+    expect(pending).toBeDefined();
+    await database
+      .update(auditOutbox)
+      .set({ refusal: "bookkeeping only" })
+      .where(eq(auditOutbox.seq, pending?.seq ?? -1));
+    await database
+      .update(auditOutbox)
+      .set({ refusal: null })
+      .where(eq(auditOutbox.seq, pending?.seq ?? -1));
+
+    await flushAuditTrail();
+    expect(await outboxRows(targetId)).toEqual([]);
+    expect(await auditRows({ targetId })).toHaveLength(1);
+  });
+
   test("a row written in a transaction that rolls back never reaches the trail", async () => {
     const targetId = `outbox-rolled-back-${randomUUID()}`;
     await database

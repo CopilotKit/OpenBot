@@ -42,6 +42,10 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+  -- Answered first: a statement trigger has no OLD row to compare.
+  IF TG_OP = 'TRUNCATE' THEN
+    RAISE EXCEPTION 'Audit records are append-only: the outbox cannot be emptied, only drained';
+  END IF;
   IF NEW.seq IS DISTINCT FROM OLD.seq
      OR NEW.kind IS DISTINCT FROM OLD.kind
      OR NEW.id IS DISTINCT FROM OLD.id
@@ -58,4 +62,11 @@ DROP TRIGGER IF EXISTS audit_outbox_append_only ON audit_outbox;
 CREATE TRIGGER audit_outbox_append_only
 BEFORE UPDATE ON audit_outbox
 FOR EACH ROW
+EXECUTE FUNCTION prevent_audit_outbox_rewrite();
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS audit_outbox_no_truncate ON audit_outbox;
+--> statement-breakpoint
+CREATE TRIGGER audit_outbox_no_truncate
+BEFORE TRUNCATE ON audit_outbox
+FOR EACH STATEMENT
 EXECUTE FUNCTION prevent_audit_outbox_rewrite();
