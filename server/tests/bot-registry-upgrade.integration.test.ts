@@ -256,7 +256,7 @@ describe("copying an existing deployment's Bots into Intelligence", () => {
     // Intelligence keeps idempotency keys to 128 characters; a key built from a 200-character id
     // would be refused and stop the boot.
     const database = await freshDeployment();
-    const longId = `copy-long-${"x".repeat(180)}`.slice(0, 200);
+    const longId = `copy-long-${randomUUID()}-${"x".repeat(200)}`.slice(0, 200);
     await database.insert(agents).values({
       id: longId,
       name: "Long",

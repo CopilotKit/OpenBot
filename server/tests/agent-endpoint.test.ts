@@ -240,6 +240,8 @@ describe("the key a customer's agent sits behind", () => {
           return { ...vaultRow, encryptedValue: value.encryptedValue };
         },
         revoke: async () => new Date(),
+        // No live key for this agent yet, so the vault creates one rather than rotating.
+        findLiveByKey: async () => null,
       } as never,
       encryptionKey: TEST_KEY,
       agentId: "agent-1",
@@ -262,6 +264,8 @@ describe("the key a customer's agent sits behind", () => {
           return vaultRow as never;
         },
         revoke: async () => new Date(),
+        // No live key for this agent yet, so the vault creates one rather than rotating.
+        findLiveByKey: async () => null,
       } as never,
       encryptionKey: TEST_KEY,
       agentId: "agent-1",

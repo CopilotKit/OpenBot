@@ -28,11 +28,14 @@ import type { BotDraft } from "./types";
 export const BOT_COPY_NAME = "bots";
 
 /**
- * The same key for the same Bot from every replica, so their copies are one write. Hashed, because
- * Intelligence refuses an Idempotency-Key over 128 characters and a Bot id may be up to 200.
+ * The same key for the same copy from every replica, so their copies are one write: made from the
+ * Bot as the local rows describe it, which every replica reads alike. The rows, not only the id, so a
+ * different body under the same id (a database restored over another) is told apart as a different
+ * request rather than refused as a reused key. Hashed, because Intelligence refuses an
+ * Idempotency-Key over 128 characters and a Bot id may be up to 200.
  */
-function upgradeKey(botId: string): string {
-  return `openbot-upgrade:bots:${createHash("sha256").update(botId).digest("hex")}`;
+function upgradeKey(draft: BotDraft): string {
+  return `openbot-upgrade:bots:${createHash("sha256").update(JSON.stringify(draft)).digest("hex")}`;
 }
 
 export type BotCopyOutcome =
@@ -122,7 +125,7 @@ export async function copyLocalBotsToIntelligence(
       deletedAt: row.deletedAt,
     };
     try {
-      await directory.create(draft, upgradeKey(row.id));
+      await directory.create(draft, upgradeKey(draft));
       created += 1;
     } catch (error) {
       // Another replica copied it between the listing and here.

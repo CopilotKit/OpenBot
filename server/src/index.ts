@@ -321,32 +321,6 @@ clearLearningRevisionFallback();
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
-/*
- * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
- * Intelligence's change announcements (agents/bot-registry/directory.ts). Started before anything
- * reads a Bot, and fatal when Intelligence cannot answer: a server with no Bots would show everybody
- * an empty roster and say nothing about why.
- */
-const botDirectory = installBotDirectory(
-  createBotDirectory({
-    registry: createAgentRegistryClient({
-      apiUrl: config.runtime.intelligence.apiUrl,
-      apiKey: config.runtime.intelligence.apiKey,
-    }),
-    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
-  }),
-);
-// A Bot deleted for good takes this deployment's rows that named it, as the old foreign keys did.
-botDirectory.onPurged((botId) => removeBotLocalRows(database, [botId]));
-await botDirectory.start();
-// An upgraded deployment's Bots, copied from the local tables once (agents/bot-registry/upgrade.ts).
-await copyLocalBotsToIntelligence(database, botDirectory);
-// Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
-// upgrading deployment's own Bots are not in Intelligence yet.
-await sweepPurgedBotRows(
-  database,
-  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
-);
 const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
@@ -447,6 +421,32 @@ const learningSettings = withLearningAutoAssign(
 );
 learningAutoAssign.start();
 await initializeDevActorUser(database, config.singleUser);
+/*
+ * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
+ * Intelligence's change announcements (agents/bot-registry/directory.ts). Started before anything
+ * reads a Bot (nothing above does), and fatal when Intelligence cannot answer: a server with no Bots would show everybody
+ * an empty roster and say nothing about why.
+ */
+const botDirectory = installBotDirectory(
+  createBotDirectory({
+    registry: createAgentRegistryClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+// A Bot deleted for good takes this deployment's rows that named it, as the old foreign keys did.
+botDirectory.onPurged((botId) => removeBotLocalRows(database, [botId]));
+await botDirectory.start();
+// An upgraded deployment's Bots, copied from the local tables once (agents/bot-registry/upgrade.ts).
+await copyLocalBotsToIntelligence(database, botDirectory);
+// Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
+// upgrading deployment's own Bots are not in Intelligence yet.
+await sweepPurgedBotRows(
+  database,
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
