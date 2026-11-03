@@ -21,9 +21,9 @@ import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -353,15 +353,10 @@ test("switching approvals off withdraws what was only waiting on it, resumes the
       { content: WITHDRAWN_APPROVALS_OFF, error: WITHDRAWN_APPROVALS_OFF },
     ]);
     expect(clicks).toEqual([]);
-    const [row] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "approval.withdrawn"),
-          eq(auditEvents.targetId, approvalId),
-        ),
-      );
+    const [row] = await auditRows({
+      eventType: "approval.withdrawn",
+      targetId: approvalId,
+    });
     expect(row?.payload).toMatchObject({ reason: WITHDRAWN_APPROVALS_OFF });
   } finally {
     await service.setPreferences(owner, { enabled: true });
@@ -397,18 +392,11 @@ test("a new allow rule withdraws the requests it now covers", async () => {
 });
 
 test("the trail tells a person's decision from the gate's own verdict", async () => {
-  const rows = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.actorUserId, owner),
-        inArray(auditEvents.eventType, [
-          "approval.person_decided",
-          "approval.evaluated",
-        ]),
-      ),
-    );
+  // The trail is Intelligence's, read after the outbox is flushed, by this file's own owner.
+  const rows = await auditRows({
+    actorUserId: owner,
+    eventType: ["approval.person_decided", "approval.evaluated"],
+  });
   const person = rows.filter(
     (row) => row.eventType === "approval.person_decided",
   );

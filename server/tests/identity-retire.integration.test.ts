@@ -9,7 +9,6 @@ import {
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   credentials,
   identityLinkChallenges,
   identityLinks,
@@ -20,6 +19,7 @@ import {
 } from "../src/identity/retire";
 import { createIdentityStore, identityUserLock } from "../src/identity/store";
 import { IdentityLinkError } from "../src/identity/types";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -317,10 +317,9 @@ test("the audit trail's own store writes the rows inside the retirement's transa
     ),
   ).toBe(1);
 
-  const rows = await database
-    .select()
-    .from(auditEvents)
-    .where(eq(auditEvents.targetId, linkId));
+  // The store writes the row to the outbox inside the retirement's transaction; once that commits,
+  // the drainer carries it to the trail in Intelligence, where it is read.
+  const rows = await auditRows({ targetId: linkId });
   expect(rows).toHaveLength(1);
   expect(rows[0]?.eventType).toBe("identity.link_retired");
 });
