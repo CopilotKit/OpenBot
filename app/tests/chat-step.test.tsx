@@ -17,7 +17,7 @@ import {
   useConversationStatus,
   useReportConversation,
 } from "@/components/channels/conversation-presence";
-import { readToolName } from "@/lib/plugins/tool-name";
+import { readToolName } from "@openbot/shared/tool-name";
 import { type StepApproval, stepFor, THINKING } from "@/lib/channels/step";
 import { settleReactWork } from "./settle-react-work";
 

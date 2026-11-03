@@ -1,6 +1,10 @@
 import type { ApprovalRequest } from "./approvals";
 import { BROWSER_STEP_PLAIN } from "./computers/step-names";
-import { connectorName, humanise, readToolName } from "./plugins/tool-name";
+import {
+  connectorName,
+  humanise,
+  readToolName,
+} from "@openbot/shared/tool-name";
 
 /**
  * How an approval request reads on its card: a title in plain words, the app it is for, the fields a

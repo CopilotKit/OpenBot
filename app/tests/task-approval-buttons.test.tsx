@@ -8,7 +8,7 @@ import { WaitingForYou } from "@/components/approvals/waiting";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * An approval a task started from a check-in raised offers Allow once and Deny, never "Always allow
+ * An approval a task started from a check-in raised offers Decline and Allow once, never "Always allow
  * here": tasks ask before every change whatever the person's rules say, so a rule saved from one
  * would be ignored the next time. Any other approval still offers it. Both places a person decides
  * one in the browser: the card in the conversation, and the row on the Bot's page.
@@ -99,7 +99,7 @@ const names = (scope: HTMLElement) =>
     .getAllByRole("button")
     .map((button) => button.textContent);
 
-test("in the conversation, a check-in task's approval offers Allow once and Deny, and no standing rule", async () => {
+test("in the conversation, a check-in task's approval offers Decline and Allow once, and no standing rule", async () => {
   serving();
   const view = draw(
     <>
@@ -111,10 +111,10 @@ test("in the conversation, a check-in task's approval offers Allow once and Deny
       </section>
     </>,
   );
-  await view.findAllByRole("region", { name: "Waiting for your approval" });
+  await view.findAllByRole("button", { name: "Allow once" });
   expect(names(view.getByRole("region", { name: "task" }))).toEqual([
+    "Decline",
     "Allow once",
-    "Deny",
   ]);
   expect(
     within(view.getByRole("region", { name: "task" })).getByText(
@@ -122,26 +122,27 @@ test("in the conversation, a check-in task's approval offers Allow once and Deny
     ),
   ).toBeTruthy();
   expect(names(view.getByRole("region", { name: "own" }))).toEqual([
+    "Decline",
     "Allow once",
     "Always allow here",
-    "Deny",
   ]);
 });
 
 test("on the Bot's page, the same: the task's row has no Always allow here, the other row keeps it", async () => {
   serving();
   const view = draw(<WaitingForYou agentId="assistant" />);
+  // Each row is the conversation's approval card, a region named by its title.
   const row = async (path: string) =>
-    (await view.findByText(path, { exact: false })).closest(
-      "[data-slot=item]",
+    (await view.findAllByText(path, { exact: false }))[0]?.closest(
+      "section",
     ) as HTMLElement;
   expect(names(await row("deno-rollback-note.md"))).toEqual([
+    "Decline",
     "Allow once",
-    "Deny",
   ]);
   expect(names(await row("notes.md"))).toEqual([
+    "Decline",
     "Allow once",
     "Always allow here",
-    "Deny",
   ]);
 });

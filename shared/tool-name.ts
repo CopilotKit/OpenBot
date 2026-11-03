@@ -37,14 +37,20 @@ export function readToolName(
   if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
 
   const [, rawServer, ...rest] = parts;
-  return appToolName(rawServer ?? "", rest.join("__"));
+  return appToolName(rawServer ?? "", rest.join("__"), running);
 }
 
 /**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
  * `mcp__server__tool` name, and what an approval is asked about as `server/tool`.
  */
-export function appToolName(server: string, tool: string): ToolName {
+export function appToolName(
+  server: string,
+  tool: string,
+  running: ToolState = false,
+  /** Whether the person's own mail and calendar are named for what happened to them. */
+  personal = true,
+): ToolName {
   const broker = brokeredApp(server);
   /*
    * Research is named for what it did, not for who did it. `web_search_exa` would read "Web search
@@ -62,10 +68,10 @@ export function appToolName(server: string, tool: string): ToolName {
    * them, with the app beside the words so two mailboxes are still told apart. See `personalAction`
    * for which calls qualify.
    */
-  const personal = personalAction(server, tool);
-  if (personal)
+  const action = personal ? personalAction(server, tool) : null;
+  if (action)
     return {
-      label: PERSONAL_WORDS[personal][stateOf(running)],
+      label: PERSONAL_WORDS[action][stateOf(running)],
       detail: connectorName(server),
     };
   /*
@@ -143,7 +149,13 @@ export function approvalWords(action: { toolRef: string; scope: string }): {
   const slash = action.toolRef.indexOf("/");
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
-    const { label } = appToolName(app, action.toolRef.slice(slash + 1));
+    // The app's own action, as a task's line and a chat card have always said it: "send message".
+    const { label } = appToolName(
+      app,
+      action.toolRef.slice(slash + 1),
+      "plain",
+      false,
+    );
     return {
       action: label.charAt(0).toLowerCase() + label.slice(1),
       place: connectorName(app),

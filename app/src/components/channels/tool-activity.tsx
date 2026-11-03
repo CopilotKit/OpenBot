@@ -385,6 +385,8 @@ export function stepDetails(step: ToolItem): StepDetails {
       refused: false,
       declined: false,
       alreadyWaiting: false,
+      stopped: false,
+      notYet: false,
       pages: 0,
       inputs: [],
       ...(output ? { output, verbatim: true } : {}),
@@ -514,13 +516,19 @@ export function summarise(steps: readonly StepDetails[]): string {
   const done = steps.filter(isDone);
   const of = (kind: StepKind) => done.filter((step) => step.kind === kind);
   const phrases: string[] = [];
-  // Claude Code's own words for a run of reads and searches.
-  const files = of("file").length;
+  /*
+   * Claude Code's own words for a run of reads and searches, which count every one that finished,
+   * as Claude Code counts them: one that didn't work is still counted here, and the issues beside
+   * the line say how many didn't.
+   */
+  const ran = (kind: StepKind) =>
+    steps.filter((step) => step.kind === kind && !step.pending);
+  const files = ran("file").length;
   if (files) phrases.push(`read ${plural(files, "file", "files")}`);
-  const patterns = of("pattern").length;
+  const patterns = ran("pattern").length;
   if (patterns)
     phrases.push(`searched for ${plural(patterns, "pattern", "patterns")}`);
-  const directories = of("directory").length;
+  const directories = ran("directory").length;
   if (directories)
     phrases.push(`listed ${plural(directories, "directory", "directories")}`);
   if (of("search").length) phrases.push("searched the web");

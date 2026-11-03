@@ -10,7 +10,7 @@ import {
   ownToolLabel,
   personToolLabel,
   readToolName,
-} from "@/lib/plugins/tool-name";
+} from "@openbot/shared/tool-name";
 
 /**
  * What the line under a conversation's name may say about the step its Bot is on, where the step's

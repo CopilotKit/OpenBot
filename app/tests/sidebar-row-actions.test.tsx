@@ -123,6 +123,7 @@ function renderSidebar(channels: ChannelSummary[], inbox?: unknown) {
     selfHostBannerDismissed: true,
     narration: null,
     skin: "openbot",
+    proactive: "on",
   });
   queryClient.setQueryData(agentKeys.list(false), []);
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {
