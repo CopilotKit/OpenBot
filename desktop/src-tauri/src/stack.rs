@@ -9631,3 +9631,232 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+/// Project only persistent identity from the selected Compose configuration. Never retain its
+/// secret-bearing environment wholesale in an update journal or log.
+pub fn runtime_update_identity(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<serde_json::Value, String> {
+    let bytes = postgres_configuration(engine, root, secrets).map_err(|p| p.said)?;
+    let config: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let volumes = config["volumes"]
+        .as_object()
+        .ok_or("Compose configuration has no persistent volume identity")?;
+    let mut names = std::collections::BTreeMap::new();
+    for (key, value) in volumes {
+        names.insert(key, value["name"].clone());
+    }
+    let project = config["name"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or("Compose project identity is missing")?;
+    Ok(
+        serde_json::json!({"project":project,"volumes":names,"namespace":config["services"]["supervisor"]["environment"]["COMPUTER_NAMESPACE"],"databaseMounts":config["services"]["postgres"]["volumes"]}),
+    )
+}
+
+/// Called after all owned application writers stop. Bring up only the existing project's
+/// Postgres service, create a custom-format dump, and validate its table of contents. The caller
+/// retains Compose ownership and stops this service before preparation/startup continues.
+pub fn backup_runtime_database(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    destination: &Path,
+    expected_database: &str,
+) -> Result<(), String> {
+    let status = compose_start_command(engine, root, secrets, std::env::consts::OS)
+        .map_err(|p| p.said)?
+        .args([
+            "up",
+            "-d",
+            "--no-deps",
+            "--no-build",
+            "--pull",
+            "never",
+            "--wait",
+            "--wait-timeout",
+            "60",
+            "postgres",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !status.status.success() {
+        return Err(format!(
+            "backup Postgres startup failed: {}",
+            command_said(&status.stderr)
+        ));
+    }
+    verify_runtime_database_identity(engine, root, secrets, expected_database)?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+    }
+    let dump = compose_command(engine, root, secrets)
+        .args([
+            "exec",
+            "-T",
+            "postgres",
+            "sh",
+            "-c",
+            "exec pg_dump --format=custom --username=\"$POSTGRES_USER\" \"$POSTGRES_DB\"",
+        ])
+        .stdout(Stdio::from(file.try_clone().map_err(|e| e.to_string())?))
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    if !dump.status.success() {
+        return Err(format!("pg_dump failed: {}", command_said(&dump.stderr)));
+    }
+    let dump_file = std::fs::File::open(destination).map_err(|e| e.to_string())?;
+    if dump_file.metadata().map_err(|e| e.to_string())?.len() < 5 {
+        return Err("database backup is empty".into());
+    }
+    let checked = compose_command(engine, root, secrets)
+        .args(["exec", "-T", "postgres", "pg_restore", "--list"])
+        .stdin(Stdio::from(dump_file))
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !checked.status.success() {
+        return Err(format!(
+            "database archive validation failed: {}",
+            command_said(&checked.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Check the running selected project's release-owned containers, using their actual image
+/// references rather than Compose's desired configuration. PostgreSQL is separately preserved.
+pub fn verify_runtime_update_images(
+    engine: &Address,
+    root: &Path,
+    candidate: &serde_json::Value,
+) -> Result<(), String> {
+    let listing = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "-q"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !listing.status.success() {
+        return Err("could not inspect candidate Compose containers".into());
+    }
+    let ids = String::from_utf8(listing.stdout).map_err(|e| e.to_string())?;
+    let ids: Vec<_> = ids.split_whitespace().collect();
+    if ids.is_empty() {
+        return Err("no candidate containers are running".into());
+    }
+    let inspected = engine
+        .command()
+        .current_dir(root)
+        .arg("inspect")
+        .args(ids)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !inspected.status.success() {
+        return Err("candidate container inspection failed".into());
+    }
+    let containers: Vec<serde_json::Value> =
+        serde_json::from_slice(&inspected.stdout).map_err(|e| e.to_string())?;
+    let references = crate::updates::candidate_images(candidate)?;
+    let mut verified = std::collections::BTreeSet::new();
+    for container in containers {
+        let service = container["Config"]["Labels"]["com.docker.compose.service"]
+            .as_str()
+            .ok_or("container has no Compose service identity")?;
+        if service == "postgres" {
+            continue;
+        }
+        let image = container["Config"]["Image"]
+            .as_str()
+            .ok_or("container has no actual image identity")?;
+        if !references.iter().any(|reference| reference == image) {
+            return Err(format!(
+                "running service {service} is not a pinned candidate image"
+            ));
+        }
+        if container["State"]["Running"] != true {
+            return Err(format!("candidate service {service} is not running"));
+        }
+        verified.insert(service.to_string());
+    }
+    for service in ["supervisor", "agent-computer"] {
+        if !verified.contains(service) {
+            return Err(format!("candidate {service} was not verified"));
+        }
+    }
+    Ok(())
+}
+
+/// Compare the database's actual migration hashes and timestamps with the accepted release's
+/// journal. A package version or an HTTP health response cannot establish database identity.
+pub fn verify_runtime_database_identity(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    expected_database: &str,
+) -> Result<(), String> {
+    let journal: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("server/drizzle/meta/_journal.json"))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let entries = journal["entries"]
+        .as_array()
+        .ok_or("migration journal entries are missing")?;
+    if entries.last().and_then(|entry| entry["tag"].as_str()) != Some(expected_database) {
+        return Err("release database tag differs from local migration journal".into());
+    }
+    let mut expected = std::collections::BTreeMap::new();
+    use sha2::{Digest, Sha256};
+    for entry in entries {
+        let tag = entry["tag"].as_str().ok_or("invalid migration tag")?;
+        if tag.is_empty()
+            || !tag
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+        {
+            return Err("unsafe migration tag".into());
+        }
+        let bytes = std::fs::read(root.join("server/drizzle").join(format!("{tag}.sql")))
+            .map_err(|e| e.to_string())?;
+        let when = entry["when"]
+            .as_u64()
+            .ok_or("invalid migration timestamp")?;
+        expected.insert(format!("{:x}", Sha256::digest(bytes)), when);
+    }
+    let output=compose_command(engine,root,secrets).args(["exec","-T","postgres","sh","-c","exec psql --no-psqlrc --tuples-only --no-align --set=ON_ERROR_STOP=1 --username=\"$POSTGRES_USER\" \"$POSTGRES_DB\" --command=\"select coalesce(json_agg(json_build_object('hash',hash,'createdAt',created_at)), '[]'::json)::text from drizzle.__drizzle_migrations\""])
+        .output().map_err(|e|e.to_string())?;
+    if !output.status.success() {
+        return Err(
+            "could not read the actual database migration journal; no release was accepted".into(),
+        );
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    let mut actual = std::collections::BTreeMap::new();
+    for row in &rows {
+        let hash = row["hash"].as_str().ok_or("invalid migration hash")?;
+        let when = row["createdAt"]
+            .as_u64()
+            .ok_or("database migration has a missing timestamp")?;
+        if actual.insert(hash.to_string(), when).is_some() {
+            return Err("database migration journal has duplicate hashes".into());
+        }
+    }
+    if actual != expected {
+        return Err("actual database migration hashes/timestamps differ from the accepted release; integrate or repair the database explicitly before updating".into());
+    }
+    Ok(())
+}

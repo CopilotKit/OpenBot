@@ -16,7 +16,7 @@ use openbot_desktop_lib::{
     install, local_browser, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    supervise, telemetry, tray, windows as win,
+    supervise, telemetry, tray, updates, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -28,6 +28,9 @@ use tauri::{Emitter, Manager};
 /// What the shell is running, so the window and the tray say the same thing.
 #[derive(Default)]
 struct Shell {
+    /// Explicit runtime update excludes ordinary Start/Repair without replacing the supervisor.
+    updating: std::sync::atomic::AtomicBool,
+    update_cancelled: std::sync::atomic::AtomicBool,
     /// Session-only local folder authority; shutdown retires it before stopping the API server.
     host_access: Mutex<Option<host_access::HostAccess>>,
     /// Named, because a restart policy that cannot say which process died cannot start it again.
@@ -164,6 +167,9 @@ struct StartAttempt<'a> {
 impl<'a> StartAttempt<'a> {
     fn begin(shell: &'a Shell) -> Result<Self, Problem> {
         use std::sync::atomic::Ordering::SeqCst;
+        if shell.updating.load(SeqCst) && shell.update_cancelled.load(SeqCst) {
+            return Err(Self::cancelled());
+        }
         shell.starting.compare_exchange(false, true, SeqCst, SeqCst).map_err(|_| {
             Problem::plain("OpenBot is already starting or finishing a cancelled startup. Wait for it to finish, then try again.")
         })?;
@@ -502,6 +508,276 @@ fn windows_blocker_instruction(blocker: win::Blocker) -> String {
 ///
 /// Reported step by step rather than as one result, because these take minutes and a window with
 /// nothing moving in it reads as a hang.
+/// Update work uses the existing startup/stop ownership, plus one session exclusion for the
+/// gaps between preparation and startup. It never creates another process supervisor.
+struct RuntimeUpdateGuard(tauri::AppHandle);
+impl RuntimeUpdateGuard {
+    fn begin(app: &tauri::AppHandle) -> Result<Self, Problem> {
+        let shell = app.state::<Shell>();
+        let _startup = shell.startup.lock().unwrap();
+        if shell.starting.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Problem::plain(
+                "Wait for the current startup or installation to finish.",
+            ));
+        }
+        shell
+            .updating
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .map_err(|_| Problem::plain("A runtime update is already in progress."))?;
+        shell
+            .update_cancelled
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(Self(app.clone()))
+    }
+}
+impl Drop for RuntimeUpdateGuard {
+    fn drop(&mut self) {
+        self.0
+            .state::<Shell>()
+            .updating
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+fn require_update_root(shell: &Shell, root: &Path) -> Result<(), Problem> {
+    let wanted = std::fs::canonicalize(root).map_err(|e| Problem::from(e.to_string()))?;
+    for selected in [
+        shell.root.lock().unwrap().clone(),
+        shell.selected_root.lock().unwrap().clone(),
+        shell
+            .containers
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.root.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if std::fs::canonicalize(selected).map_err(|e| Problem::from(e.to_string()))? != wanted {
+            return Err(Problem::plain(
+                "Select this installation and stop the other installation before updating.",
+            ));
+        }
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn check_runtime_update(root: String, version: String) -> Result<serde_json::Value, Problem> {
+    tauri::async_runtime::spawn_blocking(move || {
+        updates::check(&stack::root_from(&root), &version).map_err(Problem::from)
+    })
+    .await
+    .map_err(|e| Problem::from(e.to_string()))?
+}
+#[tauri::command]
+async fn establish_runtime_baseline(
+    app: tauri::AppHandle,
+    root: String,
+) -> Result<serde_json::Value, Problem> {
+    let _update = RuntimeUpdateGuard::begin(&app)?;
+    let root = stack::root_from(&root);
+    require_update_root(&app.state::<Shell>(), &root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        updates::establish_baseline(&root).map_err(Problem::from)
+    })
+    .await
+    .map_err(|e| Problem::from(e.to_string()))?
+}
+#[tauri::command]
+async fn stage_runtime_update(
+    app: tauri::AppHandle,
+    root: String,
+    version: String,
+) -> Result<serde_json::Value, Problem> {
+    let _update = RuntimeUpdateGuard::begin(&app)?;
+    let root = stack::root_from(&root);
+    require_update_root(&app.state::<Shell>(), &root)?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let saved=preparation::saved_engine(&root).ok_or("This installation has no saved engine. Complete its original installation before updating.")?;
+        let found=engine::detect_saved(Some(saved));
+        let address=found.address.filter(|_|found.responding).ok_or("Start the installation's saved container engine before staging an update.")?.pin()?;
+        let staged=updates::stage(&root,&version)?;
+        let candidate=updates::staged_manifest(&root)?;
+        let images=updates::candidate_images(&candidate)?;
+        for (index,image) in images.iter().enumerate() {
+            let detail=format!("Staging update software ({}/{}).",index+1,images.len());
+            report_running(&handle,"update-images",&detail,None);
+            pull_metrics::pull_image(&address,image,|bytes|report_running(&handle,"update-images",&detail,Some(bytes)),|metrics|desktop_telemetry::pull_completed(&handle,metrics))?;
+        }
+        updates::mark_images_staged(&root,saved)?;
+        Ok::<_,Problem>(staged)
+    }).await.map_err(|e|Problem::from(e.to_string()))?
+}
+#[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Reuse the existing startup IPC fields without changing configuration."
+)]
+async fn apply_runtime_update(
+    app: tauri::AppHandle,
+    root: String,
+    api_url: String,
+    gateway_ws_url: String,
+    api_key: String,
+    model: ChosenModel,
+    harness: Option<harness::HarnessChoice>,
+    organization_auth_url: Option<String>,
+    backup_acknowledged: bool,
+) -> Result<serde_json::Value, Problem> {
+    if !backup_acknowledged {
+        return Err(Problem::plain(
+            "Acknowledge downtime and database backup recovery before applying this update.",
+        ));
+    }
+    let _update = RuntimeUpdateGuard::begin(&app)?;
+    let root = stack::root_from(&root);
+    require_update_root(&app.state::<Shell>(), &root)?;
+    let target = root.clone();
+    let (mut journal, address, identity, database_identity) =
+        tauri::async_runtime::spawn_blocking(move || {
+            let journal = updates::prepare_apply(&target)?;
+            let saved = preparation::saved_engine(&target)
+                .ok_or("This installation has no saved engine.")?;
+            updates::require_staged_images(&target, saved)?;
+            let found = engine::detect_saved(Some(saved));
+            let address = found
+                .address
+                .filter(|_| found.responding)
+                .ok_or("The saved container engine is not answering.")?
+                .pin()?;
+            preparation::require_images(&address, &updates::candidate_images(&journal.candidate)?)?;
+            let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+                &target,
+                &target.join(".env"),
+                &openbot_env::MINTED[..],
+            )?;
+            let identity = stack::runtime_update_identity(&address, &target, &secrets)?;
+            let database_identity = updates::accepted_database_identity(&target)?;
+            Ok::<_, Problem>((journal, address, identity, database_identity))
+        })
+        .await
+        .map_err(|e| Problem::from(e.to_string()))??;
+    let handle = app.clone();
+    let target = root.clone();
+    tauri::async_runtime::spawn_blocking(move || stop_for_update(&handle, &target))
+        .await
+        .map_err(|e| Problem::from(e.to_string()))??;
+    let stopped_generation = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let handle = app.clone();
+    let target = root.clone();
+    let engine = address.clone();
+    journal=tauri::async_runtime::spawn_blocking(move || {
+        let shell=handle.state::<Shell>(); let _startup=shell.startup.lock().unwrap();
+        if shell.start_generation.load(std::sync::atomic::Ordering::SeqCst)!=stopped_generation { return Err(Problem::plain("Update was cancelled by Stop before mutation.")); }
+        updates::backup_vendor(&target,&mut journal)?;
+        let secrets=openbot_desktop_lib::vault::already_given_no_ui(&target,&target.join(".env"),&openbot_env::MINTED[..])?;
+        *shell.containers.lock().unwrap()=Some(ContainerDeployment{root:target.clone(),address:engine.clone()});
+        if let Err(error)=stack::backup_runtime_database(&engine,&target,&secrets,&updates::database_backup_path(&journal),&database_identity) {
+            let stopped=down_owned_containers(&shell,&target);
+            return Err(Problem::with("The database backup failed. OpenBot remains stopped; the update journal and previous source are retained.",format!("{error}; database stop: {stopped:?}")));
+        }
+        // Retire only the installation's own temporary backup database service, with no volumes.
+        down_owned_containers(&shell,&target)?;
+        if let Err(error)=updates::install_candidate(&target,&mut journal) {
+            let rollback=updates::rollback_preparation(&target,&mut journal);
+            return Err(Problem::with("Candidate installation failed. Previous vendor restoration was attempted; inspect the update journal before continuing.",format!("{error}; restore: {rollback:?}")));
+        }
+        let candidate_identity=stack::runtime_update_identity(&engine,&target,&secrets);
+        if candidate_identity.as_ref().ok()!=Some(&identity) {
+            updates::rollback_preparation(&target,&mut journal)?;
+            return Err(Problem::with("The candidate changes or cannot prove Compose project, volume or namespace identity. Previous source was restored.",format!("{candidate_identity:?}")));
+        }
+        Ok::<_,Problem>(journal)
+    }).await.map_err(|e|Problem::from(e.to_string()))??;
+    if let Err(problem) =
+        prepare_installation_inner(app.clone(), root.to_string_lossy().into(), harness.clone())
+            .await
+    {
+        let stopped = stop_for_update(&app, &root);
+        let restored = updates::rollback_preparation(&root, &mut journal);
+        return Err(Problem::with("Update preparation failed. OpenBot is stopped; repair the previous accepted release after resolving the reported failure.",format!("{}; stop: {stopped:?}; vendor restore: {restored:?}",problem_detail(problem))));
+    }
+    if app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst)
+        != stopped_generation + 1
+    {
+        updates::rollback_preparation(&root, &mut journal)?;
+        return Err(Problem::plain(
+            "Update was cancelled by Stop. Previous vendor files were restored.",
+        ));
+    }
+    updates::mark_starting(&root, &mut journal)?;
+    let launched = start_stack_inner(
+        app.clone(),
+        root.clone(),
+        api_url,
+        gateway_ws_url,
+        api_key,
+        model,
+        harness,
+        organization_auth_url,
+    )
+    .await;
+    if let Err(problem) = launched {
+        let stopped = stop_for_update(&app, &root);
+        return Err(Problem::with("The candidate did not complete migration/startup. OpenBot remains stopped. Keep the update journal and database backup; source rollback does not undo SQL.",format!("{}; stop: {stopped:?}; backup: {}",problem_detail(problem),updates::database_backup_path(&journal).display())));
+    }
+    let target = root.clone();
+    let candidate = journal.candidate.clone();
+    let engine = address.clone();
+    let verified = tauri::async_runtime::spawn_blocking(move || {
+        let ports = openbot_env::Ports::read(&target).map_err(|e| e.to_string())?;
+        updates::verify_release_endpoint(ports.server, &candidate)?;
+        stack::verify_runtime_update_images(&engine, &target, &candidate)?;
+        let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+            &target,
+            &target.join(".env"),
+            &openbot_env::MINTED[..],
+        )
+        .map_err(problem_detail)?;
+        stack::verify_runtime_database_identity(
+            &engine,
+            &target,
+            &secrets,
+            candidate["compatibility"]["database"]["to"]
+                .as_str()
+                .ok_or("candidate database identity is missing")?,
+        )?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| Problem::from(e.to_string()))?;
+    if let Err(error) = verified {
+        let stopped = stop_for_update(&app, &root);
+        return Err(Problem::with("Candidate release identity could not be verified. OpenBot remains stopped with its recovery journal and backup.",format!("{error}; stop: {stopped:?}")));
+    }
+    let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
+    if shell.root.lock().unwrap().as_ref() != Some(&root) {
+        return Err(Problem::plain(
+            "The candidate stopped before acceptance. Its update journal remains for recovery.",
+        ));
+    }
+    let accepted = updates::accept(&root, &mut journal);
+    drop(_startup);
+    if let Err(error) = accepted {
+        let stopped = stop_for_update(&app, &root);
+        return Err(Problem::with("The verified runtime could not record final acceptance. It is stopped; retain the update journal and database backup for recovery.",format!("{error}; stop: {stopped:?}")));
+    }
+    accepted.map_err(Problem::from)
+}
+
 #[tauri::command]
 async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
     let saved = {
@@ -516,6 +792,24 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
 /// Complete all local software acquisition before either authentication screen is available.
 #[tauri::command]
 async fn prepare_installation(
+    app: tauri::AppHandle,
+    root: String,
+    harness: Option<harness::HarnessChoice>,
+) -> Result<(), Problem> {
+    if app
+        .state::<Shell>()
+        .updating
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(Problem::plain(
+            "A runtime update is in progress. Wait for it to finish before repairing.",
+        ));
+    }
+    updates::require_no_interruption(&stack::root_from(&root))?;
+    prepare_installation_inner(app, root, harness).await
+}
+
+async fn prepare_installation_inner(
     app: tauri::AppHandle,
     root: String,
     harness: Option<harness::HarnessChoice>,
@@ -874,6 +1168,17 @@ async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
 ) -> Result<(), Problem> {
+    if app
+        .state::<Shell>()
+        .updating
+        .load(std::sync::atomic::Ordering::SeqCst)
+        && root.join(updates::JOURNAL).exists()
+    {
+        // The updater already verified and installed this candidate. Its accepted pin remains the
+        // previous version until owned startup and release identity verification complete.
+        return Ok(());
+    }
+    updates::require_no_interruption(root)?;
     report_running(app, "deployment", "Checking the OpenBot release.", None);
     // Both release discovery and downloading use blocking HTTP. Keeping them in a blocking task
     // avoids dropping reqwest's runtime inside this async context.
@@ -1465,7 +1770,17 @@ async fn start_stack<R: tauri::Runtime>(
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
+    if app
+        .state::<Shell>()
+        .updating
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(Problem::plain(
+            "A runtime update is in progress. Wait for it to finish before starting.",
+        ));
+    }
     let root = stack::root_from(&root);
+    updates::require_no_interruption(&root)?;
     start_stack_inner(
         app,
         root,
@@ -1754,6 +2069,20 @@ async fn start_stack_inner<R: tauri::Runtime>(
             // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
             &existing_secrets,
         );
+        for (key, value) in openbot_env::read_already_set(
+            &root.join(".env"),
+            &[
+                "TENANT_PACKAGE_DIR",
+                "COMPUTER_NAMESPACE",
+                "COMPOSE_PROJECT_NAME",
+                "COMPOSE_PROFILES",
+                "COMPOSE_FILE",
+            ],
+        )
+        .map_err(|e| Problem::from(e.to_string()))?
+        {
+            settings.insert(key, value);
+        }
         if let Some(authority) = organization_auth_url {
             settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
         }
@@ -1804,6 +2133,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
         // Set before Bun imports the runtime, and retained for supervised restarts.
         secrets.extend(desktop_telemetry::runtime_env(&app));
+        secrets.extend(updates::runtime_build_environment(&root)?);
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
@@ -1968,6 +2298,15 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
 /// quitting) and a person who used one of them and got a different amount of stopping would be
 /// right to call that a bug.
 fn stop_everything<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    fallback_root: &Path,
+) -> Result<(), String> {
+    app.state::<Shell>()
+        .update_cancelled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    stop_for_update(app, fallback_root)
+}
+fn stop_for_update<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     fallback_root: &Path,
 ) -> Result<(), String> {
@@ -4415,6 +4754,10 @@ fn main() {
             windows_blocker_instruction,
             prepare_engine,
             prepare_installation,
+            check_runtime_update,
+            stage_runtime_update,
+            establish_runtime_baseline,
+            apply_runtime_update,
             start_stack,
             reset_leftover_database,
             stop_stack,

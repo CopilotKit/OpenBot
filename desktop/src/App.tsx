@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
 import { StartFresh } from "./StartFresh";
+import { RuntimeUpdates } from "./RuntimeUpdates";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
@@ -609,6 +610,36 @@ export function App() {
     }
   }
 
+  async function applyRuntimeUpdate() {
+    setBusy(true);
+    setFailure(null);
+    setSteps([]);
+    try {
+      const result = await invoke("apply_runtime_update", {
+        root: root.trim(),
+        apiUrl,
+        gatewayWsUrl: wsUrl,
+        apiKey,
+        model,
+        harness,
+        ...(organizationAuthorityUrl !== null
+          ? { organizationAuthUrl: organizationAuthorityUrl }
+          : {}),
+        backupAcknowledged: true,
+      });
+      setRunning(true);
+      setRecoveryFailure(null);
+      return result;
+    } catch (error) {
+      setRunning(false);
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const runtimeUpdates = <RuntimeUpdates key={root} root={root} onApply={applyRuntimeUpdate} />;
+
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
     setBusy(true);
@@ -897,6 +928,7 @@ export function App() {
           }}
           onBack={changeModelAfterAskFailure}
         />
+        {runtimeUpdates}
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
@@ -969,6 +1001,7 @@ export function App() {
             Repair installation
           </button>
         )}
+        {runtimeUpdates}
         <details>
           <summary>Installation options</summary>
           <button
@@ -991,6 +1024,7 @@ export function App() {
   return (
     <main>
       <div className="sheet connection-sheet">
+        {returningToInstallation && runtimeUpdates}
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}

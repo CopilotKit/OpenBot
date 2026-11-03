@@ -231,7 +231,27 @@ pub const ALSO_COPIED_FILES: [&str; 0] = [];
 /// The stamp is written last. Anything that fails before that leaves a directory without one, which
 /// `needs_fetch` treats as absent, so an interrupted download is retried rather than half-run.
 pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
-    let body = get(&tarball_url(version)).map_err(|error| {
+    crate::updates::require_no_interruption(root)?;
+    let policy = crate::updates::distribution(root)?;
+    // Repair never lays a new source archive over an established active root. Missing image
+    // metadata can be repaired at the existing pin; source changes require explicit staging.
+    if let Some(installed) = installed(root) {
+        if installed.version != version {
+            return Err(
+                "Use the explicit runtime update controls to change an installed release".into(),
+            );
+        }
+        if installed.layout != layout() || REQUIRED.iter().any(|path| !root.join(path).exists()) {
+            return Err("This installation needs source repair. Preserve its customer files and establish a verified baseline before explicit source replacement; automatic repair will not overwrite the active tree.".into());
+        }
+        fetch_images(root, version)?;
+        return Ok(());
+    }
+    let source_url = format!(
+        "https://github.com/{}/archive/refs/tags/{version}.tar.gz",
+        policy.repository
+    );
+    let body = get(&source_url).map_err(|error| {
         format!("could not fetch {version}: {error}. Is that a released version?")
     })?;
 
@@ -329,7 +349,12 @@ pub fn unpack(root: &Path, body: &[u8]) -> Result<(), String> {
 /// Parsed here rather than at start-up so a release missing an image fails while the person is
 /// still looking at a screen that says what is being fetched, not later inside Compose's output.
 fn fetch_images(root: &Path, version: &str) -> Result<(), String> {
-    let body = get(&images_url(version))
+    let policy = crate::updates::distribution(root)?;
+    let url = format!(
+        "https://github.com/{}/releases/download/{version}/{IMAGES}",
+        policy.repository
+    );
+    let body = get(&url)
         .map_err(|error| format!("could not fetch the image list for {version}: {error}"))?;
     let manifest: Images = serde_json::from_slice(&body)
         .map_err(|error| format!("the image list for {version} is not readable: {error}"))?;
