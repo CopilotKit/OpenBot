@@ -46,6 +46,7 @@ import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createSubagents, SUBAGENT_HANDED_BACK } from "./agents/subagent";
+import { toolLimitRecorder } from "./agents/tool-limit";
 import { serverTurnAdmission } from "./agents/turn-admission";
 import {
   createWakeUpRunner,
@@ -74,8 +75,8 @@ import {
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth, sessionLifetimeMs } from "./auth";
-import { createEntra, withEntraBearer } from "./auth/entra";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
+import { createEntra, withEntraBearer } from "./auth/entra";
 import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
@@ -1939,15 +1940,7 @@ const actorAgentResolver = createActorAgentResolver({
     return copilotRuntime.learning?.acquire;
   },
   loadPersonalMemoryForActor,
-  recordToolLimitRefusalForActor: (actorId, initiator) => (botId, refused) =>
-    recordAuditEvent(bootAuditStore, {
-      eventType: "agent.tool_limit_refused",
-      targetType: "agent",
-      targetId: botId,
-      actorUserId: actorId,
-      ...(initiator ? { initiator } : {}),
-      payload: { bot: botId, ...refused },
-    }),
+  recordToolLimitRefusalForActor: toolLimitRecorder(bootAuditStore),
 });
 
 const copilotRuntime = mountCopilotRuntime(
