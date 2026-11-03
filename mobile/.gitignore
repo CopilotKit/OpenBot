@@ -1,6 +1,6 @@
 node_modules/
 .expo/
 dist/
-ios/
-android/
+/ios/
+/android/
 .env

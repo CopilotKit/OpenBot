@@ -11,6 +11,7 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     "expo-secure-store",
+    "./modules/needle/app.plugin.js",
     ["expo-notifications", { defaultChannel: "openbot" }],
     [
       "expo-speech-recognition",

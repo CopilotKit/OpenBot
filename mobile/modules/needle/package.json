@@ -1,0 +1,7 @@
+{
+  "name": "openbot-needle",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "description": "Needle (cactus-compute/needle, Apache-2.0) on the phone: a tiny offline model that turns what you say into actions."
+}

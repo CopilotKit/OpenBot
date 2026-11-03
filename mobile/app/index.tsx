@@ -87,6 +87,9 @@ export default function Home() {
           : "Sign in to OpenBot"}
       </Text>
       <Text>{serverUrl}</Text>
+      <Link href="/phone-bot" style={{ fontSize: 18, color: "#2563eb" }}>
+        Phone Bot (works with no PC or signal)
+      </Link>
       {(error || options.error || conversations.error) && (
         <Text accessibilityRole="alert" style={{ color: "#b42318" }}>
           {error || options.error || conversations.error}
