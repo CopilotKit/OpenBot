@@ -1,7 +1,12 @@
 import { PERSON_INITIATOR } from "../../audit";
 import type { AppVariables } from "../../auth/guards";
+import { currentEdition } from "../../edition";
 import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
-import { ALWAYS_ON_REFUSAL, isAlwaysOn } from "../personal-defaults";
+import {
+  ALWAYS_ON_REFUSAL,
+  EVERY_BOT_REFUSAL,
+  isAlwaysOn,
+} from "../personal-defaults";
 import {
   asSharedUseApproval,
   exposureOf,
@@ -414,6 +419,9 @@ export function mountGrantRoutes({
     const trimmedAgentId = agentId.trim();
     if (kind === "mcp" && isAlwaysOn(trimmedRef))
       return context.json({ error: ALWAYS_ON_REFUSAL }, 403);
+    // One person: every Bot has every connected app. See personal-defaults.ts.
+    if (kind === "mcp" && currentEdition() === "personal")
+      return context.json({ error: EVERY_BOT_REFUSAL }, 403);
     const refusal = await enablementRefusal(
       context,
       kind,

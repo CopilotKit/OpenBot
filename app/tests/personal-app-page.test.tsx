@@ -172,6 +172,27 @@ describe("an app's page in the personal edition", () => {
     expect(view.container.textContent).not.toContain("this deployment");
   });
 
+  test("lists the app's tools for every Bot, with nothing to give one at a time", async () => {
+    const withTools = {
+      ...notionServer,
+      tools: [
+        {
+          ref: "notion/search",
+          name: "search",
+          description: "Search your pages.",
+          effect: "read",
+          grantedTo: [],
+        },
+      ],
+    } as unknown as PluginServer;
+    const view = draw("personal", [withTools]);
+    expect(await view.findByText("search")).toBeTruthy();
+    expect(view.getByText(/Every Bot can use these/)).toBeTruthy();
+    expect(view.queryByRole("button", { name: "Grant tools…" })).toBeNull();
+    expect(view.queryByText("By Bot")).toBeNull();
+    expect(view.queryByRole("link", { name: /search/ })).toBeNull();
+  });
+
   test("goes back to Connections", async () => {
     const view = draw("personal", [notionServer]);
     const back = await view.findByRole("button", { name: /Connections/ });

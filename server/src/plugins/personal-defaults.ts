@@ -1,7 +1,7 @@
 import { and, eq, isNull, like } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { agentProfiles } from "../db/schema/coworker";
-import { mcpTools, pluginGrants } from "../db/schema/plugins";
+import { mcpServers, mcpTools, pluginGrants } from "../db/schema/plugins";
 import { currentEdition } from "../edition";
 import { catalogueEntry, classifyTool } from "./catalogue";
 
@@ -26,6 +26,8 @@ export type PersonalDefaultsDeps = {
   bots(): Promise<string[]>;
   /** The refs of one Bot's tool grants on one app. */
   granted(agentId: string, serverId: string): Promise<Set<string>>;
+  /** Every app this deployment has added. */
+  servers(): Promise<string[]>;
 };
 
 /** Who the trail names for a grant nobody pressed a button for. */
@@ -49,19 +51,37 @@ export function isAlwaysOn(ref: string): boolean {
 /** What the server answers when somebody tries to turn it off or take it from a Bot. */
 export const ALWAYS_ON_REFUSAL = "Routines are always on, for every Bot.";
 
-/** Gives Bots every always-on tool they don't hold yet. Writes nothing when they hold them all. */
-async function grantAlwaysOn(
+/** What the personal edition's server answers when somebody tries to take an app from one Bot. */
+export const EVERY_BOT_REFUSAL =
+  "In OpenBot Personal every Bot can use every app you connect. Turn the app off to take it from all of them.";
+
+/**
+ * Gives Bots every tool of these apps they don't hold yet, as `by`. Writes nothing when they hold
+ * them all, so asking on every run costs reads and no trail rows.
+ */
+async function grantEveryTool(
   store: Pick<Store, "grant">,
   deps: PersonalDefaultsDeps,
+  apps: string[],
   bots: string[],
+  by: string,
 ): Promise<void> {
-  const tools = await deps.tools(ALWAYS_ON_APP);
-  for (const bot of bots) {
-    const held = await deps.granted(bot, ALWAYS_ON_APP);
-    for (const tool of tools)
-      if (!held.has(tool.ref))
-        await store.grant("mcp", tool.ref, bot, ALWAYS_ON_BY);
+  for (const app of apps) {
+    const tools = await deps.tools(app);
+    if (tools.length === 0) continue;
+    for (const bot of bots) {
+      const held = await deps.granted(bot, app);
+      for (const tool of tools)
+        if (!held.has(tool.ref)) await store.grant("mcp", tool.ref, bot, by);
+    }
   }
+}
+
+/** The apps every Bot holds every tool of: all of them in the personal edition, else Routines. */
+async function everyBotApps(deps: PersonalDefaultsDeps): Promise<string[]> {
+  return currentEdition() === "personal"
+    ? await deps.servers()
+    : [ALWAYS_ON_APP];
 }
 
 /**
@@ -78,17 +98,21 @@ export async function ensureAlwaysOnApp(
 ): Promise<void> {
   if (!(await store.serverAddress(ALWAYS_ON_APP)))
     await store.addServer({ key: ALWAYS_ON_APP, by: ALWAYS_ON_BY });
-  await grantAlwaysOn(store, deps, await deps.bots());
+  await grantEveryTool(
+    store,
+    deps,
+    await everyBotApps(deps),
+    await deps.bots(),
+    ALWAYS_ON_BY,
+  );
 }
 
 /**
- * In the personal edition, connecting an app is enough for it to be useful: every tool it newly
- * lists that only reads is given to every Bot, as an admin grant on the trail. Tools that change
- * things are left off, so a Bot asks before it gets one, and an approval still stands in front of
- * every write a Bot is given later.
- *
- * ONLY NEW TOOLS. What the app already listed before this refresh is left alone, so a tool the
- * person took away from a Bot is not given back the next time the app is refreshed.
+ * In the personal edition, connecting an app is the whole decision: every Bot gets every tool it
+ * lists, the ones that change things too, as an admin grant on the trail. There is one person, so
+ * there is nobody to keep an app from, and what stands in front of a write is Ask before acting:
+ * Allow once, Always allow here, or Deny, in the conversation. Taking an app from one Bot is
+ * refused (see {@link EVERY_BOT_REFUSAL}); turning the app off takes it from all of them.
  *
  * Installed as a wrapper on `refreshTools` because every way an app's tools are learned goes
  * through it: adding the app, connecting an account, and pressing Refresh. The store's methods call
@@ -105,37 +129,38 @@ export function withPersonalDefaults<S extends Store>(
     serverId: string,
     actorId?: string,
   ) {
-    if (currentEdition() !== "personal")
-      return refresh.call(this, serverId, actorId);
-    const before = new Set(
-      (await deps.tools(serverId)).map((tool) => tool.ref),
-    );
     const result = await refresh.call(this, serverId, actorId);
-    const added = (await deps.tools(serverId)).filter(
-      (tool) => tool.read && !before.has(tool.ref),
-    );
-    if (added.length > 0) {
-      const bots = await deps.bots();
-      for (const tool of added)
-        for (const bot of bots)
-          await this.grant("mcp", tool.ref, bot, actorId || GRANTED_BY);
-    }
+    if (currentEdition() === "personal")
+      await grantEveryTool(
+        this,
+        deps,
+        [serverId],
+        await deps.bots(),
+        actorId || GRANTED_BY,
+      );
     return result;
   } as S["refreshTools"];
 
   /*
-   * In every edition, a Bot made after startup gets Routines the first time it runs: what a run is
-   * offered is what this answers, so it is the one moment every Bot, new or old, passes through.
+   * A Bot made after startup gets what every Bot has the first time it runs: Routines in every
+   * edition, and every connected app in the personal one. What a run is offered is what this
+   * answers, so it is the one moment every Bot, new or old, passes through.
    */
   const list = store.listForAgent;
   store.listForAgent = async function (this: S, agentId: string) {
-    await grantAlwaysOn(this, deps, [agentId]);
+    await grantEveryTool(
+      this,
+      deps,
+      await everyBotApps(deps),
+      [agentId],
+      ALWAYS_ON_BY,
+    );
     return list.call(this, agentId);
   } as S["listForAgent"];
   return store;
 }
 
-/** The two reads above, from the database. */
+/** The reads above, from the database. */
 export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
   return {
     async tools(serverId) {
@@ -168,6 +193,12 @@ export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
           ),
         );
       return new Set(rows.map((row) => row.ref));
+    },
+    async servers() {
+      const rows = await database
+        .select({ id: mcpServers.id })
+        .from(mcpServers);
+      return rows.map((row) => row.id);
     },
   };
 }

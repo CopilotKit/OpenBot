@@ -1170,7 +1170,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                * this section to do. Hidden rather than disabled with nothing to grant — a dialog
                * over an empty list could only explain its own emptiness.
                */}
-              {server.tools.length > 0 && bots.length > 0 ? (
+              {/* Not in the personal edition, where every Bot has every tool already. */}
+              {!personal && server.tools.length > 0 && bots.length > 0 ? (
                 <Button
                   onClick={() => {
                     setSelectedBots(new Set());
@@ -1186,7 +1187,11 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
               ) : null}
             </div>
           }
-          description="A Bot only sees the tools it has been given. Each call is checked when it happens, so removing access applies from the next call."
+          description={
+            personal
+              ? "Every Bot can use these. It asks you before one that changes things while Ask before acting is on."
+              : "A Bot only sees the tools it has been given. Each call is checked when it happens, so removing access applies from the next call."
+          }
           title="Tools"
         >
           <SkippedToolsNotice names={server.skippedTools ?? []} />
@@ -1199,8 +1204,13 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
               {server.tools.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
                   {/* A real link with no children: children passed to `render` replace the row's own. */}
+                  {/* A list in the personal edition: there is nobody to give a tool to one at a time. */}
                   <Item
-                    render={<Link {...paths.pluginTool(key, tool.name)} />}
+                    render={
+                      personal ? undefined : (
+                        <Link {...paths.pluginTool(key, tool.name)} />
+                      )
+                    }
                     size="sm"
                   >
                     <ItemContent>
@@ -1218,9 +1228,11 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                        * actually asking, and the names are one click away where they can be switched
                        * one at a time.
                        */}
-                      <span className="text-muted-foreground text-xs">
-                        {grantSummary(tool.grantedTo.length, bots.length)}
-                      </span>
+                      {personal ? null : (
+                        <span className="text-muted-foreground text-xs">
+                          {grantSummary(tool.grantedTo.length, bots.length)}
+                        </span>
+                      )}
                       {/*
                        * The effect, not a description. It is what a boundary written about writes
                        * evaluates, and an operator writing that rule has no other way to know.
@@ -1234,7 +1246,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                       >
                         {tool.effect === "write" ? "changes things" : "reads"}
                       </span>
-                      <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                      {personal ? null : (
+                        <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                      )}
                     </ItemActions>
                   </Item>
                   {index !== server.tools.length - 1 && <Separator />}
@@ -1252,7 +1266,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
            * about an action, or set a Bot up — and an app of a hundred and sixty-seven actions is
            * only approachable from this end.
            */}
-          {server.tools.length > 0 && bots.length > 0 ? (
+          {!personal && server.tools.length > 0 && bots.length > 0 ? (
             <>
               <p className="mt-8 font-medium text-sm">By Bot</p>
               <PageRows>
@@ -1307,7 +1321,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
        * listed by the vendor, there is no page to open for one, and putting them in the same list
        * would make the count above it wrong.
        */}
-      {server && server.withdrawn.length > 0 ? (
+      {!personal && server && server.withdrawn.length > 0 ? (
         <PageSection
           description="This vendor no longer lists these. No Bot sees them, and none can call them. The access is still saved, and comes back if the vendor lists the tool again. To remove it, use the Bot's own page."
           title="Given but no longer listed"
