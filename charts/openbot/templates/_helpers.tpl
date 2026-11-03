@@ -277,6 +277,27 @@ unknown
 {{- default (printf "%s-secrets" (include "openbot.fullname" .)) .Values.secrets.existingSecret -}}
 {{- end -}}
 
+{{/*
+The Secret a computer reads its token (and its egress proxy) from.
+
+A pod can only read a Secret in its own namespace. A shared computer runs beside the server and reads
+the release's Secret, and so does a Sandbox in the release's namespace. A Sandbox in a computers
+namespace of its own cannot: it named the release's Secret, which is not there, and sat in
+`CreateContainerConfigError` from the first Bot action on. So the chart writes the keys a computer
+reads into a Secret in the computers namespace (`computer/secret.yaml`), from the literal or from the
+store, and the computers read that one.
+
+`secrets.existingSecret` is the one case it cannot copy, because the chart cannot read it: a Secret
+of that name has to exist in the computers namespace as well, holding `computer-token`.
+*/}}
+{{- define "openbot.computerSecretName" -}}
+{{- if and (eq .Values.computers.mode "sandbox") (ne (include "openbot.computersNamespace" .) .Release.Namespace) (not .Values.secrets.existingSecret) -}}
+{{- include "openbot.componentName" (dict "root" . "component" "computer") -}}
+{{- else -}}
+{{- include "openbot.secretName" . -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "openbot.configMapName" -}}
 {{- printf "%s-config" (include "openbot.fullname" .) -}}
 {{- end -}}
@@ -745,7 +766,7 @@ leaves the computer to its own default, which is headed on Linux, the same thing
 {{- $egressProxy := $computers.egressProxy | default dict -}}
 {{- if $egressProxy.enabled -}}
 {{- $env = append $env (dict "name" "EGRESS_PROXY_DEFAULT" "valueFrom" (dict "secretKeyRef" (dict
-  "name" (default (include "openbot.secretName" .) $egressProxy.existingSecret)
+  "name" (default (include "openbot.computerSecretName" .) $egressProxy.existingSecret)
   "key" (ternary (default "egress-proxy-url" $egressProxy.existingSecretKey) "egress-proxy-url" (not (empty $egressProxy.existingSecret)))))) -}}
 {{- end -}}
 {{- toJson $env -}}
@@ -801,7 +822,7 @@ for an isolated Bot's, which keeps its files at the root of the volume it had be
             (dict "name" "BUN_INSTALL" "value" "/home/pwuser/.bun")
             (dict "name" "COMPUTER_SEPARATE_WORKSPACES" "value" "on")
             (dict "name" "COMPUTER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict
-              "name" (default (include "openbot.secretName" .) .Values.computers.existingTokenSecret)
+              "name" (default (include "openbot.computerSecretName" .) .Values.computers.existingTokenSecret)
               "key" "computer-token"))))
           $computerEnv
           .Values.computers.extraEnv)

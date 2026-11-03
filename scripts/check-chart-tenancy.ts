@@ -10,7 +10,7 @@
  *
  *     bun scripts/check-chart-tenancy.ts <ci-values.yaml> [--chart charts/openbot]
  *
- * Four renders: two organizations in namespaces of their own (the supported shape), the same two in
+ * Five renders: two organizations in namespaces of their own (the supported shape), the same two in
  * one namespace (which proves every name and selector is the release's rather than the namespace's),
  * and, for `computers.mode: sandbox`, a second release pointed at the first one's computers namespace,
  * which has to collide on the namespace's claim so Helm refuses it.
@@ -76,7 +76,12 @@ const NAME = "app.kubernetes.io/name";
 const NAMESPACE_NAME = "kubernetes.io/metadata.name";
 
 const values = (parse(await Bun.file(valuesFile).text()) ?? {}) as {
-  computers?: { mode?: string };
+  computers?: {
+    mode?: string;
+    existingTokenSecret?: string;
+    egressProxy?: { existingSecret?: string };
+  };
+  secrets?: { existingSecret?: string };
   networkPolicy?: { enabled?: boolean; ingressFrom?: unknown[] };
 };
 const sandbox = values.computers?.mode === "sandbox";
@@ -189,12 +194,15 @@ function selectorsOf(
   return found;
 }
 
-/** The pod templates this chart creates computers from, wherever they live. */
-function computerPodLabels(
-  manifests: Manifest[],
-  org: Org,
-): { namespace: string; labels: Record<string, string> }[] {
-  const pods: { namespace: string; labels: Record<string, string> }[] = [];
+type ComputerPod = {
+  namespace: string;
+  labels: Record<string, string>;
+  spec: unknown;
+};
+
+/** The pod templates this chart creates computers from, wherever they run. */
+function computerPods(manifests: Manifest[], org: Org): ComputerPod[] {
+  const pods: ComputerPod[] = [];
   for (const manifest of manifests) {
     if (
       manifest.kind === "StatefulSet" &&
@@ -203,21 +211,43 @@ function computerPodLabels(
       pods.push({
         namespace: namespaceOf(manifest, org),
         labels: manifest.spec?.template?.metadata?.labels ?? {},
+        spec: manifest.spec?.template?.spec,
       });
     }
     const template = manifest.data?.["sandbox-template.json"];
     if (manifest.kind === "ConfigMap" && template) {
       const parsed = JSON.parse(template) as {
-        podTemplate?: { metadata?: { labels?: Record<string, string> } };
+        podTemplate?: {
+          metadata?: { labels?: Record<string, string> };
+          spec?: unknown;
+        };
       };
       // The server creates every Sandbox in the computers namespace it is told about.
       pods.push({
         namespace: org.computersNamespace,
         labels: parsed.podTemplate?.metadata?.labels ?? {},
+        spec: parsed.podTemplate?.spec,
       });
     }
   }
   return pods;
+}
+
+/** Every Secret a pod spec reads a key from. */
+function secretsReadBy(spec: unknown): string[] {
+  const names: string[] = [];
+  const visit = (node: unknown) => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+    } else if (node && typeof node === "object") {
+      const record = node as Record<string, unknown>;
+      const ref = record.secretKeyRef as { name?: string } | undefined;
+      if (ref?.name) names.push(ref.name);
+      for (const child of Object.values(record)) visit(child);
+    }
+  };
+  visit(spec);
+  return [...new Set(names)];
 }
 
 function matches(
@@ -346,10 +376,44 @@ function checkOne(
     }
   }
 
+  /*
+   * Every Secret a computer reads is in the namespace it runs in. A pod cannot read a Secret from
+   * another namespace, so a computer naming the release's Secret from a computers namespace of its
+   * own never starts. A Secret the operator names is theirs to create there, so it is not checked.
+   */
+  const written = new Set(
+    manifests.flatMap((manifest) => {
+      const target =
+        manifest.kind === "ExternalSecret"
+          ? (manifest.spec?.target?.name ?? manifest.metadata?.name)
+          : manifest.kind === "Secret"
+            ? manifest.metadata?.name
+            : undefined;
+      return target ? [`${namespaceOf(manifest, org)}/${target}`] : [];
+    }),
+  );
+  const named = new Set(
+    [
+      values.secrets?.existingSecret,
+      values.computers?.existingTokenSecret,
+      values.computers?.egressProxy?.existingSecret,
+    ].filter(Boolean),
+  );
+  for (const pod of computerPods(manifests, org)) {
+    for (const secret of secretsReadBy(pod.spec)) {
+      if (named.has(secret)) continue;
+      if (!written.has(`${pod.namespace}/${secret}`)) {
+        say(
+          `this release's computers run in ${pod.namespace} and read the Secret ${secret}, which the chart does not write there, so they cannot start.`,
+        );
+      }
+    }
+  }
+
   // Every computer this release creates is fenced where it runs, when policies are on.
   if (policiesOn) {
     const policies = manifests.filter((m) => m.kind === "NetworkPolicy");
-    for (const pod of computerPodLabels(manifests, org)) {
+    for (const pod of computerPods(manifests, org)) {
       const fenced = policies.some(
         (policy) =>
           namespaceOf(policy, org) === pod.namespace &&
