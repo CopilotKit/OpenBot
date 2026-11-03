@@ -38,6 +38,8 @@ export function notificationPreview(botName: string): {
       unread: 0,
       paused: false,
       notify: "all",
+      items: 0,
+      tasks: { needsInput: 0, ready: 0, failed: 0 },
     }),
   };
 }
