@@ -1,4 +1,5 @@
 import {
+  IconApps,
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconCheck,
@@ -14,7 +15,6 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
-import { PluginsListSections } from "@/components/manage/plugins-list-page";
 import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
@@ -33,22 +33,30 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
-import { type ConnectionRow, connectionRows } from "@/lib/connections/rows";
+import { useConnectApp } from "@/lib/connections/connect-app";
+import {
+  type ConnectionRow,
+  connectionRows,
+  personalConnectionRows,
+} from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
 import { keyedLookup } from "@/lib/lookup";
+import { useManagePaths } from "@/lib/manage-paths";
 import {
   brokeredAccountsListedOn,
   serversListedFor,
   sharedAccountsListedOn,
 } from "@/lib/plugins/listed";
+import { moreAppsRow } from "@/lib/plugins/provider-vocabulary";
 import {
   connectionsQueryOptions,
   personalConnections,
   pluginsPageQueryOptions,
+  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
@@ -295,25 +303,43 @@ function RouteComponent() {
    * consent app, and dropping it here would hide a connection somebody does have.
    */
   const listed = plugins.data ? serversListedFor(plugins.data) : [];
-  const rows = connectionRows({
-    catalogue: yours,
-    brokered: brokeredAccountsListedOn(listed),
-    shared: sharedAccountsListedOn(listed),
-    connected,
-    links: links.data ?? [],
-    providers: providers.data,
-  });
+  /*
+   * THE PERSONAL EDITION LISTS EVERY APP HERE, added or not, because the one person is the one who
+   * adds it: a tile's press adds the app and connects it in one go (`useConnectApp`).
+   */
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const connectApp = useConnectApp();
+  const paths = useManagePaths();
+  // The broker's directory of more apps, as one more tile, where a broker is set up.
+  const provider = pluginsProvider(plugins.data);
+  const moreApps = moreAppsRow(
+    provider,
+    plugins.data?.composioConfigured ?? false,
+  );
+  const browse = personal && moreApps.linked ? moreApps : null;
+  const rows = personal
+    ? personalConnectionRows({
+        catalogue: plugins.data?.catalogue ?? [],
+        added,
+        brokered: brokeredAccountsListedOn(listed),
+        connected,
+        links: links.data ?? [],
+        providers: providers.data,
+      })
+    : connectionRows({
+        catalogue: yours,
+        brokered: brokeredAccountsListedOn(listed),
+        shared: sharedAccountsListedOn(listed),
+        connected,
+        links: links.data ?? [],
+        providers: providers.data,
+      });
   const query = search.trim().toLocaleLowerCase();
   const matching = rows.filter((row) =>
     `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
   );
   const inUse = rows.filter((row) => row.state !== "available").length;
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  /** GitHub and Slack, which link an account to you rather than give Bots an app. */
-  const accountLinks = rows.filter(
-    (row) => row.key === "github" || row.key === "slack",
-  );
   /*
    * The apps decide whether there is a list at all, and the account links only add to it: a failed
    * links read costs the GitHub and Slack rows and says so, not the whole page.
@@ -365,101 +391,137 @@ function RouteComponent() {
           {arrival.authorizationNotice}
         </p>
       ) : null}
-      {/*
-       * THE PERSONAL EDITION LISTS APPS THE WAY ADMIN DOES, because the one person is both halves:
-       * adding an app and connecting it are one step, taken on the app's own page. GitHub and Slack
-       * are account links rather than apps, so they keep their rows below, when there are any.
-       */}
-      {personal ? (
-        <>
-          <PluginsListSections personal />
-          {accountLinks.length > 0 ? (
-            <PageSection title="Accounts">
-              <div className="grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
-                {accountLinks.map((row) => (
-                  <ConnectionItem key={row.key} row={row} />
-                ))}
-              </div>
-            </PageSection>
-          ) : null}
-        </>
+      {connectApp.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {connectApp.error}
+        </p>
       ) : null}
       {/*
        * One section, so it carries no heading of its own: "Your connections" under "Connections"
        * said the same thing twice, 48px apart, and the description now sits under the page title.
        */}
-      {personal ? null : (
-        <PageSection>
-          {/*
-           * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
-           * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
-           * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
-           * nothing is listed rather than a list that may be wrong.
-           */}
-          {loading ? null : plugins.error || connections.error ? (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              Couldn't load your connections. Reload the page, or ask an admin
-              if it keeps happening.
-            </p>
-          ) : rows.length === 0 ? (
-            <PageEmpty icon={IconPlug} title="No apps yet">
-              Apps show up here once an admin turns them on.
-            </PageEmpty>
-          ) : (
-            <>
-              <div className="flex items-center gap-3">
-                <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
-                  <InputGroupAddon>
-                    <IconSearch aria-hidden="true" className="size-4" />
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    aria-label="Search connections"
-                    placeholder="Search connections"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
+      <PageSection>
+        {/*
+         * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
+         * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
+         * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
+         * nothing is listed rather than a list that may be wrong.
+         */}
+        {loading ? null : plugins.error || connections.error ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            Couldn't load your connections. Reload the page, or ask an admin if
+            it keeps happening.
+          </p>
+        ) : rows.length === 0 ? (
+          <PageEmpty icon={IconPlug} title="No apps yet">
+            Apps show up here once an admin turns them on.
+          </PageEmpty>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
+                <InputGroupAddon>
+                  <IconSearch aria-hidden="true" className="size-4" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  aria-label="Search connections"
+                  placeholder="Search connections"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </InputGroup>
+              <p className="shrink-0 text-xs text-muted-foreground">
+                {inUse} in use · {rows.length} in all
+              </p>
+            </div>
+            {matching.length === 0 ? (
+              <p className="mt-4 text-sm text-muted-foreground" role="status">
+                Nothing matches “{search.trim()}”.
+              </p>
+            ) : (
+              /*
+               * A grid of separate cards, where every other list is one `PageRows` card of divided
+               * rows. The accepted exception: connections are apps you pick out by their mark, so
+               * they are laid out as tiles two across rather than read down as a list.
+               */
+              <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+                {matching.map((row) => (
+                  <ConnectionItem
+                    key={row.key}
+                    onPress={
+                      row.state === "available" &&
+                      (row.action === "connect" || row.action === "add")
+                        ? () =>
+                            void connectApp.run(
+                              row.key,
+                              row.action as "connect" | "add",
+                            )
+                        : undefined
+                    }
+                    pending={connectApp.pending === row.key}
+                    row={row}
                   />
-                </InputGroup>
-                <p className="shrink-0 text-xs text-muted-foreground">
-                  {inUse} in use · {rows.length} in all
-                </p>
+                ))}
+                {browse ? (
+                  <Item
+                    className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
+                    data-testid="account-browse"
+                    render={<Link {...paths.brokerDirectory(provider)} />}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RowMark className="size-9">
+                      <IconApps className="size-4" />
+                    </RowMark>
+                    <ItemContent className="min-w-0 gap-0.5">
+                      <ItemTitle className="block w-auto truncate">
+                        {browse.title}
+                      </ItemTitle>
+                      <ItemDescription className="line-clamp-1 text-xs">
+                        {browse.description}
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
+                ) : null}
               </div>
-              {matching.length === 0 ? (
-                <p className="mt-4 text-sm text-muted-foreground" role="status">
-                  Nothing matches “{search.trim()}”.
-                </p>
-              ) : (
-                /*
-                 * A grid of separate cards, where every other list is one `PageRows` card of divided
-                 * rows. The accepted exception: connections are apps you pick out by their mark, so
-                 * they are laid out as tiles two across rather than read down as a list.
-                 */
-                <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
-                  {matching.map((row) => (
-                    <ConnectionItem key={row.key} row={row} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-          {links.error || providers.error ? (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              Couldn't load GitHub and Slack, so they aren't listed. Reload the
-              page.
-            </p>
-          ) : null}
-        </PageSection>
-      )}
+            )}
+          </>
+        )}
+        {links.error || providers.error ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            Couldn't load GitHub and Slack, so they aren't listed. Reload the
+            page.
+          </p>
+        ) : null}
+      </PageSection>
     </PageShell>
   );
 }
 
-/** One connection: its mark, its name, one line, and where it stands. Opens its own page. */
-function ConnectionItem({ row }: { row: ConnectionRow }) {
+/**
+ * One connection: its mark, its name, one line, and where it stands. Opens its own page, or, given
+ * `onPress`, is the press that connects it (the personal edition's Connect and Add).
+ */
+function ConnectionItem({
+  row,
+  onPress,
+  pending = false,
+}: {
+  row: ConnectionRow;
+  onPress?: () => void;
+  pending?: boolean;
+}) {
   return (
     <Item
-      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
+      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 text-left"
       data-testid={`account-${row.key}`}
-      render={<Link params={{ key: row.key }} to="/connections/$key" />}
+      render={
+        onPress ? (
+          <button disabled={pending} onClick={onPress} type="button" />
+        ) : (
+          <Link params={{ key: row.key }} to="/connections/$key" />
+        )
+      }
       size="sm"
       variant="outline"
     >
@@ -478,7 +540,7 @@ function ConnectionItem({ row }: { row: ConnectionRow }) {
         ) : null}
       </ItemContent>
       <ItemActions className="shrink-0">
-        <ConnectionStateLabel state={row.state} />
+        <ConnectionStateLabel pending={pending} row={row} />
       </ItemActions>
     </Item>
   );
@@ -498,7 +560,17 @@ function ConnectionMark({
   return <Mark className="size-4" />;
 }
 
-function ConnectionStateLabel({ state }: { state: ConnectionRow["state"] }) {
+/** Where a tile stands, or the word for what pressing it does. */
+const ACTION_LABEL = { connect: "Connect", add: "Add", setup: "Set up" };
+
+function ConnectionStateLabel({
+  row,
+  pending,
+}: {
+  row: ConnectionRow;
+  pending: boolean;
+}) {
+  const { state } = row;
   if (state === "connected") {
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -506,7 +578,7 @@ function ConnectionStateLabel({ state }: { state: ConnectionRow["state"] }) {
           aria-hidden="true"
           className="size-3.5 text-emerald-600 dark:text-emerald-400"
         />
-        Connected
+        {row.noAccount ? "On" : "Connected"}
       </span>
     );
   }
@@ -515,7 +587,13 @@ function ConnectionStateLabel({ state }: { state: ConnectionRow["state"] }) {
   }
   return (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
-      {state === "needs_reconnect" ? "Reconnect" : "Connect"}
+      {pending
+        ? row.action === "add"
+          ? "Adding…"
+          : "Connecting…"
+        : state === "needs_reconnect"
+          ? "Reconnect"
+          : ACTION_LABEL[row.action ?? "connect"]}
     </span>
   );
 }

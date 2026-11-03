@@ -17,10 +17,12 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { identityKeys } from "@/lib/identity/queries";
 import {
+  type CatalogueItem,
   type PluginServer,
   type PluginsPage,
   pluginKeys,
@@ -36,10 +38,100 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
+function entry(
+  key: string,
+  title: string,
+  auth: CatalogueItem["auth"],
+): CatalogueItem {
+  return {
+    key,
+    title,
+    vendor: title,
+    summary: `${title} for your Bots.`,
+    docsUrl: "",
+    auth,
+    perInstance: false,
+  };
+}
+
+const CATALOGUE = [
+  entry("notion", "Notion", "user-oauth"),
+  entry("google-drive", "Google Drive", "user-oauth"),
+  entry("exa", "Exa Search", "none"),
+  entry("exa-authenticated", "Exa Search (API key)", "deployment-bearer"),
+];
+
+/** A server row as the plugin list returns it. Notion registers its own client; Drive needs one. */
+function server(key: string): PluginServer {
+  return {
+    id: key,
+    title: CATALOGUE.find((item) => item.key === key)?.title ?? key,
+    vendor: key,
+    url: `https://${key}.example/mcp`,
+    summary: "",
+    docsUrl: "",
+    provenance: "first-party",
+    hasCredential: false,
+    toolsRefreshedAt: null,
+    lastError: null,
+    addedBy: "me",
+    dynamicClient: key === "notion",
+    authScheme: null,
+    tools: [],
+    withdrawn: [],
+    accountMode: null,
+    sharedVendorConnected: false,
+    ownerGrants: "any",
+    ownerGrantsChosen: null,
+  } as unknown as PluginServer;
+}
+
+let servers: PluginServer[] = [];
+let connected: string[] = [];
+let composio = false;
+const writes: string[] = [];
+
+function page(): PluginsPage {
+  return {
+    catalogue: CATALOGUE,
+    servers,
+    skills: [],
+    botsMayCallBack: true,
+    redirectUri: null,
+    composioConfigured: composio,
+    authorizesPerAction: false,
+  } as unknown as PluginsPage;
+}
+
 const originalFetch = global.fetch;
 beforeEach(() => {
+  servers = [server("notion")];
+  connected = [];
+  composio = false;
+  writes.length = 0;
   global.fetch = Object.assign(
-    async () => new Response(null, { status: 404 }),
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const path = String(input).split("?")[0] ?? "";
+      if (init?.method && init.method !== "GET") {
+        writes.push(`${init.method} ${path}`);
+        if (path === "/api/plugins/servers") {
+          const { key } = JSON.parse(String(init.body)) as { key: string };
+          servers = [...servers, server(key)];
+        }
+        if (path.endsWith("/connect"))
+          return Response.json({ connected: true });
+        return Response.json({ ok: true });
+      }
+      if (path === "/api/plugins") return Response.json(page());
+      if (path === "/api/plugins/connections")
+        return Response.json({
+          connections: connected.map((serverId) => ({
+            serverId,
+            status: "connected",
+          })),
+        });
+      return new Response(null, { status: 404 });
+    },
     { preconnect: originalFetch.preconnect },
   );
 });
@@ -47,60 +139,9 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const notion: PluginServer = {
-  id: "notion",
-  title: "Notion",
-  vendor: "Notion",
-  url: "https://mcp.notion.com/mcp",
-  summary: "Pages and databases.",
-  docsUrl: "",
-  provenance: "first-party",
-  hasCredential: true,
-  toolsRefreshedAt: null,
-  lastError: null,
-  addedBy: "me",
-  dynamicClient: true,
-  authScheme: null,
-  tools: [],
-  withdrawn: [],
-  accountMode: null,
-  sharedVendorConnected: false,
-  ownerGrants: "any",
-  ownerGrantsChosen: null,
-} as unknown as PluginServer;
-
-const page = {
-  catalogue: [
-    {
-      key: "notion",
-      title: "Notion",
-      vendor: "Notion",
-      summary: "Pages and databases.",
-      docsUrl: "",
-      auth: "user-oauth",
-      perInstance: false,
-    },
-    {
-      key: "google-drive",
-      title: "Google Drive",
-      vendor: "Google",
-      summary: "Your files.",
-      docsUrl: "",
-      auth: "user-oauth",
-      perInstance: false,
-    },
-  ],
-  servers: [notion],
-  skills: [],
-  botsMayCallBack: true,
-  redirectUri: null,
-  composioConfigured: false,
-  authorizesPerAction: false,
-} as unknown as PluginsPage;
-
 function draw(edition: "team" | "personal", at = "/connections") {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: { queries: { retry: false } },
   });
   client.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
@@ -108,7 +149,7 @@ function draw(edition: "team" | "personal", at = "/connections") {
     localEvaluation: edition === "personal",
     edition,
   });
-  client.setQueryData(pluginKeys.page(), page);
+  client.setQueryData(pluginKeys.page(), page());
   client.setQueryData(pluginKeys.connections(), { connections: [] });
   client.setQueryData(identityKeys.links(), []);
   client.setQueryData(identityKeys.providers(), {
@@ -141,64 +182,115 @@ function draw(edition: "team" | "personal", at = "/connections") {
     path: "/connections/$key",
     getParentRoute: () => app,
   });
+  const history = createMemoryHistory({ initialEntries: [at] });
   const router = createRouter({
     routeTree: root.addChildren([
       authed.addChildren([app.addChildren([list as never, one as never])]),
     ]),
-    history: createMemoryHistory({ initialEntries: [at] }),
+    history,
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
+  return { view, history, user: userEvent.setup({ document }) };
 }
 
+const tile = (view: ReturnType<typeof draw>["view"], key: string) =>
+  view.getByTestId(`account-${key}`);
+
 describe("Connections in the personal edition", () => {
-  test("lists the apps you have and the ones you can add, each opening under Connections", async () => {
-    const view = draw("personal");
-    expect(await view.findByText("Your apps")).toBeTruthy();
-    expect(view.getByText("Add an app")).toBeTruthy();
-    const added = view.getByTestId("plugin-notion");
-    expect(added.getAttribute("href")).toBe("/connections/notion");
-    // Not turned on yet, and still listed: adding it is opening it.
-    const available = view.getByTestId("plugin-google-drive");
-    expect(available.getAttribute("href")).toBe("/connections/google-drive");
-    expect(within(available).getByText("Google Drive")).toBeTruthy();
+  test("is one searchable list of every app, with no apps-versus-accounts split", async () => {
+    const { view } = draw("personal");
+    await view.findByTestId("account-google-drive");
+    for (const key of ["notion", "google-drive", "exa", "exa-authenticated"])
+      expect(tile(view, key)).toBeTruthy();
+    expect(
+      view.getByRole("textbox", { name: "Search connections" }),
+    ).toBeTruthy();
+    expect(view.queryByText("Your apps")).toBeNull();
+    expect(view.queryByText("Add an app")).toBeNull();
+    expect(within(tile(view, "notion")).getByText("Connect")).toBeTruthy();
+    expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
+    expect(
+      within(tile(view, "exa-authenticated")).getByText("Set up"),
+    ).toBeTruthy();
   });
 
-  test("never says an admin has to turn an app on", async () => {
-    const view = draw("personal");
-    await view.findByText("Your apps");
-    expect(view.container.textContent).not.toContain("admin");
+  test("Connect on an app with a client goes straight to your account", async () => {
+    const { view, user } = draw("personal");
+    await user.click(await view.findByTestId("account-notion"));
+    await waitFor(() =>
+      expect(writes).toEqual(["POST /api/plugins/servers/notion/connect"]),
+    );
+  });
+
+  test("Connect on an app nobody added adds it first; one that needs a client set up then opens its page", async () => {
+    const { view, user, history } = draw("personal");
+    await user.click(await view.findByTestId("account-google-drive"));
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/connections/google-drive"),
+    );
+    expect(writes).toEqual(["POST /api/plugins/servers"]);
+  });
+
+  test("Add on an app with no account turns it on and is done", async () => {
+    const { view, user } = draw("personal");
+    await user.click(await view.findByTestId("account-exa"));
+    await waitFor(() => expect(writes).toEqual(["POST /api/plugins/servers"]));
+    await waitFor(() =>
+      expect(within(tile(view, "exa")).getByText("On")).toBeTruthy(),
+    );
+  });
+
+  test("Set up opens the app's page, where its key is typed", async () => {
+    const { view, user, history } = draw("personal");
+    await user.click(await view.findByTestId("account-exa-authenticated"));
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/connections/exa-authenticated"),
+    );
+    expect(writes).toEqual([]);
+  });
+
+  test("a connected app opens its page, to choose which Bots use it", async () => {
+    connected = ["notion"];
+    const { view, user, history } = draw("personal");
+    await waitFor(() =>
+      expect(within(tile(view, "notion")).getByText("Connected")).toBeTruthy(),
+    );
+    await user.click(await view.findByTestId("account-notion"));
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/connections/notion"),
+    );
   });
 });
 
-test("the team edition's Connections still lists only what an admin turned on", async () => {
-  const view = draw("team");
-  expect(await view.findByText("Notion")).toBeTruthy();
-  expect(view.queryByText("Google Drive")).toBeNull();
-  expect(view.queryByText("Add an app")).toBeNull();
+test("with a broker set up, the last tile browses its directory of more apps", async () => {
+  composio = true;
+  const { view } = draw("personal");
+  const browse = await view.findByTestId("account-browse");
+  expect(within(browse).getByText("Browse Composio")).toBeTruthy();
+  expect(browse.getAttribute("href")).toBe("/connections/browse/composio");
 });
 
 describe("an app under Connections in the personal edition", () => {
   test("is one page: turning it on, your account, and which Bots use it", async () => {
-    const view = draw("personal", "/connections/notion");
+    const { view } = draw("personal", "/connections/notion");
     expect(await view.findByText("Turned on")).toBeTruthy();
     expect(view.getByText("Your account")).toBeTruthy();
   });
+});
 
-  test("an app not added yet opens on Connect", async () => {
-    const view = draw("personal", "/connections/google-drive");
-    expect(
-      await view.findByRole("button", { name: "Connect Google Drive" }),
-    ).toBeTruthy();
-  });
+test("the team edition's Connections still lists only what an admin turned on, as your accounts", async () => {
+  const { view } = draw("team");
+  expect(await view.findByTestId("account-notion")).toBeTruthy();
+  expect(view.queryByTestId("account-google-drive")).toBeNull();
+  expect(view.queryByTestId("account-exa")).toBeNull();
 });
 
 test("the team edition's app under Connections is still only your account", async () => {
-  const view = draw("team", "/connections/notion");
+  const { view } = draw("team", "/connections/notion");
   await view.findAllByText("Notion");
   expect(view.queryByText("Turned on")).toBeNull();
-  expect(view.queryByText("Enable for this deployment")).toBeNull();
 });

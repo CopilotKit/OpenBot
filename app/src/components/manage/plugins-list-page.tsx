@@ -116,26 +116,6 @@ function summaryFor(
 }
 
 export function PluginsListPage() {
-  return (
-    <PageShell
-      description="Connect services for your company, then choose which Bots can use each service’s tools."
-      title="Plugins"
-    >
-      <PluginsListSections />
-    </PageShell>
-  );
-}
-
-/**
- * The lists themselves, without the page around them. The personal edition draws them inside
- * Connections, where adding an app and connecting your account are one step, so they speak to the
- * one person instead of to an admin setting things up for everybody.
- */
-export function PluginsListSections({
-  personal = false,
-}: {
-  personal?: boolean;
-}) {
   const paths = useManagePaths();
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
@@ -171,39 +151,30 @@ export function PluginsListSections({
   );
 
   return (
-    <>
+    <PageShell
+      description="Connect services for your company, then choose which Bots can use each service’s tools."
+      title="Plugins"
+    >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
       {plugins.isPending ? null : plugins.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          {personal
-            ? "Couldn't load your apps. Reload the page."
-            : "Couldn't load plugins. Reload the page."}
+          Couldn't load plugins. Reload the page.
         </p>
       ) : (
         <>
           {/*
            * First, because each one is somebody waiting. All of them, not only those about an app
            * that is connected: an app nobody has switched on has no page of its own to list them on.
-           * Not in the personal edition, where nobody else can ask.
            */}
-          {personal ? null : <AccessRequestsSection />}
+          <AccessRequestsSection />
 
           <PageSection
-            description={
-              personal
-                ? "Your Bots can use these. Open one to connect your account or choose which Bots use it."
-                : "Added for everybody. Open one to set it up and choose which Bots get its tools."
-            }
-            title={personal ? "Your apps" : "Connected"}
+            description="Added for everybody. Open one to set it up and choose which Bots get its tools."
+            title="Connected"
           >
             {plugins.data?.servers.length === 0 ? (
-              <PageEmpty
-                icon={IconPlug}
-                title={personal ? "No apps yet" : "Nothing connected yet"}
-              >
-                {personal
-                  ? "Add one from the list below."
-                  : "Pick one from the list below."}
+              <PageEmpty icon={IconPlug} title="Nothing connected yet">
+                Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
@@ -267,21 +238,12 @@ export function PluginsListSections({
           </PageSection>
 
           <PageSection
-            description={
-              personal
-                ? "Apps OpenBot can connect to. Open one to add it."
-                : "Reviewed, first-party servers. Open one to add it."
-            }
-            title={personal ? "Add an app" : "Explore plugins"}
+            description="Reviewed, first-party servers. Open one to add it."
+            title="Explore plugins"
           >
             {explore.length === 0 ? (
-              <PageEmpty
-                icon={IconCircleCheck}
-                title={personal ? "All added" : "All connected"}
-              >
-                {personal
-                  ? "Every app on the list is added."
-                  : "Every plugin in the catalogue is connected."}
+              <PageEmpty icon={IconCircleCheck} title="All connected">
+                Every plugin in the catalogue is connected.
               </PageEmpty>
             ) : (
               <PageRows>
@@ -369,7 +331,7 @@ export function PluginsListSections({
           </PageSection>
         </>
       )}
-    </>
+    </PageShell>
   );
 }
 

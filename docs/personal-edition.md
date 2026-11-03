@@ -56,9 +56,13 @@ form, and taking over the browser is always offered.
 There is no Admin. Apps live on **Connections**, because adding an app and connecting your account
 are the same decision when one person makes both:
 
-- `/connections` lists the apps you have, the apps you can add, and the broker directory.
-- `/connections/<app>` is the whole app: **Connect** turns it on and goes straight to signing in
-  to your account, then its tools and which Bots use them are on the same page.
+- `/connections` is one searchable grid of every app and your GitHub and Slack accounts, connected
+  ones first. A tile's press does the job: **Connect** adds the app and goes straight to signing in
+  to your account; **Add**, for an app with no account (a free search provider, Routines), turns it
+  on; **Set up** opens the app's page where a key or OAuth client has to be typed first. With a
+  broker set up, the last tile browses its directory of more apps.
+- A connected tile opens `/connections/<app>`: the app's tools, which Bots use them, your account,
+  and turning it off.
 - When an app is connected, every tool it newly lists that only reads is given to every Bot, so it
   works straight away. Tools that change things are left for you to give, and a Bot still asks
   before it uses one. Tools you take away are not given back when the app is refreshed. See

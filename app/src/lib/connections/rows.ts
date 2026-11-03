@@ -27,6 +27,15 @@ export type ConnectionRow = {
   title: string;
   summary: string;
   state: ConnectionState;
+  /**
+   * What pressing a tile that is not in use does, in the personal edition, where every app is a
+   * tile. `connect` adds the app if needed and signs in to your account, `add` turns on an app with
+   * no account, and `setup` opens the app's page because something has to be typed there first.
+   * Absent everywhere else: the tile opens its page.
+   */
+  action?: "connect" | "add" | "setup";
+  /** An app with no account behind it, which reads "On" rather than "Connected" once added. */
+  noAccount?: boolean;
   /** What draws the row's mark: a catalogue icon, an app's logo, or an identity provider's icon. */
   mark:
     | { kind: "catalogue"; key: string }
@@ -143,6 +152,56 @@ export function connectionRows(input: {
    * What is already in use first, so the list opens on what a person has rather than on everything
    * they could add. Stable within each half: the order above, which keeps apps before accounts.
    */
+  const inUse = (row: ConnectionRow) => row.state !== "available";
+  return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
+}
+
+/**
+ * The personal edition's tiles: every app in the catalogue, whether or not it has been added, and
+ * the same brokered apps and GitHub and Slack links as {@link connectionRows}.
+ *
+ * One person adds an app and connects their account, so the two are one press: a tile says what
+ * that press does. An app reached as you is Connect. An app with no account at all (a free search
+ * provider, Routines) is Add, and On once added. An app that needs a key typed first is Set up,
+ * and is On once added with it.
+ */
+export function personalConnectionRows(input: {
+  catalogue: CatalogueItem[];
+  added: ReadonlySet<string>;
+  brokered: PluginServer[];
+  connected: ReadonlySet<string>;
+  links: LinkedAccount[];
+  providers: IdentityProviders | undefined;
+}): ConnectionRow[] {
+  const apps = input.catalogue.map((entry): ConnectionRow => {
+    const base = {
+      key: entry.key,
+      title: entry.title,
+      summary: entry.summary,
+      mark: { kind: "catalogue", key: entry.key } as const,
+    };
+    if (entry.auth === "user-oauth")
+      return {
+        ...base,
+        state: input.connected.has(entry.key) ? "connected" : "available",
+        action: "connect",
+      };
+    return {
+      ...base,
+      state: input.added.has(entry.key) ? "connected" : "available",
+      action: entry.auth === "deployment-bearer" ? "setup" : "add",
+      noAccount: true,
+    };
+  });
+  const rest = connectionRows({
+    catalogue: [],
+    brokered: input.brokered,
+    shared: [],
+    connected: input.connected,
+    links: input.links,
+    providers: input.providers,
+  });
+  const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
 }
