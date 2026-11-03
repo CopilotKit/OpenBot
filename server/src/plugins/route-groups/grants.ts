@@ -1,6 +1,7 @@
 import { PERSON_INITIATOR } from "../../audit";
 import type { AppVariables } from "../../auth/guards";
 import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
+import { ALWAYS_ON_REFUSAL, isAlwaysOn } from "../personal-defaults";
 import {
   asSharedUseApproval,
   exposureOf,
@@ -411,6 +412,8 @@ export function mountGrantRoutes({
     }
     const trimmedRef = ref.trim();
     const trimmedAgentId = agentId.trim();
+    if (kind === "mcp" && isAlwaysOn(trimmedRef))
+      return context.json({ error: ALWAYS_ON_REFUSAL }, 403);
     const refusal = await enablementRefusal(
       context,
       kind,

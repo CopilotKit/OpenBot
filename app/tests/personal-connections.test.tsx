@@ -59,6 +59,7 @@ const CATALOGUE = [
   entry("google-drive", "Google Drive", "user-oauth"),
   entry("exa", "Exa Search", "none"),
   entry("exa-authenticated", "Exa Search (API key)", "deployment-bearer"),
+  entry("routines", "Routines", "builtin"),
 ];
 
 /** A server row as the plugin list returns it. Notion registers its own client; Drive needs one. */
@@ -275,6 +276,14 @@ test("with a broker set up, the last tile browses its directory of more apps", a
 });
 
 describe("an app under Connections in the personal edition", () => {
+  test("Routines is always on, with no switch to turn it off", async () => {
+    servers = [server("notion"), server("routines")];
+    const { view } = draw("personal", "/connections/routines");
+    expect(await view.findByText("Always on")).toBeTruthy();
+    expect(view.queryByRole("switch")).toBeNull();
+    expect(view.queryByText("Turned on")).toBeNull();
+  });
+
   test("is one page: turning it on, your account, and which Bots use it", async () => {
     const { view } = draw("personal", "/connections/notion");
     expect(await view.findByText("Turned on")).toBeTruthy();

@@ -4,6 +4,7 @@ import { brokerSentence, schemeKind } from "../broker";
 import { CATALOGUE } from "../catalogue";
 import { vendorSentence } from "../composio";
 import { redirectUriFor } from "../oauth";
+import { ALWAYS_ON_REFUSAL, isAlwaysOn } from "../personal-defaults";
 import { asAccountMode } from "../shared-accounts";
 import { asSharedUseApproval, type SharedUseApproval } from "../shared-use";
 import {
@@ -392,6 +393,8 @@ export function mountServerRoutes({
     if (forbidden) return forbidden;
 
     const serverId = context.req.param("id");
+    if (isAlwaysOn(serverId))
+      return context.json({ error: ALWAYS_ON_REFUSAL }, 403);
     /*
      * READ BEFORE THE ROW GOES. The ask-before-write rule a Shared app was given lives in the
      * approval policy, not on the row, so nothing cascades it away; asked afterwards, the mode is

@@ -140,7 +140,6 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
-import { setEdition } from "./edition";
 import {
   chooseOpenAIApi,
   mountCopilotRuntime,
@@ -170,6 +169,7 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { setEdition } from "./edition";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -233,6 +233,11 @@ import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
+  ensureAlwaysOnApp,
+  personalDefaultsDeps,
+  withPersonalDefaults,
+} from "./plugins/personal-defaults";
+import {
   arcadeVerifierNotice,
   selectProviderWiring,
   storedProvider,
@@ -242,10 +247,6 @@ import {
   createSharedUseStore,
 } from "./plugins/shared-use-store";
 import { ensureSingleUserIdentity } from "./plugins/single-user-identity";
-import {
-  personalDefaultsDeps,
-  withPersonalDefaults,
-} from "./plugins/personal-defaults";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -1141,6 +1142,8 @@ if (composio) {
  */
 const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
+// In the personal edition Routines is on from the start, for every Bot. See personal-defaults.ts.
+await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {
     const actor = await actorFor(ownerUserId);

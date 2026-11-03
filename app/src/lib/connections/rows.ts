@@ -157,6 +157,12 @@ export function connectionRows(input: {
 }
 
 /**
+ * The app the personal edition turns on for every Bot at startup and never turns off. The server
+ * names the same one in `server/src/plugins/personal-defaults.ts`.
+ */
+export const ALWAYS_ON_APP = "routines";
+
+/**
  * The personal edition's tiles: every app in the catalogue, whether or not it has been added, and
  * the same brokered apps and GitHub and Slack links as {@link connectionRows}.
  *

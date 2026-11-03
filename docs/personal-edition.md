@@ -58,8 +58,7 @@ are the same decision when one person makes both:
 
 - `/connections` is one searchable grid of every app and your GitHub and Slack accounts, connected
   ones first. A tile's press does the job: **Connect** adds the app and goes straight to signing in
-  to your account; **Add**, for an app with no account (a free search provider, Routines), turns it
-  on; **Set up** opens the app's page where a key or OAuth client has to be typed first. With a
+  to your account; **Add**, for an app with no account (a free search provider), turns it on; **Set up** opens the app's page where a key or OAuth client has to be typed first. With a
   broker set up, the last tile browses its directory of more apps.
 - A connected tile opens `/connections/<app>`: the app's tools, which Bots use them, your account,
   and turning it off.
@@ -67,6 +66,9 @@ are the same decision when one person makes both:
   works straight away. Tools that change things are left for you to give, and a Bot still asks
   before it uses one. Tools you take away are not given back when the app is refreshed. See
   `server/src/plugins/personal-defaults.ts`.
+- **Routines is always on.** The server adds it at startup and gives every Bot all of its tools,
+  including the ones that schedule work. A Bot made later gets them the first time it runs. Routines
+  can't be turned off or taken from a Bot: the server refuses with `403`.
 
 The rest of what a person running OpenBot for themselves needs is under Settings: Skills for every
 Bot, Credentials, Computer and Activity (the audit trail). Where Admin was, **Team features** opens

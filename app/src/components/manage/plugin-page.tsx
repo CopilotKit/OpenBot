@@ -46,7 +46,10 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import {
   addCuratedServerMutationOptions,
   connectAccountMutationOptions,
@@ -63,8 +66,6 @@ import {
   brokeredProvenance,
   brokeredReach,
 } from "@/lib/plugins/provider-vocabulary";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
 import {
   type CatalogueItem,
   connectionsQueryOptions,
@@ -217,6 +218,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Routines is on for every Bot in the personal edition and has no off switch. See personal-defaults.ts.
+  const alwaysOn = personal && key === ALWAYS_ON_APP;
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const provider = pluginsProvider(plugins.data);
@@ -602,7 +605,16 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
            * switching this off deletes every grant on the vendor's tools and that is not recoverable
            * by switching it back on.
            */}
-          {personal && !server ? (
+          {alwaysOn ? (
+            <Item size="sm">
+              <ItemContent>
+                <ItemTitle>Always on</ItemTitle>
+                <ItemDescription>
+                  Every Bot can use it to schedule its own work.
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          ) : personal && !server ? (
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>Add {title}</ItemTitle>
