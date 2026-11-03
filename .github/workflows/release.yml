@@ -11,6 +11,19 @@ on:
         required: true
         type: choice
         options: [patch, minor, major]
+      # A stable release goes straight from main. A candidate or beta is cut onto `release/X.Y`
+      # first, and a final turns the last candidate on that branch into the release itself.
+      kind:
+        description: What to release
+        required: false
+        default: stable
+        type: choice
+        options: [stable, rc, beta, final]
+      from:
+        description: The commit on main to cut the first candidate or beta from, as a full commit SHA or a branch name (default the tip). A short SHA does not work.
+        required: false
+        default: ""
+        type: string
       dry_run:
         description: Show the version and notes without opening a PR
         required: false
@@ -27,7 +40,14 @@ concurrency:
 jobs:
   create:
     name: create
-    if: github.ref == 'refs/heads/main'
+    # Main for every kind. A release branch only for a candidate, beta or final, because a stable
+    # release never comes from one. `release/publish/*` is where the release PRs themselves live,
+    # and nothing is cut from those.
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      (inputs.kind != 'stable' &&
+        startsWith(github.ref, 'refs/heads/release/') &&
+        !startsWith(github.ref, 'refs/heads/release/publish/'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -46,9 +66,30 @@ jobs:
             if (open.length > 0) {
               core.setFailed(`A release PR is already open: ${open.map((p) => p.html_url).join(", ")}`);
             }
+      # `from` picks where a new release branch starts. Anywhere else it would be ignored, and an
+      # input that is silently ignored is one somebody believes was used.
+      - name: Check the inputs
+        env:
+          KIND: ${{ inputs.kind }}
+          FROM: ${{ inputs.from }}
+        run: |
+          set -euo pipefail
+          if [ -n "$FROM" ] && { [ "$GITHUB_REF" != refs/heads/main ] || { [ "$KIND" != rc ] && [ "$KIND" != beta ]; }; }; then
+            echo "::error::'from' only applies to the first candidate or beta, run from main."
+            exit 1
+          fi
+          # A final finishes a candidate, and candidates live on their release branch, never on main.
+          if [ "$KIND" = final ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            echo "::error::A final finishes the candidates on their release/X.Y branch. Run it from that branch."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The whole history, because the previous tag is what says where these notes start.
+          # Empty unless a candidate or beta names its own starting commit, which means the commit
+          # this run was started on.
+          ref: ${{ inputs.from }}
+          # The whole history, because the previous tag is what says where these notes start. It
+          # brings every tag and every branch too, which the checks below read.
           fetch-depth: 0
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -59,6 +100,7 @@ jobs:
         name: Write the version and promote the notes
         env:
           BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
         run: |
           set -euo pipefail
           current=$(bun -e 'console.log(require("./package.json").version)')
@@ -73,57 +115,102 @@ jobs:
             }
           fi
 
-          # CHANGELOG.md is written by hand, for the person deciding whether to upgrade. This
-          # promotes what is already there; it never generates notes from commit subjects, because a
-          # commit subject is written for the person reading the diff.
-          grep -q '^## Unreleased$' CHANGELOG.md || {
-            echo "::error::CHANGELOG.md has no '## Unreleased' section."
-            exit 1
-          }
-          unreleased=$(awk '/^## Unreleased$/{found=1; next} /^## /{found=0} found' CHANGELOG.md | grep -c '[^[:space:]]' || true)
-          if [ "$unreleased" -eq 0 ]; then
-            echo "::error::Nothing under '## Unreleased'. A release nobody can describe is not a release."
+          # The version this run is heading for and the branch it belongs to, worked out the same
+          # way the prepare script below works them out, so they can be checked before anything is
+          # written.
+          next=$(CURRENT="$current" bun -e '
+            const { nextVersion, releaseBranch } = require("./scripts/release-version.ts");
+            try {
+              const next = nextVersion(process.env.CURRENT, process.env.BUMP, process.env.KIND);
+              console.log(next + " " + releaseBranch(next));
+            } catch (error) {
+              console.error("::error::" + error.message);
+              process.exit(1);
+            }
+          ')
+          version=${next% *}
+          branch=${next#* }
+
+          # A final ships what a candidate was tested as, so it is cut from the commit a candidate
+          # was published from and nothing newer. The tags came with the full-history checkout.
+          if [ "$KIND" = final ] && [ -z "$(git tag --points-at HEAD "v$version-*")" ]; then
+            echo "::error::$GITHUB_REF_NAME has moved on since its last candidate for $version. Cut a new candidate first."
             exit 1
           fi
 
-          bun -e '
-            const fs = require("fs");
-            // `bun -e` passes argv as [bun, ...args], so the argument is the last element. Reading
-            // it positionally from the front silently yields undefined and every bump becomes a patch.
-            const bump = process.argv.at(-1);
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            const [major, minor, patch] = pkg.version.split(".").map(Number);
-            const next =
-              bump === "major" ? [major + 1, 0, 0] :
-              bump === "minor" ? [major, minor + 1, 0] :
-              [major, minor, patch + 1];
-            pkg.version = next.join(".");
-            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
-            console.log(pkg.version);
-          ' -- "$BUMP" > /tmp/version
-          version=$(cat /tmp/version)
-          bun desktop/scripts/desktop-version.ts sync
+          new_branch=""
+          if [ "$KIND" = rc ] || [ "$KIND" = beta ]; then
+            if [ "$GITHUB_REF" = refs/heads/main ]; then
+              # The first candidate or beta starts the release branch. It starts from a commit on
+              # main, so the branch holds nothing main never had.
+              git merge-base --is-ancestor HEAD origin/main || {
+                echo "::error::$(git rev-parse HEAD) is not on main."
+                exit 1
+              }
+              # A branch that already exists has candidates on it, and the next one belongs there.
+              if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+                echo "::error::$branch already exists. To cut the next candidate or beta, run from it."
+                exit 1
+              fi
+              new_branch=$branch
+            fi
+          fi
+          # Off main, a run releases the branch it was started on and no other.
+          if [ "$GITHUB_REF" != refs/heads/main ] && [ "$GITHUB_REF_NAME" != "$branch" ]; then
+            echo "::error::$version belongs to $branch, not $GITHUB_REF_NAME."
+            exit 1
+          fi
 
-          # The chart's default image tag is its appVersion, so a release that moves package.json
-          # without moving this leaves a default `helm install` pulling the previous image, or an
-          # image tag that was never pushed. Move them together, every time.
-          sed -i -E "s/^appVersion:.*/appVersion: \"$version\"/" charts/openbot/Chart.yaml
-
-          # Unreleased becomes the version, and a fresh empty Unreleased takes its place so the next
-          # change has somewhere to go without anyone hand-editing a heading.
-          bun -e '
-            const fs = require("fs");
-            const version = process.argv[process.argv.length - 1];
-            const text = fs.readFileSync("CHANGELOG.md", "utf8");
-            fs.writeFileSync(
-              "CHANGELOG.md",
-              text.replace(/^## Unreleased$/m, `## Unreleased\n\n## ${version}`),
-            );
-          ' -- "$version"
-
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A version is published once. A tag that already carries it means this release happened.
+          if git rev-parse --verify --quiet "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already tagged."
+            exit 1
+          fi
           {
-            echo "## Release v$version"
+            echo "new_branch=$new_branch"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+          # Writes the version, the chart's appVersion, the Cargo files and the changelog, and
+          # refuses a changelog with nothing under Unreleased. It appends version, base and notes to
+          # $GITHUB_OUTPUT for the steps below.
+          bun scripts/release-prepare.ts "$BUMP" "$KIND"
+
+      - name: Write the PR body
+        env:
+          KIND: ${{ inputs.kind }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          NOTES: ${{ steps.prepare.outputs.notes }}
+        run: |
+          set -euo pipefail
+          # A candidate or beta is for the people who asked to try it. It is published where they
+          # can find it and nowhere that would hand it to everybody else, and it does not wait for
+          # the smoke journey, because trying it is what it is for.
+          if [ "$KIND" = rc ] || [ "$KIND" = beta ]; then
+            {
+              echo "## Prerelease v$VERSION"
+              echo
+              echo "Merging this publishes a GitHub prerelease, never the Latest release. The images"
+              echo "are tagged v$VERSION and not \`latest\`, and the installers attached to it are"
+              echo "pinned to this version."
+              echo
+              echo "Before merging:"
+              echo "- [ ] The notes below describe what this $KIND changes"
+              echo
+              echo "Merging runs the full suite against this commit before it builds, so there is"
+              echo "nothing to check about CI here."
+              echo
+              # A prerelease does not promote the changelog, so these are what is under Unreleased.
+              echo '```'
+              echo
+              printf '%s\n' "$NOTES"
+              echo
+              echo '```'
+            } > /tmp/pr-body.md
+            exit 0
+          fi
+          {
+            echo "## Release v$VERSION"
             echo
             echo "Merging this publishes the image, tags the commit and creates the GitHub Release."
             echo
@@ -137,16 +224,31 @@ jobs:
             echo "nothing to check about CI here. The journey is the part CI cannot do: it needs a"
             echo "licence, and a licence belongs to the machine it was issued for."
             echo
+            # The notes come trimmed, so the blank lines the section had around it go back in.
             echo '```'
-            awk -v v="## $version" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md
+            echo
+            printf '%s\n' "$NOTES"
+            echo
             echo '```'
           } > /tmp/pr-body.md
 
       - name: Preview
         if: inputs.dry_run
         run: |
-          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock
+          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock desktop/intelligence-cli.json
           cat /tmp/pr-body.md
+
+      # The first candidate or beta needs its branch before a PR can target it. It is made through
+      # the API with this run's token, so the checkout never holds a credential.
+      - name: Cut the release branch
+        if: steps.prepare.outputs.new_branch != '' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.prepare.outputs.new_branch }}
+          SHA: ${{ steps.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/heads/$BRANCH" -f "sha=$SHA"
 
       # A pull request opened by a workflow does not trigger the pull_request workflows, so the
       # release PR arrives without its own checks. That is deliberate rather than tolerated: the
@@ -162,4 +264,5 @@ jobs:
           labels: release
           commit-message: "Release v${{ steps.prepare.outputs.version }}"
           title: "Release v${{ steps.prepare.outputs.version }}"
+          base: ${{ steps.prepare.outputs.base }}
           body-path: /tmp/pr-body.md
