@@ -16,6 +16,7 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
+import { useActiveSkin } from "@/skins/registry";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -35,6 +36,7 @@ function RouteComponent() {
   const explore = agents?.filter(isSharedWithYou);
   const { start, startChosen, pending } = useStartChannel();
   const [error, setError] = useState<string | null>(null);
+  const { home } = useActiveSkin();
 
   /** Default recipient when the composer draft has no mention. */
   const fallback = defaultAgentProfile(
@@ -44,7 +46,7 @@ function RouteComponent() {
 
   return (
     <>
-      <SidebarToggleBar />
+      {home?.Top ? <home.Top /> : <SidebarToggleBar />}
       <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
@@ -135,7 +137,8 @@ function RouteComponent() {
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
-        <div className="mt-10 w-full max-w-2xl">
+        {home?.Below ? <home.Below /> : null}
+        <div className="mt-10 w-full max-w-2xl" data-slot="home-explore">
           {loading ? (
             <>
               <h2

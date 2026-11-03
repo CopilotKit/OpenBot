@@ -33,4 +33,13 @@ export type Skin = {
    * adds no endpoint. A key the active skin does not have goes home.
    */
   screens?: Record<string, ComponentType>;
+  /**
+   * Extra parts for OpenBot's own home screen, which keeps its message box and how a message is
+   * sent. `Top` replaces the bar above the greeting (it must still let the person open the
+   * conversation list); `Below` is drawn under the message box. Absent, home is OpenBot's own.
+   */
+  home?: {
+    Top?: ComponentType;
+    Below?: ComponentType;
+  };
 };
