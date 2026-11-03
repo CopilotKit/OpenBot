@@ -19,6 +19,11 @@
  */
 import { createDatabase } from "../../server/src/db/client";
 import { createRoutineStore } from "../../server/src/routines/store";
+import { createScheduleClient } from "../../server/src/schedules/client";
+import {
+  createScheduleDirectory,
+  installScheduleDirectory,
+} from "../../server/src/schedules/directory";
 import {
   dispatchClaimedRoutines,
   offerDueRoutines,
@@ -32,7 +37,7 @@ import { workerStatus } from "./status";
 console.info(`OpenBot worker status: ${workerStatus().status}`);
 
 /*
- * The worker's three settings, parsed and validated in one place (`./env`).
+ * The worker's settings, parsed and validated in one place (`./env`).
  *
  * Refused up front, for the reason `fire-routines.ts` refuses up front: a loop that
  * started anyway would open a run row for every routine it offers itself and collect
@@ -42,16 +47,39 @@ console.info(`OpenBot worker status: ${workerStatus().status}`);
  *
  * Read from the environment rather than from `DeploymentConfig`/`loadConfig`, and
  * deliberately so. `loadConfig` demands the whole server deployment's configuration —
- * Intelligence credentials, key encryption, auth — because it answers "what can this
- * deployment do". This process is handed exactly three settings by `scripts/start.sh`
- * (`DATABASE_URL`, `SERVER_INTERNAL_URL`, `WORKER_SHARED_SECRET`); calling
+ * key encryption, auth — because it answers "what can this deployment do". This process is
+ * handed exactly its own settings by `scripts/start.sh` (`DATABASE_URL`, `SERVER_INTERNAL_URL`,
+ * `WORKER_SHARED_SECRET`, and the Intelligence address and key the routines live behind); calling
  * `loadConfig(process.env)` here would refuse to start over settings this loop has no
  * opinion about and does not need.
  */
-const { workerSharedSecret, serverInternalUrl, databaseUrl, owner } =
-  loadWorkerEnv();
+const {
+  workerSharedSecret,
+  serverInternalUrl,
+  databaseUrl,
+  owner,
+  intelligence,
+} = loadWorkerEnv();
 
 const database = createDatabase(databaseUrl);
+/*
+ * The routines live in Intelligence. This loop reads the due ones from its own schedule directory,
+ * loaded once now and kept fresh by Intelligence's announcements (or its timer), exactly as the
+ * server's is. Exactly-once firing never rested on that copy being fresh: the `routine.fire` key
+ * and Intelligence's compare-and-set on each routine's clock decide it.
+ */
+const scheduleDirectory = installScheduleDirectory(
+  createScheduleDirectory({
+    client: createScheduleClient({
+      apiUrl: intelligence.apiUrl,
+      apiKey: intelligence.apiKey,
+    }),
+    ...(intelligence.gatewayWsUrl
+      ? { gatewayWsUrl: intelligence.gatewayWsUrl }
+      : {}),
+  }),
+);
+await scheduleDirectory.start();
 const queue = createWorkQueue(database);
 const routineStore = createRoutineStore(database);
 
