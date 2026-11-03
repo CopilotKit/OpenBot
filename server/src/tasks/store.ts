@@ -113,7 +113,8 @@ export const listedTask = sql`(
     or exists (
       select 1 from ${workItems}
       where ${workItems.kind} = ${PROACTIVE_TASK_KIND}
-        and ${workItems.payload}->>'taskId' = ${botTasks.id}
+        and (${workItems.payload}->>'ownerUserId') = ${botTasks.ownerUserId}
+        and (${workItems.payload}->>'taskId') = ${botTasks.id}
         and ${workItems.createdAt} > ${botTasks.resolvedAt}
     )
     or exists (

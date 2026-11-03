@@ -631,7 +631,7 @@ export async function readTaskStates(
           and(
             eq(workItems.kind, "person.response"),
             isNull(workItems.finishedAt),
-            sql`${payload("ownerUserId")} = ${owner}`,
+            eq(workOwner, owner),
             inThreads(answeredThread),
             sql`(${workItems.attempts} < ${DEFAULT_MAX_ATTEMPTS} or ${workItems.leaseUntil} > now())`,
           ),
