@@ -53,27 +53,39 @@ form, and taking over the browser is always offered.
 
 ## What the app shows
 
-There is no Admin. Apps live on **Connections**, because adding an app and connecting your account
-are the same decision when one person makes both:
+The menu is **Bots**, **Connections** and **Settings**. There is no Admin and no Capabilities page.
 
-- `/connections` is one searchable grid of every app and your GitHub and Slack accounts, connected
-  ones first. A tile's press does the job: **Connect** adds the app and goes straight to signing in
-  to your account; **Add**, for an app with no account (a free search provider), turns it on; **Set up** opens the app's page where a key or OAuth client has to be typed first. With a
+**Connections** is every way a Bot signs in to something, because adding an app and connecting your
+account are the same decision when one person makes both:
+
+- `/connections` is one searchable grid of the apps that connect in one press, plus your GitHub
+  account, connected ones first. **Connect** adds the app and goes straight to signing in; **Add**,
+  for an app with no account (a free search provider), turns it on. Apps that need a key or an OAuth
+  client typed first wait behind **Show apps that need setup**, and a search finds them too. With a
   broker set up, the last tile browses its directory of more apps.
-- A connected tile opens `/connections/<app>`: the app's tools, which Bots use them, your account,
-  and turning it off.
-- When an app is connected, every tool it newly lists that only reads is given to every Bot, so it
-  works straight away. Tools that change things are left for you to give, and a Bot still asks
-  before it uses one. Tools you take away are not given back when the app is refreshed. See
+- Connecting an app gives **every Bot every tool** it lists, including the ones that change things.
+  What stands in front of a write is Ask before acting (Allow once, Always allow here, or Deny, in the
+  conversation). An app can't be taken from one Bot; turning it off takes it from all of them. See
   `server/src/plugins/personal-defaults.ts`.
+- A connected tile opens `/connections/<app>`: its tools, your account, and turning it off.
+- **Sign-ins and keys**, below the grid: saved website logins at `/connections/logins` and API keys at
+  `/connections/keys`.
 - **Routines is always on**, here as in the team edition: every Bot has all of its tools, and it
   can't be turned off. See [Routines](routines.md).
 
-The rest of what a person running OpenBot for themselves needs is under Settings: Skills for every
-Bot, Credentials, Computer and Activity (the audit trail). Where Admin was, **OpenBot for Business** opens
-a list of what the team edition adds. An old `/admin/...` or `/settings/plugins/...` address opens
-the same page under Connections or Settings, or Settings itself. Settings has no Learning page,
-which chooses who else's Bots use your Skills, and a Bot has no Sharing page.
+**In a conversation**, when a Bot needs an app that isn't connected, it shows a card with
+**Connect**: one press turns the app on and opens its sign-in in a new tab, and the conversation
+carries on once it is connected.
+
+**Bots** lists your Bots and, under **What your Bots know**, Skills and Memory. A Bot's own page has
+four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before
+doing, and its goals) and Setup.
+
+**Settings** holds Skills for every Bot, Computer and Activity (the audit trail). Where Admin was,
+**OpenBot for Business** opens a list of what the team edition adds. An old `/admin/...`,
+`/settings/plugins/...`, `/settings/credentials` or `/settings/passwords` address opens the same page
+where it is now. There is no Learning page, Sharing, Visibility, Isolated, or Reaching you, which are
+all about other people, other computers or Slack and Teams.
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
