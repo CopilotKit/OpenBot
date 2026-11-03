@@ -24,9 +24,11 @@ import {
 import { recorderConnections } from "../src/db/schema/recorder";
 import { retireOwnedAccounts } from "../src/identity/retire";
 import { createPeopleStore } from "../src/people/store";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import { testLearningIntelligence } from "./support/learning";
 
 /*
  * The two ways OpenBot itself ends people's sessions, outside Better Auth's own routes, end their Recorders too:
@@ -68,6 +70,9 @@ function recorderWith(auditFor?: () => AuditStore) {
     organizationAuth: undefined,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
+    trajectoryBindings: createTrajectoryBindingStore(
+      testLearningIntelligence(),
+    ),
     personalSpaces: {
       containerFor: (userId) => `space-of-${userId}`,
       state: async () => ({ state: "unassigned", containerId: null }),

@@ -194,6 +194,7 @@ import {
 } from "./intelligence-client";
 import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import {
+import { createProjectChangesClient } from "./intelligence/project-changes";
   createLearningAutoAssign,
   probeLearningContainer,
   withLearningAutoAssign,
@@ -204,6 +205,7 @@ import {
   ensureLearningContainer,
   intelligenceApiOrigin,
   keyIntelligence,
+import { createLearningChanges } from "./learning/changes";
   type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
@@ -213,6 +215,7 @@ import {
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
+import { createLearningIntelligence } from "./learning/intelligence";
 import {
   createLearningSharingStore,
   createOpenSkillIndex,
@@ -223,6 +226,7 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
+import { copyLocalLearningToIntelligence } from "./learning/upgrade";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
@@ -278,6 +282,7 @@ import {
   createSnsVerifier,
   fetchText as fetchSnsText,
   inboundEmailConfigFromEnv,
+import { createTrajectoryBindingStore } from "./recorder/trajectory-bindings";
 } from "./responsibilities/email";
 import {
   createSlackTriggerIngest,
@@ -325,13 +330,30 @@ const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
 const learningSettingsStore = createLearningSettingsStore(
-  database,
+  learningIntelligence,
   config.learning,
 );
 // Its own client, like the self-host banner's: the constructor opens nothing.
 const learningProbeIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
+/*
+ * Learning settings and pointers live in Intelligence's Learning assignments (learning/intelligence.ts): the Admin
+ * settings, each thread's container, each person's space and sharing choice, and whose each Recorder trajectory is. The
+ * settings and the open-Skill index are read on every run, so each instance holds them in memory, kept fresh by
+ * Intelligence's `learning_changes` announcements and a timer.
+ */
+const learningIntelligence = createLearningIntelligence({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const learningChanges = createLearningChanges({
+  client: createProjectChangesClient({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+  gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+});
 /*
  * Who can create the `openbot` container here: never the runtime key. A service token the operator
  * configured (local evaluation installs), or a CopilotKit CLI login on this machine, which is what a
@@ -391,7 +413,7 @@ const learningAutoAssign = createLearningAutoAssign({
 const personalLearningSpaces = createPersonalLearningSpaces({
   readSettings: () => learningSettingsStore.read(),
   snapshots: learningProbeIntelligence,
-  store: createPersonSpaceStore(database),
+  store: createPersonSpaceStore(learningIntelligence, learningChanges),
   ...(learningCanCreate && learningApiOrigin
     ? {
         create: (container) =>
@@ -410,7 +432,10 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
-const learningSharingStore = createLearningSharingStore(database);
+const learningSharingStore = createLearningSharingStore(learningIntelligence, {
+  // A change saved here is in this instance's index before the Settings route answers.
+  onSaved: (space) => openSkillIndex.apply(space),
+});
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
   read: () => learningSharingStore.openSources(),
@@ -422,11 +447,18 @@ const learningSettings = withLearningAutoAssign(
 learningAutoAssign.start();
 await initializeDevActorUser(database, config.singleUser);
 /*
+  readOne: (userId) => learningIntelligence.personalSpace(userId),
  * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
  * Intelligence's change announcements (agents/bot-registry/directory.ts). Started before anything
  * reads a Bot (nothing above does), and fatal when Intelligence cannot answer: a server with no Bots would show everybody
  * an empty roster and say nothing about why.
  */
+// An upgraded deployment's Learning settings and pointers, copied from the local tables once (learning/upgrade.ts).
+await copyLocalLearningToIntelligence(database, learningIntelligence);
+learningChanges.start();
+// Fatal when Intelligence cannot answer, as the Bot directory is: every run reads these settings.
+await learningSettingsStore.start(learningChanges);
+openSkillIndex.start(learningChanges);
 const botDirectory = installBotDirectory(
   createBotDirectory({
     registry: createAgentRegistryClient({
@@ -1469,6 +1501,7 @@ const teamBots = createTeamBots({
 /*
  * What a check-in may read: the apps each person connected with their own account, through the
  * tools that say they only read, and never another person's account through a Team Bot. See
+  trajectoryBindings: createTrajectoryBindingStore(learningIntelligence),
  * proactive/scope.ts and proactive/restriction.ts. Read afresh per question, so a connection
  * withdrawn or a label changed applies on the next call.
  */

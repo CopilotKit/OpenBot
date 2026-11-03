@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { LearningSettings } from "@openbot/shared/learning";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
-import { eq } from "drizzle-orm";
-import type { Database } from "../db/client";
-import { learningPersonSpaces } from "../db/schema/learning";
+import type { LearningChanges } from "./changes";
 import type { LearningContainerSpec } from "./ensure-container";
+import type { LearningIntelligence } from "./intelligence";
 
 /**
  * A person's own Learning space: one Intelligence Learning container per OpenBot person, which every recording they make
@@ -58,28 +57,43 @@ function errorCode(error: unknown): string {
   return typeof code === "string" ? code : "";
 }
 
-/** The rows that remember which people's spaces OpenBot has seen exist. */
-export function createPersonSpaceStore(database: Database) {
+/**
+ * Which people's spaces OpenBot has seen exist: Intelligence's confirm record for each (it holds the space's container
+ * and its sharing choice, learning/intelligence.ts), and, in front of it, the people this instance already confirmed or
+ * read as confirmed, so a space seen once is not confirmed again on every capture pass and popup. An announcement that
+ * a person's space changed on another instance drops them from that memory, and the next question reads Intelligence.
+ */
+export function createPersonSpaceStore(
+  intelligence: Pick<
+    LearningIntelligence,
+    "personalSpace" | "confirmPersonalSpace" | "forgetPersonalSpace"
+  >,
+  changes?: LearningChanges,
+) {
+  const seen = new Set<string>();
+  changes?.listen({
+    onChange: (change) => {
+      if (change.entity === "personal_space") seen.delete(change.appUserId);
+    },
+    onJoined: () => seen.clear(),
+  });
   return {
     async confirmed(userId: string): Promise<boolean> {
-      const [row] = await database
-        .select({ userId: learningPersonSpaces.userId })
-        .from(learningPersonSpaces)
-        .where(eq(learningPersonSpaces.userId, userId))
-        .limit(1);
-      return row !== undefined;
+      if (seen.has(userId)) return true;
+      const space = await intelligence.personalSpace(userId);
+      if (space.learningContainerId === null) return false;
+      seen.add(userId);
+      return true;
     },
     /** Idempotent, so replicas confirming the same space at once all succeed. */
     async confirm(userId: string, containerId: string): Promise<void> {
-      await database
-        .insert(learningPersonSpaces)
-        .values({ userId, containerId })
-        .onConflictDoNothing();
+      if (seen.has(userId)) return;
+      await intelligence.confirmPersonalSpace(userId, containerId);
+      seen.add(userId);
     },
     async forget(userId: string): Promise<void> {
-      await database
-        .delete(learningPersonSpaces)
-        .where(eq(learningPersonSpaces.userId, userId));
+      seen.delete(userId);
+      await intelligence.forgetPersonalSpace(userId);
     },
   };
 }
@@ -289,4 +303,21 @@ export function createPersonalLearningSpaces(deps: {
       void state(userId).catch(() => {});
     },
   };
+}
+
+/**
+ * Remove a person's Learning records in Intelligence when OpenBot removes the person for good: their space record and
+ * sharing choice (the old tables' foreign keys took these with the person) and the containers their threads were given.
+ * The containers and Skills stay in Learning, and their Recorder trajectories stay theirs: Intelligence's capture data,
+ * which no other person may record into.
+ */
+export async function removePersonLearning(
+  intelligence: Pick<
+    LearningIntelligence,
+    "purgePersonalSpace" | "deleteThreadAssignments"
+  >,
+  userId: string,
+): Promise<void> {
+  await intelligence.purgePersonalSpace(userId);
+  await intelligence.deleteThreadAssignments(userId);
 }

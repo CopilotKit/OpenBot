@@ -30,7 +30,7 @@ import {
 import { createRecorderRefusalAudit } from "./refusal-audit";
 import type { RecorderRouteDeps } from "./routes";
 import { createRecorderSignOut, type SignOutRecorders } from "./sign-out";
-import { createTrajectoryBindingStore } from "./trajectory-bindings";
+import type { TrajectoryBindingStore } from "./trajectory-bindings";
 import {
   createTrajectoryConnectHook,
   createTrajectoryLearningSelector,
@@ -91,6 +91,8 @@ export function createRecorderExtension(deps: {
   peopleStore: Pick<PeopleStore, "isRevoked">;
   /** Each person's own Learning space, which every recording they make joins. */
   personalSpaces: PersonalLearningSpaces;
+  /** Which person each trajectory belongs to, in Intelligence (recorder/trajectory-bindings.ts). */
+  trajectoryBindings: Pick<TrajectoryBindingStore, "bind" | "isBoundTo">;
   auditStore: AuditStore;
   /**
    * How long a Better Auth session lasts here unused, in milliseconds (auth/index.ts `sessionLifetimeMs`, read from the
@@ -112,8 +114,7 @@ export function createRecorderExtension(deps: {
   };
 } {
   const { config, database, organizationAuth } = deps;
-  const trajectoryBindings = createTrajectoryBindingStore(database);
-  const { personalSpaces } = deps;
+  const { personalSpaces, trajectoryBindings } = deps;
 
   /*
    * A connection is a sign-in of its own, so it lasts as the person's sign-in here does. Better Auth's session ends once

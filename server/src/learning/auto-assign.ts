@@ -415,5 +415,11 @@ export function withLearningAutoAssign<T extends LearningSettingsStore>(
         autoAssign.kick();
       return settings;
     },
+    async snapshot() {
+      const snapshot = await store.snapshot();
+      if (snapshot.settings.enabled && snapshot.settings.defaultTarget === null)
+        autoAssign.kick();
+      return snapshot;
+    },
   };
 }

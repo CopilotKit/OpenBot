@@ -34,13 +34,21 @@ import {
 import { skillArchive } from "./fixtures/learned-skill-archive";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import {
+  eventually,
+  joined,
+  removeLearningPeople,
+  testLearningChanges,
+  testLearningIntelligence,
+} from "./support/learning";
 
 /*
- * Settings, Learning end to end: the routes a person's screen calls, the Postgres rows they write, the audit trail, the
- * administrator's Skill sharing switch (the enterprise settings row Admin saves), and what a run of a Bot is offered, on
- * two replicas sharing one database. A run is built the way a person's chat turn builds it (the runtime's request
- * factory and the actor resolver) and its Skills are read from the request the model receives. Intelligence and the
- * model are faked: each person's space publishes a fixed set of Skills, and the model answers "Done.".
+ * Settings, Learning end to end: the routes a person's screen calls, the sharing choices they save in Intelligence's
+ * Learning assignments (the real test Intelligence), the audit trail, the administrator's Skill sharing switch (the
+ * enterprise settings row Admin saves), and what a run of a Bot is offered, on replicas sharing one Intelligence. A run
+ * is built the way a person's chat turn builds it (the runtime's request factory and the actor resolver) and its Skills
+ * are read from the request the model receives. Skill delivery and the model are faked: each person's space publishes
+ * a fixed set of Skills, and the model answers "Done.".
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -55,17 +63,23 @@ const auditStore = {
     audits.push(event);
   },
 };
-const store = createLearningSharingStore(database);
+const intelligence = testLearningIntelligence();
+/** As index.ts wires it: a choice saved here is in this replica's index before the route answers. */
+const store = createLearningSharingStore(intelligence, {
+  onSaved: (space) => thisReplica.apply(space),
+});
 let invalidations = 0;
-let clock = 1_000_000;
-/** Two replicas' indexes over one database; only the first is told about changes made through its routes. */
+/**
+ * Two replicas' indexes over one Intelligence. Only the first is told about changes made through its routes; the other
+ * hears nothing until it reads its index again, as its timer does.
+ */
 const thisReplica = createOpenSkillIndex({
   read: () => store.openSources(),
-  now: () => clock,
+  readOne: (userId) => intelligence.personalSpace(userId),
 });
 const otherReplica = createOpenSkillIndex({
   read: () => store.openSources(),
-  now: () => clock,
+  readOne: (userId) => intelligence.personalSpace(userId),
 });
 const published: Record<string, ReturnType<typeof skillArchive>> = {
   [personalLearningContainerId(grace)]: skillArchive("grace-r1", [
@@ -310,6 +324,7 @@ afterAll(async () => {
   await model.stop();
   remote.stop(true);
   await database.delete(enterpriseSettings).where(sharingRow);
+  await removeLearningPeople([ada, grace]);
   await database.delete(users).where(inArray(users.id, [ada, grace]));
   await database.$client.close();
 });
@@ -379,7 +394,7 @@ describe("Settings, Learning", () => {
     expect(await offered(learning, "ada")).toEqual(["ada-only"]);
   });
 
-  test("open: every Bot uses them, at once on this replica, and on another within the index's TTL", async () => {
+  test("open: every Bot uses them, at once on this replica, and on another that reads its index", async () => {
     const before = invalidations;
     const saved = await call("/api/settings/learning/mode", "grace", {
       method: "PUT",
@@ -392,7 +407,7 @@ describe("Settings, Learning", () => {
       "grace-picked",
       "grace-private",
     ]);
-    // The other replica read its index before the change and keeps it for its TTL.
+    // The other replica reads its index for the first time now, so it sees the change.
     expect(await offered(learningElsewhere, "ada")).toEqual([
       "ada-only",
       "grace-picked",
@@ -418,7 +433,7 @@ describe("Settings, Learning", () => {
   });
 
   test("choose: only the Skills the person opens are used by every Bot", async () => {
-    // The other replica has an index from the open step; let it age out first.
+    // The other replica keeps the index it read in the open step.
     await offered(learningElsewhere, "ada");
     await call("/api/settings/learning/mode", "grace", {
       method: "PUT",
@@ -446,18 +461,64 @@ describe("Settings, Learning", () => {
     ]);
   });
 
-  test("another replica sees a change once its index's TTL has passed", async () => {
-    // Still the index it read while Grace's choice was open.
+  test("another replica that heard nothing sees a change once it reads its index again, as its timer does", async () => {
+    // Still the index it read while Grace's choice was open: no run waits on Intelligence for it.
     expect(await offered(learningElsewhere, "ada")).toEqual([
       "ada-only",
       "grace-picked",
       "grace-private",
     ]);
-    clock += 30_001;
+    await otherReplica.refresh();
     expect(await offered(learningElsewhere, "ada")).toEqual([
       "ada-only",
       "grace-picked",
     ]);
+  });
+
+  test("a replica subscribed to Intelligence's change feed hears of a change made on another and reads that person's space", async () => {
+    const changes = testLearningChanges();
+    const heard = createOpenSkillIndex({
+      read: () => store.openSources(),
+      readOne: (userId) => intelligence.personalSpace(userId),
+      refreshIntervalMs: 60 * 60_000,
+    });
+    try {
+      await joined(changes);
+      heard.start(changes);
+      const mine = async () =>
+        (await heard.sources()).find((source) => source.userId === grace);
+      expect((await mine())?.skills).toEqual(new Set(["grace-picked"]));
+      // Saved through another replica's store, not this index's.
+      await createLearningSharingStore(intelligence).setSkillOpen(
+        grace,
+        "grace-private",
+        true,
+      );
+      await eventually(
+        async () => {
+          const skills = (await mine())?.skills;
+          return skills !== "all" && skills?.has("grace-private") === true;
+        },
+        10_000,
+        "the subscribed replica to hear Grace's change",
+      );
+      await createLearningSharingStore(intelligence).setSkillOpen(
+        grace,
+        "grace-private",
+        false,
+      );
+      await eventually(
+        async () => {
+          const skills = (await mine())?.skills;
+          return skills !== "all" && skills?.has("grace-private") === false;
+        },
+        10_000,
+        "the subscribed replica to hear Grace close it again",
+      );
+    } finally {
+      heard.stop();
+      changes.stop();
+    }
   });
 
   test("opening and closing a Skill each write an audit row; repeating one writes none", async () => {
@@ -734,33 +795,63 @@ describe("every path that builds a Bot for a person gives its runs their Skills 
 });
 
 describe("the open-Skill index", () => {
-  test("reads once per TTL, again at once after invalidate, and keeps its last answer when a read fails", async () => {
+  test("serves runs from memory, reads again when refreshed or invalidated, and keeps its last answer when a read fails", async () => {
     let reads = 0;
     let fail = false;
-    let now = 0;
     const index = createOpenSkillIndex({
       read: async () => {
         reads++;
-        if (fail) throw new Error("database down");
+        if (fail) throw new Error("Intelligence down");
         return [{ userId: "g", containerId: "user-g", skills: "all" }];
       },
-      ttlMs: 1_000,
-      now: () => now,
     });
+    // Only the very first read waits for Intelligence; every run after that is answered from memory.
     await index.sources();
     await index.sources();
     expect(reads).toBe(1);
-    now += 1_001;
-    await index.sources();
+    await index.refresh();
     expect(reads).toBe(2);
     index.invalidate();
-    await index.sources();
-    expect(reads).toBe(3);
-    now += 1_001;
+    await index.refresh();
+    expect(reads).toBeGreaterThanOrEqual(3);
     fail = true;
+    await expect(index.refresh()).rejects.toThrow("Intelligence down");
     expect(await index.sources()).toEqual([
       { userId: "g", containerId: "user-g", skills: "all" },
     ]);
+  });
+
+  test("a space saved or announced is applied at once, and an older answer never replaces a newer one", async () => {
+    const index = createOpenSkillIndex({ read: async () => [] });
+    expect(await index.sources()).toEqual([]);
+    const space = (
+      version: number,
+      mode: "open" | "closed" | "choose",
+      openSkills: string[] = [],
+    ) => ({
+      appUserId: "p",
+      learningContainerId: null,
+      confirmedAt: null,
+      sharing: { mode, openSkills },
+      version,
+      updatedAt: null,
+    });
+    index.apply(space(3, "choose", ["a"]));
+    expect(await index.sources()).toEqual([
+      {
+        userId: "p",
+        containerId: personalLearningContainerId("p"),
+        skills: new Set(["a"]),
+      },
+    ]);
+    index.apply(space(2, "open"));
+    expect((await index.sources())[0]?.skills).toEqual(new Set(["a"]));
+    index.apply(space(4, "closed", ["a"]));
+    expect(await index.sources()).toEqual([]);
+    // A purged space announces version 0, and leaves the index.
+    index.apply(space(5, "open"));
+    index.apply(space(0, "closed"));
+    expect(await index.sources()).toEqual([]);
   });
 
   test("a read that began before a change never replaces what came after it", async () => {

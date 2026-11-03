@@ -9,9 +9,11 @@ import { SIGN_OUT_UNFINISHED } from "../src/auth/organization";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { sessions, users } from "../src/db/schema/core";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import { testLearningIntelligence } from "./support/learning";
 
 /*
  * A person's sign-in ending ends their Recorders with it, through the real Better Auth routes and the Recorder's own
@@ -41,6 +43,9 @@ function recorderWith(auditFor?: () => AuditStore) {
     organizationAuth: undefined,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
+    trajectoryBindings: createTrajectoryBindingStore(
+      testLearningIntelligence(),
+    ),
     personalSpaces: {
       containerFor: (userId) => `space-of-${userId}`,
       state: async () => ({ state: "unassigned", containerId: null }),

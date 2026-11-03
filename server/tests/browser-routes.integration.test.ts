@@ -70,9 +70,11 @@ import {
 } from "../src/db/schema/recorder";
 import { startHttpServer } from "../src/http-server";
 import { createRecorderConnectionStore } from "../src/recorder/connections";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import { testLearningIntelligence } from "./support/learning";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `browser-routes-${randomUUID()}`;
@@ -503,6 +505,9 @@ function build(
     organizationAuth: options.organizationAuth,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
+    trajectoryBindings: createTrajectoryBindingStore(
+      testLearningIntelligence(),
+    ),
     personalSpaces,
     sessionLifetimeMs: SESSION_LIFETIME_MS,
     auditStore,

@@ -23,8 +23,10 @@ import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { recorderConnections } from "../src/db/schema/recorder";
 import { clearDesktopConnectionFailure } from "../src/desktop-connection-failure";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testLearningIntelligence } from "./support/learning";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-organization-${randomUUID()}`;
@@ -157,6 +159,9 @@ beforeAll(() => {
     organizationAuth,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
+    trajectoryBindings: createTrajectoryBindingStore(
+      testLearningIntelligence(),
+    ),
     personalSpaces: {
       containerFor: (userId) => `space-of-${userId}`,
       state: async () => ({ state: "unassigned", containerId: null }),
