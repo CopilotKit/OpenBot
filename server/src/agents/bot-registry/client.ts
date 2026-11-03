@@ -408,6 +408,7 @@ function draftToWire(draft: BotDraft) {
 
 function changesToWire(changes: BotChanges) {
   const wire: Record<string, unknown> = {};
+  if (changes.type !== undefined) wire.kind = changes.type;
   if (changes.name !== undefined) wire.name = changes.name;
   if (changes.title !== undefined) wire.title = changes.title;
   if (changes.roleDescription !== undefined)

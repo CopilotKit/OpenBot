@@ -103,19 +103,11 @@ async function setAgentRun(
     configuration: Record<string, unknown>;
   },
 ) {
-  // A Bot's type is fixed for its life in Intelligence, so a different type is a new Bot under the
-  // same id: the old one purged, this one made in its place with everything else it had.
+  // The type and the configuration for it change together, as an edit or a package sync does.
   const directory = await useTestBots();
   const current = await directory.registry.get(id);
   if (!current) throw new Error(`Intelligence has no Bot ${id}`);
-  if (current.type === run.type) {
-    await directory.update(id, current.version, {
-      configuration: run.configuration,
-    });
-    return;
-  }
-  await directory.registry.purge(id, `test:${crypto.randomUUID()}`);
-  await directory.create({ ...current, ...run });
+  await directory.update(id, current.version, run);
 }
 
 /** When Intelligence says this Bot was deleted, or null while it is live. */

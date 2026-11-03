@@ -34,7 +34,7 @@ export type Bot = {
   version: number;
 };
 
-/** What a new Bot is made of. Identity is fixed here: the id and the type never change afterwards. */
+/** What a new Bot is made of. Its id and creation time never change afterwards; its type may. */
 export type BotDraft = {
   id: string;
   type: BotType;
@@ -54,10 +54,14 @@ export type BotDraft = {
   deletedAt?: Date | null;
 };
 
-/** The fields an edit may change. Absent leaves a field as it is; `configuration` is replaced whole. */
+/**
+ * The fields an edit may change. Absent leaves a field as it is; `configuration` is replaced whole.
+ * A new `type` must come with a `configuration` for it: Intelligence refuses one without.
+ */
 export type BotChanges = Partial<
   Pick<
     Bot,
+    | "type"
     | "name"
     | "title"
     | "roleDescription"

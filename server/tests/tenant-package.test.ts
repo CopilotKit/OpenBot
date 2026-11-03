@@ -1064,10 +1064,11 @@ describe("tenant package agent profile synchronization", () => {
   });
 
   /*
-   * Intelligence keeps a Bot's type for its lifetime, so a package that changes one is refused, and
-   * refused before any of its Bots is written: the new Bot listed ahead of the changed one is not made.
+   * A package may change a Bot's type, as it always could: the Bot keeps its id, so its grants,
+   * memberships and conversations stay with it, and it runs as the new type from then on. The type
+   * and the configuration for it change together; the old prompt does not linger on a remote Bot.
    */
-  test("refuses a package that changes a Bot's type, before writing anything", async () => {
+  test("changes a Bot's type in place when the package does", async () => {
     const agent = packageAgent();
     const tenantPackage = loadedPackage(agent);
     const deploymentPackage = await synchronizeTenantPackage(
@@ -1077,33 +1078,59 @@ describe("tenant package agent profile synchronization", () => {
     createdAgentIds.push(agent.id);
     createdPackageIds.push(deploymentPackage.id);
     const before = await storedBot(agent.id);
-    const [packageBefore] = await packageRowsOf(tenantPackage.tenantId);
+    const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
+    await database
+      .insert(channels)
+      .values({ id: channelId, name: "Kept", description: "" });
+    createdChannelIds.push(channelId);
+    await database
+      .insert(channelAgents)
+      .values({ channelId, agentId: agent.id });
 
-    const newcomer = packageAgent({ name: "Newcomer" });
-    createdAgentIds.push(newcomer.id);
-    await expect(
-      synchronizeTenantPackage(database, {
-        ...tenantPackage,
-        checksum: randomUUID(),
-        agents: [
-          newcomer,
-          {
-            ...agent,
-            name: "Now Remote",
-            type: "remote_ag_ui",
-            configuration: { endpoint: "https://agent.example.test/ag-ui" },
+    await synchronizeTenantPackage(database, {
+      ...tenantPackage,
+      checksum: randomUUID(),
+      agents: [
+        {
+          ...agent,
+          type: "remote_mastra",
+          configuration: {
+            endpoint: "https://agent.example.test/mastra",
+            remoteAgentId: "weather",
           },
-        ],
-      }),
-    ).rejects.toThrow(
-      `Tenant package agent "${agent.id}" was a built_in Bot and the package now makes it remote_ag_ui`,
-    );
+        },
+      ],
+    });
 
-    expect(await storedBot(agent.id)).toEqual(before);
-    expect(await botInIntelligence(newcomer.id)).toBeNull();
-    expect(await packageRowsOf(tenantPackage.tenantId)).toEqual([
-      packageBefore,
-    ]);
+    const after = await storedBot(agent.id);
+    expect(after).toMatchObject({
+      id: agent.id,
+      type: "remote_mastra",
+      configuration: {
+        endpoint: "https://agent.example.test/mastra",
+        remoteAgentId: "weather",
+      },
+      packageId: deploymentPackage.id,
+      deletedAt: null,
+      version: before.version + 1,
+    });
+    expect(after.createdAt.toISOString()).toBe(before.createdAt.toISOString());
+    expect(
+      await database
+        .select({ agentId: channelAgents.agentId })
+        .from(channelAgents)
+        .where(eq(channelAgents.channelId, channelId)),
+    ).toEqual([{ agentId: agent.id }]);
+
+    // And it runs as what it now is.
+    const loaded = await createRuntimeAgentLoader(database)({
+      id: "package-type-reader",
+      role: "admin",
+    });
+    expect(loaded.find((one) => one.id === agent.id)).toMatchObject({
+      type: "remote_mastra",
+      remoteAgentId: "weather",
+    });
   });
 });
 

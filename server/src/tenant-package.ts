@@ -1110,11 +1110,6 @@ async function refusePackageBotCollisions(
         `Tenant package agent "${agent.id}" collides with a user-owned profile`,
       );
     }
-    if (bot.type !== agent.type) {
-      throw new Error(
-        `Tenant package agent "${agent.id}" was a ${bot.type} Bot and the package now makes it ${agent.type}. A Bot keeps its type for its lifetime in Intelligence; give the ${agent.type} Bot a new id in the package.`,
-      );
-    }
   }
 
   return current;
@@ -1125,8 +1120,8 @@ async function refusePackageBotCollisions(
  *
  * Only ever the package's own Bots. A Bot of the same id that a person made, or another package
  * made, is refused rather than taken over, as the local upsert's `setWhere` did. A Bot whose type
- * the package changed is refused too: Intelligence keeps a Bot's type for its lifetime, so the
- * package has to give the new one a new id.
+ * the package changed is changed in place, type and configuration together, keeping its id and so
+ * everything here that names it.
  */
 async function synchronizePackageBots(
   tenantPackage: LoadedTenantPackage,
@@ -1158,6 +1153,7 @@ async function synchronizePackageBots(
 
   for (const agent of tenantPackage.agents) {
     const wanted = {
+      type: agent.type,
       name: agent.name,
       title: agent.title,
       roleDescription: agent.roleDescription,
@@ -1170,7 +1166,7 @@ async function synchronizePackageBots(
     let bot = current.get(agent.id) ?? null;
     if (!bot) {
       await bots().create(
-        { id: agent.id, type: agent.type, isolated: false, ...wanted },
+        { id: agent.id, isolated: false, ...wanted },
         key(agent.id, "create", 0),
       );
       continue;
@@ -1182,6 +1178,7 @@ async function synchronizePackageBots(
       );
     }
     const differs =
+      bot.type !== wanted.type ||
       bot.name !== wanted.name ||
       bot.title !== wanted.title ||
       bot.roleDescription !== wanted.roleDescription ||
