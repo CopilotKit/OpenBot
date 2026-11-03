@@ -46,6 +46,47 @@ Ad-hoc signed Mac builds require the first-open exception described in
 [Apple's instructions](https://support.apple.com/en-us/102445). They are for internal testing
 and are not Apple-notarized. See [Windows signing](windows-signing.md) for signed NSIS builds.
 
+## Which Intelligence CLI an installer carries
+
+The desktop installer bundles the Intelligence CLI and the Node runtime that runs it.
+`desktop/intelligence-cli.json` chooses both:
+
+```json
+{ "cli": "latest", "node": "25.9.0" }
+```
+
+`cli` is one of:
+
+- the `copilotkit` npm dist-tag `latest`, which is the default
+- any other npm version or dist-tag of `copilotkit`, such as `1.2.3` or `next`
+- a `https://pkg.pr.new/...` preview URL, such as
+  `https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@<sha>`
+
+Any other URL is refused. `node` is an exact Node version. The download is checked against the
+SHA-256 that nodejs.org lists in `SHASUMS256.txt`, and a mismatch fails the build.
+
+A version or URL that does not exist fails the build, because `npm pack` cannot fetch it. So does a
+package that does not ship `index.js` as its bin. Nothing falls back to a different CLI.
+
+The build records what it actually bundled in `build-version.json`: the CLI's source, package name,
+exact version and integrity hash, and Node's exact version and SHA-256. A `latest` or a preview URL
+is therefore readable afterwards as the version it turned into.
+
+Cutting a release candidate turns `latest` into that exact version in the file, so the candidate
+and the release built from it carry the same CLI. A final release cannot change the file.
+
+To assemble the bundle locally, from the repository root:
+
+```sh
+bun desktop/scripts/cli-bundle.ts darwin arm64
+```
+
+The platform is `darwin` or `win32`, and the architecture is `arm64` or `x64`. The bundle is written
+to `desktop/src-tauri/cli-bundle`.
+
+On a tree without `desktop/src-tauri/tauri.bundled-cli.conf.json`, which is `main` today, CI
+bundles nothing and the installer carries no CLI.
+
 ## What merging does
 
 `publish-release.yml` runs on every push to `main` and starts by deciding whether the commit is a
