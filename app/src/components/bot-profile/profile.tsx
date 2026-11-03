@@ -72,7 +72,7 @@ export function BotProfile({
   const { done } = useNeedsYou(agent.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
-  // The browser's answer, shared with onboarding's Get notified step, so a yes there shows here.
+  // The browser's answer, shared with the prompt a conversation offers, so a yes there shows here.
   const permission = useNotificationPermission();
 
   return (

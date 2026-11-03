@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useBotLook } from "@/components/agents/bot-look";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
+import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import {
   type AgentOption,
   type CommandOption,
@@ -452,6 +453,14 @@ export function ConversationView({
         data-slot="composer-column"
       >
         {notice}
+        {/*
+         * Notifications are offered once this person has started a task: a Bot is working for them,
+         * so what a notification is for is plain. Read off the transcript, so the conversation a
+         * first message from home opens offers it too.
+         */}
+        {messages.some((message) => message.role === "user") ? (
+          <NotifyPrompt />
+        ) : null}
         <Composer
           agents={agents}
           autoFocus={autoFocus}
