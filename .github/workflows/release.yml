@@ -40,13 +40,12 @@ concurrency:
 jobs:
   create:
     name: create
-    # Main for every kind. A release branch only for a candidate, beta or final, because a stable
-    # release never comes from one. `release/publish/*` is where the release PRs themselves live,
-    # and nothing is cut from those.
+    # Main and the release branches. `release/publish/*` is where the release PRs themselves live,
+    # and nothing is cut from those. A stable release from a release branch gets this far so that
+    # "Check the inputs" can refuse it with a reason, instead of the run skipping and looking green.
     if: >-
       github.ref == 'refs/heads/main' ||
-      (inputs.kind != 'stable' &&
-        startsWith(github.ref, 'refs/heads/release/') &&
+      (startsWith(github.ref, 'refs/heads/release/') &&
         !startsWith(github.ref, 'refs/heads/release/publish/'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -76,6 +75,12 @@ jobs:
           set -euo pipefail
           if [ -n "$FROM" ] && { [ "$GITHUB_REF" != refs/heads/main ] || { [ "$KIND" != rc ] && [ "$KIND" != beta ]; }; }; then
             echo "::error::'from' only applies to the first candidate or beta, run from main."
+            exit 1
+          fi
+          # A stable release comes from main. A release branch carries one line of candidates, and
+          # what leaves it as a stable version is the final that finishes them.
+          if [ "$KIND" = stable ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::A stable release is cut from main. From $GITHUB_REF_NAME, cut a candidate, a beta or the final."
             exit 1
           fi
           # A final finishes a candidate, and candidates live on their release branch, never on main.
@@ -166,21 +171,39 @@ jobs:
             echo "::error::v$version is already tagged."
             exit 1
           fi
+          # A stable release from main must not take a version that a release branch is still
+          # heading for. It would publish as Latest first, and the final that finishes those
+          # candidates would then find its version already tagged. A release branch that has been
+          # finished stays behind, so it is the candidate tags for this exact version that count,
+          # and a patch after the final still goes ahead.
+          if [ "$KIND" = stable ] &&
+            git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null &&
+            [ -n "$(git tag --list "v$version-*")" ]; then
+            echo "::error::$branch already has candidates for $version. Finish them with a final from that branch, or choose a bump past it."
+            exit 1
+          fi
           {
             echo "new_branch=$new_branch"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
           # Writes the version, the chart's appVersion, the Cargo files and the changelog, and
-          # refuses a changelog with nothing under Unreleased. It appends version, base and notes to
-          # $GITHUB_OUTPUT for the steps below.
+          # refuses a changelog with nothing under Unreleased. It appends version, base and the path
+          # of a file holding the notes to $GITHUB_OUTPUT for the steps below.
           bun scripts/release-prepare.ts "$BUMP" "$KIND"
 
+      # The notes can be longer than the 65,536 characters GitHub allows in a PR body. The action
+      # below cuts a longer body to that length and warns (src/main.ts in its v8.1.1). The checklist
+      # comes first, so the cut only drops the end of the notes. The whole section is still in the
+      # CHANGELOG.md diff of the PR, and the published release reads it from there, not from here.
+      # The notes come through a file: an environment variable over 128 KB makes the shell fail with
+      # "Argument list too long", and the Unreleased section can grow past that. The notes have no
+      # trailing newline, so the bare echo after cat ends their last line.
       - name: Write the PR body
         env:
           KIND: ${{ inputs.kind }}
           VERSION: ${{ steps.prepare.outputs.version }}
-          NOTES: ${{ steps.prepare.outputs.notes }}
+          NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
         run: |
           set -euo pipefail
           # A candidate or beta is for the people who asked to try it. It is published where they
@@ -203,7 +226,8 @@ jobs:
               # A prerelease does not promote the changelog, so these are what is under Unreleased.
               echo '```'
               echo
-              printf '%s\n' "$NOTES"
+              cat "$NOTES_FILE"
+              echo
               echo
               echo '```'
             } > /tmp/pr-body.md
@@ -227,7 +251,8 @@ jobs:
             # The notes come trimmed, so the blank lines the section had around it go back in.
             echo '```'
             echo
-            printf '%s\n' "$NOTES"
+            cat "$NOTES_FILE"
+            echo
             echo
             echo '```'
           } > /tmp/pr-body.md

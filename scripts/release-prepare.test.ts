@@ -191,13 +191,15 @@ test("a stable release never touches a latest CLI", () => {
   expect(read(cliPath)).toBe(before);
 });
 
-test("the CLI entry writes version, base and notes to GITHUB_OUTPUT", () => {
-  const { root } = fixture("0.2.0");
+function runCli(unreleased?: string) {
+  const { root } = fixture("0.2.0", unreleased);
   copyFileSync(
     join(import.meta.dir, "release-prepare.ts"),
     join(root, "scripts/release-prepare.ts"),
   );
   const output = join(root, "github-output.txt");
+  const temp = join(root, "runner-temp");
+  mkdirSync(temp);
   const run = Bun.spawnSync(
     [
       process.execPath,
@@ -205,11 +207,29 @@ test("the CLI entry writes version, base and notes to GITHUB_OUTPUT", () => {
       "patch",
       "stable",
     ],
-    { cwd: root, env: { ...process.env, GITHUB_OUTPUT: output } },
+    {
+      cwd: root,
+      env: { ...process.env, GITHUB_OUTPUT: output, RUNNER_TEMP: temp },
+    },
   );
+  return { run, output, temp };
+}
+
+test("the CLI entry writes version and base to GITHUB_OUTPUT, and the notes to a file", () => {
+  const { run, output, temp } = runCli();
   expect(run.exitCode).toBe(0);
-  const text = readFileSync(output, "utf8");
-  expect(text).toContain("version=0.2.1\n");
-  expect(text).toContain("base=main\n");
-  expect(text).toMatch(/notes<<(EOF_[0-9a-f]+)\n- Something new\.\n\1\n/);
+  const file = join(temp, "release-notes.md");
+  expect(readFileSync(output, "utf8")).toBe(
+    `version=0.2.1\nbase=main\nnotes_file=${file}\n`,
+  );
+  expect(readFileSync(file, "utf8")).toBe("- Something new.");
+});
+
+test("the notes file holds the whole Unreleased body, past what one env var can carry", () => {
+  const line = "- A long note.\n";
+  const { run, temp } = runCli(line.repeat(20000));
+  expect(run.exitCode).toBe(0);
+  const notes = readFileSync(join(temp, "release-notes.md"), "utf8");
+  expect(notes.length).toBeGreaterThan(200_000);
+  expect(notes).toBe(line.repeat(20000).trim());
 });

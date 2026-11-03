@@ -1,10 +1,11 @@
-import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
+  mkdtempSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   type Bump,
@@ -151,7 +152,9 @@ const kinds: Kind[] = ["stable", "rc", "beta", "final"];
 
 // Runs from the release workflow: `bun scripts/release-prepare.ts <bump> <kind>`.
 // The result goes to $GITHUB_OUTPUT so later steps can read it, or to stdout when
-// run by hand. The notes can span lines, so they use a delimiter no note will contain.
+// run by hand. The notes go to a file and only its path is an output: a step that took them
+// through an environment variable would fail once they pass 128 KB, the most Linux allows for
+// one string.
 if (import.meta.main) {
   const [bump, kind] = process.argv.slice(2);
   if (!bumps.includes(bump as Bump) || !kinds.includes(kind as Kind)) {
@@ -166,8 +169,12 @@ if (import.meta.main) {
       bump as Bump,
       kind as Kind,
     );
-    const delimiter = `EOF_${randomBytes(8).toString("hex")}`;
-    const text = `version=${version}\nbase=${base}\nnotes<<${delimiter}\n${notes}\n${delimiter}\n`;
+    const notesFile = join(
+      process.env.RUNNER_TEMP || mkdtempSync(join(tmpdir(), "release-")),
+      "release-notes.md",
+    );
+    writeFileSync(notesFile, notes);
+    const text = `version=${version}\nbase=${base}\nnotes_file=${notesFile}\n`;
     if (process.env.GITHUB_OUTPUT) {
       appendFileSync(process.env.GITHUB_OUTPUT, text);
     } else {
