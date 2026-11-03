@@ -19,10 +19,14 @@ import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { personalAdminRedirect } from "@/lib/manage-paths";
 import { Route as AdminRoute } from "@/routes/_authed/admin/route";
+import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 describe("the team features dialog", () => {
   test("lists every team feature and nothing to click but close", async () => {
