@@ -3,15 +3,10 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  mcpServers,
-  pluginGrants,
-  users,
-} from "../src/db/schema";
+import { mcpServers, pluginGrants, users } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -30,7 +25,7 @@ const spec: Record<BrokerProvider, { toolkit: string; scheme: string }> = {
 };
 
 async function cleanup() {
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [lowId, highId]));
@@ -57,11 +52,11 @@ async function seed(provider: BrokerProvider) {
       accountMode: "shared",
       sharedVendorUserId: "openbot-deployment:x:R",
     });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
+  await seedBot({
+    id: bot,
+    name: "Triage",
+    type: "built_in",
+    configuration: { systemPrompt: "" },
     ownerUserId: owner,
     visibility: "private",
     title: "Triage",

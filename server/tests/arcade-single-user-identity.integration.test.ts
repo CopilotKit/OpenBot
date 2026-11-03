@@ -24,7 +24,6 @@ import type { AppVariables } from "../src/auth/guards";
 import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   brokeredConnections,
   brokeredIdentities,
@@ -38,6 +37,7 @@ import { createPluginRoutes } from "../src/plugins/routes";
 import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { seedPeople } from "./support/people";
 
@@ -84,7 +84,12 @@ const migrations = join(import.meta.dir, "..", "drizzle");
 const created: string[] = [];
 const opened: Database[] = [];
 
-const BOT = "helper";
+/*
+ * One Bot for every deployment this file boots. Each deployment has a database of its own, but Bots
+ * live in Intelligence, and the tests share one project there: so the Bot is made once, under an id
+ * no other file or run uses, and every deployment grants to it.
+ */
+const BOT = `helper-${suite}`;
 const TOOLKIT = "Gmail";
 const ROW = `arcade-${TOOLKIT}`;
 const READ = `${TOOLKIT}.ListEmails`;
@@ -531,6 +536,10 @@ beforeAll(() => {
   useArcadeClient(client.actions);
 });
 
+beforeAll(async () => {
+  await seedBot({ id: BOT, name: "Helper", type: "built_in" });
+});
+
 beforeEach(() => {
   project = arcadeProject();
 });
@@ -545,6 +554,7 @@ afterEach(async () => {
 
 // Every database this file created is dropped here, and there are a few dozen of them.
 afterAll(async () => {
+  await removeBots([BOT]);
   useArcadeClient(null);
   engine?.stop(true);
   if (wasBaseURL === undefined) delete process.env.ARCADE_BASE_URL;
@@ -660,9 +670,6 @@ async function enableGmail({ database, store }: Deployment) {
       destructive: false,
     },
   ]);
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: "Helper", type: "built_in", configuration: {} });
   for (const name of ["ListEmails", "SendEmail"]) {
     await store.grant("mcp", `${ROW}/${name}`, BOT, DEV_ACTOR.email);
   }

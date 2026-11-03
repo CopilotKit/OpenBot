@@ -13,7 +13,6 @@ import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   brokeredConnections,
   mcpServers,
@@ -26,6 +25,7 @@ import {
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
 import { expectOnlyRefusal } from "./helpers/refusals";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -109,9 +109,7 @@ async function seedShared(
     effect: "read",
     version: "1",
   });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
+  await seedBot({ id: bot, name: "Helper", type: "built_in" });
   await store.grant(
     "mcp",
     `${app}/GITHUB_LIST_ISSUES`,
@@ -137,7 +135,7 @@ async function clean() {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [app, duplicate]));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
 }
 
 beforeEach(async () => {

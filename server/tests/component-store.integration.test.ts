@@ -15,20 +15,20 @@ import {
 } from "../src/components/store";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   componentExclusions,
   componentFunctions,
   components,
 } from "../src/db/schema";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The grant surface, against a real database.
  *
  * Not mocked: every interesting property here is a property of the query. A left join that has to
- * return a row for a component nobody configured, a foreign key that has to take a Bot's
- * withholdings with it, a primary key that has to make withholding twice a no-op.
+ * return a row for a component nobody configured, a purge that has to take a Bot's withholdings
+ * with it, a primary key that has to make withholding twice a no-op.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -56,12 +56,7 @@ async function makeComponent(name: string, published: boolean) {
 }
 
 beforeAll(async () => {
-  for (const id of [botA, botB]) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
-  }
+  for (const id of [botA, botB]) await seedBot({ id, name: id });
   await makeComponent(componentName, true);
   await makeComponent(otherName, false);
 });
@@ -243,7 +238,7 @@ afterAll(async () => {
     .delete(componentExclusions)
     .where(inArray(componentExclusions.componentName, names));
   await database.delete(components).where(inArray(components.name, names));
-  await database.delete(agents).where(inArray(agents.id, [...fixtureAgentIds]));
+  await removeBots([...fixtureAgentIds]);
 });
 
 describe("deciding whether a Bot may use a component", () => {
@@ -325,18 +320,14 @@ describe("withholding", () => {
     ).rejects.toThrow(ComponentNotFoundError);
   });
 
-  test("deleting a Bot takes its withholdings with it", async () => {
+  test("deleting a Bot for good takes its withholdings with it", async () => {
     const doomed = `agent_test_doomed_${suite}`;
     fixtureAgentIds.add(doomed);
-    await database.insert(agents).values({
-      id: doomed,
-      name: doomed,
-      type: "remote_ag_ui",
-      configuration: {},
-    });
+    await seedBot({ id: doomed, name: doomed });
     await store.revoke(componentName, doomed, "x@example.test");
 
-    await database.delete(agents).where(eq(agents.id, doomed));
+    // Purged in Intelligence: this deployment's rows that named it go, as the foreign key took them.
+    await removeBots([doomed]);
 
     const left = await database
       .select()

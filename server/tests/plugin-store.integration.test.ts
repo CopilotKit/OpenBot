@@ -22,7 +22,6 @@ import {
 } from "../src/credentials";
 import { createDatabase, type Database } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   brokeredConnections,
   credentials as credentialRows,
@@ -65,6 +64,7 @@ import {
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import fileActions from "./fixtures/composio-file-actions.json";
+import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -244,9 +244,9 @@ let ownsFixtureIds = false;
  * references `mcp_servers.id`, so removing a real `notion` row takes every person's per-user
  * credential row with it and leaves their encrypted vault rows referenced by nothing — unreachable
  * from any screen and invisible to `retireConnectionsFor`, which exists to stop exactly that state.
- * Removing a real Bot takes six tables: its channel memberships, its agent profile, everyone's
- * preferences for it, its routines and all of their run history, its component exclusions and its
- * plugin grants. Removing a real PERSON takes ten: their sign-in accounts and live sessions, their
+ * Removing a real Bot for good takes it out of Intelligence and every row here that names it: its
+ * channel memberships, everyone's preferences for it, its routines and all of their run history,
+ * its component exclusions and its plugin grants. Removing a real PERSON takes ten: their sign-in accounts and live sessions, their
  * roles, their channel memberships and intelligence mappings, their per-Bot preferences and written
  * instructions, their skills, their routines, and every per-user connector credential they hold —
  * and nulls the owner off their agent profiles and SSO provider besides. The fixtures then re-insert
@@ -254,11 +254,13 @@ let ownsFixtureIds = false;
  *
  * The list below is every table this file deletes from at an id it did not invent — an id spelled
  * the way production spells it, so a row already sitting at it belongs to somebody else. Each of
- * `mcp_servers`, `agents`, `composio_connections` and `users` is asked about here, and nothing else
- * needs to be: `mcp_tools` and `plugin_grants` are the two remaining unconditional deletes and both
- * are reached only by a key that references one of these four — `mcp_tools.server_id` names a
- * server, `plugin_grants.agent_id` names a Bot — so a row at either could not exist without the
- * guard having already refused over its parent. Every other delete in this file names an id
+ * `mcp_servers`, the Bot in Intelligence, `composio_connections` and `users` is asked about here, and
+ * nothing else needs to be: `mcp_tools` and `plugin_grants` are the two remaining unconditional
+ * deletes and both are reached only by a key that names one of these four. `mcp_tools.server_id`
+ * names a server by foreign key, so a row there could not exist without the guard having already
+ * refused over its parent. `plugin_grants.agent_id` names a Bot by id alone, since Bots live in
+ * Intelligence, so a grant at `bot_helper` with no Bot behind it is one nobody holds, and the boot
+ * sweep would remove it anyway. Every other delete in this file names an id
  * carrying {@link suite}, and the reads that touch the deployment's own `google-drive` row skip
  * their delete instead, on the {@link suiteCreatedServerRow} flags above.
  *
@@ -307,15 +309,15 @@ beforeAll(async () => {
   /*
    * ONE AT A TIME RATHER THAN `Promise.all`, and the reason is the driver rather than the queries.
    *
-   * {@link TEST_POOL} holds two connections, so four reads issued together are pipelined two to a
+   * {@link TEST_POOL} holds two connections, so reads issued together are pipelined two to a
    * connection, and Bun's postgres client names its prepared statements from the query text it is
-   * given. Two of these four collide on that name: the five-parameter `composio_connections` read
-   * binds against the statement prepared for the one-parameter `agents` read and Postgres refuses
-   * with `bind message supplies 5 parameters, but prepared statement ... requires 1`. The guard
-   * then throws out of the file's first hook, which takes every test in the file with it and
-   * reports as one unnamed failure with no test name in it.
+   * given. Two reads of different shapes can collide on that name: a five-parameter
+   * `composio_connections` read bound against the statement prepared for a one-parameter read, and
+   * Postgres refused with `bind message supplies 5 parameters, but prepared statement ... requires
+   * 1`. The guard then throws out of the file's first hook, which takes every test in the file with
+   * it and reports as one unnamed failure with no test name in it.
    *
-   * Nothing here is waiting on anything else and four sequential reads of four empty tables cost
+   * Nothing here is waiting on anything else and a few sequential reads of empty tables cost
    * milliseconds, so there was never anything to win by issuing them together.
    */
   const configuredServers = await database
@@ -323,10 +325,9 @@ beforeAll(async () => {
     .from(mcpServers)
     .where(inArray(mcpServers.id, ["gmail", "notion"]));
 
-  const existingBots = await database
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.id, "bot_helper"));
+  // Bots live in Intelligence, so that is where a real `bot_helper` would be.
+  const existingBot = await (await useTestBots()).registry.get("bot_helper");
+  const existingBots = existingBot ? [existingBot] : [];
 
   /*
    * Brokered connections, keyed on the PAIR rather than on the person.
@@ -393,17 +394,7 @@ beforeAll(async () => {
 });
 
 beforeAll(async () => {
-  for (const id of [holderId, strangerId]) {
-    await database
-      .insert(agents)
-      .values({
-        id,
-        name: id,
-        type: "remote_ag_ui",
-        configuration: {},
-      })
-      .onConflictDoNothing();
-  }
+  for (const id of [holderId, strangerId]) await seedBot({ id, name: id });
 
   suiteCreatedServerRow =
     (
@@ -509,8 +500,7 @@ afterAll(async () => {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
     await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
   }
-  await database.delete(agents).where(eq(agents.id, holderId));
-  await database.delete(agents).where(eq(agents.id, strangerId));
+  await removeBots([holderId, strangerId]);
   for (const id of issuedCredentialIds) {
     await database.delete(credentialRows).where(eq(credentialRows.id, id));
   }
@@ -1510,15 +1500,7 @@ describe("refresh token rotation", () => {
   let clientBefore: string | null | undefined;
 
   beforeAll(async () => {
-    await database
-      .insert(agents)
-      .values({
-        id: rotationBotId,
-        name: rotationBotId,
-        type: "remote_ag_ui",
-        configuration: {},
-      })
-      .onConflictDoNothing();
+    await seedBot({ id: rotationBotId, name: rotationBotId });
     await database
       .insert(users)
       .values({
@@ -1613,7 +1595,7 @@ describe("refresh token rotation", () => {
         .delete(mcpServers)
         .where(eq(mcpServers.id, rotationServerId));
     }
-    await database.delete(agents).where(eq(agents.id, rotationBotId));
+    await removeBots([rotationBotId]);
     await database.delete(users).where(eq(users.id, rotationUserId));
   });
 
@@ -2573,15 +2555,7 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   beforeAll(async () => {
-    await database
-      .insert(agents)
-      .values({
-        id: dynamicBotId,
-        name: dynamicBotId,
-        type: "remote_ag_ui",
-        configuration: {},
-      })
-      .onConflictDoNothing();
+    await seedBot({ id: dynamicBotId, name: dynamicBotId });
     await database
       .insert(users)
       .values({
@@ -2660,7 +2634,7 @@ describe("a dynamic client the vendor has evicted", () => {
         .delete(mcpServers)
         .where(eq(mcpServers.id, dynamicServerId));
     }
-    await database.delete(agents).where(eq(agents.id, dynamicBotId));
+    await removeBots([dynamicBotId]);
     await database.delete(users).where(eq(users.id, dynamicUserId));
   });
 
@@ -4467,7 +4441,7 @@ async function freshDatabase(): Promise<Database> {
   await database
     .delete(pluginGrants)
     .where(eq(pluginGrants.agentId, "bot_helper"));
-  await database.delete(agents).where(eq(agents.id, "bot_helper"));
+  await removeBots(["bot_helper"]);
   // The actions before the servers. `mcp_tools` cascades on the server row anyway, so this is what
   // clears actions a previous run left against a server row it is not what created.
   await database
@@ -4592,12 +4566,7 @@ async function seedComposioGmail(
     effect: "read",
     version: options.version === undefined ? "20260903_00" : options.version,
   });
-  await database.insert(agents).values({
-    id: "bot_helper",
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: "bot_helper", name: "Helper", type: "built_in" });
   if (options.connect !== false) {
     await database.insert(brokeredConnections).values({
       provider: "composio",
@@ -4688,7 +4657,7 @@ afterAll(async () => {
   await database
     .delete(brokeredConnections)
     .where(eq(brokeredConnections.app, `sweep_witness_${suite}`));
-  await database.delete(agents).where(eq(agents.id, "bot_helper"));
+  await removeBots(["bot_helper"]);
   await database.delete(users).where(eq(users.id, "user_leaver"));
 });
 
@@ -6108,12 +6077,7 @@ describe("a row that resolves to two servers at once", () => {
       vendorName: "notion-fetch",
       description: "Fetch a page.",
     });
-    await database.insert(agents).values({
-      id: "bot_helper",
-      name: "Helper",
-      type: "built_in",
-      configuration: {},
-    });
+    await seedBot({ id: "bot_helper", name: "Helper", type: "built_in" });
     await store.grant(
       "mcp",
       "notion/notion-fetch",
@@ -8446,15 +8410,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
   });
 
   beforeAll(async () => {
-    await database
-      .insert(agents)
-      .values({
-        id: faultBotId,
-        name: faultBotId,
-        type: "remote_ag_ui",
-        configuration: {},
-      })
-      .onConflictDoNothing();
+    await seedBot({ id: faultBotId, name: faultBotId });
 
     // A real vault row, on the real database. What breaks is the READ, not the pointer: the server
     // is configured exactly as a working one is, which is what makes the fault a fault rather than
@@ -8510,7 +8466,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
     // The tools go with the server row, which cascades; both ids carry this run's suffix, so
     // neither can be a row the deployment configured.
     await database.delete(mcpServers).where(eq(mcpServers.id, faultServerId));
-    await database.delete(agents).where(eq(agents.id, faultBotId));
+    await removeBots([faultBotId]);
     if (faultCredentialId) {
       await database
         .delete(credentialRows)

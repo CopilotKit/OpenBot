@@ -4,9 +4,10 @@ import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import { agentProfiles, agents, skills, users } from "../src/db/schema";
+import { skills, users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -55,21 +56,15 @@ beforeAll(async () => {
     // Unowned Bots are deployment-published Bots visible to every user.
     [sharedBot, null],
   ] as const) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
-    await database
-      .insert(agentProfiles)
-      .values({
-        agentId: id,
-        ownerUserId: owner,
-        title: id,
-        roleDescription: "For a test.",
-        avatarSeed: id,
-        visibility: "private",
-      })
-      .onConflictDoNothing();
+    await seedBot({
+      id,
+      name: id,
+      ownerUserId: owner,
+      title: id,
+      roleDescription: "For a test.",
+      avatarSeed: id,
+      visibility: "private",
+    });
   }
 
   const write = (slug: string, ownerUserId: string | null) =>
@@ -98,9 +93,7 @@ afterAll(async () => {
         `catalogue-${suite}`,
       ]),
     );
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [aliceBot, sharedBot]));
+  await removeBots([aliceBot, sharedBot]);
   await database.delete(users).where(inArray(users.id, [alice, bob]));
 });
 

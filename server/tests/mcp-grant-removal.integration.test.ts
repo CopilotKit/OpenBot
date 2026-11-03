@@ -1,12 +1,13 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { agents, mcpServers, mcpTools, pluginGrants } from "../src/db/schema";
+import { mcpServers, mcpTools, pluginGrants } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -103,16 +104,16 @@ afterAll(async () => {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [serverId, keptServerId]));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
+});
+
+// The Bot both tests grant to, made once so either test runs on its own.
+beforeAll(async () => {
+  await seedBot({ id: botId, name: botId, type: "built_in" });
 });
 
 test("removing an app takes its grants with it, and adding it back grants nothing", async () => {
   useComposioClient(listing(actionName));
-
-  await database
-    .insert(agents)
-    .values({ id: botId, name: botId, type: "built_in", configuration: {} })
-    .onConflictDoNothing();
 
   await store.addBrokeredApp({
     slug,
@@ -176,11 +177,6 @@ test("a re-added app a Bot was never granted again refuses the call", async () =
   const noAuthRef = `${noAuthServerId}/${noAuthAction}`;
 
   useComposioClient(listing(noAuthAction));
-
-  await database
-    .insert(agents)
-    .values({ id: botId, name: botId, type: "built_in", configuration: {} })
-    .onConflictDoNothing();
 
   try {
     await store.addBrokeredApp({

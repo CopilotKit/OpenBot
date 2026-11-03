@@ -11,15 +11,11 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -93,14 +89,12 @@ async function clean() {
     .delete(brokeredConnections)
     .where(eq(brokeredConnections.app, foreign));
   await database.delete(mcpServers).where(eq(mcpServers.id, foreign));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
 }
 
 beforeEach(async () => {
   await clean();
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
+  await seedBot({ id: bot, name: "Helper", type: "built_in" });
 });
 afterEach(async () => {
   useComposioClient(null);

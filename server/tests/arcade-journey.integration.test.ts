@@ -62,7 +62,6 @@ import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   brokeredConnections,
   mcpServers,
@@ -77,6 +76,7 @@ import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
@@ -614,12 +614,7 @@ beforeAll(async () => {
   const client = createArcadeClient("never-dialled");
   broker = client.broker;
   useArcadeClient(client.actions);
-  await database.insert(agents).values({
-    id: BOT,
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: BOT, name: "Helper", type: "built_in" });
 });
 
 afterAll(async () => {
@@ -634,7 +629,7 @@ afterAll(async () => {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [MAIL_ROW, DIARY_ROW]));
-  await database.delete(agents).where(eq(agents.id, BOT));
+  await removeBots([BOT]);
   await removePeople(database, [ADMIN]);
   await database.$client.close();
 });

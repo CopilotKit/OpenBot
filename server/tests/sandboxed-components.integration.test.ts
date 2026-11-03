@@ -8,12 +8,12 @@ import {
 } from "../src/components/sandboxed";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   componentExclusions,
   componentFunctions,
   components,
   sandboxedComponents,
 } from "../src/db/schema";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -164,10 +164,7 @@ describe("deleting a name this surface does not own", () => {
   const bot = `agent_test_${suite}`;
 
   beforeAll(async () => {
-    await database
-      .insert(agents)
-      .values({ id: bot, name: bot, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
+    await seedBot({ id: bot, name: bot });
     // A component the build ships, as `syncCatalogue` would have written it.
     await database.insert(components).values({
       name: compiled,
@@ -195,7 +192,7 @@ describe("deleting a name this surface does not own", () => {
 
   afterAll(async () => {
     await database.delete(components).where(eq(components.name, compiled));
-    await database.delete(agents).where(eq(agents.id, bot));
+    await removeBots([bot]);
   });
 
   test("refuses a compiled component's name instead of deleting its governance", async () => {

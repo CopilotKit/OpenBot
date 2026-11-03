@@ -15,8 +15,6 @@ import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   appAccessRequests,
   brokeredConnections,
   credentials,
@@ -41,6 +39,7 @@ import {
   type PluginStore,
   type ServerRecord,
 } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { stubBroker } from "./support/stub-broker";
 
@@ -342,14 +341,10 @@ beforeAll(async () => {
       emailVerified: true,
     });
   for (const agent of [bot, hidden]) {
-    await database.insert(agents).values({
+    await seedBot({
       id: agent,
       name: `Bot ${agent}`,
       type: "built_in",
-      configuration: {},
-    });
-    await database.insert(agentProfiles).values({
-      agentId: agent,
       ownerUserId: maker,
       // Public, so the people asking below are in the audience a Shared app's approval covers.
       visibility: agent === bot ? "public" : "private",
@@ -369,7 +364,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await clearApps();
-  await database.delete(agents).where(inArray(agents.id, [bot, hidden]));
+  await removeBots([bot, hidden]);
   await database
     .delete(users)
     .where(inArray(users.id, [person, other, admin, maker]));

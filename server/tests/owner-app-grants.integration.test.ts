@@ -21,15 +21,12 @@ import {
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   brokeredConnections,
   mcpServers,
   mcpTools,
   pluginGrants,
   sharedUseApprovals,
   teamBotConsents,
-  teamBotPublications,
   users,
 } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
@@ -44,6 +41,7 @@ import {
   createTeamBots,
   TEAM_BOT_CONSENT_MARKER,
 } from "../src/team-bots/team-bots";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { stubBroker } from "./support/stub-broker";
 
@@ -227,22 +225,16 @@ async function clear() {
   await database
     .delete(teamBotConsents)
     .where(inArray(teamBotConsents.userId, people));
-  if (createdBots.length) {
-    await database
-      .delete(teamBotPublications)
-      .where(inArray(teamBotPublications.agentId, createdBots));
-    await database
-      .delete(agentProfiles)
-      .where(inArray(agentProfiles.agentId, createdBots.splice(0)));
-  }
+  // For good, with their publications, grants and approvals, as deleting the agents rows did.
+  await removeBots(createdBots.splice(0));
   await database
     .delete(brokeredConnections)
     .where(like(brokeredConnections.app, `%${suite}%`));
   await database.delete(mcpServers).where(like(mcpServers.id, `%${suite}%`));
-  await database.delete(agents).where(like(agents.name, "Research Helper"));
 }
 
 beforeAll(async () => {
+  await useTestBots();
   for (const user of people)
     await database.insert(users).values({
       id: user,

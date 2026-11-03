@@ -5,8 +5,6 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   mcpServers,
   pluginGrants,
   responsibilities,
@@ -21,6 +19,7 @@ import {
   createSharedUseStore,
 } from "../src/plugins/shared-use-store";
 import { expectOnlyRefusal } from "./helpers/refusals";
+import { changeBot, removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -46,7 +45,7 @@ beforeEach(async () => {
   await database
     .delete(sharedUseRequests)
     .where(eq(sharedUseRequests.agentId, bot));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
   await database
     .delete(users)
@@ -70,11 +69,10 @@ beforeEach(async () => {
     accountMode: "shared",
     sharedVendorUserId: "openbot-deployment:x:R",
   });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
+  await seedBot({
+    id: bot,
+    name: "Triage",
+    type: "built_in",
     ownerUserId: id("owner"),
     visibility: "private",
     title: "Triage",
@@ -90,7 +88,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
   await database
     .delete(users)
@@ -485,10 +483,7 @@ describe("owner approvals", () => {
         .update(mcpServers)
         .set({ ownerGrants: "any" })
         .where(eq(mcpServers.id, app));
-      await database
-        .update(agentProfiles)
-        .set({ visibility: "public" })
-        .where(eq(agentProfiles.agentId, bot));
+      await changeBot(bot, { visibility: "public" });
       const request = await store.fileRequest({
         botId: bot,
         serverId: app,
@@ -620,7 +615,7 @@ describe("an app with a duplicate row at its url", () => {
   const other = id("otherbot");
 
   beforeEach(async () => {
-    await database.delete(agents).where(eq(agents.id, other));
+    await removeBots([other]);
     await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
     await database.insert(mcpServers).values({
       id: duplicate,
@@ -634,7 +629,7 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   afterAll(async () => {
-    await database.delete(agents).where(eq(agents.id, other));
+    await removeBots([other]);
     await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
   });
 
@@ -679,12 +674,7 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   test("botsHolding the answering id includes a Bot granted only through the duplicate", async () => {
-    await database.insert(agents).values({
-      id: other,
-      name: "Other",
-      type: "built_in",
-      configuration: {},
-    });
+    await seedBot({ id: other, name: "Other", type: "built_in" });
     await database.insert(pluginGrants).values({
       kind: "mcp",
       ref: `${duplicate}/GITHUB_LIST_ISSUES`,

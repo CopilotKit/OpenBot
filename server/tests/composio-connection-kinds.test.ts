@@ -18,7 +18,6 @@ import type {
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   brokeredConnections,
   mcpServers,
@@ -42,6 +41,7 @@ import {
   type BrokeredProbe,
   createPluginStore,
 } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -850,7 +850,7 @@ async function recordedHere(): Promise<string[]> {
 
 async function clean(): Promise<void> {
   await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
   await database.delete(mcpTools).where(inArray(mcpTools.serverId, APP_IDS));
   await database.delete(mcpServers).where(inArray(mcpServers.id, APP_IDS));
   await database
@@ -862,12 +862,7 @@ beforeEach(async () => {
   await clean();
   brokerAsks = [];
   reached = [];
-  await database.insert(agents).values({
-    id: botId,
-    name: "Kinds Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: botId, name: "Kinds Helper", type: "built_in" });
   for (const app of Object.values(APP)) {
     await seedApp(app.id, app.slug, app.recorded);
   }

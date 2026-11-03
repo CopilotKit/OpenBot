@@ -23,7 +23,8 @@ import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
-import { agents, componentExclusions, components } from "../src/db/schema";
+import { componentExclusions, components } from "../src/db/schema";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -50,11 +51,7 @@ const chartArgs = {
 };
 
 beforeAll(async () => {
-  for (const id of [allowedBot, deniedBot])
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
+  for (const id of [allowedBot, deniedBot]) await seedBot({ id, name: id });
   // What the browser announces on first load, so the rows are the build's own declarations.
   ({ added: addedComponents } = await store.syncCatalogue(
     GALLERY.map(({ name, title, kind, description }) => ({
@@ -80,9 +77,7 @@ afterAll(async () => {
     await database
       .delete(components)
       .where(inArray(components.name, addedComponents));
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [allowedBot, deniedBot]));
+  await removeBots([allowedBot, deniedBot]);
 });
 
 function lifecycle(input: RunAgentInput, body: BaseEvent[]): BaseEvent[] {

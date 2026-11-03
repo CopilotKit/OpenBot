@@ -23,7 +23,6 @@ import { encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   accounts,
-  agents,
   auditEvents,
   credentials,
   mcpServers,
@@ -37,6 +36,7 @@ import {
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { createRequestActor } from "../src/request-actor";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
@@ -560,9 +560,7 @@ beforeAll(async () => {
     return realFetch(new Request(local, request));
   }) as typeof fetch;
 
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: BOT, type: "remote_ag_ui", configuration: {} });
+  await seedBot({ id: BOT, name: BOT });
   await database.insert(credentials).values({
     id: DEPLOYMENT_CREDENTIAL,
     kind: "mcp",
@@ -581,7 +579,7 @@ afterAll(async () => {
   entraServer?.stop(true);
   mcpServer?.stop(true);
   await database.delete(mcpServers).where(like(mcpServers.id, `obo-%-${tag}`));
-  await database.delete(agents).where(eq(agents.id, BOT));
+  await removeBots([BOT]);
   await database
     .delete(credentials)
     .where(inArray(credentials.id, [DEPLOYMENT_CREDENTIAL]));

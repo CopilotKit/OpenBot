@@ -4,15 +4,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  pluginGrants,
-  skills,
-  users,
-} from "../src/db/schema";
+import { pluginGrants, skills, users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -51,21 +46,15 @@ beforeAll(async () => {
     [aliceBot, alice],
     [sharedBot, null],
   ] as const) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
-    await database
-      .insert(agentProfiles)
-      .values({
-        agentId: id,
-        ownerUserId: owner,
-        title: id,
-        roleDescription: "For a test.",
-        avatarSeed: id,
-        visibility: "private",
-      })
-      .onConflictDoNothing();
+    await seedBot({
+      id,
+      name: id,
+      ownerUserId: owner,
+      title: id,
+      roleDescription: "For a test.",
+      avatarSeed: id,
+      visibility: "private",
+    });
   }
 });
 
@@ -81,9 +70,7 @@ afterAll(async () => {
         botlessSlug,
       ]),
     );
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [aliceBot, sharedBot]));
+  await removeBots([aliceBot, sharedBot]);
   await database.delete(users).where(inArray(users.id, [alice, bob]));
 });
 
@@ -208,9 +195,9 @@ describe("a skill name written again after the skill was uninstalled", () => {
 
   /*
    * The other half of a grant that could never do anything: the skill is there and the Bot is not.
-   * `plugin_grants.agent_id` is a foreign key, so an administrator's grant for a mistyped Bot id used
-   * to fail at the insert and answer 500 with no body. It is a refusal with a sentence now, and
-   * nothing is stored.
+   * `plugin_grants.agent_id` names a Bot by id alone, since Bots live in Intelligence, so nothing in
+   * the database stops a grant for a mistyped Bot id: the route asks Intelligence whether the Bot
+   * exists, refuses with a sentence when it does not, and stores nothing.
    */
   test("a skill cannot be granted to a Bot nobody has", async () => {
     expect(

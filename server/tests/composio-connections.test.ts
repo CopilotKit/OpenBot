@@ -9,7 +9,6 @@ import type {
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   auditEvents,
   brokeredConnections,
   mcpServers,
@@ -26,6 +25,7 @@ import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -810,7 +810,7 @@ function useAnsweringClient(actions: Partial<ComposioActions> = {}) {
 /** Only this run's rows, and every one of them keyed on an id this run invented. */
 async function clean() {
   await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
   await database
     .delete(mcpTools)
     .where(
@@ -929,12 +929,7 @@ async function addApp() {
 
 /** The app, a Bot holding its one action, and optionally somebody who has connected it. */
 async function seedApp(options: { connect?: boolean } = {}) {
-  await database.insert(agents).values({
-    id: botId,
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: botId, name: "Helper", type: "built_in" });
   await addApp();
   if (options.connect !== false) {
     await database.insert(brokeredConnections).values({
@@ -1629,12 +1624,7 @@ test("the trail carries the vendor's answer per person, not one answer for the a
  * the same call names it.
  */
 test("both acts that end a brokered connection file it under the app", async () => {
-  await database.insert(agents).values({
-    id: botId,
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: botId, name: "Helper", type: "built_in" });
   // The row id and the app slug deliberately different, which is the only shape that can tell the
   // two keys apart.
   await database.insert(mcpServers).values({

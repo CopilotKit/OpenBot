@@ -11,15 +11,11 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -76,9 +72,7 @@ async function seed() {
     effect: "read",
     version: "1",
   });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
+  await seedBot({ id: bot, name: "Helper", type: "built_in" });
   await database.insert(brokeredConnections).values({
     provider: "composio",
     app,
@@ -94,7 +88,7 @@ async function clean() {
     .delete(brokeredConnections)
     .where(eq(brokeredConnections.app, app));
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
 }
 
 beforeEach(async () => {

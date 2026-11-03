@@ -12,7 +12,6 @@ import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   brokeredConnections,
   mcpServers,
   pluginGrants,
@@ -22,6 +21,7 @@ import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -115,9 +115,14 @@ beforeEach(async () => {
     authScheme: "OAUTH2",
     accountMode: "personal",
   });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Ops", type: "built_in", configuration: {} });
+  // Public and ownerless, as a package's Bot is: the whole team is who it answers, so "team" is the
+  // audience a switch to Shared proposes for it.
+  await seedBot({
+    id: bot,
+    name: "Ops",
+    type: "built_in",
+    visibility: "public",
+  });
   await database.insert(pluginGrants).values({
     kind: "mcp",
     ref: `${app}/LINEAR_LIST`,
@@ -145,7 +150,7 @@ afterEach(async () => {
   await database
     .delete(brokeredConnections)
     .where(eq(brokeredConnections.app, app));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
 });
 

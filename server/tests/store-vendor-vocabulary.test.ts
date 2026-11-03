@@ -18,15 +18,11 @@ import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -210,12 +206,7 @@ describe("the brokered-credential invariant names the active vendor", () => {
     const botId = `bot-${suite}`;
     const action = "Orphan.Read";
     seededServers.push(id);
-    await database.insert(agents).values({
-      id: botId,
-      name: "Helper",
-      type: "built_in",
-      configuration: {},
-    });
+    await seedBot({ id: botId, name: "Helper", type: "built_in" });
     await database.insert(mcpServers).values({
       id,
       title: "Orphan",
@@ -256,7 +247,7 @@ describe("the brokered-credential invariant names the active vendor", () => {
     expect(raised).toContain("Arcade");
     expect(raised).not.toContain("Composio");
 
-    await database.delete(agents).where(inArray(agents.id, [botId]));
+    await removeBots([botId]);
   });
 });
 

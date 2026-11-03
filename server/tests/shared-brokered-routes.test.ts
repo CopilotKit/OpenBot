@@ -2,6 +2,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -13,18 +14,13 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -138,6 +134,11 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
     ),
   );
 }
+
+// The grant routes ask the Bot directory whether a Bot exists and who owns it.
+beforeAll(async () => {
+  await useTestBots();
+});
 
 beforeEach(async () => {
   authorizedFor.length = 0;
@@ -363,11 +364,10 @@ describe("GET /connections", () => {
 describe("granting a shared app's action", () => {
   const botId = `grantbot-${suite}`;
   beforeEach(async () => {
-    await database
-      .insert(agents)
-      .values({ id: botId, name: "Ops", type: "built_in", configuration: {} });
-    await database.insert(agentProfiles).values({
-      agentId: botId,
+    await seedBot({
+      id: botId,
+      name: "Ops",
+      type: "built_in",
       ownerUserId: null,
       visibility: "public",
       title: "Ops",
@@ -384,7 +384,7 @@ describe("granting a shared app's action", () => {
     });
   });
   afterEach(async () => {
-    await database.delete(agents).where(eq(agents.id, botId));
+    await removeBots([botId]);
   });
 
   // The Bot in this test is public with no owner, so its exposure is the whole team.

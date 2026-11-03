@@ -6,7 +6,6 @@ import type { ActionPolicy } from "../src/computer/policy";
 import { encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   credentials,
   mcpServers,
   mcpTools,
@@ -15,6 +14,7 @@ import {
   users,
 } from "../src/db/schema";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -239,10 +239,7 @@ async function connect(userId: string, refreshToken: string) {
 }
 
 beforeAll(async () => {
-  await database
-    .insert(agents)
-    .values({ id: botId, name: botId, type: "remote_ag_ui", configuration: {} })
-    .onConflictDoNothing();
+  await seedBot({ id: botId, name: botId });
 
   for (const [id, email] of [
     [askerId, `${askerId}@openbot.test`],
@@ -357,7 +354,7 @@ afterAll(async () => {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
     await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
   }
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
   await database.delete(users).where(eq(users.id, askerId));
   await database.delete(users).where(eq(users.id, otherId));
 });

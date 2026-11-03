@@ -1,5 +1,12 @@
 // server/tests/composio-single-user-identity.integration.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -17,7 +24,6 @@ import {
 import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
 import {
-  agents,
   brokeredConnections,
   brokeredIdentities,
   mcpServers,
@@ -32,6 +38,7 @@ import { createPluginRoutes } from "../src/plugins/routes";
 import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/composio-file-actions.json";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -68,7 +75,12 @@ const migrations = join(import.meta.dir, "..", "drizzle");
 const created: string[] = [];
 const opened: Database[] = [];
 
-const BOT = "helper";
+/*
+ * One Bot for every deployment this file boots. Each deployment has a database of its own, but Bots
+ * live in Intelligence, and the tests share one project there: so the Bot is made once, under an id
+ * no other file or run uses, and every deployment grants to it.
+ */
+const BOT = `helper-${suite}`;
 const ACTION = "GMAIL_FETCH_EMAILS";
 const REF = `gmail/${ACTION}`;
 
@@ -108,12 +120,17 @@ async function close(database: Database) {
  * Each test's databases are closed when it ends, so their pools do not pile up across the file.
  * Two connections a deployment, held to the end, ran a full CI run's Postgres out of clients.
  */
+beforeAll(async () => {
+  await seedBot({ id: BOT, name: "Helper", type: "built_in" });
+});
+
 afterEach(async () => {
   for (const database of opened.splice(0)) await database.$client.close();
 });
 
 // Every database this file created is dropped here, and there are a few dozen of them.
 afterAll(async () => {
+  await removeBots([BOT]);
   useComposioClient(null);
   for (const database of opened) await database.$client.close();
   const admin = postgres(administrative.href, { max: 1, onnotice: () => {} });
@@ -393,9 +410,6 @@ async function enableGmail({ database, store }: Deployment) {
     effect: "read",
     version: fetchEmails.version,
   });
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: "Helper", type: "built_in", configuration: {} });
   await store.grant("mcp", REF, BOT, DEV_ACTOR.email);
 }
 

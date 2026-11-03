@@ -5,7 +5,6 @@ import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import {
-  agents,
   mcpServers,
   mcpTools,
   skills,
@@ -13,6 +12,7 @@ import {
   users,
 } from "../src/db/schema";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -55,10 +55,7 @@ beforeAll(async () => {
     .insert(users)
     .values({ id: author, email: `${author}@example.test`, name: author })
     .onConflictDoNothing();
-  await database
-    .insert(agents)
-    .values({ id: bot, name: bot, type: "remote_ag_ui", configuration: {} })
-    .onConflictDoNothing();
+  await seedBot({ id: bot, name: bot });
   await database
     .insert(mcpServers)
     .values({
@@ -95,7 +92,7 @@ afterAll(async () => {
     .delete(skills)
     .where(inArray(skills.slug, [skill, otherSkill]));
   await database.delete(mcpServers).where(eq(mcpServers.id, server));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database.delete(users).where(eq(users.id, author));
 });
 
