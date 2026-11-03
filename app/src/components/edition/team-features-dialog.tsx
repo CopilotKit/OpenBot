@@ -1,6 +1,7 @@
 import {
   type Icon,
   IconAdjustments,
+  IconArrowUpRight,
   IconChecks,
   IconDeviceDesktop,
   IconHistory,
@@ -15,6 +16,7 @@ import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { useEffect, useSyncExternalStore } from "react";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -29,8 +31,7 @@ import { cn } from "@/lib/utils";
  * What the team edition has and the personal edition does not, one short line each, in the three
  * things a team gets: its people, where its Bots work, and control over both.
  *
- * Shown where Admin would be. A list and nothing else: no links, no buttons beyond closing it, so
- * the place Admin used to be says what there is without sending anybody anywhere.
+ * Shown where Admin would be: the list, and one way to ask about it.
  */
 export const TEAM_FEATURE_GROUPS: readonly {
   title: string;
@@ -65,6 +66,9 @@ export const TEAM_FEATURE_GROUPS: readonly {
     ],
   },
 ];
+
+/** Where Talk to us goes, until there is a page of its own for it. */
+export const BUSINESS_URL = "https://openbot.co";
 
 export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
   (group) => group.features,
@@ -142,6 +146,16 @@ export function TeamFeaturesDialog() {
                 </ul>
               </section>
             ))}
+            {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
+            <a
+              className={cn(buttonVariants(), "mt-2 w-full")}
+              href={BUSINESS_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Talk to us
+              <IconArrowUpRight aria-hidden="true" />
+            </a>
           </div>
         </div>
       </DialogContent>

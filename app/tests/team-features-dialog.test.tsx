@@ -11,6 +11,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { isRedirect } from "@tanstack/react-router";
 import { act, cleanup, render } from "@testing-library/react";
 import {
+  BUSINESS_URL,
   openTeamFeatures,
   TEAM_FEATURES,
   TeamFeaturesDialog,
@@ -29,7 +30,7 @@ afterAll(async () => {
 });
 
 describe("the team features dialog", () => {
-  test("lists every team feature and nothing to click but close", async () => {
+  test("lists every team feature, with Talk to us and close", async () => {
     const view = render(<TeamFeaturesDialog />);
     expect(view.queryByRole("dialog")).toBeNull();
     act(() => openTeamFeatures());
@@ -37,7 +38,10 @@ describe("the team features dialog", () => {
     for (const feature of TEAM_FEATURES) {
       expect(dialog.textContent).toContain(feature.title);
     }
-    expect(view.queryAllByRole("link")).toHaveLength(0);
+    const links = view.queryAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual(["Talk to us"]);
+    expect(links[0]?.getAttribute("href")).toBe(BUSINESS_URL);
+    expect(links[0]?.getAttribute("target")).toBe("_blank");
     expect(
       view.queryAllByRole("button").map((button) => button.textContent),
     ).toEqual(["Close"]);
