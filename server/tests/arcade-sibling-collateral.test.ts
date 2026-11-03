@@ -1,18 +1,20 @@
 // server/tests/arcade-sibling-collateral.test.ts
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { brokeredConnections, mcpServers } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
- * SCOPING. `audit_events` is append-only and `brokered_connections` is long-lived, so every
+ * SCOPING. The audit trail (Intelligence's, shared by every run) is append-only and
+ * `brokered_connections` is long-lived, so every
  * assertion here is keyed on names THIS TEST ALONE writes: each test mints its own `run()` — a
  * fresh suffix on every app and every vendor identity it touches — and reads rows and the trail
  * only by those. A "did not happen" assertion is therefore one only this test could have falsified.
@@ -127,20 +129,17 @@ const rowsFor = async (names: string[]) =>
       .where(inArray(brokeredConnections.app, names))
       .orderBy(asc(brokeredConnections.app))
   ).map((row) => row.app);
-const trailFor = (names: string[]) =>
-  database
-    .select({
-      app: auditEvents.targetId,
-      payload: sql<Record<string, unknown>>`payload`,
-    })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_disconnected"),
-        inArray(auditEvents.targetId, names),
-      ),
-    )
-    .orderBy(asc(auditEvents.targetId));
+// One read per app name (the trail is asked for one target at a time), in app order.
+const trailFor = async (names: string[]) => {
+  const rows: { app: string | null; payload: Record<string, unknown> }[] = [];
+  for (const name of names)
+    for (const row of await auditRows({
+      eventType: "mcp.account_disconnected",
+      targetId: name,
+    }))
+      rows.push({ app: row.targetId, payload: row.payload });
+  return rows.sort((a, b) => ((a.app ?? "") < (b.app ?? "") ? -1 : 1));
+};
 
 afterEach(async () => {
   if (apps.length) {

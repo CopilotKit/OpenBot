@@ -56,13 +56,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import Arcade from "@arcadeai/arcadejs";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   brokeredConnections,
   mcpServers,
   mcpTools,
@@ -76,6 +75,7 @@ import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
+import { auditRows } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
@@ -87,8 +87,8 @@ const suite = randomUUID().slice(0, 8);
 /**
  * Two toolkits whose CAPITALS CARRY MEANING. `GoogleCalendar-…` is the name a lowercasing step
  * anywhere between the picker and the transport would destroy, and the suite suffix is what makes
- * `audit_events` — which is append-only and cannot be cleaned between tests — answer about this run
- * and no other.
+ * the audit trail (Intelligence's, shared by every run, append-only and never cleaned between
+ * tests) answer about this run and no other.
  */
 const MAIL = `Gmail-${suite}`;
 const DIARY = `GoogleCalendar-${suite}`;
@@ -554,26 +554,20 @@ async function connectionsOf(app: string) {
  * The trail for one app and one event type, OLDEST FIRST — and the order is asked for rather than
  * inherited.
  *
- * `.at(-1)` below means "the disconnect this test just caused", which a `SELECT` with no `ORDER BY`
- * does not answer: PostgreSQL may return the rows of an unordered read in any order it likes, and
- * what it actually returns is roughly heap order. Insertion order and time order agree on a table
- * only ever appended to by one test, which is why this read passed locally and failed on CI — there
- * the last row back was the PERSONAL disconnect from the describe above, so a Shared app's audit
- * entry was read as a person ending their own account, and the assertion reported a defect in the
- * product that the product had not committed.
+ * `.at(-1)` below means "the disconnect this test just caused", which a read in no stated order
+ * does not answer: when this was a `SELECT` with no `ORDER BY`, PostgreSQL returned roughly heap
+ * order, which agreed with time order only on a table appended to by one test. That is why the read
+ * once passed locally and failed on CI: there the last row back was the PERSONAL disconnect from the
+ * describe above, so a Shared app's audit entry was read as a person ending their own account, and
+ * the assertion reported a defect in the product that the product had not committed.
  *
- * `createdAt` is the only key that can carry this: `id` is a random UUID, so it sorts arbitrarily.
- * The disconnects it separates arrive on their own requests and so in their own transactions, which
- * is what makes their `now()` values distinct.
+ * The moment each row was written is the only key that can carry this: `id` is a random UUID, so it
+ * sorts arbitrarily. The trail answers newest first by that moment, so this reverses it. The
+ * disconnects it separates arrive on their own requests and so in their own transactions, which is
+ * what makes their moments distinct.
  */
 async function eventsOn(app: string, eventType: string) {
-  return await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(eq(auditEvents.targetId, app), eq(auditEvents.eventType, eventType)),
-    )
-    .orderBy(auditEvents.createdAt);
+  return (await auditRows({ targetId: app, eventType })).reverse();
 }
 
 async function attemptRow() {

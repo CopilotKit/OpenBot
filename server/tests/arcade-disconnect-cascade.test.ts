@@ -1,12 +1,13 @@
 // server/tests/arcade-disconnect-cascade.test.ts
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { brokeredConnections, mcpServers } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -135,21 +136,26 @@ const rowsFor = async (apps: string[]) =>
       .where(inArray(brokeredConnections.app, apps))
       .orderBy(asc(brokeredConnections.app))
   ).map((row) => row.app);
-// Filed by owner, because the trail is append-only and an earlier test's rows are still there.
-const trailFor = (userId: string) =>
-  database
-    .select({
-      app: auditEvents.targetId,
-      payload: sql<Record<string, unknown>>`payload`,
-    })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_disconnected"),
-        sql`payload ->> 'owner' = ${userId}`,
-      ),
-    )
-    .orderBy(asc(auditEvents.targetId));
+/*
+ * Filed by owner, because the trail is append-only and an earlier test's rows are still there. The
+ * trail is Intelligence's and shared by every run, so it is asked for this run's apps (every
+ * `mcp.account_disconnected` row is filed against the app it ended) and the owner is picked out of
+ * the payload here, in the app order the rows were once read in.
+ */
+const trailFor = async (userId: string) => {
+  const rows = [];
+  for (const app of [gmail, calendar, slack, drive, lonely, keyed])
+    rows.push(
+      ...(await auditRows({
+        eventType: "mcp.account_disconnected",
+        targetId: app,
+      })),
+    );
+  return rows
+    .filter((row) => row.payload.owner === userId)
+    .map((row) => ({ app: row.targetId, payload: row.payload }))
+    .sort((a, b) => ((a.app ?? "") < (b.app ?? "") ? -1 : 1));
+};
 
 // The audit trail is append-only, so it is never cleaned: every name here carries this run's suffix.
 afterEach(async () => {

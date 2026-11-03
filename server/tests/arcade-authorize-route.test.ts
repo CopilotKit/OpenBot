@@ -19,6 +19,7 @@ import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore, type PluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
 
@@ -353,14 +354,20 @@ describe("POST /servers/:id/authorize", () => {
   });
 
   test("the authorization url appears in no audit row", async () => {
+    /*
+     * Every row on the trail since just before this mint, whoever wrote it: the trail is
+     * Intelligence's and shared by every run, so the window is what keeps the read to this case,
+     * while the check itself still covers every row in it, not only the ones this case expects.
+     */
+    const since = new Date(Date.now() - 1_000);
     const actor = await person("audit");
     expect((await authorize(appAs("user", actor), personalApp)).status).toBe(
       200,
     );
-    const leaked = await database.execute(
-      sql`select id from audit_events
-          where payload::text like ${"%bearer-capability%"}
-             or target_id like ${"%bearer-capability%"}`,
+    const leaked = (await auditRows({ from: since })).filter(
+      (row) =>
+        JSON.stringify(row.payload).includes("bearer-capability") ||
+        (row.targetId ?? "").includes("bearer-capability"),
     );
     expect(leaked.length).toBe(0);
   });

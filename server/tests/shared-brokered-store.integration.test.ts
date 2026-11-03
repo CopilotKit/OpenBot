@@ -12,12 +12,7 @@ import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
 import {
   BrokerAccountGoneError,
   type ConnectedAppBroker,
@@ -25,6 +20,7 @@ import {
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
 import { expectOnlyRefusal } from "./helpers/refusals";
+import { auditRows } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -704,12 +700,9 @@ describe("an account the vendor no longer holds", () => {
 
   /* Counted before and after: the trail is not cleaned between tests, which share the app id. */
   const failures = async () =>
-    (
-      await database
-        .select({ eventType: auditEvents.eventType })
-        .from(auditEvents)
-        .where(eq(auditEvents.targetId, `${app}/GITHUB_LIST_ISSUES`))
-    ).filter((row) => row.eventType === "mcp.call_failed").length;
+    (await auditRows({ targetId: `${app}/GITHUB_LIST_ISSUES` })).filter(
+      (row) => row.eventType === "mcp.call_failed",
+    ).length;
 
   test("on a Shared app: refused with a card saying an administrator has to connect it again", async () => {
     const store = freshStore();
