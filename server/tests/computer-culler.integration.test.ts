@@ -58,11 +58,14 @@ function providerWith(computers: ComputerLocation[]) {
  * holds the audit store to that). Set here directly because the store stamps the database's clock,
  * and these cases need a computer last used an hour ago.
  */
-async function recordUse(
-  rows: ReturnType<typeof ran> | ReturnType<typeof ran>[],
-) {
+type Use = {
+  payload: { bot: string; computer?: string; action?: string };
+  createdAt: Date;
+};
+
+async function recordUse(rows: Use | Use[]) {
   for (const row of Array.isArray(rows) ? rows : [rows]) {
-    const payload = row.payload as { bot: string; computer?: string };
+    const { payload } = row;
     await database
       .insert(computerActivity)
       .values({

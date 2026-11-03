@@ -88,7 +88,13 @@ function fixture(
       consumeChallenge: async () => true,
       bind: async (input) => {
         calls.push({ bind: input });
-        return { ...bound, ...input };
+        return {
+          ...bound,
+          ...input,
+          mentionId: input.mentionId ?? null,
+          createdAt: new Date(),
+          optedOutAt: null,
+        };
       },
       updateSmsStatus: async (...input) => {
         calls.push(input);
