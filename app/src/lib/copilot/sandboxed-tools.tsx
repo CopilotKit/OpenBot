@@ -3,7 +3,7 @@ import {
   useFrontendTool,
 } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import * as z from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { RefusedCard } from "@/components/gallery/refused";
@@ -12,7 +12,12 @@ import {
   decideComponent,
   type GrantedComponent,
 } from "@/lib/components/queries";
-import { useActiveBotId, useDeclaredBotId } from "@/lib/copilot/active-bot";
+import {
+  type ToolCallContext,
+  useBotOfCall,
+  useDeclaredBotId,
+} from "@/lib/copilot/active-bot";
+import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
 import {
   type PublishedSandboxed,
   publishedSandboxedQueryOptions,
@@ -23,12 +28,22 @@ import {
  * render published runtime markup in the SDK sandbox.
  */
 export function SandboxedTools() {
-  const botId = useActiveBotId();
-  // Grants are fetched only once a surface has declared its Bot; the placeholder is not one the
-  // server knows, and asking would 404 on every poll.
+  // The grants of the Bot on screen, for the cards drawn in its conversation. Fetched only once a
+  // surface has declared its Bot; the placeholder is not one the server knows, and asking would 404
+  // on every poll.
   const declared = useDeclaredBotId();
   const { data: published } = useQuery(publishedSandboxedQueryOptions());
   const { data: granted } = useQuery(agentComponentsQueryOptions(declared));
+  // Each one offered to the run of a Bot holding it, never by what the screen shows; see
+  // `bot-offer.ts`.
+  const offered = useMemo(
+    () =>
+      Object.fromEntries(
+        (published ?? []).map((component) => [component.name, heldComponent]),
+      ),
+    [published],
+  );
+  useOfferedTo(offered);
 
   const held = new Map(
     (granted ?? []).map((component: GrantedComponent) => [
@@ -41,7 +56,6 @@ export function SandboxedTools() {
     <>
       {(published ?? []).map((component) => (
         <SandboxedTool
-          botId={botId}
           component={component}
           description={held.get(component.name)}
           key={component.name}
@@ -65,14 +79,13 @@ function parametersFor(schema: Record<string, unknown>) {
 function SandboxedTool({
   component,
   description,
-  botId,
 }: {
   component: PublishedSandboxed;
   description: string | undefined;
-  botId: string;
 }) {
   const [refusals, setRefusals] = useState<Map<string, string>>(new Map());
   const isHeld = description !== undefined;
+  const botOf = useBotOfCall();
 
   const render = useCallback(
     // `toolCallId`, not `toolCall.id`: a renderer's props carry the id flat,
@@ -136,13 +149,12 @@ function SandboxedTool({
       description ??
       `A component authored in this deployment: ${component.name}.`,
     parameters: parametersFor(component.argumentSchema),
-    // Keep the hook mounted and hide revoked grants from the model to preserve hook order.
-    available: isHeld,
-    handler: async (
-      _args: unknown,
-      context: { toolCall?: { id?: string } } = {},
-    ) => {
-      const decision = await decideComponent(component.name, botId);
+    handler: async (_args: unknown, context: ToolCallContext = {}) => {
+      // The Bot that drew it, not the one on screen; see `botOfCall`.
+      const decision = await decideComponent(
+        component.name,
+        botOf(context?.agent),
+      );
       if (!decision.allowed) {
         const reason = decision.reason ?? "That component is not allowed here.";
         const id = context?.toolCall?.id;

@@ -3,12 +3,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ProposedSkillCard } from "@/components/skills/proposed-skill";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { useDeclaredBotId } from "@/lib/copilot/active-bot";
+import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
-import {
-  agentPluginsQueryOptions,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import type { SkillFormValues } from "@/lib/skills/form";
 import {
   describeSkill,
@@ -45,16 +42,20 @@ import { queryClient } from "@/query-client";
  * write skills with, and it is granted the same way everything else is.
  */
 
+/**
+ * Offered to the run of a Bot holding the `skill-creator` skill, never by what the screen shows; see
+ * `bot-offer.ts`.
+ */
+const authoring: OfferRule = (bot) => bot.skills.has(SKILL_CREATOR_SLUG);
+const OFFERED: Readonly<Record<string, OfferRule>> = {
+  list_skills: authoring,
+  read_skill: authoring,
+  list_skill_tools: authoring,
+  save_skill: authoring,
+};
+
 export function SkillTools() {
-  // Grants are only fetched once a surface has declared its Bot; the placeholder is not one the
-  // server knows, and asking would 404 on every poll.
-  const declared = useDeclaredBotId();
-  // Empty rather than undefined: the factory's own `enabled: agentId.length > 0` is the guard for
-  // "no Bot declared yet", so the placeholder never reaches the server.
-  const { data: granted } = useQuery(agentPluginsQueryOptions(declared ?? ""));
-  const authoring = (granted?.skills ?? []).some(
-    (skill) => skill.slug === SKILL_CREATOR_SLUG,
-  );
+  useOfferedTo(OFFERED);
 
   /*
    * The Plugins payload carries two of the three reads: every skill scoped to whoever is asking, and
@@ -74,7 +75,6 @@ export function SkillTools() {
     description:
       "The skills that already exist in this deployment, one line each, with whose each one is. Read this before writing a skill: a slug is an identity, so reusing one replaces that skill, and a slug that is not the person's own cannot be replaced at all.",
     parameters: z.object({}),
-    available: authoring,
     handler: async () => {
       const [{ skills }, me] = await Promise.all([
         page(),
@@ -95,7 +95,6 @@ export function SkillTools() {
           "The skill's `/` command, without the slash, as list_skills spells it.",
         ),
     }),
-    available: authoring,
     handler: async ({ slug }) => {
       const wanted = String(slug).replace(/^\//, "");
       const { skills } = await page();
@@ -112,7 +111,6 @@ export function SkillTools() {
     description:
       "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets is always the intersection of what the skill names with what the Bot was granted — so a skill may name tools for a connector this Bot does not hold yet.",
     parameters: z.object({}),
-    available: authoring,
     handler: async () => describeToolRefs((await page()).servers),
   });
 
@@ -121,7 +119,6 @@ export function SkillTools() {
     description:
       "Put a finished skill in front of the person to save. They see the command, the title and the whole instruction, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the skill says — not to check your draft.",
     parameters: proposedSkillSchema,
-    available: authoring,
     render: ProposedSkillRender,
   });
 
