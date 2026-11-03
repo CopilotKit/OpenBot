@@ -163,6 +163,7 @@ async function walk(
   client: Pick<AuditTrailClient, "store">,
   copy: CopiedTable,
   holder: string,
+  batchSize: number,
 ): Promise<{ stored: number; refused: string[] }> {
   const lockName = `intelligence-copy:${copy.table}`;
   const refused: string[] = [];
@@ -186,7 +187,7 @@ async function walk(
         select ${sql.raw(MICROS)} as "createdAt", id::text as id, ${sql.raw(copy.columns)} as record
         from ${sql.raw(copy.table)} ${after}
         order by created_at, id
-        limit ${BATCH}
+        limit ${batchSize}
       `),
     );
     const last = rows.at(-1);
@@ -223,7 +224,9 @@ export async function copyAuditTable(
   database: Database,
   client: Pick<AuditTrailClient, "store">,
   copy: CopiedTable,
+  options: { batchSize?: number } = {},
 ): Promise<TableCopyOutcome> {
+  const batchSize = options.batchSize ?? BATCH;
   const [done] = await database
     .select({ name: intelligenceCopies.name })
     .from(intelligenceCopies)
@@ -236,7 +239,7 @@ export async function copyAuditTable(
   if (!(await tryLocalLock(database, lockName, holder, LOCK_TTL_MS)))
     return { kind: "busy" };
   try {
-    let pass = await walk(database, client, copy, holder);
+    let pass = await walk(database, client, copy, holder, batchSize);
     let local = await countRows(database, copy.table);
     if (pass.stored !== local && pass.stored + pass.refused.length !== local) {
       // Not explained by refusals: rows changed under an earlier walk, or a bookmark outlived its
@@ -244,7 +247,7 @@ export async function copyAuditTable(
       await database
         .delete(intelligenceCopyProgress)
         .where(eq(intelligenceCopyProgress.name, copy.table));
-      pass = await walk(database, client, copy, holder);
+      pass = await walk(database, client, copy, holder, batchSize);
       local = await countRows(database, copy.table);
     }
     if (pass.stored !== local) {

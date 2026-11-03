@@ -36,6 +36,10 @@ function announce() {
 /**
  * Write one record to the outbox. `computer`, for a `computer.*` audit event, also moves that
  * computer's last-activity bookmark forward in the same statement (see `computerActivity`).
+ *
+ * The record goes in as text and is cast, not as a value typed `jsonb`: handed a string for a `jsonb`
+ * parameter, Bun's driver encodes it again and stores a JSON string rather than the object (the bug
+ * `db/schema/json.ts` describes), which Intelligence then refuses.
  */
 export async function writeOutbox(
   executor: Executor,
@@ -48,7 +52,7 @@ export async function writeOutbox(
   await executor.execute(sql`
     with written as (
       insert into audit_outbox (kind, id, record)
-      values (${kind}, ${id}::uuid, ${JSON.stringify(record)}::jsonb)
+      values (${kind}, ${id}::uuid, ${JSON.stringify(record)}::text::jsonb)
       returning occurred_at
     )
     insert into computer_activity (computer, last_active_at)
