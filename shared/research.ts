@@ -40,6 +40,14 @@ const FIRECRAWL: ResearchTools = Object.freeze({
   fetch: "firecrawl_scrape",
 });
 
+const KEENABLE: ResearchTools = Object.freeze({
+  search: "search_web_pages",
+  fetch: "fetch_page_content",
+  notes: Object.freeze([
+    "Generate one session_id for the conversation and reuse it on related search and fetch calls.",
+  ]),
+});
+
 /**
  * The research tools on each catalogue entry, by the entry's key.
  *
@@ -55,6 +63,8 @@ export const RESEARCH_TOOLS: Readonly<Record<string, ResearchTools>> =
     "exa-authenticated": EXA,
     firecrawl: FIRECRAWL,
     "firecrawl-authenticated": FIRECRAWL,
+    keenable: KEENABLE,
+    "keenable-authenticated": KEENABLE,
   });
 
 /** What a research call is called on screen, whichever provider made it. */
@@ -122,4 +132,5 @@ export const RESEARCH_APP_NAMES: readonly string[] = Object.freeze([
   "Parallel Search",
   "Exa Search",
   "Firecrawl",
+  "Keenable",
 ]);

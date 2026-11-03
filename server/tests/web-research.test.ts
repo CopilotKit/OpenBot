@@ -36,6 +36,8 @@ const RESEARCH_TOOLS: Record<string, [string, string]> = {
   "exa-authenticated": ["web_search_exa", "web_fetch_exa"],
   firecrawl: ["firecrawl_search", "firecrawl_scrape"],
   "firecrawl-authenticated": ["firecrawl_search", "firecrawl_scrape"],
+  keenable: ["search_web_pages", "fetch_page_content"],
+  "keenable-authenticated": ["search_web_pages", "fetch_page_content"],
 };
 const pair = (server = "parallel") =>
   (RESEARCH_TOOLS[server] ?? []).map((name) => tool(server, name));
@@ -86,6 +88,8 @@ describe("research providers in the catalogue", () => {
       "exa-authenticated": "https://mcp.exa.ai/mcp",
       firecrawl: "https://mcp.firecrawl.dev/v2/mcp",
       "firecrawl-authenticated": "https://mcp.firecrawl.dev/v2/mcp",
+      keenable: "https://api.keenable.ai/mcp-public",
+      "keenable-authenticated": "https://api.keenable.ai/mcp",
     };
     for (const [key, url] of Object.entries(urls)) {
       expect(resolveServerUrl(key, "https://attacker.example")?.url).toBe(url);
@@ -136,13 +140,18 @@ describe("research providers in the catalogue", () => {
     expect(serverCredentialKind(catalogueEntry("parallel")!)).toBeNull();
     expect(serverCredentialKind(catalogueEntry("exa")!)).toBeNull();
     expect(serverCredentialKind(catalogueEntry("firecrawl")!)).toBeNull();
+    expect(serverCredentialKind(catalogueEntry("keenable")!)).toBeNull();
     for (const key of [
       "parallel-authenticated",
       "exa-authenticated",
       "firecrawl-authenticated",
+      "keenable-authenticated",
     ])
       expect(serverCredentialKind(catalogueEntry(key)!)).toBe("mcp");
     expect(tokenHeaderFor(catalogueEntry("exa-authenticated"))).toBe(
+      "x-api-key",
+    );
+    expect(tokenHeaderFor(catalogueEntry("keenable-authenticated"))).toBe(
       "x-api-key",
     );
     expect(
@@ -185,6 +194,12 @@ describe("what a Bot is told about research", () => {
     expect(exa).toContain("Do not name the provider in your answer");
     expect(grantedToolGuidance(pair())).toContain(
       "Parallel: Generate one session_id",
+    );
+    expect(grantedToolGuidance(pair("keenable"))).toContain(
+      "- Keenable: mcp__keenable__search_web_pages finds sources and mcp__keenable__fetch_page_content reads selected pages.",
+    );
+    expect(grantedToolGuidance(pair("keenable"))).toContain(
+      "Keenable: Generate one session_id",
     );
   });
 

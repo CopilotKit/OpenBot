@@ -99,6 +99,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### Keenable joins the public-web research providers
+
+Two new catalogue entries give a Bot public-web search and page reading without its browser:
+**Keenable** (free, rate-limited per IP, at `https://api.keenable.ai/mcp-public`) and **Keenable (API
+key)** (the deployment's key in Keenable's `X-API-Key` header, at `https://api.keenable.ai/mcp`). Both
+advertise only `search_web_pages` and `fetch_page_content`, which read. Nothing is granted to any Bot
+until an administrator does it. See [docs/web-research.md](docs/web-research.md).
+
 ### Bots can install packages on their computers
 
 Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
