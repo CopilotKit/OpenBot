@@ -200,7 +200,7 @@ test("a background delivery records no view until the person returns to the visi
   expect(requests).toHaveLength(1);
 });
 
-test("rerenders share one pending request; remounts let the server deduplicate", async () => {
+test("one mounted answer sends once; remounts keep the same observed identifiers", async () => {
   let finish: (response: Response) => void = () => {
     throw new Error("No pending request");
   };
@@ -242,20 +242,7 @@ test("streaming text waits until the final answer is settled", async () => {
   expect(requests).toHaveLength(1);
 });
 
-test("a delayed server linkage is retried while the result remains visible", async () => {
-  status = 202;
-  channel();
-  intersect();
-  await flush();
-  expect(requests).toHaveLength(1);
-  status = 204;
-  await act(async () => {
-    await Bun.sleep(1100);
-  });
-  expect(requests).toHaveLength(2);
-});
-
-test("failed requests cannot storm on rerenders and stop retrying in a hidden tab", async () => {
+test("a failed telemetry POST remains best effort without automatic retries", async () => {
   const warn = spyOn(console, "warn").mockImplementation(() => {});
   status = 503;
   const { view, element } = channel();
@@ -266,7 +253,6 @@ test("failed requests cannot storm on rerenders and stop retrying in a hidden ta
     intersect();
   }
   expect(requests).toHaveLength(1);
-  visibility("hidden");
   await act(async () => {
     await Bun.sleep(1100);
   });
@@ -277,7 +263,7 @@ test("failed requests cannot storm on rerenders and stop retrying in a hidden ta
   warn.mockRestore();
 });
 
-test("a transcript without a trusted thread never invents result linkage", async () => {
+test("a transcript without a thread ID never invents result linkage", async () => {
   const { messages } = fixture();
   render(<ChatTranscript messages={messages} />);
   intersect();
@@ -334,41 +320,6 @@ test("a rejected clipboard write records no copy", async () => {
   expect(error.mock.calls).toHaveLength(1);
   expect(error.mock.calls[0]?.[0]).toBe("Failed to copy to clipboard:");
   error.mockRestore();
-});
-
-test("unlinked historical replies stop after three attempts until a new visibility episode", async () => {
-  status = 202;
-  channel();
-  intersect();
-  await flush();
-  await act(async () => {
-    await Bun.sleep(2200);
-  });
-  expect(requests).toHaveLength(3);
-  intersect();
-  await flush();
-  expect(requests).toHaveLength(3);
-  visibility("hidden");
-  status = 204;
-  visibility("visible");
-  await flush();
-  expect(requests).toHaveLength(4);
-});
-
-test("scrolling out of view stops a pending retry and returning can retry", async () => {
-  status = 202;
-  channel();
-  intersect();
-  await flush();
-  intersect(false);
-  await act(async () => {
-    await Bun.sleep(1100);
-  });
-  expect(requests).toHaveLength(1);
-  status = 204;
-  intersect();
-  await flush();
-  expect(requests).toHaveLength(2);
 });
 
 test("background direct Bot history is not viewed when the person returns after scrolling away", async () => {
@@ -437,6 +388,17 @@ test("an edge-touching or zero-area body is not an actually visible result", asy
   intersect(true, 0);
   await flush();
   expect(requests).toHaveLength(0);
+  intersect();
+  await flush();
+  expect(requests).toHaveLength(1);
+});
+
+test("one mounted answer remains deduplicated when a continuation toggles readiness", async () => {
+  const { view, element } = channel();
+  intersect();
+  await flush();
+  view.rerender(element(true));
+  view.rerender(element(false));
   intersect();
   await flush();
   expect(requests).toHaveLength(1);
