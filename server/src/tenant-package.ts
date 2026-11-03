@@ -1237,6 +1237,9 @@ async function synchronizePackageChannel(
         `Tenant package channel "${channel.id}" collides with a channel this package does not own`,
       );
     }
+    // A package's channel cannot be deleted through OpenBot; one deleted some other way is left
+    // as it is rather than failing the boot over a conversation nobody can open.
+    if (current.deletedAt !== null) return;
     const same =
       current.name === wanted.name &&
       current.description === wanted.description &&

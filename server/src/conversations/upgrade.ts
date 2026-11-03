@@ -56,6 +56,33 @@ export type ConversationCopyOutcome =
     };
 
 const BATCH = 100;
+/**
+ * The most one batch may weigh, serialised. Intelligence refuses a body over 2 MB, and a group's
+ * lines and a voice session's transcript can be long, so a batch is cut by size as well as count.
+ */
+const BATCH_BYTES = 1_000_000;
+
+/** Items in order, cut into batches of at most {@link BATCH} items and {@link BATCH_BYTES}. */
+function batches<T>(items: T[]): T[][] {
+  const out: T[][] = [];
+  let current: T[] = [];
+  let bytes = 0;
+  for (const item of items) {
+    const size = Buffer.byteLength(JSON.stringify(item));
+    if (
+      current.length > 0 &&
+      (current.length >= BATCH || bytes + size > BATCH_BYTES)
+    ) {
+      out.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(item);
+    bytes += size;
+  }
+  if (current.length > 0) out.push(current);
+  return out;
+}
 
 function batchKey(resource: string, items: unknown[]): string {
   return `openbot-upgrade:${resource}:${createHash("sha256").update(JSON.stringify(items)).digest("hex")}`;
@@ -72,8 +99,7 @@ async function importAll<T>(
   let present = 0;
   const refused: string[] = [];
   const missing: string[] = [];
-  for (let at = 0; at < items.length; at += BATCH) {
-    const batch = items.slice(at, at + BATCH);
+  for (const batch of batches(items)) {
     const results = await send(batch, batchKey(resource, batch));
     const byId = new Map(results.map((result) => [result.id, result]));
     for (const item of batch) {
