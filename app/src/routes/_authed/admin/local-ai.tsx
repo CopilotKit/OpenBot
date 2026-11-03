@@ -1,4 +1,4 @@
-import { IconCpu, IconRefresh, IconWorld } from "@tabler/icons-react";
+import { IconBolt, IconCpu, IconRefresh, IconWorld } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment } from "react";
@@ -31,6 +31,8 @@ type LocalAiReport = {
     models: { id: string; sizeBytes: number | null }[];
   }[];
   inUse: { baseUrl: string | null; model: string | null; isLocal: boolean };
+  /** Needle, the small helper that picks each message's tools. Older servers leave it out. */
+  needle?: { on: boolean; up: boolean };
 };
 
 function size(bytes: number | null) {
@@ -106,6 +108,40 @@ function LocalAiPage() {
               </ItemDescription>
             </ItemContent>
             {inUse?.isLocal ? (
+              <ItemActions>
+                <span className="font-medium text-primary text-xs">On</span>
+              </ItemActions>
+            ) : null}
+          </Item>
+        </PageRows>
+      </PageSection>
+
+      <PageSection
+        description="A tiny model on this computer that picks which tools each message needs, in a blink, so the big AI only sees those. It never chats and never does anything itself."
+        title="Needle helper"
+      >
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia>
+              <IconBolt />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>
+                {!data?.needle?.on
+                  ? "Off"
+                  : data.needle.up
+                    ? "On and working"
+                    : "On, but not answering yet"}
+              </ItemTitle>
+              <ItemDescription>
+                {!data?.needle?.on
+                  ? "To use it: bun run ai needle on, then restart OpenBot"
+                  : data.needle.up
+                    ? "To stop it: bun run ai needle off, then restart OpenBot"
+                    : "It may still be downloading its model. If this stays, restart OpenBot."}
+              </ItemDescription>
+            </ItemContent>
+            {data?.needle?.on && data.needle.up ? (
               <ItemActions>
                 <span className="font-medium text-primary text-xs">On</span>
               </ItemActions>

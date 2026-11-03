@@ -1033,6 +1033,7 @@ async function buildAgent(
       skills,
       text: latestUserText(input.messages),
       choose: narrowing.choose,
+      ...(narrowing.chooseFast ? { chooseFast: narrowing.chooseFast } : {}),
       signal,
       ...(narrowing.floor === undefined ? {} : { floor: narrowing.floor }),
     });
@@ -1200,6 +1201,12 @@ export type ToolSelection = {
   loadSkills: (botId: string) => Promise<SelectableSkill[]>;
   /** Pass one. Ordinary failures skip narrowing; cancellation stops the run. */
   choose: (prompt: string, signal?: AbortSignal) => Promise<string | null>;
+  /** A quicker pass one tried first: Needle on this computer, when it is turned on. */
+  chooseFast?: (
+    text: string,
+    skills: readonly SelectableSkill[],
+    signal?: AbortSignal,
+  ) => Promise<string[] | null>;
   /** Writes the discovery row. Never allowed to fail a run. */
   record?: (botId: string, selection: Selection<GrantedTool>) => Promise<void>;
   /** Overrides the default catalogue size below which nothing is narrowed. */

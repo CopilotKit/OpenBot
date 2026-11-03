@@ -509,6 +509,21 @@ services:
       # mount has to be the containing directory rather than the file mount point.
       - ./.langchain:/root/.langchain
 
+  # Needle (cactus-compute/needle, Apache-2.0): a tiny model on this computer that picks which of a
+  # Bot's skills a message needs, so the big AI only sees the tools that matter. Optional: started
+  # when NEEDLE_URL is set (`bun run ai needle on`). Its model is downloaded once into the volume.
+  needle:
+    profiles: ["needle"]
+    build: ./needle-helper
+    ports:
+      - "127.0.0.1:${NEEDLE_PORT:-4310}:4310"
+    environment:
+      NEEDLE_TELEMETRY: "0"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - needle-models:/models
+    restart: unless-stopped
+
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:
     build:
@@ -576,3 +591,4 @@ volumes:
   spire-agent-socket:
   spire-agent-data:
   agent-profiles:
+  needle-models:

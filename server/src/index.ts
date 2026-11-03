@@ -74,8 +74,8 @@ import {
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth, sessionLifetimeMs } from "./auth";
-import { createEntra, withEntraBearer } from "./auth/entra";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
+import { createEntra, withEntraBearer } from "./auth/entra";
 import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
@@ -206,6 +206,13 @@ import {
   createLearningSharingStore,
   createOpenSkillIndex,
 } from "./learning/sharing";
+import { createNeedleChooser } from "./local-ai/needle";
+import { imapMailClient } from "./mail/client";
+import {
+  createMailAccountStore,
+  createMailService,
+  useMailService,
+} from "./mail/service";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
@@ -225,12 +232,6 @@ import { useArcadeClient } from "./plugins/arcade";
 import { createArcadeClient } from "./plugins/arcade-adapter";
 import { assertActivatable, providerDecision } from "./plugins/broker";
 import { useRoutineTools } from "./plugins/builtin-routines";
-import { imapMailClient } from "./mail/client";
-import {
-  createMailAccountStore,
-  createMailService,
-  useMailService,
-} from "./mail/service";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
@@ -1716,12 +1717,17 @@ const loadVendors = async () =>
  * be wrong without a Bot gaining anything. That is also why every failure below is silent and
  * lands on the whole catalogue: the narrowing is worth an accuracy point, never a capability.
  */
+const needleChooser = process.env.NEEDLE_URL?.trim()
+  ? createNeedleChooser(process.env.NEEDLE_URL.trim())
+  : null;
 const selectionForActor = (actorId: string): ToolSelection => ({
   loadSkills: (botId) => grantedSkills({ store: pluginStore, botId }),
   // The deployment's own model and key, the same pair the intent router uses, so selection is
   // never a second thing to configure. It throws on a missing key, which reads as "could not
   // choose" and leaves the whole catalogue offered.
   choose: chooseSkills,
+  // Needle on this computer, when `bun run ai needle on` turned it on: tried first, in milliseconds.
+  ...(needleChooser ? { chooseFast: needleChooser } : {}),
   record: async (botId, selection) => {
     await recordAuditEvent(bootAuditStore, {
       eventType: "mcp.tools_discovered",
@@ -1734,6 +1740,7 @@ const selectionForActor = (actorId: string): ToolSelection => ({
         granted: selection.granted,
         offered: selection.offered.length,
         skills: selection.skills,
+        ...(selection.by ? { chosenBy: selection.by } : {}),
       },
     });
   },

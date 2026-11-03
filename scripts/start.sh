@@ -55,6 +55,8 @@ SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
 # docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
 # was ignored: the supervisor was still started and the server still told to use it.
 ONE_COMPUTER_EACH="$(setting OPENBOT_ONE_COMPUTER_EACH true)"
+# Needle, the small tool-picking helper, runs only when it was turned on (`bun run ai needle on`).
+NEEDLE_URL="$(setting NEEDLE_URL "")"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
@@ -250,6 +252,9 @@ else
   SERVICES+=(agent-bot)
 fi
 SERVICES+=(agent-langgraph)
+if [ -n "$NEEDLE_URL" ]; then
+  SERVICES+=(needle)
+fi
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT

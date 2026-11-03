@@ -71,6 +71,8 @@ export type Selection<Tool extends SelectableTool> = {
   reason: SelectionReason;
   /** How many were granted, so a reader can see the narrowing without recomputing it. */
   granted: number;
+  /** Set when Needle, on this computer, did the choosing instead of the deployment's model. */
+  by?: "needle";
 };
 
 /**
@@ -228,6 +230,15 @@ export async function selectTools<Tool extends SelectableTool>(input: {
     prompt: string,
     signal?: AbortSignal,
   ) => Promise<string | null> | (string | null) | Promise<never>;
+  /**
+   * A quicker pass one tried first, given the message and skills directly: Needle, when it runs on
+   * this computer. Null or a throw means "can't say", and `choose` is asked as before.
+   */
+  chooseFast?: (
+    text: string,
+    skills: readonly SelectableSkill[],
+    signal?: AbortSignal,
+  ) => Promise<string[] | null>;
   signal?: AbortSignal;
   /** Overridable so a deployment that measured its own knee is not stuck with ours. */
   floor?: number;
@@ -252,21 +263,37 @@ export async function selectTools<Tool extends SelectableTool>(input: {
   if (text.trim() === "") return everything("unavailable");
 
   let chosen: string[] | null = null;
-  try {
-    const answer = await input.choose(
-      selectionPrompt(text, skills),
-      input.signal,
-    );
-    input.signal?.throwIfAborted();
-    chosen =
-      typeof answer === "string" ? readChosenSkills(answer, skills) : null;
-  } catch {
-    // A user stopping the run is not an unavailable selector. Never start a fallback model run.
-    input.signal?.throwIfAborted();
-    // A selector that failed is not an error a person should ever see. It costs this run the
-    // narrowing and nothing else, which is the behaviour that shipped before it existed.
-    chosen = null;
+  let byNeedle = false;
+  if (input.chooseFast) {
+    try {
+      const known = new Set(skills.map((skill) => skill.slug));
+      const fast = await input.chooseFast(text, skills, input.signal);
+      input.signal?.throwIfAborted();
+      const picked = (fast ?? []).filter((slug) => known.has(slug));
+      if (picked.length > 0) {
+        chosen = picked;
+        byNeedle = true;
+      }
+    } catch {
+      input.signal?.throwIfAborted();
+    }
   }
+  if (chosen === null)
+    try {
+      const answer = await input.choose(
+        selectionPrompt(text, skills),
+        input.signal,
+      );
+      input.signal?.throwIfAborted();
+      chosen =
+        typeof answer === "string" ? readChosenSkills(answer, skills) : null;
+    } catch {
+      // A user stopping the run is not an unavailable selector. Never start a fallback model run.
+      input.signal?.throwIfAborted();
+      // A selector that failed is not an error a person should ever see. It costs this run the
+      // narrowing and nothing else, which is the behaviour that shipped before it existed.
+      chosen = null;
+    }
   if (chosen === null) return everything("unavailable");
   /*
    * The model says none apply, and everything stays offered anyway.
@@ -298,6 +325,7 @@ export async function selectTools<Tool extends SelectableTool>(input: {
     skills: chosen,
     reason: "selected",
     granted: tools.length,
+    ...(byNeedle ? { by: "needle" as const } : {}),
   };
 }
 

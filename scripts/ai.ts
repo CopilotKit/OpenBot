@@ -5,6 +5,7 @@
  *   bun run ai offline             the AI on this computer (first chat model found)
  *   bun run ai offline qwen3:8b    that model on this computer
  *   bun run ai online              back to the online AI you had before (OpenAI or your own server)
+ *   bun run ai needle on|off       Needle, a tiny helper that picks each message's tools in a blink
  *
  * Offline finds Ollama (11434) or LM Studio (1234) the same way Admin, Local AI does. Going offline
  * first keeps a copy of the online settings in `.env` (the ONLINE_SAVED_ lines), and going online puts
@@ -41,7 +42,13 @@ function write(text: string, values: Record<string, string | null>): string {
       continue;
     }
     const at = lines.findIndex((entry) => pattern.test(entry));
-    if (at === -1) lines.push(`${key}=${value}`);
+    // Before the file's closing blank line, so the file still ends with a newline.
+    if (at === -1)
+      lines.splice(
+        lines.at(-1) === "" ? lines.length - 1 : lines.length,
+        0,
+        `${key}=${value}`,
+      );
     else lines[at] = `${key}=${value}`;
   }
   return lines.join("\n");
@@ -86,9 +93,29 @@ if (mode === "online") {
   process.exit(0);
 }
 
+if (mode === "needle") {
+  const turn = process.argv[3];
+  if (turn !== "on" && turn !== "off") {
+    console.error("Use: bun run ai needle on, or bun run ai needle off");
+    process.exit(1);
+  }
+  writeFileSync(
+    ENV,
+    write(current, {
+      NEEDLE_URL: turn === "on" ? "http://127.0.0.1:4310" : null,
+    }),
+  );
+  console.log(
+    turn === "on"
+      ? "Needle is on. Restart OpenBot: it starts Needle beside it (the first start downloads its 35 MB model once). Needle then picks which tools each message needs, so the big AI is only shown those."
+      : "Needle is off. Restart OpenBot. Tools are picked the usual way again.",
+  );
+  process.exit(0);
+}
+
 if (mode !== "offline") {
   console.error(
-    "Use: bun run ai online, bun run ai offline [model], or bun run ai",
+    "Use: bun run ai online, bun run ai offline [model], bun run ai needle on|off, or bun run ai",
   );
   process.exit(1);
 }
