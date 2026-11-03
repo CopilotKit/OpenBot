@@ -32,6 +32,7 @@ import {
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 
@@ -43,6 +44,9 @@ import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 export function ApprovalSettings() {
   const inbox = useQuery(approvalInboxOptions());
   const me = useQuery(currentUserQueryOptions()).data;
+  // The personal edition has no Admin to point at, and no team for team settings to govern.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const agents = useQuery(agentListQueryOptions());
   const hiddenAgents = useQuery(agentListQueryOptions(true));
   const preferences = useMutation(
@@ -83,7 +87,7 @@ export function ApprovalSettings() {
           {error.message}
         </p>
       ) : null}
-      {me?.role === "admin" ? (
+      {me?.role === "admin" && !personal ? (
         <p className="mt-6 text-muted-foreground text-sm">
           Team settings and shared account requests are in{" "}
           <Link className="underline underline-offset-4" to="/admin/approvals">

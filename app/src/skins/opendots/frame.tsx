@@ -42,6 +42,7 @@ import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { type NavigationItem, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -124,10 +125,10 @@ function RailDestination({
   const Icon = item.icon;
   return (
     <RailTip label={item.label}>
-      <Link
+      <NavigationTarget
         aria-label={item.label}
         className={cn(railButton, "relative")}
-        to={item.to}
+        item={item}
       >
         <Icon />
         {item.id === "bots" && showBadge ? (
@@ -137,7 +138,7 @@ function RailDestination({
             <BotsNavBadge />
           </span>
         ) : null}
-      </Link>
+      </NavigationTarget>
     </RailTip>
   );
 }

@@ -147,6 +147,21 @@ test("someone who neither owns the Bot nor administers the deployment does not s
   expect(view.queryByText("Sharing")).toBeNull();
 });
 
+test("the personal edition has nobody to share a Bot with, so no Sharing", async () => {
+  serving("admin");
+  const served = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input) === "/api/capabilities"
+      ? Response.json({ edition: "personal" })
+      : served(input, init)) as unknown as typeof fetch;
+  const view = draw(BOT);
+  expect(await view.findByText("Setup")).toBeTruthy();
+  // The capabilities answer arrives on its own request; wait for the row it removes to settle.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(view.queryByText("Sharing")).toBeNull();
+  expect(view.getByText("Skills and access")).toBeTruthy();
+});
+
 test("an administrator sees Sharing on somebody else's Bot", async () => {
   serving("admin");
   const view = draw({ ...BOT, mine: false });

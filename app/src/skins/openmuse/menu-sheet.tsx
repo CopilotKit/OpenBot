@@ -31,6 +31,7 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { navigationRender } from "@/components/edition/team-features-dialog";
 import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -148,7 +149,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             <LinkRow
               icon={item.icon}
               key={item.id}
-              render={<Link onClick={onClose} to={item.to} />}
+              render={navigationRender(item, { onClick: onClose })}
               tint={item.section === "account" ? "plain" : "sky"}
               title={item.label}
             />

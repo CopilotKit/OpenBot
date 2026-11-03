@@ -123,6 +123,30 @@ describe("runtime capabilities", () => {
     expect(response.status).toBe(200);
     expect((await response.json()).selfHostBanner).toBe(false);
   });
+
+  // One person running it for themselves is not somebody to offer help running it for a company.
+  test("reports the personal edition, with no self-host banner", async () => {
+    const personal = createApp(
+      loadConfig(
+        testEnvironment({
+          GOOGLE_OAUTH_CLIENT_ID: undefined,
+          GOOGLE_OAUTH_CLIENT_SECRET: undefined,
+          BETTER_AUTH_SECRET: undefined,
+          BETTER_AUTH_URL: undefined,
+          INITIAL_ADMIN_EMAILS: undefined,
+          OPENBOT_EDITION: "personal",
+          OPENBOT_SINGLE_USER: "true",
+          AGENT_COMPUTER_URL: "http://127.0.0.1:7000",
+        }),
+      ),
+    );
+
+    const body = await (
+      await personal.request("http://openbot.local/api/capabilities")
+    ).json();
+    expect(body.edition).toBe("personal");
+    expect(body.selfHostBanner).toBe(false);
+  });
 });
 
 describe("authentication availability", () => {

@@ -17,12 +17,14 @@ import {
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { channelKeys } from "@/lib/channels/queries";
-import { NAVIGATION, navigationFor } from "@/lib/navigation";
+import { deploymentKeys } from "@/lib/deployment/queries";
+import { isNavigationLink, NAVIGATION, navigationFor } from "@/lib/navigation";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
 
@@ -73,11 +75,20 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-function renderSidebar(role: "admin" | "user") {
+function renderSidebar(
+  role: "admin" | "user",
+  edition: "team" | "personal" = "team",
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   clients.push(queryClient);
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: edition === "personal",
+    edition,
+  });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "maya",
     name: "Maya Chen",
@@ -124,6 +135,8 @@ function renderSidebar(role: "admin" | "user") {
       component: () => (
         <SidebarProvider>
           <AppSidebar />
+          {/* Mounted once by the signed-in layout; here so the entry has something to open. */}
+          <TeamFeaturesDialog />
         </SidebarProvider>
       ),
     }),
@@ -147,6 +160,7 @@ function links(root: HTMLElement) {
 
 function expected(role: "admin" | "user", section: "primary" | "account") {
   return navigationFor(role)
+    .filter(isNavigationLink)
     .filter((item) => item.section === section)
     .map((item) => ({ label: item.label, to: item.to }));
 }
@@ -199,4 +213,35 @@ test("Admin is in the list for admins only", () => {
     "connections",
     "settings",
   ]);
+});
+
+test("the personal edition has no Admin, and a feature list in its place", () => {
+  const personal = navigationFor("admin", "personal");
+  expect(
+    personal.some((item) => item.kind !== "dialog" && item.to === "/admin"),
+  ).toBe(false);
+  const dialogs = personal.filter((item) => item.kind === "dialog");
+  expect(dialogs.map((item) => item.id)).toEqual(["team-features"]);
+  expect(personal.map((item) => item.id)).toEqual([
+    "bots",
+    "capabilities",
+    "connections",
+    "team-features",
+    "settings",
+  ]);
+  // The team edition is unchanged.
+  expect(navigationFor("admin")).toEqual(navigationFor("admin", "team"));
+  expect(navigationFor("admin").map((item) => item.id)).toContain("admin");
+});
+
+test("in the personal edition the menu opens the team features instead of Admin", async () => {
+  const { view, user } = renderSidebar("admin", "personal");
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  const menu = await view.findByRole("menu");
+  expect(within(menu).queryByRole("menuitem", { name: "Admin" })).toBeNull();
+  await user.click(
+    within(menu).getByRole("menuitem", { name: "Team features" }),
+  );
+  const dialog = await view.findByRole("dialog");
+  expect(within(dialog).getByText("OpenBot for teams")).toBeTruthy();
 });

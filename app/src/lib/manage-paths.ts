@@ -64,6 +64,29 @@ export function managePaths(edition: "team" | "personal") {
 
 export type ManagePaths = ReturnType<typeof managePaths>;
 
+/** Each Admin page the personal edition keeps, and where it is under Settings. */
+const MOVED: readonly (readonly [admin: string, settings: string])[] = [
+  ["/admin/plugins", "/settings/plugins"],
+  ["/admin/skills", "/settings/skills"],
+  ["/admin/credentials", "/settings/credentials"],
+  ["/admin/computers", "/settings/computer"],
+  ["/admin/audit", "/settings/activity"],
+];
+
+/**
+ * Where an old Admin address goes in the personal edition: the same page under Settings, with
+ * whatever followed it (`/admin/plugins/notion/tools/search` keeps `/notion/tools/search`), or
+ * Settings itself for a page the personal edition does not have.
+ */
+export function personalAdminRedirect(pathname: string): string {
+  for (const [admin, settings] of MOVED) {
+    if (pathname === admin || pathname.startsWith(`${admin}/`)) {
+      return `${settings}${pathname.slice(admin.length)}`.replace(/\/$/, "");
+    }
+  }
+  return "/settings";
+}
+
 /**
  * The paths for this deployment. The edition is read once per page load and cached for good, so
  * this is a lookup, not a request; until it answers, the team edition's paths, which are what every

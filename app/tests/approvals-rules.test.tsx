@@ -304,6 +304,22 @@ test("an administrator is told where team settings are", async () => {
   expect(link.getAttribute("href")).toBe("/admin/approvals");
 });
 
+test("the personal edition's one person is not pointed at an Admin it does not have", async () => {
+  role = "admin";
+  const served = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      String(path) === "/api/capabilities"
+        ? Response.json({ edition: "personal" })
+        : served(path, init),
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Rules for every Bot");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(view.queryByRole("link", { name: "Admin → Approvals" })).toBeNull();
+});
+
 test("a member is not pointed at Admin", async () => {
   const view = draw(<ApprovalSettings />);
   await view.findByText("Rules for every Bot");

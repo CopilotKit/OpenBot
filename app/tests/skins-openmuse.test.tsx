@@ -30,7 +30,7 @@ import type { BotActivity, BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import type { MemoryRecord } from "@/lib/memory";
-import { navigationFor } from "@/lib/navigation";
+import { isNavigationLink, navigationFor } from "@/lib/navigation";
 import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
@@ -799,7 +799,7 @@ describe("every OpenBot surface stays reachable", () => {
       renderAt("/s/goals");
       const menu = within(await openMenu());
       await menu.findByRole("link", { name: /^Settings$/ });
-      for (const item of navigationFor(role)) {
+      for (const item of navigationFor(role).filter(isNavigationLink)) {
         expect(
           menu
             .getByRole("link", { name: new RegExp(`^${item.label}$`) })

@@ -34,6 +34,7 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deliveryQueryOptions } from "@/lib/delivery";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { memorySourcesQueryOptions } from "@/lib/memory";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
@@ -68,8 +69,12 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const teamBots = useQuery(teamBotsQueryOptions());
   const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
   // Its owner and administrators change it there; anyone it is published to finds its link there.
+  // The personal edition has one person and nobody to share with.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const canShare =
-    agent.mine || me?.role === "admin" || published !== undefined;
+    !personal &&
+    (agent.mine || me?.role === "admin" || published !== undefined);
 
   const goals = useQuery(responsibilitiesQueryOptions());
   const reach = useQuery(deliveryQueryOptions());
