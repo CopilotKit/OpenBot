@@ -49,11 +49,16 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import { toolLimitFor, toolLimitRefusal } from "./agents/tool-limit";
+import {
+  OPENBOT_TOOL_LIMIT,
+  toolLimitFor,
+  toolLimitRefusal,
+} from "./agents/tool-limit";
 import {
   isSearchingModel,
   planToolSearch,
   SEARCH_RESULTS_LIMIT,
+  searchesTools,
   searchToolsTool,
   withToolSearch,
 } from "./agents/tool-search";
@@ -617,7 +622,8 @@ export function builtInAgentConfiguration(
                   }),
               ),
           })),
-          maxSteps: TOOL_STEPS,
+          // Each search is a step of its own, so a run that searches gets two more.
+          maxSteps: searching ? TOOL_STEPS + SEARCH_STEPS : TOOL_STEPS,
         }
       : {}),
   };
@@ -630,6 +636,9 @@ export function builtInAgentConfiguration(
  * Beyond that a model is not making progress, and every extra step is somebody's money.
  */
 const TOOL_STEPS = 8;
+
+/** The steps a run that holds tools behind search gets on top, one per search it may need. */
+const SEARCH_STEPS = 2;
 
 /**
  * Build the built-in and remote AG-UI agent map the runtime serves.
@@ -1128,32 +1137,28 @@ async function buildAgent(
   }
 
   /*
-   * A built-in Bot takes its tools in its configuration, so narrowing means building it again once
-   * the message is known. The guidance it is given is generated from the tools passed here, which is
-   * what keeps a narrowed run from being told it holds something it was not offered.
-   */
-  /*
    * Whether a run may be sent to the model with the tools it would send, decided by count.
    *
    * Per run rather than per Bot, because the count is only known then: narrowing may have cut the
    * grants down, a handoff may have added to them, and the client's own tools arrive with the
-   * request. Search reserves room for its largest result batch under our per-step budget, on every
-   * provider. Without search, only Chat Completions has a count limit.
+   * request. Tools waiting behind search are not counted, because they are not sent, but room is
+   * kept for one search's answer, so a search never promises tools the next step cannot carry.
+   *
+   * Two limits. Chat Completions refuses a 129th tool, so a run headed there is held to that. Where a
+   * run searches, it is held to `MODEL_TOOL_LIMIT` on every provider, because that is the most
+   * `toolsForStep` will send; that number is OpenBot's, and the refusal says so rather than putting
+   * it in the provider's mouth. A run on any other path with search off has no count to meet.
    *
    * The refusal is the person's answer; the log line and the audit row are the admin's, because a Bot
-   * over the limit fails on every message until somebody removes some of its apps, and nobody removes
-   * what they cannot see. Ported from #948, with the limit read from the API the runtime resolves.
+   * over the limit fails on every message until somebody looks, and nobody looks at what they cannot
+   * see. Ported from #948, with the limit read from the API the runtime resolves.
    */
   const limit = model.plan ? null : toolLimitFor(model, apiKey ?? undefined);
   const admitTools = (waiting: ReadonlySet<string>) => {
-    // Search must be able to deliver every tool it promises on the next step, on every provider.
     const capacity =
       limit ??
       (waiting.size > 0
-        ? {
-            provider: model.provider === "openai" ? "OpenAI" : "Anthropic",
-            limit: MODEL_TOOL_LIMIT,
-          }
+        ? { provider: OPENBOT_TOOL_LIMIT, limit: MODEL_TOOL_LIMIT }
         : null);
     if (!capacity) return undefined;
     const reserved = Math.min(waiting.size, SEARCH_RESULTS_LIMIT);
@@ -1178,12 +1183,15 @@ async function buildAgent(
           timestamp: new Date().toISOString(),
         });
       });
-      if (reserved > 0 && names.length <= capacity.limit)
-        return `${agent.name} can't answer. Its ${names.length} always-visible tools leave fewer than ${reserved} slots for tool search under the ${capacity.limit}-tool request budget. An admin can remove some of its apps on the Bot's page.`;
       return toolLimitRefusal(agent.name, count, capacity);
     };
   };
 
+  /*
+   * A built-in Bot takes its tools in its configuration, so narrowing means building it again once
+   * the message is known. The guidance it is given is generated from the tools passed here, which is
+   * what keeps a narrowed run from being told it holds something it was not offered.
+   */
   const withTools = (
     tools: GrantedTool[],
     input?: RunAgentInput,
@@ -1203,45 +1211,49 @@ async function buildAgent(
         (input?.tools.length ?? 0) +
         RUNTIME_STATE_TOOLS.length,
     });
-    const admit = admitTools(waiting);
-    return new BuiltInAgentWithSaneHistory(
-      builtInAgentConfiguration(
-        agent,
-        model,
-        apiKey,
-        tools,
-        computerGuidance,
-        connectedVendors,
-        standingInstructions,
-        model.plan && input
-          ? new PlanModel(
-              model.plan,
-              agent.id,
-              input,
-              new Set(input.tools.map((tool) => tool.name)),
-              signal,
-            )
-          : undefined,
-        learnedSkills,
-        waiting,
-      ),
-      {
-        observe: observeModelConnection,
-        ...(admit ? { admitTools: admit } : {}),
-        ...(waiting.size > 0 ? { waiting } : {}),
-        ...(loadAttachment
-          ? {
-              inline: (messages: AgentRunInput["messages"], threadId: string) =>
-                inlineAttachments(
-                  messages,
-                  loadAttachment,
-                  threadId,
-                  markAttachmentsSent,
-                ),
-            }
-          : {}),
-      },
+    const configuration = builtInAgentConfiguration(
+      agent,
+      model,
+      apiKey,
+      tools,
+      computerGuidance,
+      connectedVendors,
+      standingInstructions,
+      model.plan && input
+        ? new PlanModel(
+            model.plan,
+            agent.id,
+            input,
+            new Set(input.tools.map((tool) => tool.name)),
+            signal,
+          )
+        : undefined,
+      learnedSkills,
+      waiting,
     );
+    // What really waits: nothing, when the model could not be wrapped and is sent every tool.
+    const held = searchesTools(
+      "model" in configuration ? configuration.model : undefined,
+    )
+      ? waiting
+      : new Set<string>();
+    const admit = admitTools(held);
+    return new BuiltInAgentWithSaneHistory(configuration, {
+      observe: observeModelConnection,
+      ...(admit ? { admitTools: admit } : {}),
+      ...(held.size > 0 ? { waiting: held } : {}),
+      ...(loadAttachment
+        ? {
+            inline: (messages: AgentRunInput["messages"], threadId: string) =>
+              inlineAttachments(
+                messages,
+                loadAttachment,
+                threadId,
+                markAttachmentsSent,
+              ),
+          }
+        : {}),
+    });
   };
 
   const whole = withTools(granted);
