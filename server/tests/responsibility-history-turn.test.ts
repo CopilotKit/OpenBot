@@ -185,8 +185,14 @@ describe("a responsibility run on a thread shared with other goals", () => {
     expect(count("b2")).toBe(5);
     expect(count("a3")).toBe(9);
 
-    const b2 = sent.find((entry) => entry.runId === "b2")?.ids ?? [];
-    expect(b2.some((id) => id.startsWith("a"))).toBe(false);
+    const ids = (runId: string) =>
+      sent.find((entry) => entry.runId === runId)?.ids ?? [];
+    // A firing's id is a random UUID, so goal A's messages are named by what goal A's runs sent,
+    // not by a prefix.
+    const goalA = new Set([...ids("a1"), ...ids("a2"), ...ids("a3")]);
+    const b2 = ids("b2");
+    expect(b2.filter((id) => goalA.has(id))).toEqual([]);
+    expect(b2).toContain(ids("b1")[0]);
     expect(b2.some((id) => id.startsWith("person"))).toBe(false);
 
     // Persisting is unchanged: 5 runs of 4 messages plus the person's 2, each exactly once.
