@@ -1,10 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { agentQueryOptions } from "@/lib/agents/queries";
-import {
-  type CapabilityKey,
-  myCapabilitiesQueryOptions,
-} from "@/lib/enterprise/queries";
-import { useDeclaredBotId } from "./active-bot";
+import type { CapabilityKey } from "@/lib/enterprise/queries";
+import type { OfferRule } from "./bot-offer";
 
 /** Which computer tools this conversation offers the Bot. */
 export type ComputerToolsOffered = {
@@ -32,7 +27,7 @@ export type ComputerToolsOffered = {
  * so, which is how asking a Bot a question about an app it holds no tools for ended with its screen
  * opening on nothing.
  *
- * Pure, and separated from the hook below, because every one of those rules is worth stating in a
+ * Pure, and separate from the offers below, because every one of those rules is worth stating in a
  * test without a router, a query client and a profile fetch around it.
  */
 export function computerToolsOffered({
@@ -43,7 +38,7 @@ export function computerToolsOffered({
   profile: { visibility: string; canManage: boolean } | undefined;
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
 }): ComputerToolsOffered {
-  const mine = !profile || profile.visibility === "public" || profile.canManage;
+  const mine = computerDrivable(profile);
   // An unresolved switch reads as allowed, for the same reason an unresolved profile does.
   const allows = (capability: CapabilityKey) =>
     capabilities?.[capability] !== false;
@@ -62,24 +57,21 @@ export function computerToolsOffered({
  * Bot declined something is audit bookkeeping rather than a computer action, so it stays offered
  * wherever the Bot is this person's to drive, whatever the computer switches say.
  */
-export function useComputerAvailable(): boolean {
-  const declared = useDeclaredBotId();
-  const { data: profile } = useQuery({
-    ...agentQueryOptions(declared ?? ""),
-    enabled: Boolean(declared),
-  });
+export function computerDrivable(
+  profile: { visibility: string; canManage: boolean } | undefined,
+): boolean {
   return !profile || profile.visibility === "public" || profile.canManage;
 }
 
-export function useComputerToolsOffered(): ComputerToolsOffered {
-  const declared = useDeclaredBotId();
-  const { data: profile } = useQuery({
-    ...agentQueryOptions(declared ?? ""),
-    enabled: Boolean(declared),
-  });
-  const { data: mine } = useQuery(myCapabilitiesQueryOptions());
-  return computerToolsOffered({
-    profile,
-    capabilities: mine?.capabilities,
-  });
-}
+/**
+ * The rules above as offers, asked of the Bot whose run it is rather than the one on screen. See
+ * `bot-offer.ts`.
+ */
+export const offeredBrowser: OfferRule = (bot) =>
+  computerToolsOffered(bot).browser;
+export const offeredNavigate: OfferRule = (bot) =>
+  computerToolsOffered(bot).navigate;
+export const offeredComputer: OfferRule = (bot) =>
+  computerToolsOffered(bot).computer;
+export const offeredDrivable: OfferRule = (bot) =>
+  computerDrivable(bot.profile);

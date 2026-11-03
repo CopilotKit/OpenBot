@@ -344,7 +344,16 @@ export function ChannelChat({
       UseAgentUpdate.OnRunStatusChanged,
     ],
   });
-  useEffect(() => observeApprovalAgent(agent), [agent]);
+  /*
+   * FOR THE AGENT'S LIFE, NOT THE SCREEN'S. A turn goes on after the person leaves this conversation,
+   * and a step a rule asks about is still sent to the gate with this conversation, which needs the
+   * run's input captured. The observer used to stop when this screen unmounted, and a gated step the
+   * Bot took after its person had left was sent to the computer with no conversation to ask in. It
+   * is not taken off: it goes when the agent does, after its last run.
+   */
+  useEffect(() => {
+    observeApprovalAgent(agent);
+  }, [agent]);
 
   /**
    * First-message seed from the compose screen. It is taken once per mount and retained until the

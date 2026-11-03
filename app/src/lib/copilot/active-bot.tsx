@@ -116,6 +116,13 @@ export function botOfCall(
   agent: CallingAgent | undefined,
   onScreen: string,
 ): string {
+  return botOfAgent(agent) ?? onScreen;
+}
+
+/** The Bot an agent runs, as `botOfCall` reads it, or undefined when it names none. */
+export function botOfAgent(
+  agent: CallingAgent | undefined,
+): string | undefined {
   for (const id of [agent?.runtimeAgentId, agent?.agentId]) {
     if (
       typeof id === "string" &&
@@ -125,7 +132,7 @@ export function botOfCall(
     )
       return id;
   }
-  return onScreen;
+  return undefined;
 }
 
 /**

@@ -8,7 +8,6 @@ import {
 } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
-import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
@@ -21,11 +20,8 @@ import {
   type ChannelSummary,
   channelKeys,
 } from "@/lib/channels/queries";
-import { ActiveBotProvider } from "@/lib/copilot/active-bot";
-import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
-import { GalleryTools } from "@/lib/copilot/gallery-tools";
-import { SignInTool } from "@/lib/copilot/sign-in-tool";
+import { CopilotProvider } from "@/lib/copilot/provider";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -38,6 +34,10 @@ import { settleReactWork } from "./settle-react-work";
  * against the placeholder Bot, which the server does not know, and the person came back to "Not
  * shown: Record. This deployment could not be asked whether that component is allowed" where the
  * record should have been. In another Bot's conversation the check was made for that other Bot.
+ *
+ * And what the turn's next step is offered is that Bot's, not the screen's: its components in their
+ * published words, its computer and its authoring tools. A step a rule asks about still goes to the
+ * gate with its conversation.
  *
  * End to end in the app, as `help-handback.test.tsx` is: the real chat, the real tools and the
  * CopilotKit core running them, against a runtime and a server that answer as the real ones do. The
@@ -78,6 +78,16 @@ function theRecordCard() {
   return { ...spec, confirmation: spec.confirmation };
 }
 const RECORD = theRecordCard();
+/** A card only the other Bot holds, so a run offered the screen's components is told about it. */
+function theMetricsCard() {
+  const spec = CARDS.find((candidate) => candidate.name === "showMetrics");
+  if (!spec)
+    throw new Error("The headline figures card is not in the gallery.");
+  return spec;
+}
+const METRICS = theMetricsCard();
+/** The words this deployment published for the record, which is what a Bot holding it is told. */
+const RECORD_PUBLISHED = "Show one account from the demo CRM, with its fields.";
 const RECORD_ARGS = {
   title: "Northwind Traders",
   subtitle: "Enterprise account",
@@ -85,8 +95,11 @@ const RECORD_ARGS = {
   fields: [{ label: "Owner", value: "Priya Raman" }],
 };
 
+type Call = { name: string; args: Record<string, unknown> };
 /** What the Bot's held run streams once the person has gone: one call, with these arguments. */
-let call: { name: string; args: Record<string, unknown> };
+let call: Call;
+/** And what the runs after it call, one each, before the Bot says it is done. */
+let then: Call[] = [];
 let runs: RunAgentInput[] = [];
 /** The thread as the runtime has stored it. */
 let stored: Message[] = [];
@@ -98,6 +111,8 @@ let decisions: unknown[] = [];
 let computerCalls: string[] = [];
 /** Every sign-in request opened, as its body. */
 let signIns: unknown[] = [];
+/** Every step sent to the approval gate, as its path and body. */
+let gated: { path: string; body: Record<string, unknown> }[] = [];
 let originalFetch: typeof fetch;
 let originalDecode: typeof HTMLImageElement.prototype.decode;
 let originalSocket: typeof WebSocket;
@@ -123,8 +138,11 @@ function sse(events: unknown[]) {
 
 const CALL_ID = "call-off-screen";
 const REPLY = "Done.";
+/** The id of the call a later run makes: the second run's is `call-off-screen-2`. */
+const callId = (step: number) =>
+  step === 0 ? CALL_ID : `${CALL_ID}-${step + 1}`;
 
-/** The Bot's turns: the first makes the call, the one after its result says it is done. */
+/** The Bot's turns: the first makes the call, the ones after it make `then`, the last says it is done. */
 function runEvents(input: RunAgentInput): unknown[] {
   const started = {
     type: "RUN_STARTED",
@@ -136,15 +154,23 @@ function runEvents(input: RunAgentInput): unknown[] {
     threadId: input.threadId,
     runId: input.runId,
   };
-  if (input.messages.at(-1)?.role !== "tool") {
+  const step = input.messages.filter(
+    (message) => message.role === "assistant" && message.toolCalls?.length,
+  ).length;
+  const making = step === 0 ? call : then[step - 1];
+  if (making) {
+    const id = callId(step);
     const assistant = {
       id: `assistant-${input.runId}`,
       role: "assistant" as const,
       toolCalls: [
         {
-          id: CALL_ID,
+          id,
           type: "function" as const,
-          function: { name: call.name, arguments: JSON.stringify(call.args) },
+          function: {
+            name: making.name,
+            arguments: JSON.stringify(making.args),
+          },
         },
       ],
     };
@@ -153,16 +179,16 @@ function runEvents(input: RunAgentInput): unknown[] {
       started,
       {
         type: "TOOL_CALL_START",
-        toolCallId: CALL_ID,
-        toolCallName: call.name,
+        toolCallId: id,
+        toolCallName: making.name,
         parentMessageId: assistant.id,
       },
       {
         type: "TOOL_CALL_ARGS",
-        toolCallId: CALL_ID,
-        delta: JSON.stringify(call.args),
+        toolCallId: id,
+        delta: JSON.stringify(making.args),
       },
-      { type: "TOOL_CALL_END", toolCallId: CALL_ID },
+      { type: "TOOL_CALL_END", toolCallId: id },
       finished,
     ];
   }
@@ -186,10 +212,12 @@ async function components(path: string, request: Request): Promise<Response> {
     return NativeResponse.json({ added: [] });
   if (path === `/api/components/for-agent/${BOT}`)
     return NativeResponse.json({
-      components: [{ name: "showRecord", description: RECORD.description }],
+      components: [{ name: "showRecord", description: RECORD_PUBLISHED }],
     });
   if (path === `/api/components/for-agent/${OTHER}`)
-    return NativeResponse.json({ components: [] });
+    return NativeResponse.json({
+      components: [{ name: "showMetrics", description: METRICS.description }],
+    });
   if (path === "/api/components/showRecord/decision") {
     const body = (await request.json()) as { agentId?: string };
     decisions.push(body);
@@ -259,7 +287,7 @@ async function signIn(path: string, request: Request): Promise<Response> {
 }
 
 beforeAll(() => {
-  GALLERY_COMPONENTS.push(RECORD);
+  GALLERY_COMPONENTS.push(RECORD, METRICS);
   GlobalRegistrator.register();
   originalFetch = globalThis.fetch;
   originalDecode = HTMLImageElement.prototype.decode;
@@ -283,6 +311,51 @@ beforeAll(() => {
         return components(url.pathname, request);
       if (url.pathname.startsWith("/api/sign-in-requests"))
         return signIn(url.pathname, request);
+      // The two Bots as the server describes them: the crm Bot is this person's, the other one is
+      // a Team Bot they are a teammate on, whose computer they may not drive.
+      if (url.pathname === `/api/agents/${BOT}`)
+        return NativeResponse.json({
+          agent: {
+            id: BOT,
+            name: "Accounts",
+            visibility: "public",
+            canManage: true,
+          },
+        });
+      if (url.pathname === `/api/agents/${OTHER}`)
+        return NativeResponse.json({
+          agent: {
+            id: OTHER,
+            name: "Other",
+            visibility: "team",
+            canManage: false,
+          },
+        });
+      // Only the other Bot makes coworkers.
+      if (url.pathname === `/api/plugins/for/${OTHER}`)
+        return NativeResponse.json({
+          skills: [
+            {
+              slug: "bot-creator",
+              title: "Make a coworker",
+              summary: "",
+              instructions: "",
+            },
+          ],
+          tools: [],
+        });
+      if (url.pathname === "/api/admin/enterprise/me")
+        return NativeResponse.json({ capabilities: {}, enforced: false });
+      // The gate, answering as it does when nothing asks: the step is done, and here is its result.
+      if (/^\/api\/approvals\/computer\/[^/]+$/.test(url.pathname)) {
+        gated.push({
+          path: url.pathname,
+          body: (await request.json()) as Record<string, unknown>,
+        });
+        return NativeResponse.json({
+          result: { ok: true, element: { role: "button", name: "Save" } },
+        });
+      }
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
           version: "fixture",
@@ -335,6 +408,8 @@ beforeEach(() => {
   decisions = [];
   computerCalls = [];
   signIns = [];
+  gated = [];
+  then = [];
   arrive = Promise.resolve();
   sessionStorage.clear();
   queryClient.clear();
@@ -360,7 +435,8 @@ beforeEach(() => {
 afterEach(() => cleanup());
 afterAll(async () => {
   await settleReactWork();
-  GALLERY_COMPONENTS.splice(GALLERY_COMPONENTS.indexOf(RECORD), 1);
+  for (const spec of [RECORD, METRICS])
+    GALLERY_COMPONENTS.splice(GALLERY_COMPONENTS.indexOf(spec), 1);
   globalThis.fetch = originalFetch;
   HTMLImageElement.prototype.decode = originalDecode;
   globalThis.WebSocket = originalSocket;
@@ -369,39 +445,38 @@ afterAll(async () => {
 
 type Place = "conversation" | "elsewhere" | "another Bot";
 
-/** The signed-in app around one place: the crm Bot's conversation, a page with none, or another Bot's. */
+/**
+ * The signed-in app around one place: the crm Bot's conversation, a page with none, or another Bot's.
+ * The app's own CopilotKit provider, with every tool it registers.
+ */
 function app(place: Place) {
   return (
     <QueryClientProvider client={queryClient}>
-      <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
-        <ActiveBotProvider>
-          <ComputerTools />
-          <SignInTool />
-          <GalleryTools />
-          {place === "conversation" ? (
-            <ChannelChat
-              channel={channel}
-              key={channel.id}
-              runtimeAgentId={BOT}
-            />
-          ) : place === "another Bot" ? (
-            <ChannelChat
-              channel={otherChannel}
-              key={otherChannel.id}
-              runtimeAgentId={OTHER}
-            />
-          ) : (
-            <p>Settings</p>
-          )}
-        </ActiveBotProvider>
-      </CopilotKitProvider>
+      <CopilotProvider>
+        {place === "conversation" ? (
+          <ChannelChat
+            channel={channel}
+            key={channel.id}
+            runtimeAgentId={BOT}
+          />
+        ) : place === "another Bot" ? (
+          <ChannelChat
+            channel={otherChannel}
+            key={otherChannel.id}
+            runtimeAgentId={OTHER}
+          />
+        ) : (
+          <p>Settings</p>
+        )}
+      </CopilotProvider>
     </QueryClientProvider>
   );
 }
 
 /**
  * Ask the crm Bot for something, go to `place` while it is working, and only then let its call
- * arrive. Resolves once the Bot's next run, the one carrying the call's result, has been asked for.
+ * arrive. Resolves once the Bot's next run, the one carrying the call's result, has been asked for,
+ * and the runs for every call in `then` after it.
  */
 async function leaveBeforeTheCall(place: Place) {
   let release = () => {};
@@ -424,17 +499,18 @@ async function leaveBeforeTheCall(place: Place) {
       expect(view.queryByRole("textbox", { name: "Message" })).toBeTruthy(),
     );
   release();
-  await waitFor(() => expect(runs).toHaveLength(2), { timeout: 5000 });
+  await waitFor(() => expect(runs).toHaveLength(2 + then.length), {
+    timeout: 5000,
+  });
   return view;
 }
 
-/** What the Bot was told the call came to, from the run that carried it. */
-function result(): string {
+/** What the Bot was told a call came to, from the run that carried it. */
+function result(id = CALL_ID): string {
   const message = runs
     .at(-1)
     ?.messages.find(
-      (candidate) =>
-        candidate.role === "tool" && candidate.toolCallId === CALL_ID,
+      (candidate) => candidate.role === "tool" && candidate.toolCallId === id,
     );
   return String(message?.content ?? "");
 }
@@ -490,4 +566,79 @@ test("a sign-in the Bot asks for from another Bot's conversation is opened for t
     expect.objectContaining({ botId: BOT, site: "https://crm.example" }),
   ]);
   expect(JSON.parse(result())).toMatchObject({ ok: true, signedIn: true });
+});
+
+/** The names a run was offered, and the words it was given for one of them. */
+function offered(run: RunAgentInput | undefined) {
+  const tools = run?.tools ?? [];
+  return {
+    names: tools.map((tool) => tool.name),
+    words: (name: string) =>
+      tools.find((tool) => tool.name === name)?.description,
+  };
+}
+
+test("the next step of a turn its person has left is offered that Bot's own tools", async () => {
+  call = {
+    name: "computer_navigate",
+    args: { url: "https://crm.example/accounts/northwind" },
+  };
+  await leaveBeforeTheCall("elsewhere");
+
+  const next = offered(runs[1]);
+  // Its record card, in the words published for it: not a lookalike drawn some other way.
+  expect(next.names).toContain("showRecord");
+  expect(next.words("showRecord")).toBe(RECORD_PUBLISHED);
+  expect(next.names).not.toContain("showMetrics");
+  expect(next.names).toContain("computer_navigate");
+  expect(next.names).not.toContain("list_bots");
+});
+
+test("the next step of a turn whose person is in another Bot's conversation is offered its own Bot's tools, not that Bot's", async () => {
+  call = {
+    name: "computer_navigate",
+    args: { url: "https://crm.example/accounts/northwind" },
+  };
+  await leaveBeforeTheCall("another Bot");
+
+  const next = offered(runs[1]);
+  expect(next.names).toContain("showRecord");
+  expect(next.words("showRecord")).toBe(RECORD_PUBLISHED);
+  // The other Bot's card, the other Bot's authoring, and the other Bot's refusal of the computer to
+  // a teammate: none of them is this Bot's.
+  expect(next.names).not.toContain("showMetrics");
+  expect(next.names).not.toContain("list_bots");
+  expect(next.names).not.toContain("save_bot");
+  expect(next.names).toContain("computer_navigate");
+  expect(next.names).toContain("computer_click");
+});
+
+/*
+ * A LATER RUN, NOT THE ONE ALREADY GOING. The run in flight when the person left holds the
+ * subscribers it started with, so the observer heard it to the end even after it was stopped. The
+ * run after it did not, and its gated step went to the gate under the previous run's id.
+ */
+test("a step a rule asks about, in a run that starts after its person has left, goes to the gate with that run", async () => {
+  call = {
+    name: "computer_navigate",
+    args: { url: "https://crm.example/accounts/northwind" },
+  };
+  then = [{ name: "computer_click", args: { ref: "e1", snapshotId: 7 } }];
+  await leaveBeforeTheCall("elsewhere");
+
+  expect(gated).toEqual([
+    {
+      path: `/api/approvals/computer/${BOT}`,
+      body: expect.objectContaining({
+        runId: runs[1]?.runId,
+        threadId: channel.threadId,
+        toolCallId: callId(1),
+        toolName: "computer_click",
+        args: { ref: "e1", snapshotId: 7 },
+      }),
+    },
+  ]);
+  // Nothing went to the computer without its conversation.
+  expect(computerCalls.filter((path) => path.endsWith("/click"))).toEqual([]);
+  expect(JSON.parse(result(callId(1)))).toMatchObject({ ok: true });
 });

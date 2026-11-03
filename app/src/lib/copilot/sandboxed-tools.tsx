@@ -3,7 +3,7 @@ import {
   useFrontendTool,
 } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import * as z from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { RefusedCard } from "@/components/gallery/refused";
@@ -17,6 +17,7 @@ import {
   useBotOfCall,
   useDeclaredBotId,
 } from "@/lib/copilot/active-bot";
+import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
 import {
   type PublishedSandboxed,
   publishedSandboxedQueryOptions,
@@ -27,11 +28,22 @@ import {
  * render published runtime markup in the SDK sandbox.
  */
 export function SandboxedTools() {
-  // Grants are fetched only once a surface has declared its Bot; the placeholder is not one the
-  // server knows, and asking would 404 on every poll.
+  // The grants of the Bot on screen, for the cards drawn in its conversation. Fetched only once a
+  // surface has declared its Bot; the placeholder is not one the server knows, and asking would 404
+  // on every poll.
   const declared = useDeclaredBotId();
   const { data: published } = useQuery(publishedSandboxedQueryOptions());
   const { data: granted } = useQuery(agentComponentsQueryOptions(declared));
+  // Each one offered to the run of a Bot holding it, never by what the screen shows; see
+  // `bot-offer.ts`.
+  const offered = useMemo(
+    () =>
+      Object.fromEntries(
+        (published ?? []).map((component) => [component.name, heldComponent]),
+      ),
+    [published],
+  );
+  useOfferedTo(offered);
 
   const held = new Map(
     (granted ?? []).map((component: GrantedComponent) => [
@@ -137,8 +149,6 @@ function SandboxedTool({
       description ??
       `A component authored in this deployment: ${component.name}.`,
     parameters: parametersFor(component.argumentSchema),
-    // Keep the hook mounted and hide revoked grants from the model to preserve hook order.
-    available: isHeld,
     handler: async (
       _args: unknown,
       context: { toolCall?: { id?: string }; agent?: CallingAgent } = {},

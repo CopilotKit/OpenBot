@@ -76,7 +76,8 @@ test("keeps one render while the description changes as grants load", () => {
   const last = registered.at(-1);
   expect(first?.description).toBe("Built-in words.");
   expect(last?.description).toBe("Published words.");
-  expect(last?.available).toBe(true);
+  // Never hidden by the grants of the Bot on screen: each run is offered its own Bot's (bot-offer.ts).
+  expect(last?.available).not.toBe(false);
   expect(last?.type).toBe("human-in-the-loop");
   expect(registered.every((tool) => tool.render === first?.render)).toBe(true);
 });
