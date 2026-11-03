@@ -6,7 +6,6 @@ import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { defaultOptOuts } from "../src/db/schema/defaults";
-import { memorySources } from "../src/db/schema/memory";
 import {
   brokeredConnections,
   mcpServers,
@@ -19,9 +18,9 @@ import {
   lockDefaults,
 } from "../src/memory/defaults";
 import { createMemoryIngestion } from "../src/memory/ingestion";
-import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import { createProactiveStore } from "../src/proactive/store";
+import { removeTestMemory, testMemory } from "./support/memory";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -44,7 +43,7 @@ const plugins = createPluginStore({
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
 });
-const memory = createMemoryStore(database);
+const { store: memory, intelligence, cache } = testMemory(database);
 const ingestion = createMemoryIngestion({ store: memory, plugins });
 const proactive = createProactiveStore(database);
 const synced: string[] = [];
@@ -54,6 +53,7 @@ function defaults(
 ) {
   return createMemoryDefaults({
     database,
+    memory,
     // The vendor read is the ingestion's own business; here only that it was asked for.
     ingestion: {
       defaultSourceCandidates: ingestion.defaultSourceCandidates,
@@ -73,16 +73,9 @@ function defaults(
   });
 }
 
+/** The person's sources for a Bot, as Intelligence holds them. */
 const sourcesOf = (person: string, agentId: string) =>
-  database
-    .select()
-    .from(memorySources)
-    .where(
-      and(
-        eq(memorySources.ownerUserId, person),
-        eq(memorySources.agentId, agentId),
-      ),
-    );
+  memory.sourcesFor(person, agentId);
 const researchOf = (person: string, agentId: string) =>
   database
     .select()
@@ -94,9 +87,9 @@ const researchOf = (person: string, agentId: string) =>
       ),
     );
 async function reset() {
-  await database
-    .delete(memorySources)
-    .where(inArray(memorySources.ownerUserId, [owner, other]));
+  for (const person of [owner, other])
+    await intelligence.purgeSources({ userId: person });
+  cache.forget();
   await database
     .delete(proactiveSettings)
     .where(inArray(proactiveSettings.ownerUserId, [owner, other]));
@@ -196,6 +189,7 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
+  await removeTestMemory([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, secondBot]);
   await database
@@ -281,6 +275,35 @@ describe("memory sources, on by default", () => {
     ).toEqual([{ feature: "memory_source", scope: app }]);
     // The person's other Bot is a separate choice.
     expect(await defaults().adoptSources(owner, secondBot)).toHaveLength(1);
+  });
+
+  test("a removal racing an adoption still lands: the app is not added back", async () => {
+    for (let round = 0; round < 5; round++) {
+      await reset();
+      const [id] = await defaults().adoptSources(owner, bot);
+      // The removal records the turn-down before it deletes the source in Intelligence, and adoption
+      // reads the sources before the turn-downs, so however these interleave the app stays removed.
+      await Promise.all([
+        memory.removeSource(owner, id as string),
+        defaults().adoptSources(owner, bot),
+        defaults().adoptSources(owner, bot),
+      ]);
+      expect(await sourcesOf(owner, bot)).toEqual([]);
+      expect(await defaults().adoptSources(owner, bot)).toEqual([]);
+    }
+  });
+
+  test("two instances adopting the same default at once make one source", async () => {
+    await reset();
+    // Each with its own cache, as two replicas are.
+    const replica = testMemory(database).store;
+    const [first, second] = await Promise.all([
+      defaults().adoptSources(owner, bot),
+      defaults({ memory: replica }).adoptSources(owner, bot),
+    ]);
+    const sources = await sourcesOf(owner, bot);
+    expect(sources).toHaveLength(1);
+    expect([...(first ?? []), ...(second ?? [])]).toContain(sources[0]?.id);
   });
 
   test("a source made by hand on the app counts as the person's choice", async () => {

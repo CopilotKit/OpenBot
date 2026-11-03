@@ -8,7 +8,6 @@ import { users } from "../src/db/schema/core";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import { proactiveSettings } from "../src/db/schema/proactive";
 import { createMemoryIngestion } from "../src/memory/ingestion";
-import { createMemoryStore } from "../src/memory/store";
 import { MemoryRefusedError } from "../src/memory/types";
 import { createPluginStore } from "../src/plugins/store";
 import { proactiveInitiator } from "../src/proactive/restriction";
@@ -19,6 +18,7 @@ import {
 } from "../src/proactive/types";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testMemory } from "./support/memory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `proactive-${randomUUID()}`;
@@ -39,7 +39,7 @@ const plugins = createPluginStore({
   callVendor: async () => ({ text: "[]", isError: false }),
 });
 const proactive = createProactiveStore(database);
-const memory = createMemoryStore(database);
+const memory = testMemory(database).store;
 const ingestion = createMemoryIngestion({ store: memory, plugins });
 
 beforeAll(async () => {

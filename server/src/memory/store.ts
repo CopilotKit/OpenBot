@@ -171,13 +171,28 @@ export function createMemoryStore(
     }
   }
 
-  /** One live memory of this person's as this instance holds it, or not found. */
+  /**
+   * One live memory of this person's, or not found. An id a content edit has since replaced (a Bot that
+   * recalled it before the person edited it, a tab not yet refreshed) still finds the memory it became.
+   */
   async function memoryOf(ownerUserId: string, id: string) {
-    const memory = (await person(ownerUserId)).memories.find(
-      (entry) => entry.id === bareId(id),
-    );
-    if (!memory || !shown(memory)) throw new MemoryNotFoundError();
-    return memory;
+    const memories = (await person(ownerUserId)).memories;
+    const held = memories.find((entry) => entry.id === bareId(id));
+    if (held && shown(held)) return held;
+    let next: string | null | undefined = bareId(id);
+    for (let hop = 0; next && hop < 20; hop++) {
+      const memory = await write(() =>
+        intelligence.getMemory(ownerUserId, next as string),
+      );
+      if (!memory) break;
+      if (!memory.invalidatedAt) {
+        if (!shown(memory)) break;
+        cache.invalidate(ownerUserId);
+        return memory;
+      }
+      next = memory.supersededBy;
+    }
+    throw new MemoryNotFoundError();
   }
 
   /** A source read fresh from Intelligence, when it is this person's. */

@@ -47,7 +47,6 @@ import {
   users,
   workItems,
 } from "../src/db/schema";
-import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import type {
   ProactiveMetricsResponse,
@@ -66,6 +65,7 @@ import type {
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testMemory } from "./support/memory";
 
 /*
  * The admin's say over check-ins, through the real path: real Postgres, the real enterprise controls
@@ -290,7 +290,7 @@ function replica() {
   });
   const engine = createProactiveEngine({
     store,
-    memory: createMemoryStore(database),
+    memory: testMemory(database).store,
     queue,
     owner: `ci-replica-${suite}-${randomUUID()}`,
     runTurn: async (input) => {

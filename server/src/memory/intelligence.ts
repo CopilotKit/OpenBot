@@ -31,6 +31,8 @@ export type WireMemory = {
   content: string;
   sourceThreadIds: string[];
   invalidatedAt?: string | null;
+  /** The memory a content change replaced this one with. */
+  supersededBy?: string | null;
   agentId: string | null;
   reviewState: "unreviewed" | "confirmed" | "edited";
   enabled: boolean;
