@@ -287,6 +287,7 @@ describe("the project change feed", () => {
       () => subscription.joinCode(),
       (code) => code !== null && code !== first,
     );
+    if (second === null) throw new Error("No join code after the rotation.");
     expect(joins.at(-1)).toBe(second);
 
     const nonce = randomUUID();
