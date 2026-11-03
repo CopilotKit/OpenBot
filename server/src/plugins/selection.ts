@@ -25,6 +25,11 @@ import { researchRoleFor } from "./catalogue";
  * A prefilter that drops the tool is wrong in a way nothing can. So the model chooses, retrieval (if
  * a deployment ever needs it) narrows into that choice rather than replacing it, and every uncertain
  * case here resolves towards offering more rather than less.
+ *
+ * WHAT IS OFFERED IS NOT ALWAYS SENT. Past `TOOL_SEARCH_FLOOR`, an app's offered tools wait behind a
+ * search the model runs itself (`agents/tool-search.ts`), and only the chosen skills' tools are sent
+ * up front. That keeps the failure direction above: everything offered stays reachable within the
+ * run, so "offer everything" still means everything, without a request the provider refuses.
  */
 
 /** One granted skill, as much of it as choosing needs. */
@@ -68,6 +73,15 @@ export type Selection<Tool extends SelectableTool> = {
   offered: Tool[];
   /** The slugs pass one chose. Empty for every reason other than `selected`. */
   skills: string[];
+  /**
+   * The offered tools those skills asked for, without the undeclared ones that ride along. Empty
+   * for every reason other than `selected`.
+   *
+   * Tool search reads this. When a run holds too many tools to send them all, the ones a chosen
+   * skill asked for stay in front of the model and the rest wait behind a search, so the run that
+   * selection narrowed is shown what it was narrowed to and can still find everything it holds.
+   */
+  chosen: Tool[];
   reason: SelectionReason;
   /** How many were granted, so a reader can see the narrowing without recomputing it. */
   granted: number;
@@ -238,6 +252,7 @@ export async function selectTools<Tool extends SelectableTool>(input: {
   const everything = (reason: SelectionReason): Selection<Tool> => ({
     offered: [...tools],
     skills: [],
+    chosen: [],
     reason,
     granted: tools.length,
   });
@@ -296,6 +311,7 @@ export async function selectTools<Tool extends SelectableTool>(input: {
       (tool) => !declared.has(tool.ref) || wanted.has(tool.ref),
     ),
     skills: chosen,
+    chosen: tools.filter((tool) => wanted.has(tool.ref)),
     reason: "selected",
     granted: tools.length,
   };
