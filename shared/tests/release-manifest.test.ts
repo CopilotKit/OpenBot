@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import conformance from "../fixtures/releases/conformance.json";
 import {
   classifySource,
   parseReleaseManifest,
@@ -40,6 +41,13 @@ function installed(
 }
 
 describe("release manifest v1", () => {
+  test.each(conformance.parse)("shared fixture $name", ({ file, valid }) => {
+    const input = JSON.parse(
+      readFileSync(join(import.meta.dir, "../fixtures/releases", file), "utf8"),
+    );
+    if (valid) expect(parseReleaseManifest(input).schemaVersion).toBe(1);
+    else expect(() => parseReleaseManifest(input)).toThrow();
+  });
   test("accepts an exact source and digest-pinned fork release", () => {
     expect(fixture().distribution.repository).toBe("acme/openbot");
     expect(planUpgrade(installed(), fixture(), policy).allowed).toBe(true);
