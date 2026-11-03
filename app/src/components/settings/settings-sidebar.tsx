@@ -120,8 +120,12 @@ const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 export function settingsSidebarItems(
   edition: "team" | "personal",
 ): SettingsSidebarItem[] {
+  // Learning is who else's Bots use your Skills, and the personal edition has nobody else.
   return edition === "personal"
-    ? [...SETTINGS_SIDEBAR_ITEMS, ...PERSONAL_SETTINGS_SIDEBAR_ITEMS]
+    ? [
+        ...SETTINGS_SIDEBAR_ITEMS.filter((item) => item.title !== "Learning"),
+        ...PERSONAL_SETTINGS_SIDEBAR_ITEMS,
+      ]
     : SETTINGS_SIDEBAR_ITEMS;
 }
 

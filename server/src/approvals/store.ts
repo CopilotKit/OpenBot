@@ -73,7 +73,9 @@ export function createApprovalStore(database: Database): ApprovalStore {
         .from(approvalPreferences)
         .where(eq(approvalPreferences.ownerUserId, owner))
         .limit(1);
-      return row?.enabled === true;
+      // The same default the policy decides with, so the switch shows what actually happens.
+      if (!row) return currentEdition() === "personal";
+      return row.enabled === true;
     },
     async setEnabled(owner, enabled) {
       await database
@@ -327,6 +329,8 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         : { ...DEFAULT_PREFERENCES };
   };
   const teamSettings = async (): Promise<ApprovalTeamSettings> => {
+    // No team, and no screen for these: a team deployment's values are not read.
+    if (currentEdition() === "personal") return { ...DEFAULT_TEAM };
     const [row] = await database
       .select()
       .from(approvalTeamSettings)
@@ -382,6 +386,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
       return next;
     },
     async teamRules() {
+      if (currentEdition() === "personal") return [];
       return database
         .select()
         .from(approvalTeamRules)

@@ -25,6 +25,7 @@ import {
 } from "@/lib/deployment/queries";
 import type { PluginsPage } from "@/lib/plugins/queries";
 import { Route as PersonalSettingsRoute } from "@/routes/_authed/settings/_personal";
+import { Route as LearningRoute } from "@/routes/_authed/settings/learning";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -68,6 +69,28 @@ describe("the Settings sidebar", () => {
         to,
       });
     }
+  });
+
+  test("has no Learning page, which is about sharing Skills with other people", async () => {
+    expect(
+      settingsSidebarItems("personal").map((item) => item.title),
+    ).not.toContain("Learning");
+    expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
+      "Learning",
+    );
+    const guard = LearningRoute.options.beforeLoad as unknown as (input: {
+      context: { queryClient: QueryClient };
+    }) => Promise<unknown>;
+    let sentTo: unknown = "open";
+    try {
+      await guard({ context: { queryClient: clientFor("personal") } });
+    } catch (thrown) {
+      sentTo = isRedirect(thrown) ? thrown.options.to : thrown;
+    }
+    expect(sentTo).toBe("/settings");
+    await expect(
+      guard({ context: { queryClient: clientFor("team") } }),
+    ).resolves.toBeUndefined();
   });
 
   test("lists none of it in the team edition", () => {

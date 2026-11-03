@@ -11,7 +11,8 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `approval-edition-${randomUUID()}`;
 const fresh = `${prefix}-fresh`,
   chose = `${prefix}-chose`;
-const { policy } = createApprovalStore(database);
+const store = createApprovalStore(database);
+const { policy } = store;
 
 beforeAll(async () => {
   await database.insert(users).values([
@@ -42,4 +43,34 @@ test("a saved choice beats the personal edition's default", async () => {
   setEdition("personal");
   await policy.setPreferences(chose, { enabled: false });
   expect((await policy.preferences(chose)).enabled).toBe(false);
+  expect(await store.enabled(chose)).toBe(false);
+});
+
+// The switch on Settings → Approvals reads this; it must say what the policy above decides.
+test("the personal edition's switch shows asking first as on for somebody who chose nothing", async () => {
+  setEdition("personal");
+  expect(await store.enabled(fresh)).toBe(true);
+  setEdition("team");
+  expect(await store.enabled(fresh)).toBe(false);
+});
+
+/** A database that fails the test if the personal edition reads a stored value at all. */
+const untouchable = new Proxy({} as typeof database, {
+  get: (_target, property) => {
+    throw new Error(
+      `the personal edition read the database (${String(property)})`,
+    );
+  },
+});
+
+// A team deployment's settings and rules have no screen in the personal edition, so they are not read.
+test("the personal edition ignores team approval settings and team rules", async () => {
+  setEdition("personal");
+  const { policy: personal } = createApprovalStore(untouchable);
+  expect(await personal.teamSettings()).toEqual({
+    enforceAutoReview: false,
+    customRulesEnabled: true,
+    hostCommandsCap: "allow",
+  });
+  expect(await personal.teamRules()).toEqual([]);
 });

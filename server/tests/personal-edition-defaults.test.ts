@@ -7,6 +7,7 @@ import {
 import { createEnterpriseStore } from "../src/admin/settings-store";
 import type { Database } from "../src/db/client";
 import { setEdition } from "../src/edition";
+import { createLearningSettingsStore } from "../src/learning/settings";
 
 const member = { role: "admin" as const, groups: [] };
 
@@ -65,6 +66,24 @@ describe("the personal edition's capabilities", () => {
     expect(await createEnterpriseStore(untouchable).capabilityRows()).toEqual(
       [],
     );
+  });
+});
+
+describe("what a team deployment left behind", () => {
+  test("its network policies are not read", async () => {
+    setEdition("personal");
+    expect(await createEnterpriseStore(untouchable).networkPolicies()).toEqual(
+      [],
+    );
+  });
+
+  test("a paused Automatic Learning is not paused here, where nothing can resume it", async () => {
+    const learning = createLearningSettingsStore();
+    await learning.write({ enabled: false, defaultTarget: null, agents: {} });
+    setEdition("personal");
+    expect((await learning.read()).enabled).toBe(true);
+    setEdition("team");
+    expect((await learning.read()).enabled).toBe(false);
   });
 });
 

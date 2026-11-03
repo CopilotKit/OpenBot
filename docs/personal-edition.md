@@ -36,7 +36,8 @@ variable to change:
 ## What is fixed
 
 Settings an admin changes in the team edition are fixed here. Values left in the database by a team
-deployment are not read.
+deployment are not read: capability switches, enterprise settings, network policies, team approval
+settings and team rules, and a paused Automatic Learning.
 
 | | Personal edition |
 | --- | --- |
@@ -55,8 +56,9 @@ form, and taking over the browser is always offered.
 There is no Admin. The pages a person running OpenBot for themselves still needs are under
 Settings: Apps (`/settings/plugins`), Skills for every Bot, Credentials, Computer and Activity (the
 audit trail). Where Admin was, **Team features** opens a list of what the team edition adds. An old
-`/admin/...` address opens the same page under Settings, or Settings itself.
+`/admin/...` address opens the same page under Settings, or Settings itself. Settings has no
+Learning page, which chooses who else's Bots use your Skills, and a Bot has no Sharing page.
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,
-enterprise controls, the admin learning and check-in settings, SCIM and SSO registration, Team Bots,
-groups and shared-account requests. See `server/src/edition-routes.ts`.
+enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
+and check-in settings, and SCIM and SSO registration. See `server/src/edition-routes.ts`.

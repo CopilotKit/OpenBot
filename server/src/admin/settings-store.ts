@@ -273,6 +273,8 @@ export function createEnterpriseStore(database: Database) {
     },
 
     async networkPolicies(): Promise<NetworkPolicyRow[]> {
+      // No screen edits these in the personal edition, so a team deployment's policy is not read.
+      if (currentEdition() === "personal") return [];
       const rows = await database.select().from(networkPolicies);
       return rows.map((row) => ({
         scopeKind: row.scopeKind,

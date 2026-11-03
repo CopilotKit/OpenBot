@@ -23,9 +23,6 @@ const closed = [
   "/api/admin/learning",
   "/api/auth/scim/v2/Users",
   "/api/auth/sso/register",
-  "/api/team-bots",
-  "/api/groups/abc",
-  "/api/approvals/shared-use",
   // Percent-encoded, as the router decodes it before matching a handler.
   "/api/admin/%70eople",
 ];
@@ -41,9 +38,13 @@ const open = [
   "/api/components",
   "/api/approvals",
   "/api/auth/get-session",
+  // What a person's own screens still read, under or beside a closed prefix.
+  "/api/admin/enterprise/me",
+  "/api/approvals/shared-use",
+  "/api/groups",
+  "/api/team-bots",
   // Prefixes, not substrings: a sibling that merely starts the same way stays open.
   "/api/admin/peoplex",
-  "/api/team-botsy",
 ];
 
 describe("the personal edition", () => {
