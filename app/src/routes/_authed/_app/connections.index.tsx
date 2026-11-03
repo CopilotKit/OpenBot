@@ -14,6 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
+import { PluginsListSections } from "@/components/manage/plugins-list-page";
 import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
@@ -33,6 +34,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { type ConnectionRow, connectionRows } from "@/lib/connections/rows";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
@@ -306,6 +308,12 @@ function RouteComponent() {
     `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
   );
   const inUse = rows.filter((row) => row.state !== "available").length;
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  /** GitHub and Slack, which link an account to you rather than give Bots an app. */
+  const accountLinks = rows.filter(
+    (row) => row.key === "github" || row.key === "slack",
+  );
   /*
    * The apps decide whether there is a list at all, and the account links only add to it: a failed
    * links read costs the GitHub and Slack rows and says so, not the whole page.
@@ -319,7 +327,11 @@ function RouteComponent() {
   return (
     <PageShell
       className="@container"
-      description="Connect your accounts so Bots can use apps on your behalf."
+      description={
+        personal
+          ? "Add apps and connect your accounts so your Bots can use them."
+          : "Connect your accounts so Bots can use apps on your behalf."
+      }
       title="Connections"
     >
       {/*
@@ -354,68 +366,89 @@ function RouteComponent() {
         </p>
       ) : null}
       {/*
-       * One section, so it carries no heading of its own: "Your connections" under "Connections"
-       * said the same thing twice, 48px apart, and the description now sits under the page title.
+       * THE PERSONAL EDITION LISTS APPS THE WAY ADMIN DOES, because the one person is both halves:
+       * adding an app and connecting it are one step, taken on the app's own page. GitHub and Slack
+       * are account links rather than apps, so they keep their rows below, when there are any.
        */}
-      <PageSection>
-        {/*
-         * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
-         * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
-         * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
-         * nothing is listed rather than a list that may be wrong.
-         */}
-        {loading ? null : plugins.error || connections.error ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load your connections. Reload the page, or ask an admin if
-            it keeps happening.
-          </p>
-        ) : rows.length === 0 ? (
-          <PageEmpty icon={IconPlug} title="No apps yet">
-            Apps show up here once an admin turns them on.
-          </PageEmpty>
-        ) : (
-          <>
-            <div className="flex items-center gap-3">
-              <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
-                <InputGroupAddon>
-                  <IconSearch aria-hidden="true" className="size-4" />
-                </InputGroupAddon>
-                <InputGroupInput
-                  aria-label="Search connections"
-                  placeholder="Search connections"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </InputGroup>
-              <p className="shrink-0 text-xs text-muted-foreground">
-                {inUse} in use · {rows.length} in all
-              </p>
-            </div>
-            {matching.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground" role="status">
-                Nothing matches “{search.trim()}”.
-              </p>
-            ) : (
-              /*
-               * A grid of separate cards, where every other list is one `PageRows` card of divided
-               * rows. The accepted exception: connections are apps you pick out by their mark, so
-               * they are laid out as tiles two across rather than read down as a list.
-               */
-              <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
-                {matching.map((row) => (
+      {personal ? (
+        <>
+          <PluginsListSections personal />
+          {accountLinks.length > 0 ? (
+            <PageSection title="Accounts">
+              <div className="grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+                {accountLinks.map((row) => (
                   <ConnectionItem key={row.key} row={row} />
                 ))}
               </div>
-            )}
-          </>
-        )}
-        {links.error || providers.error ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Reload the
-            page.
-          </p>
-        ) : null}
-      </PageSection>
+            </PageSection>
+          ) : null}
+        </>
+      ) : null}
+      {/*
+       * One section, so it carries no heading of its own: "Your connections" under "Connections"
+       * said the same thing twice, 48px apart, and the description now sits under the page title.
+       */}
+      {personal ? null : (
+        <PageSection>
+          {/*
+           * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
+           * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
+           * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
+           * nothing is listed rather than a list that may be wrong.
+           */}
+          {loading ? null : plugins.error || connections.error ? (
+            <p className="mt-4 text-destructive text-sm" role="alert">
+              Couldn't load your connections. Reload the page, or ask an admin
+              if it keeps happening.
+            </p>
+          ) : rows.length === 0 ? (
+            <PageEmpty icon={IconPlug} title="No apps yet">
+              Apps show up here once an admin turns them on.
+            </PageEmpty>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
+                  <InputGroupAddon>
+                    <IconSearch aria-hidden="true" className="size-4" />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    aria-label="Search connections"
+                    placeholder="Search connections"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </InputGroup>
+                <p className="shrink-0 text-xs text-muted-foreground">
+                  {inUse} in use · {rows.length} in all
+                </p>
+              </div>
+              {matching.length === 0 ? (
+                <p className="mt-4 text-sm text-muted-foreground" role="status">
+                  Nothing matches “{search.trim()}”.
+                </p>
+              ) : (
+                /*
+                 * A grid of separate cards, where every other list is one `PageRows` card of divided
+                 * rows. The accepted exception: connections are apps you pick out by their mark, so
+                 * they are laid out as tiles two across rather than read down as a list.
+                 */
+                <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+                  {matching.map((row) => (
+                    <ConnectionItem key={row.key} row={row} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {links.error || providers.error ? (
+            <p className="mt-4 text-destructive text-sm" role="alert">
+              Couldn't load GitHub and Slack, so they aren't listed. Reload the
+              page.
+            </p>
+          ) : null}
+        </PageSection>
+      )}
     </PageShell>
   );
 }

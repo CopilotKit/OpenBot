@@ -53,11 +53,22 @@ form, and taking over the browser is always offered.
 
 ## What the app shows
 
-There is no Admin. The pages a person running OpenBot for themselves still needs are under
-Settings: Apps (`/settings/plugins`), Skills for every Bot, Credentials, Computer and Activity (the
-audit trail). Where Admin was, **Team features** opens a list of what the team edition adds. An old
-`/admin/...` address opens the same page under Settings, or Settings itself. Settings has no
-Learning page, which chooses who else's Bots use your Skills, and a Bot has no Sharing page.
+There is no Admin. Apps live on **Connections**, because adding an app and connecting your account
+are the same decision when one person makes both:
+
+- `/connections` lists the apps you have, the apps you can add, and the broker directory.
+- `/connections/<app>` is the whole app: **Connect** turns it on and goes straight to signing in
+  to your account, then its tools and which Bots use them are on the same page.
+- When an app is connected, every tool it newly lists that only reads is given to every Bot, so it
+  works straight away. Tools that change things are left for you to give, and a Bot still asks
+  before it uses one. Tools you take away are not given back when the app is refreshed. See
+  `server/src/plugins/personal-defaults.ts`.
+
+The rest of what a person running OpenBot for themselves needs is under Settings: Skills for every
+Bot, Credentials, Computer and Activity (the audit trail). Where Admin was, **Team features** opens
+a list of what the team edition adds. An old `/admin/...` or `/settings/plugins/...` address opens
+the same page under Connections or Settings, or Settings itself. Settings has no Learning page,
+which chooses who else's Bots use your Skills, and a Bot has no Sharing page.
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning

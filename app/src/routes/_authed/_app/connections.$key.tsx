@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { IdentityConnectionPage } from "@/components/connections/identity-connection-page";
+import { PluginPage } from "@/components/manage/plugin-page";
 import {
   PageEmpty,
   PageRows,
@@ -36,6 +37,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   brokeredProvenance,
@@ -131,10 +133,18 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
  */
 function RouteComponent() {
   const { key } = Route.useParams();
-  const { linked } = Route.useSearch();
+  const { linked, action } = Route.useSearch();
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
+  /*
+   * The personal edition's app page is the whole app: turning it on, your account, its tools and
+   * which Bots use them, because one person makes all of those decisions. A per-action
+   * authorization (`?action=`) keeps its own page, which is what that flow comes back to.
+   */
+  if (personal && action === undefined) return <PluginPage pluginKey={key} />;
   return <AppConnectionPage />;
 }
 

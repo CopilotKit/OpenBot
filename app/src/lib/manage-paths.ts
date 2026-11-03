@@ -5,30 +5,33 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 export type BrokerDirectory = "composio" | "arcade";
 
 /**
- * Where the pages that set up what Bots can reach live: under Admin in the team edition, and under
- * Settings in the personal one, where there is no Admin. Both render the same page components, so
- * every link between those pages goes through here rather than naming `/admin`.
+ * Where the pages that set up what Bots can reach live: under Admin in the team edition. In the
+ * personal one, where there is no Admin, apps are part of Connections and the rest is under
+ * Settings. Both render the same page components, so every link between those pages goes through
+ * here rather than naming `/admin`.
  */
 export function managePaths(edition: "team" | "personal") {
   if (edition === "personal") {
     return {
-      plugins: () => linkOptions({ to: "/settings/plugins" }),
+      /** What the list of apps is called where a back button names it. */
+      pluginsLabel: "Connections",
+      plugins: () => linkOptions({ to: "/connections" }),
       plugin: (key: string) =>
-        linkOptions({ to: "/settings/plugins/$key", params: { key } }),
+        linkOptions({ to: "/connections/$key", params: { key } }),
       pluginTool: (key: string, tool: string) =>
         linkOptions({
-          to: "/settings/plugins/$key/tools/$tool",
+          to: "/connections/$key/tools/$tool",
           params: { key, tool },
         }),
       pluginBot: (key: string, agentId: string) =>
         linkOptions({
-          to: "/settings/plugins/$key/bots/$agentId",
+          to: "/connections/$key/bots/$agentId",
           params: { key, agentId },
         }),
       brokerDirectory: (directory: BrokerDirectory) =>
         directory === "composio"
-          ? linkOptions({ to: "/settings/plugins/composio" })
-          : linkOptions({ to: "/settings/plugins/arcade" }),
+          ? linkOptions({ to: "/connections/browse/composio" })
+          : linkOptions({ to: "/connections/browse/arcade" }),
       skills: () => linkOptions({ to: "/settings/skills" }),
       credentials: () => linkOptions({ to: "/settings/credentials" }),
       newCredential: () => linkOptions({ to: "/settings/credentials/new" }),
@@ -37,6 +40,7 @@ export function managePaths(edition: "team" | "personal") {
     };
   }
   return {
+    pluginsLabel: "Plugins",
     plugins: () => linkOptions({ to: "/admin/plugins" }),
     plugin: (key: string) =>
       linkOptions({ to: "/admin/plugins/$key", params: { key } }),
@@ -64,9 +68,19 @@ export function managePaths(edition: "team" | "personal") {
 
 export type ManagePaths = ReturnType<typeof managePaths>;
 
-/** Each Admin page the personal edition keeps, and where it is under Settings. */
+/**
+ * Where an app's address goes in the personal edition, given what followed `/plugins` in its old
+ * address: the same page under Connections, with the directories under `/connections/browse`.
+ */
+export function personalAppsAddress(rest: string): string {
+  const path = rest.replace(/^\/+|\/+$/g, "");
+  if (path === "composio" || path === "arcade")
+    return `/connections/browse/${path}`;
+  return path ? `/connections/${path}` : "/connections";
+}
+
+/** Each other Admin page the personal edition keeps, and where it is under Settings. */
 const MOVED: readonly (readonly [admin: string, settings: string])[] = [
-  ["/admin/plugins", "/settings/plugins"],
   ["/admin/skills", "/settings/skills"],
   ["/admin/credentials", "/settings/credentials"],
   ["/admin/computers", "/settings/computer"],
@@ -74,11 +88,13 @@ const MOVED: readonly (readonly [admin: string, settings: string])[] = [
 ];
 
 /**
- * Where an old Admin address goes in the personal edition: the same page under Settings, with
- * whatever followed it (`/admin/plugins/notion/tools/search` keeps `/notion/tools/search`), or
+ * Where an old Admin address goes in the personal edition: an app's page under Connections, the
+ * same page under Settings with whatever followed it (`/admin/credentials/new` keeps `/new`), or
  * Settings itself for a page the personal edition does not have.
  */
 export function personalAdminRedirect(pathname: string): string {
+  if (pathname === "/admin/plugins" || pathname.startsWith("/admin/plugins/"))
+    return personalAppsAddress(pathname.slice("/admin/plugins".length));
   for (const [admin, settings] of MOVED) {
     if (pathname === admin || pathname.startsWith(`${admin}/`)) {
       return `${settings}${pathname.slice(admin.length)}`.replace(/\/$/, "");

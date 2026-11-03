@@ -131,7 +131,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
 
   return (
     <PageShell
-      backButton={{ label: "Plugins", linkProps: paths.plugins() }}
+      backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
       description={`${name}'s app directory. Add an app to make its tools available to Bots. Each person still connects their own account before it reads anything.`}
       title={directoryLabel}
     >

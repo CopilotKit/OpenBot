@@ -9,7 +9,6 @@ import {
   IconKey,
   IconLayoutGrid,
   IconLock,
-  IconPlug,
   IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
@@ -90,11 +89,11 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 ];
 
 /**
- * What the personal edition keeps of Admin. There is no Admin there, and the one person still adds
- * apps, writes skills for every Bot, stores credentials, resets the computer and reads the trail.
+ * What the personal edition keeps of Admin. There is no Admin there, and the one person still writes
+ * skills for every Bot, stores credentials, resets the computer and reads the trail. Apps are not
+ * here: adding one and connecting it are the same step, on Connections.
  */
 const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
-  { title: "Apps", icon: IconPlug, linkOptions: { to: "/settings/plugins" } },
   {
     title: "Skills for every Bot",
     icon: IconBook,

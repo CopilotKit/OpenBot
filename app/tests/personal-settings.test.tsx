@@ -54,7 +54,6 @@ function clientFor(edition: "team" | "personal" | undefined) {
 }
 
 const PERSONAL_ENTRIES = [
-  ["Apps", "/settings/plugins"],
   ["Skills for every Bot", "/settings/skills"],
   ["Credentials", "/settings/credentials"],
   ["Computer", "/settings/computer"],
@@ -69,6 +68,17 @@ describe("the Settings sidebar", () => {
         to,
       });
     }
+  });
+
+  test("has no Apps entry, because apps are part of Connections", () => {
+    const items = settingsSidebarItems("personal");
+    expect(items.map((item) => item.title)).not.toContain("Apps");
+    expect(
+      items.some(
+        (item) =>
+          (item.linkOptions as { to?: string }).to === "/settings/plugins",
+      ),
+    ).toBe(false);
   });
 
   test("has no Learning page, which is about sharing Skills with other people", async () => {
@@ -188,6 +198,6 @@ describe("the personal pages under Settings", () => {
     );
     // The page's back button: an anchor drawn as a button.
     const back = await view.findByRole("button", { name: /Plugin/ });
-    expect(back.getAttribute("href")).toBe("/settings/plugins/notion");
+    expect(back.getAttribute("href")).toBe("/connections/notion");
   });
 });

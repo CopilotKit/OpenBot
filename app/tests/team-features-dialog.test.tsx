@@ -46,14 +46,11 @@ describe("the team features dialog", () => {
 
 describe("an old Admin address in the personal edition", () => {
   test.each([
-    ["/admin/plugins", "/settings/plugins"],
-    ["/admin/plugins/notion", "/settings/plugins/notion"],
-    [
-      "/admin/plugins/notion/tools/search",
-      "/settings/plugins/notion/tools/search",
-    ],
-    ["/admin/plugins/notion/bots/bot-1", "/settings/plugins/notion/bots/bot-1"],
-    ["/admin/plugins/composio", "/settings/plugins/composio"],
+    ["/admin/plugins", "/connections"],
+    ["/admin/plugins/notion", "/connections/notion"],
+    ["/admin/plugins/notion/tools/search", "/connections/notion/tools/search"],
+    ["/admin/plugins/notion/bots/bot-1", "/connections/notion/bots/bot-1"],
+    ["/admin/plugins/composio", "/connections/browse/composio"],
     ["/admin/skills", "/settings/skills"],
     ["/admin/credentials", "/settings/credentials"],
     ["/admin/credentials/new", "/settings/credentials/new"],
@@ -105,7 +102,7 @@ describe("an old Admin address in the personal edition", () => {
   test("is sent to its Settings address", async () => {
     expect(
       await outcome("personal", "/admin/plugins/notion/tools/search"),
-    ).toBe("/settings/plugins/notion/tools/search");
+    ).toBe("/connections/notion/tools/search");
     expect(await outcome("personal", "/admin/people")).toBe("/settings");
   });
 

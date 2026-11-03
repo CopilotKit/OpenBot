@@ -63,6 +63,7 @@ import {
   brokeredProvenance,
   brokeredReach,
 } from "@/lib/plugins/provider-vocabulary";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   type CatalogueItem,
@@ -213,6 +214,9 @@ function ConnectionStateUnreadable() {
 
 export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
   const paths = useManagePaths();
+  // One person: adding and connecting are one step, and nothing here is about other people.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const provider = pluginsProvider(plugins.data);
@@ -459,8 +463,27 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
       setToken("");
       setClient({ clientId: "", clientSecret: "" });
       setDialog(null);
+      return true;
     } catch (thrown) {
       setError((thrown as Error).message);
+      return false;
+    }
+  };
+
+  /*
+   * THE PERSONAL EDITION'S ONE STEP. Adding an app and connecting your account are two decisions
+   * only when two people make them. Here Connect adds the app and, for an app reached as you, goes
+   * straight on to the account it needs, once the list says there is a client to consent against.
+   */
+  const connectNew = async () => {
+    if (!(await add()) || auth !== "user-oauth") return;
+    const fresh = await queryClient.fetchQuery({
+      ...pluginsPageQueryOptions(),
+      staleTime: 0,
+    });
+    const added = fresh.servers.find((item) => item.id === key);
+    if (added && (added.hasCredential || added.dynamicClient)) {
+      connectSelf.mutate(key);
     }
   };
 
@@ -518,7 +541,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
   if (!plugins.data) {
     return (
       <PageShell
-        backButton={{ label: "Plugins", linkProps: paths.plugins() }}
+        backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
         title="Plugins"
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
@@ -530,7 +553,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
   if (!(entry || server)) {
     return (
       <PageShell
-        backButton={{ label: "Plugins", linkProps: paths.plugins() }}
+        backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
         description="There is no plugin with that name, here or in the catalogue."
         title="Not a plugin"
       >
@@ -553,7 +576,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
 
   return (
     <PageShell
-      backButton={{ label: "Plugins", linkProps: paths.plugins() }}
+      backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
       description={entry?.summary ?? server?.summary}
       title={title}
     >
@@ -579,34 +602,67 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
            * switching this off deletes every grant on the vendor's tools and that is not recoverable
            * by switching it back on.
            */}
-          <Item size="sm">
-            <ItemContent>
-              <ItemTitle>Enable for this deployment</ItemTitle>
-              <ItemDescription>
-                {server
-                  ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
-                  : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-label={`Enable ${title} for this deployment`}
-                checked={server !== undefined}
-                onCheckedChange={(next) => {
-                  setError(null);
-                  if (next) void add();
-                  else remove.mutate(key);
-                }}
-              />
-            </ItemActions>
-          </Item>
+          {personal && !server ? (
+            <Item size="sm">
+              <ItemContent>
+                <ItemTitle>Add {title}</ItemTitle>
+                <ItemDescription>
+                  Connect it to give your Bots its tools. Bots can read with it
+                  right away, and ask you before they change anything.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  aria-label={`Connect ${title}`}
+                  disabled={addCurated.isPending || connectSelf.isPending}
+                  onClick={() => void connectNew()}
+                  size="sm"
+                  type="button"
+                >
+                  Connect
+                </Button>
+              </ItemActions>
+            </Item>
+          ) : (
+            <Item size="sm">
+              <ItemContent>
+                <ItemTitle>
+                  {personal ? "Turned on" : "Enable for this deployment"}
+                </ItemTitle>
+                <ItemDescription>
+                  {personal
+                    ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to its tools."
+                    : server
+                      ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
+                      : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  aria-label={
+                    personal
+                      ? `Turn ${title} on or off`
+                      : `Enable ${title} for this deployment`
+                  }
+                  checked={server !== undefined}
+                  onCheckedChange={(next) => {
+                    setError(null);
+                    if (next) void add();
+                    else remove.mutate(key);
+                  }}
+                />
+              </ItemActions>
+            </Item>
+          )}
 
           {/*
            * ONLY A BROKERED APP THAT HAS AN ACCOUNT TO MAKE. `NO_AUTH` is the Composio scheme with
            * nothing to connect at all — see `brokeredAccountsListedOn` — so there is no personal/
            * shared choice to offer for it, and a row here could only open a dialog that refuses.
            */}
-          {server &&
+          {/* The personal edition has one person, so whose account it is has one answer: yours. */}
+          {!personal &&
+          server &&
           brokeredProvenance(server.provenance) &&
           server.authScheme !== "NO_AUTH" ? (
             <>
@@ -646,8 +702,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
            * app with no account start off, because a Bot given one of those reaches an account that
            * is not the asker's. An owner's grant runs on the asker's own account, except on a shared
            * account, where the grant lets the people who can use the Bot use the team account.
+           * Not in the personal edition, where the owner of every Bot is the one person.
            */}
-          {server ? (
+          {server && !personal ? (
             <>
               <Separator />
               <Item size="sm">
@@ -947,9 +1004,13 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                     <ItemContent>
                       <ItemTitle>Your account</ItemTitle>
                       <ItemDescription>
-                        {youConnected
-                          ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
-                          : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
+                        {personal
+                          ? youConnected
+                            ? `Connected. Your Bots use your ${title} as you.`
+                            : `Connect your ${title} account so your Bots can use it.`
+                          : youConnected
+                            ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
+                            : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>

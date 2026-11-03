@@ -209,7 +209,7 @@ export function PluginBotPage({
   if (plugins.data && !server) {
     return (
       <PageShell
-        backButton={{ label: "Plugins", linkProps: paths.plugins() }}
+        backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
         description="No app with that name is turned on."
         title={appTitle}
       >
@@ -230,7 +230,7 @@ export function PluginBotPage({
   if (!server) {
     return (
       <PageShell
-        backButton={{ label: "Plugins", linkProps: paths.plugins() }}
+        backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
         title="Plugins"
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
