@@ -85,6 +85,8 @@ export function createBotDirectory(options: {
   /** The gateway address the runtime is configured with. Absent: no announcements, timer only. */
   gatewayWsUrl?: string;
   resyncIntervalMs?: number;
+  /** How announcements are subscribed to. The gateway's, unless a test drives them itself. */
+  subscribe?: typeof subscribeToBotChanges;
 }): BotDirectory {
   const { registry } = options;
   const bots = new Map<string, Bot>();
@@ -163,7 +165,14 @@ export function createBotDirectory(options: {
   const heard = async (change: BotChange) => {
     try {
       if (change.change === "purged") {
-        // Cleaned up even when this instance never held it: the rows are in the shared database.
+        // Asked again first: an announcement can arrive after the id was made again, and the rows
+        // here would then belong to the new Bot. Only an id Intelligence no longer has is cleaned up,
+        // and then even when this instance never held it, since the rows are in the shared database.
+        const current = await registry.get(change.agentId);
+        if (current) {
+          apply(current);
+          return;
+        }
         await forget(change.agentId, true);
         return;
       }
@@ -232,7 +241,7 @@ export function createBotDirectory(options: {
 
     async start() {
       if (options.gatewayWsUrl) {
-        subscription = subscribeToBotChanges({
+        subscription = (options.subscribe ?? subscribeToBotChanges)({
           client: registry,
           gatewayWsUrl: options.gatewayWsUrl,
           onChange: (change) => {

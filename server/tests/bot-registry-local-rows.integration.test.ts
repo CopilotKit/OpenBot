@@ -11,6 +11,9 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, getTableName, inArray, is, sql } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
+import { createAgentRegistryClient } from "../src/agents/bot-registry/client";
+import { createBotDirectory } from "../src/agents/bot-registry/directory";
+import type { BotChange } from "../src/agents/bot-registry/events";
 import {
   BOT_CHILD_TABLES,
   BOT_REFERENCE_COLUMNS,
@@ -27,7 +30,13 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
-import { deleteBot, removeBots, seedBot, useTestBots } from "./support/bots";
+import {
+  deleteBot,
+  removeBots,
+  seedBot,
+  testIntelligence,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -210,5 +219,58 @@ describe("the cascade, by hand", () => {
     await database
       .delete(channels)
       .where(inArray(channels.id, [channelId, keep.channelId]));
+  });
+
+  test("a purge announced after the id was made again leaves the new Bot and its rows", async () => {
+    // Announcements are at most once and can arrive late. Driven by hand here so the order is the
+    // one that matters: the purge's announcement reaches this instance after the id is back.
+    let announce: ((change: BotChange) => void) | undefined;
+    const intelligence = testIntelligence();
+    const replica = createBotDirectory({
+      registry: createAgentRegistryClient(intelligence),
+      gatewayWsUrl: intelligence.gatewayWsUrl,
+      subscribe: (options) => {
+        announce = options.onChange;
+        return { joinCode: () => "driven-by-test", renew() {}, stop() {} };
+      },
+    });
+    const cleaned: string[] = [];
+    replica.onPurged((id) => {
+      cleaned.push(id);
+    });
+    await replica.start();
+    try {
+      const bot = await seedBot();
+      await replica.find(bot.id);
+      const registry = (await useTestBots()).registry;
+      await registry.purge(bot.id, `test:${randomUUID()}`);
+      // Every live instance hears that purge for real; give them time to clean up after it.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const again = await registry.create(
+        { ...bot, deletedAt: null, createdAt: undefined },
+        `test:${randomUUID()}`,
+      );
+      // The new Bot's own rows, made after it was.
+      const channelId = `channel_${randomUUID()}`;
+      await database
+        .insert(channels)
+        .values({ id: channelId, name: "Again", description: "" });
+      await database
+        .insert(channelAgents)
+        .values({ channelId, agentId: bot.id });
+
+      announce?.({ agentId: bot.id, version: bot.version, change: "purged" });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      expect(cleaned).toEqual([]);
+      expect(replica.peek(bot.id)?.createdAt.toISOString()).toBe(
+        again.createdAt.toISOString(),
+      );
+      expect((await rowsFor(bot.id, channelId)).member).toBe(true);
+      await removeBots([bot.id]);
+      await database.delete(channels).where(eq(channels.id, channelId));
+    } finally {
+      replica.stop();
+    }
   });
 });
