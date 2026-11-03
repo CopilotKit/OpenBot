@@ -208,6 +208,9 @@ test("a run's reads come from its own successful audit rows only", async () => {
   expect(reads[0]?.at).toBeInstanceOf(Date);
 });
 
+/** How the person decided the first item: whichever of the two clicks landed first. */
+let firstDecision = "";
+
 test("items carry their normalized title, are listed to their owner, and are resolved once", async () => {
   const [setting] = await proactive.list(owner);
   if (!setting) throw new Error("setting missing");
@@ -256,9 +259,12 @@ test("items carry their normalized title, are listed to their owner, and are res
     proactive.resolveSuggestion(owner, suggestion.id, "started"),
     proactive.resolveSuggestion(owner, suggestion.id, "dismissed"),
   ]);
-  expect(
-    [started, again].filter((result) => result.status === "fulfilled"),
-  ).toHaveLength(1);
+  const won = [started, again].filter(
+    (result) => result.status === "fulfilled",
+  );
+  expect(won).toHaveLength(1);
+  firstDecision = (won[0] as PromiseFulfilledResult<{ status: string }>).value
+    .status;
   expect(
     (await proactive.suggestions(owner)).some(
       (row) => row.id === suggestion.id,
@@ -318,6 +324,17 @@ test("open items stay open across check-ins until the person starts or hides one
       sourceLink: null,
       sourceApp: "Issue tracker",
     },
+    // The first item, from the first Bot, when Hide was the click that landed: hidden from all.
+    ...(firstDecision === "dismissed"
+      ? [
+          {
+            agentId: bot,
+            title: "Reply to Sam",
+            sourceLink: "https://issues.example.test/1",
+            sourceApp: "Issue tracker",
+          },
+        ]
+      : []),
   ]);
   expect(prior.started).toEqual([{ title: "Book the venue" }]);
   expect(await proactive.priorItems(other, secondBot)).toEqual({
