@@ -2,6 +2,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -14,17 +15,25 @@ import { createDatabase } from "../src/db/client";
 import {
   brokeredConnections,
   mcpServers,
-  pluginGrants,
   sharedUseApprovals,
 } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const suite = randomUUID().slice(0, 8);
 const app = `mode-${suite}`;
 const bot = `modebot-${suite}`;
@@ -123,10 +132,7 @@ beforeEach(async () => {
     type: "built_in",
     visibility: "public",
   });
-  await database.insert(pluginGrants).values({
-    kind: "mcp",
-    ref: `${app}/LINEAR_LIST`,
-    agentId: bot,
+  await grantBot(bot, "mcp", `${app}/LINEAR_LIST`, {
     grantedBy: "admin@example.test",
   });
   await database.insert(brokeredConnections).values([

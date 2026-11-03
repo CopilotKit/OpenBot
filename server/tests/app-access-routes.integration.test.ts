@@ -21,10 +21,7 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
-  pluginGrants,
   sharedUseApprovals,
-  teamBotConsents,
-  teamBotPublications,
   users,
 } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
@@ -39,7 +36,35 @@ import {
   type PluginStore,
   type ServerRecord,
 } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  changePreferences,
+  clearPreferences,
+  removeBots,
+  seedBot,
+  storedAccess,
+  useTestConfiguration,
+} from "./support/bots";
+
+/** Give a Bot one tool, as the old tests' bare `plugin_grants` row did: no granter, an administrator's. */
+async function grantTool(agentId: string, ref: string) {
+  await changeAccess([
+    {
+      op: "grant",
+      botId: agentId,
+      kind: "mcp",
+      ref,
+      grantedBy: null,
+      grantedAs: "admin",
+      ifGranted: "replace",
+    },
+  ]);
+}
+
+/** Every ref one Bot holds, as Intelligence holds them now. */
+async function heldRefs(agentId: string) {
+  return (await storedAccess(agentId)).grants.map((grant) => grant.ref);
+}
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { stubBroker } from "./support/stub-broker";
 
@@ -273,11 +298,7 @@ async function seedApp(input: {
       destructive: input.destructive?.includes(tool) ?? false,
     });
   if (input.grant !== false)
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${input.key}/${(input.tools ?? ["READ"])[0]}`,
-      agentId: bot,
-    });
+    await grantTool(bot, `${input.key}/${(input.tools ?? ["READ"])[0]}`);
 }
 
 const ourServers = like(mcpServers.id, `%${suite}%`);
@@ -304,18 +325,21 @@ async function connectTeamAccount(name: string) {
 }
 
 async function clearApps() {
-  await database
-    .delete(teamBotPublications)
-    .where(inArray(teamBotPublications.agentId, [bot, hidden]));
-  await database
-    .delete(teamBotConsents)
-    .where(inArray(teamBotConsents.userId, [person, other, admin]));
+  await changeAccess([
+    { op: "unpublish", botId: bot },
+    { op: "unpublish", botId: hidden },
+  ]);
+  await clearPreferences([person, other, admin]);
   await database
     .delete(appAccessRequests)
     .where(inArray(appAccessRequests.requestedBy, [person, other, admin]));
-  await database
-    .delete(pluginGrants)
-    .where(inArray(pluginGrants.agentId, [bot, hidden]));
+  await changeAccess(
+    (["mcp", "skill", "bot"] as const).map((kind) => ({
+      op: "revokeMatching" as const,
+      kind,
+      botIds: [bot, hidden],
+    })),
+  );
   await database
     .delete(brokeredConnections)
     .where(like(brokeredConnections.app, `%${suite}%`));
@@ -333,6 +357,7 @@ async function clearApps() {
 }
 
 beforeAll(async () => {
+  await useTestConfiguration();
   for (const user of [person, other, admin, maker])
     await database.insert(users).values({
       id: user,
@@ -383,9 +408,7 @@ describe("what each app a Bot holds is, for the person asking", () => {
     });
     await seedApp({ key: CALENDAR, title: "Google Calendar", grant: false });
     // A grant whose app is gone: still something this Bot was given.
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: `${GONE}/SEND`, agentId: bot });
+    await grantTool(bot, `${GONE}/SEND`);
     // Linear connected, and its key refused by the vendor at the last check.
     await database.insert(brokeredConnections).values({
       provider: "composio",
@@ -520,9 +543,7 @@ describe("what each app a Bot holds is, for the person asking", () => {
       provenance: "first-party",
       credentialId: client?.id ?? null,
     });
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: "google-drive/search", agentId: bot });
+    await grantTool(bot, "google-drive/search");
     const [credential] = await database
       .insert(credentials)
       .values({
@@ -832,11 +853,7 @@ describe("answering a request", () => {
       enabled: false,
       granted: [`${SLACK}/LIST`],
     });
-    const grants = await database
-      .select({ ref: pluginGrants.ref })
-      .from(pluginGrants)
-      .where(eq(pluginGrants.agentId, bot));
-    expect(grants.map((grant) => grant.ref).sort()).toEqual([`${SLACK}/LIST`]);
+    expect((await heldRefs(bot)).sort()).toEqual([`${SLACK}/LIST`]);
     const [approval] = await database
       .select()
       .from(sharedUseApprovals)
@@ -1156,9 +1173,7 @@ describe("on an Arcade deployment", () => {
       description: "READ",
       inputSchema: {},
     });
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: `${ARC_MAIL}/READ`, agentId: bot });
+    await grantTool(bot, `${ARC_MAIL}/READ`);
   }
 
   const forBot = (composioConfigured = true) =>
@@ -1311,11 +1326,7 @@ describe("what approving grants, and when it can be answered", () => {
     expect((await json<{ granted: string[] }>(response)).granted).toEqual([
       `${GMAIL}/READ_MAIL`,
     ]);
-    const grants = await database
-      .select({ ref: pluginGrants.ref })
-      .from(pluginGrants)
-      .where(eq(pluginGrants.agentId, bot));
-    expect(grants.map((grant) => grant.ref)).toEqual([`${GMAIL}/READ_MAIL`]);
+    expect(await heldRefs(bot)).toEqual([`${GMAIL}/READ_MAIL`]);
   });
 
   test("an app with no read-only action is refused with where to choose, and stays pending", async () => {
@@ -1336,12 +1347,7 @@ describe("what approving grants, and when it can be answered", () => {
       "read-only",
     );
     expect(await statusOf(request.id)).toBe("pending");
-    expect(
-      await database
-        .select()
-        .from(pluginGrants)
-        .where(eq(pluginGrants.agentId, bot)),
-    ).toEqual([]);
+    expect((await storedAccess(bot)).grants).toEqual([]);
     // Naming the actions is how an administrator grants more than the reads.
     const chosen = await appAs(admin, "admin").request(
       `/api/plugins/access-requests/${request.id}/approve`,
@@ -1483,9 +1489,7 @@ describe("what a request may carry", () => {
   });
 
   test("a grant that outlived its app can still be asked about", async () => {
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: `${GONE}/SEND`, agentId: bot });
+    await grantTool(bot, `${GONE}/SEND`);
     const response = await appAs(person, "user", { composio: false }).request(
       "/api/plugins/access-requests",
       post({ agentId: bot, app: GONE }),
@@ -1592,9 +1596,15 @@ describe("why an app is off, and a Shared app's audience", () => {
 
 describe("a teammate on somebody else's Team Bot", () => {
   beforeEach(async () => {
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: maker, audience: "team" });
+    await changeAccess([
+      {
+        op: "publish",
+        botId: bot,
+        audience: "team",
+        members: [],
+        publishedBy: maker,
+      },
+    ]);
     await seedApp({ key: GMAIL, title: "Gmail" });
   });
   const connect = (
@@ -1647,12 +1657,9 @@ describe("a teammate on somebody else's Team Bot", () => {
       accountHolder: "you",
       asksFirst: true,
     });
-    await database.insert(teamBotConsents).values({
-      userId: other,
-      agentId: bot,
-      serverId: GMAIL,
-      decision: "always",
-    });
+    await changePreferences(other, [
+      { op: "setConsent", botId: bot, serverId: GMAIL, decision: "always" },
+    ]);
     expect((await asTeammate()).asksFirst).toBe(false);
   });
 

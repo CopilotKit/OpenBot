@@ -67,7 +67,6 @@ import {
   mcpServers,
   mcpTools,
   pendingAuthorizations,
-  pluginGrants,
 } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import { useArcadeClient } from "../src/plugins/arcade";
@@ -76,12 +75,21 @@ import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 
 const suite = randomUUID().slice(0, 8);
 /**
@@ -905,12 +913,7 @@ describe("an Arcade deployment, from the picker to the disconnect", () => {
   });
 
   test("a call goes out as the identity this deployment resolved", async () => {
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${MAIL_ROW}/${SEND}`,
-      agentId: BOT,
-      grantedBy: ADMIN,
-    });
+    await grantBot(BOT, "mcp", `${MAIL_ROW}/${SEND}`, { grantedBy: ADMIN });
 
     const response = await send("POST", "/call", {
       ref: `${MAIL_ROW}/${SEND}`,

@@ -36,7 +36,6 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
-  pluginGrants,
   proactiveSettings,
   proactiveSuggestions,
   users,
@@ -58,7 +57,7 @@ import { createTaskRunner } from "../src/tasks/runner";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
-import { removeBots, useTestBots } from "./support/bots";
+import { changeAccess, removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -446,16 +445,20 @@ const fixtures = (() => {
         credentialId: grantToken,
         scope: "",
       });
-      await database.insert(pluginGrants).values(
+      await changeAccess(
         [
           ref(NOTION, GET_REQUEST),
           ref(NOTION, FETCH),
           ref(NOTION, COMMENT),
           ref(EXA, SEARCH),
         ].map((granted) => ({
+          op: "grant" as const,
+          botId,
           kind: "mcp" as const,
           ref: granted,
-          agentId: botId,
+          grantedBy: null,
+          grantedAs: "admin" as const,
+          ifGranted: "replace" as const,
         })),
       );
     },
@@ -726,9 +729,6 @@ afterAll(async () => {
         theirs.map((row) => row.id),
       ),
     );
-  await database
-    .delete(pluginGrants)
-    .where(inArray(pluginGrants.agentId, bots));
   await fixtures.remove();
   await database.delete(users).where(inArray(users.id, people));
   await removeBots(bots);

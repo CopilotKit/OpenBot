@@ -1,15 +1,31 @@
 // server/tests/shared-use-arcade-urls.test.ts
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, pluginGrants, users } from "../src/db/schema";
+import { mcpServers, users } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const suite = randomUUID().slice(0, 8);
 const id = (name: string) => `${name}-${suite}`;
 
@@ -63,10 +79,7 @@ async function seed(provider: BrokerProvider) {
     roleDescription: "Triage",
     avatarSeed: "x",
   });
-  await database.insert(pluginGrants).values({
-    kind: "mcp",
-    ref: `${highId}/ACTION`,
-    agentId: bot,
+  await grantBot(bot, "mcp", `${highId}/ACTION`, {
     grantedBy: "admin@example.test",
   });
 }

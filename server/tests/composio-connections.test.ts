@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -13,7 +20,6 @@ import {
   brokeredConnections,
   mcpServers,
   mcpTools,
-  pluginGrants,
   users,
 } from "../src/db/schema";
 import { accessFor } from "../src/plugins/access";
@@ -25,7 +31,7 @@ import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -61,6 +67,10 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 
 const suite = randomUUID().slice(0, 8);
 /** The app: its `mcp_servers.id`, and the slug in its url, which is what a connection is keyed on. */
@@ -809,7 +819,7 @@ function useAnsweringClient(actions: Partial<ComposioActions> = {}) {
 
 /** Only this run's rows, and every one of them keyed on an id this run invented. */
 async function clean() {
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
+  // Purging the Bot removes its grants in Intelligence with it.
   await removeBots([botId]);
   await database
     .delete(mcpTools)

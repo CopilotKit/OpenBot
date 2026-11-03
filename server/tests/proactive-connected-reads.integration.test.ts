@@ -31,7 +31,6 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
-  pluginGrants,
 } from "../src/db/schema/plugins";
 import {
   proactivePeople,
@@ -59,7 +58,12 @@ import { createProactiveStore } from "../src/proactive/store";
 import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -73,6 +77,10 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const suite = randomUUID().slice(0, 8);
 /** 32 zero bytes in base64: a real AES-256 key, because the vault is opened for Notion's grant. */
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -327,10 +335,17 @@ const fixtures = (() => {
     return stored.id;
   }
   const grant = (agentId: string, refs: string[]) =>
-    database
-      .insert(pluginGrants)
-      .values(refs.map((granted) => ({ kind: "mcp", ref: granted, agentId })))
-      .onConflictDoNothing();
+    changeAccess(
+      refs.map((granted) => ({
+        op: "grant" as const,
+        botId: agentId,
+        kind: "mcp" as const,
+        ref: granted,
+        grantedBy: null,
+        grantedAs: "admin" as const,
+        ifGranted: "keep" as const,
+      })),
+    );
 
   return {
     async install() {
@@ -483,9 +498,13 @@ const fixtures = (() => {
     },
 
     async remove() {
-      await database
-        .delete(pluginGrants)
-        .where(inArray(pluginGrants.agentId, botIds));
+      await changeAccess(
+        botIds.map((botId) => ({
+          op: "revokeMatching" as const,
+          kind: "mcp" as const,
+          botIds: [botId],
+        })),
+      );
       await database
         .delete(brokeredConnections)
         .where(eq(brokeredConnections.userId, owner));
