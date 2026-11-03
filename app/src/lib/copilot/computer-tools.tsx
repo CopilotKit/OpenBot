@@ -13,11 +13,18 @@ import {
   runHelpRequest,
   runNavigation,
 } from "@/lib/computers/handoff";
-import { useActiveBotHolder } from "./active-bot";
-import { useFrontendTool } from "./approval-tools";
 import {
-  useComputerAvailable,
-  useComputerToolsOffered,
+  type ToolCallContext,
+  useActiveBotHolder,
+  useBotOfCall,
+} from "./active-bot";
+import { useFrontendTool } from "./approval-tools";
+import { type OfferRule, useOfferedTo } from "./bot-offer";
+import {
+  offeredBrowser,
+  offeredComputer,
+  offeredDrivable,
+  offeredNavigate,
 } from "./computer-available";
 
 /**
@@ -171,18 +178,41 @@ function stillStarting(outcome: ComputerOutcome): boolean {
   return outcome.ok === false && outcome.starting === true;
 }
 
-export function ComputerTools() {
-  const bot = useActiveBotHolder();
-  /*
-   * Not offered to a Team Bot's teammates, and not offered where this deployment's capability
-   * switches would refuse them; see computerToolsOffered.
-   */
-  const offered = useComputerToolsOffered();
+/**
+ * Who is offered each computer tool: a Bot this person may drive, as far as this deployment's
+ * switches allow. Not offered to a Team Bot's teammates, nor where a switch would refuse it; see
+ * `computerToolsOffered`. Asked of the Bot whose run it is, never the one on screen (`bot-offer.ts`).
+ */
+const OFFERED: Readonly<Record<string, OfferRule>> = {
+  computer_navigate: offeredNavigate,
+  computer_read: offeredBrowser,
+  computer_snapshot: offeredBrowser,
+  computer_type: offeredBrowser,
+  computer_click: offeredBrowser,
+  computer_key: offeredBrowser,
+  computer_request_secret: offeredBrowser,
   // Audit bookkeeping rather than a computer action, so it answers only the first question.
-  const available = useComputerAvailable();
+  report_refusal: offeredDrivable,
+  computer_request_help: offeredBrowser,
+  computer_list_files: offeredComputer,
+  computer_read_file: offeredComputer,
+  computer_run_command: offeredComputer,
+  computer_write_file: offeredComputer,
+  computer_scroll: offeredBrowser,
+};
+
+export function ComputerTools() {
+  /*
+   * WHOSE COMPUTER, ASKED TWO WAYS. A handler acts for the Bot that made the call, which a turn the
+   * person walked away from keeps making while another screen, or another Bot, is in front of them;
+   * acting on the screen's Bot there opened pages and ran commands on the wrong computer. A renderer
+   * draws a call in the conversation on screen, whose Bot is the screen's, so it reads the holder.
+   */
+  const botOf = useBotOfCall();
+  const bot = useActiveBotHolder();
+  useOfferedTo(OFFERED);
 
   useFrontendTool({
-    available: offered.navigate,
     name: "computer_navigate",
     description:
       "Open a web page on your own computer so the person can watch. Use this when asked to open, " +
@@ -195,12 +225,9 @@ export function ComputerTools() {
     handler: async (
       { url }: { url: string },
       // Context is optional in the SDK.
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => {
-      const computerId = bot.current;
+      const computerId = botOf(agent);
       const result = await runNavigation(computerId, url, toolCall?.id, signal);
       if (result.ok) noteBrowsed(computerId);
       return result;
@@ -252,7 +279,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_read",
     description:
       "Read the page currently open on your computer, without opening anything. Use this after you " +
@@ -260,16 +286,12 @@ export function ComputerTools() {
     parameters: z.object({}),
     handler: async (
       _input: Record<string, never>,
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => runBrowserRead(bot.current, "/read", toolCall?.id, signal),
+      { signal, toolCall, agent }: ToolCallContext = {},
+    ) => runBrowserRead(botOf(agent), "/read", toolCall?.id, signal),
     render: () => null,
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_snapshot",
     description:
       "List the things on the current page you can act on: fields, buttons, links and checkboxes, " +
@@ -279,11 +301,8 @@ export function ComputerTools() {
     parameters: z.object({}),
     handler: async (
       _input: Record<string, never>,
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => runBrowserRead(bot.current, "/snapshot", toolCall?.id, signal),
+      { signal, toolCall, agent }: ToolCallContext = {},
+    ) => runBrowserRead(botOf(agent), "/snapshot", toolCall?.id, signal),
     // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -303,7 +322,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_type",
     description:
       "Enter text into a field on the page. Give the ref of the field from your most recent " +
@@ -327,10 +345,10 @@ export function ComputerTools() {
         text: string;
         submit?: boolean;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/type",
         {
           method: "POST",
@@ -355,7 +373,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_click",
     description:
       "Click something on the page: a button, a link, a checkbox or a radio option. Give the ref " +
@@ -370,10 +387,10 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/click",
         {
           method: "POST",
@@ -403,7 +420,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_key",
     description:
       "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
@@ -422,10 +438,10 @@ export function ComputerTools() {
         ref?: string;
         snapshotId?: number;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/key",
         {
           method: "POST",
@@ -446,7 +462,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_request_secret",
     description:
       "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
@@ -470,9 +485,9 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
-      const botId = bot.current;
+      const botId = botOf(agent);
       const asked = await callComputer(
         botId,
         "/control/secret",
@@ -506,7 +521,6 @@ export function ComputerTools() {
 
   /** Self-reported model declines: audit evidence, not an enforcement control. */
   useFrontendTool({
-    available,
     name: "report_refusal",
     description:
       "Record that you DECLINED something you were asked to do, because it looked unsafe, was outside " +
@@ -525,11 +539,11 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string; request?: string },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
       try {
         const response = await tryClient(
-          `/api/agents/${encodeURIComponent(bot.current)}/declined`,
+          `/api/agents/${encodeURIComponent(botOf(agent))}/declined`,
           { method: "POST", body: input, signal },
         );
         return response.ok
@@ -544,7 +558,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_request_help",
     description:
       "Ask the person to take control of your computer and do something you cannot: sign in, enter a " +
@@ -563,11 +576,8 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string },
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => runHelpRequest(bot.current, input.reason, toolCall?.id, signal),
+      { signal, toolCall, agent }: ToolCallContext = {},
+    ) => runHelpRequest(botOf(agent), input.reason, toolCall?.id, signal),
     // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
     render: ({ args, result, toolCallId }) => (
       <HelpRequestCard
@@ -580,7 +590,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.computer,
     name: "computer_list_files",
     description:
       "List what is in your workspace: every file and folder you have saved, with sizes. Call this " +
@@ -593,8 +602,11 @@ export function ComputerTools() {
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
     // Activity is read from the conversation this answer lands in: see `useConversationActivity`.
-    handler: async (input: { path?: string }) =>
-      callComputer(bot.current, "/files/list", {
+    handler: async (
+      input: { path?: string },
+      { agent }: ToolCallContext = {},
+    ) =>
+      callComputer(botOf(agent), "/files/list", {
         method: "POST",
         body: input ?? {},
       }),
@@ -621,7 +633,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.computer,
     name: "computer_read_file",
     description:
       "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, " +
@@ -632,8 +643,8 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }) =>
-      callComputer(bot.current, "/files/read", {
+    handler: async (input: { path: string }, { agent }: ToolCallContext = {}) =>
+      callComputer(botOf(agent), "/files/read", {
         method: "POST",
         body: input,
       }),
@@ -659,7 +670,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.computer,
     name: "computer_run_command",
     description:
       "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
@@ -688,10 +698,10 @@ export function ComputerTools() {
      */
     handler: async (
       input: { command: string },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/exec",
         { method: "POST", body: input },
         signal,
@@ -737,7 +747,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.computer,
     name: "computer_write_file",
     description:
       "Save a file in your own workspace so you still have it later. Paths are relative to your " +
@@ -755,12 +764,15 @@ export function ComputerTools() {
         .optional()
         .describe("Add to the end of the file instead of replacing it"),
     }),
-    handler: async (input: {
-      path: string;
-      contents: string;
-      append?: boolean;
-    }) =>
-      callComputer(bot.current, "/files/write", {
+    handler: async (
+      input: {
+        path: string;
+        contents: string;
+        append?: boolean;
+      },
+      { agent }: ToolCallContext = {},
+    ) =>
+      callComputer(botOf(agent), "/files/write", {
         method: "POST",
         body: input,
       }),
@@ -787,7 +799,6 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    available: offered.browser,
     name: "computer_scroll",
     description:
       "Scroll the page down, or up with a negative amount, to bring more of a long page into view.",
@@ -799,10 +810,10 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { deltaY?: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/scroll",
         {
           method: "POST",

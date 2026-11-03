@@ -269,6 +269,16 @@ beforeAll(() => {
         return NativeResponse.json({ messages: stored });
       if (url.pathname === "/api/agents")
         return NativeResponse.json({ agents: [] });
+      // What the Bot's runs are offered is read from these, as the server answers them: the Bot is
+      // the person's own, holds no components, and the deployment switches nothing off.
+      if (url.pathname === `/api/agents/${BOT}`)
+        return NativeResponse.json({
+          agent: { id: BOT, visibility: "public", canManage: true },
+        });
+      if (url.pathname === `/api/components/for-agent/${BOT}`)
+        return NativeResponse.json({ components: [] });
+      if (url.pathname === "/api/admin/enterprise/me")
+        return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ skills: [], tools: [] });
       if (url.pathname === "/api/voice/sessions")
