@@ -153,8 +153,11 @@ async function worker(): Promise<WorkerReport> {
   const intelligence = testIntelligence();
   const child = Bun.spawn(["bun", "scripts/fire-routines.ts"], {
     cwd: SERVER_DIR,
+    // The worker's own settings and nothing of this test process's environment beyond what runs a
+    // program: whatever else the shell running the suite holds is not the deployment's.
     env: {
-      ...process.env,
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
       ...testEnvironment({
         DATABASE_URL: testDatabaseUrl(),
         INTELLIGENCE_API_URL: intelligence.apiUrl,
