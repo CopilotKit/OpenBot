@@ -3152,6 +3152,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     let root = cleanup_root(&shell, &stack::default_root());
+    updates::require_no_interruption(&root)?;
     let organization_recovery = !quit_cleanup_notice_path(&root).exists()
         && shell
             .recovery_required
@@ -3369,6 +3370,11 @@ fn already_running_at(root: &Path, ports: &openbot_env::Ports) -> bool {
 
 /// Neither an owned API nor an answering app port alone authorizes showing a deployment.
 fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
+    // Durable update recovery outranks surviving process ownership after a shell crash.
+    // Every passive adoption, tray restore and Recorder handoff shares this boundary.
+    if updates::require_no_interruption(root).is_err() {
+        return None;
+    }
     if !already_running_on(root, ports.server, stack::recorded_server_owns_port)
         || !stack::recorded_process_owns_port(root, "app", ports.app).unwrap_or(false)
     {
@@ -11786,6 +11792,57 @@ fn main() {
         window.navigate(current.parse().unwrap()).unwrap();
         restore_window_on(app.handle(), &f.ports);
         assert_eq!(window.url().unwrap().as_str(), current);
+    }
+
+    #[test]
+    fn runtime_update_pending_journal_blocks_owned_answering_runtime_reopen() {
+        let f = RestoreFixture::new();
+        openbot_env::write(
+            &f.owned.join(".env"),
+            &f.ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(server_capabilities_answer(f.ports.server));
+        assert!(stack::recorded_server_owns_port(&f.owned, f.ports.server).unwrap());
+        assert!(stack::recorded_process_owns_port(&f.owned, "app", f.ports.app).unwrap());
+        assert!(stack::app_url(f.ports.app).is_some());
+        assert!(already_running_at(&f.owned, &f.ports));
+        std::fs::write(
+            f.owned.join(updates::JOURNAL),
+            r#"{"phase":"migration-startup-verification"}"#,
+        )
+        .unwrap();
+        // A new shell has no in-memory recovery flag, while its previously owned processes live.
+        let app = f.app(&f.owned, "tauri://localhost/");
+        assert!(app
+            .state::<Shell>()
+            .recovery_required
+            .lock()
+            .unwrap()
+            .is_none());
+        assert!(!already_running_now(
+            app.handle(),
+            &f.owned.to_string_lossy()
+        ));
+        assert!(!already_running_at(&f.owned, &f.ports));
+        assert!(owned_app_url(&f.owned, &f.ports).is_none());
+        let error = show_openbot_on(app.handle().clone(), &f.ports).unwrap_err();
+        assert!(
+            error.said.contains("interrupted runtime update"),
+            "{}",
+            error.said
+        );
+        assert!(error.said.contains(updates::JOURNAL), "{}", error.said);
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .as_str(),
+            "tauri://localhost/"
+        );
     }
 
     #[test]
