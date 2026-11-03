@@ -8,6 +8,7 @@ import type {
 import {
   type CopilotKitIntelligence,
   CopilotRuntime,
+  resolveModel,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import {
@@ -20,10 +21,12 @@ import {
   defaultModelFor,
   requiresResponsesApi,
 } from "@openbot/shared/model-providers";
+import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
   IntelligenceKnowingANewThread,
+  RUNTIME_STATE_TOOLS,
   RunBuiltAgent,
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
@@ -46,6 +49,19 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
+import {
+  OPENBOT_TOOL_LIMIT,
+  toolLimitFor,
+  toolLimitRefusal,
+} from "./agents/tool-limit";
+import {
+  isSearchingModel,
+  planToolSearch,
+  SEARCH_RESULTS_LIMIT,
+  searchesTools,
+  searchToolsTool,
+  withToolSearch,
+} from "./agents/tool-search";
 import type { AuditInitiator } from "./audit";
 import {
   attachmentIdsIn,
@@ -480,6 +496,11 @@ export function builtInAgentConfiguration(
   standingInstructions?: string | null,
   planModel?: PlanModel,
   learnedSkills?: LearnedSkillInvocation,
+  /**
+   * Which of `tools` wait behind `search_tools` instead of being sent on every step, decided by
+   * `planToolSearch`. Empty sends everything, which is every Bot at or under the floor.
+   */
+  waiting: ReadonlySet<string> = new Set(),
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -494,8 +515,32 @@ export function builtInAgentConfiguration(
   }
 
   const standing = standingInstructionsGuidance(standingInstructions);
+  /*
+   * The model, wrapped when some tools wait, so each step is sent only what it has found.
+   *
+   * Resolved by the runtime's own `resolveModel` and not by a copy of it: which OpenAI API a model
+   * is called on, its key and `OPENAI_BASE_URL` are all decided there, and a second copy here would
+   * drift from the first and bring back the Chat Completions refusal it exists to avoid. A model the
+   * wrapper cannot hold is sent as it was, with every tool, and the pre-flight count says so.
+   */
+  const unwrapped =
+    waiting.size > 0
+      ? (planModel ??
+        resolveModel(
+          `${model.provider}/${model.defaultModel}`,
+          apiKey ?? undefined,
+        ))
+      : undefined;
+  const wrapped = isSearchingModel(unwrapped)
+    ? withToolSearch(unwrapped, waiting)
+    : undefined;
+  const searching = wrapped !== undefined;
+  const shown = searching ? waiting : new Set<string>();
   const allTools = [
     ...tools,
+    ...(searching
+      ? [searchToolsTool(tools.filter((tool) => waiting.has(tool.name)))]
+      : []),
     ...(learnedSkills?.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -505,7 +550,7 @@ export function builtInAgentConfiguration(
   ];
 
   return {
-    model: planModel ?? `${model.provider}/${model.defaultModel}`,
+    model: wrapped ?? planModel ?? `${model.provider}/${model.defaultModel}`,
     /*
      * The package's role, then the person's own standing instructions, then what this Bot actually
      * holds, then the computer.
@@ -535,8 +580,8 @@ export function builtInAgentConfiguration(
       ORCHESTRATION_GUIDANCE,
       // How to read the untrusted-content envelope every outside result arrives in.
       UNTRUSTED_GUIDANCE,
-      ...(grantedToolGuidance(tools, connectedVendors)
-        ? [grantedToolGuidance(tools, connectedVendors)]
+      ...(grantedToolGuidance(tools, connectedVendors, shown)
+        ? [grantedToolGuidance(tools, connectedVendors, shown)]
         : []),
       ...(computerGuidance
         ? [computerGuidance({ search: holdsWebSearch(tools) })]
@@ -577,7 +622,8 @@ export function builtInAgentConfiguration(
                   }),
               ),
           })),
-          maxSteps: TOOL_STEPS,
+          // Each search is a step of its own, so a run that searches gets two more.
+          maxSteps: searching ? TOOL_STEPS + SEARCH_STEPS : TOOL_STEPS,
         }
       : {}),
   };
@@ -590,6 +636,9 @@ export function builtInAgentConfiguration(
  * Beyond that a model is not making progress, and every extra step is somebody's money.
  */
 const TOOL_STEPS = 8;
+
+/** The steps a run that holds tools behind search gets on top, one per search it may need. */
+const SEARCH_STEPS = 2;
 
 /**
  * Build the built-in and remote AG-UI agent map the runtime serves.
@@ -648,6 +697,8 @@ export async function buildAgents(
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
   loadPersonalMemory?: LoadPersonalMemory,
+  /** How a run refused for holding too many tools is put on record. Absent writes no row. */
+  recordToolLimitRefusal?: RecordToolLimitRefusal,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -704,6 +755,7 @@ export async function buildAgents(
           loadAttachment,
           markAttachmentsSent,
           acquireLearnedSkills,
+          recordToolLimitRefusal,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -966,6 +1018,8 @@ async function buildAgent(
   /** How this run records that those files were sent. See {@link buildAgents}. */
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  /** How a run refused by `admitTools` below is put on record. See {@link buildAgents}. */
+  recordToolLimitRefusal?: RecordToolLimitRefusal,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1016,12 +1070,17 @@ async function buildAgent(
     });
   };
 
-  /** Pass one and pass two, for one run. Shared by both agent kinds; each applies it differently. */
-  const offeredFor = async (
+  /**
+   * Pass one and pass two, for one run. Shared by both agent kinds; each applies it differently.
+   *
+   * `pinned` is what the chosen skills asked for, which a built-in run keeps in front of its model
+   * when the rest of what it holds waits behind a search. See `planToolSearch`.
+   */
+  const selectionFor = async (
     input: RunAgentInput,
     signal?: AbortSignal,
-  ): Promise<GrantedTool[]> => {
-    if (!narrowing) return granted;
+  ): Promise<{ offered: GrantedTool[]; pinned: ReadonlySet<string> }> => {
+    if (!narrowing) return { offered: granted, pinned: new Set() };
     const chosen = await selectTools({
       tools: granted,
       skills,
@@ -1036,8 +1095,13 @@ async function buildAgent(
     await narrowing.record?.(agent.id, chosen).catch(() => {
       diagnoseRecordFailure(chosen);
     });
-    return chosen.offered;
+    return {
+      offered: chosen.offered,
+      pinned: new Set(chosen.chosen.map((tool) => tool.name)),
+    };
   };
+  const offeredFor = async (input: RunAgentInput, signal?: AbortSignal) =>
+    (await selectionFor(input, signal)).offered;
 
   if (agent.type === "remote_ag_ui" || agent.type === "remote_mastra") {
     /*
@@ -1073,6 +1137,57 @@ async function buildAgent(
   }
 
   /*
+   * Whether a run may be sent to the model with the tools it would send, decided by count.
+   *
+   * Per run rather than per Bot, because the count is only known then: narrowing may have cut the
+   * grants down, a handoff may have added to them, and the client's own tools arrive with the
+   * request. Tools waiting behind search are not counted, because they are not sent, but room is
+   * kept for one search's answer, so a search never promises tools the next step cannot carry.
+   *
+   * Two limits. Chat Completions refuses a 129th tool, so a run headed there is held to that. Where a
+   * run searches, it is held to `MODEL_TOOL_LIMIT` on every provider, because that is the most
+   * `toolsForStep` will send; that number is OpenBot's, and the refusal says so rather than putting
+   * it in the provider's mouth. A run on any other path with search off has no count to meet.
+   *
+   * The refusal is the person's answer; the log line and the audit row are the admin's, because a Bot
+   * over the limit fails on every message until somebody looks, and nobody looks at what they cannot
+   * see. Ported from #948, with the limit read from the API the runtime resolves.
+   */
+  const limit = model.plan ? null : toolLimitFor(model, apiKey ?? undefined);
+  const admitTools = (waiting: ReadonlySet<string>) => {
+    const capacity =
+      limit ??
+      (waiting.size > 0
+        ? { provider: OPENBOT_TOOL_LIMIT, limit: MODEL_TOOL_LIMIT }
+        : null);
+    if (!capacity) return undefined;
+    const reserved = Math.min(waiting.size, SEARCH_RESULTS_LIMIT);
+    return (names: readonly string[]) => {
+      const count = names.length + reserved;
+      if (count <= capacity.limit) return undefined;
+      const refused = {
+        tools: count,
+        limit: capacity.limit,
+        provider: capacity.provider,
+      };
+      console.error({
+        error: "tool_limit_exceeded",
+        context: { operation: "admitTools", agentId: agent.id, ...refused },
+        timestamp: new Date().toISOString(),
+      });
+      void recordToolLimitRefusal?.(agent.id, refused).catch(() => {
+        // Never log the thrown value: database errors can contain connection details.
+        console.error({
+          error: "tool_limit_record_failed",
+          context: { operation: "recordToolLimitRefusal", agentId: agent.id },
+          timestamp: new Date().toISOString(),
+        });
+      });
+      return toolLimitRefusal(agent.name, count, capacity);
+    };
+  };
+
+  /*
    * A built-in Bot takes its tools in its configuration, so narrowing means building it again once
    * the message is known. The guidance it is given is generated from the tools passed here, which is
    * what keeps a narrowed run from being told it holds something it was not offered.
@@ -1082,45 +1197,74 @@ async function buildAgent(
     input?: RunAgentInput,
     signal?: AbortSignal,
     learnedSkills?: LearnedSkillInvocation,
-  ) =>
-    new BuiltInAgentWithSaneHistory(
-      builtInAgentConfiguration(
-        agent,
-        model,
-        apiKey,
-        tools,
-        computerGuidance,
-        connectedVendors,
-        standingInstructions,
-        model.plan && input
-          ? new PlanModel(
-              model.plan,
-              agent.id,
-              input,
-              new Set(input.tools.map((tool) => tool.name)),
-              signal,
-            )
-          : undefined,
-        learnedSkills,
-      ),
-      {
-        observe: observeModelConnection,
-        ...(loadAttachment
-          ? {
-              inline: (messages: AgentRunInput["messages"], threadId: string) =>
-                inlineAttachments(
-                  messages,
-                  loadAttachment,
-                  threadId,
-                  markAttachmentsSent,
-                ),
-            }
-          : {}),
-      },
+    pinned?: ReadonlySet<string>,
+  ) => {
+    /*
+     * What waits behind a search, decided where the run's tools are final. The count includes what
+     * this configuration does not list but the provider is sent anyway: learned skills, the client's
+     * tools when the request is known, and the runtime's two.
+     */
+    const waiting = planToolSearch(tools, {
+      ...(pinned ? { pinned } : {}),
+      alsoSent:
+        (learnedSkills?.tools.length ?? 0) +
+        (input?.tools.length ?? 0) +
+        RUNTIME_STATE_TOOLS.length,
+    });
+    const configuration = builtInAgentConfiguration(
+      agent,
+      model,
+      apiKey,
+      tools,
+      computerGuidance,
+      connectedVendors,
+      standingInstructions,
+      model.plan && input
+        ? new PlanModel(
+            model.plan,
+            agent.id,
+            input,
+            new Set(input.tools.map((tool) => tool.name)),
+            signal,
+          )
+        : undefined,
+      learnedSkills,
+      waiting,
     );
+    // What really waits: nothing, when the model could not be wrapped and is sent every tool.
+    const held = searchesTools(
+      "model" in configuration ? configuration.model : undefined,
+    )
+      ? waiting
+      : new Set<string>();
+    const admit = admitTools(held);
+    return new BuiltInAgentWithSaneHistory(configuration, {
+      observe: observeModelConnection,
+      ...(admit ? { admitTools: admit } : {}),
+      ...(held.size > 0 ? { waiting: held } : {}),
+      ...(loadAttachment
+        ? {
+            inline: (messages: AgentRunInput["messages"], threadId: string) =>
+              inlineAttachments(
+                messages,
+                loadAttachment,
+                threadId,
+                markAttachmentsSent,
+              ),
+          }
+        : {}),
+    });
+  };
 
   const whole = withTools(granted);
-  if (!narrowing && !handoff && !model.plan && !acquireLearnedSkills)
+  // Even a small app grant may need search once the client's tools arrive with the run.
+  if (
+    !narrowing &&
+    !handoff &&
+    !model.plan &&
+    !acquireLearnedSkills &&
+    !granted.some((tool) => tool.searchable)
+  )
     return whole;
 
   return new RunBuiltAgent(
@@ -1139,7 +1283,9 @@ async function buildAgent(
           "Learned Skill tool names are reserved by Automatic Learning.",
         );
       }
-      const offered = narrowing ? await offeredFor(input, signal) : granted;
+      const { offered, pinned } = narrowing
+        ? await selectionFor(input, signal)
+        : { offered: granted, pinned: new Set<string>() };
       signal.throwIfAborted();
       /*
        * The tool for handing work to another Bot is made per run, not per request.
@@ -1157,9 +1303,11 @@ async function buildAgent(
       return !model.plan &&
         !learnedSkills &&
         tools.length === granted.length &&
-        passing.length === 0
+        passing.length === 0 &&
+        pinned.size === 0 &&
+        input.tools.length === 0
         ? whole
-        : withTools(tools, input, signal, learnedSkills);
+        : withTools(tools, input, signal, learnedSkills, pinned);
     },
   );
 }
@@ -1711,6 +1859,8 @@ export async function resolveRuntimeAgents(
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
   loadPersonalMemory?: LoadPersonalMemory,
+  /** Appended after `loadPersonalMemory`, for the positional reason `loadInstructions` gives. */
+  recordToolLimitRefusal?: RecordToolLimitRefusal,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1747,11 +1897,22 @@ export async function resolveRuntimeAgents(
     markAttachmentsSent,
     acquireLearnedSkills,
     loadPersonalMemory,
+    recordToolLimitRefusal,
   );
 }
 
 /** What one Bot may call, for the person whose request this is. */
 export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
+
+/**
+ * Writes the row for a run refused before its model call because it would have sent more tools
+ * than the provider accepts. Bound to the person asking, like {@link LoadToolsForBot}. Never
+ * allowed to change the refusal: a failure is logged and the person still gets the sentence.
+ */
+export type RecordToolLimitRefusal = (
+  botId: string,
+  refused: { tools: number; limit: number; provider: string },
+) => Promise<void>;
 
 /**
  * The deployment's signed statement of what a run is, for the agent that will run it.

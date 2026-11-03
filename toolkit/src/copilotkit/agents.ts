@@ -1,6 +1,7 @@
 import {
   AbstractAgent,
   type BaseEvent,
+  EventType,
   type Message,
   type RunAgentInput,
 } from "@ag-ui/client";
@@ -15,6 +16,7 @@ import {
   from,
   fromEvent,
   type Observable,
+  of,
   switchMap,
   takeUntil,
 } from "rxjs";
@@ -42,6 +44,9 @@ import { historyOrEmpty } from "../thread-history";
  */
 export const PLAN_RUN_COMPLETED = Symbol("plan-run-completed");
 
+/** The RUN_ERROR code of a built-in run refused before its model call by `admitTools`. */
+export const TOOL_LIMIT_EXCEEDED = "OPENBOT_TOOL_LIMIT_EXCEEDED";
+
 type AgentHeaders = Record<string, string>;
 type HeaderBearingAgent = AbstractAgent & { headers?: AgentHeaders };
 
@@ -54,7 +59,54 @@ export type BuiltInAgentHooks = {
   inline?: (messages: Message[], threadId: string) => Promise<Message[]>;
   /** Watch the model connection, for a host that reports when it fails. */
   observe: (run: Observable<BaseEvent>) => Observable<BaseEvent>;
+  /**
+   * Decide, before the model is called, whether a run that would send these tools may go ahead.
+   * A sentence refuses it: the run ends with that sentence as its RUN_ERROR and no provider is
+   * called. Absent, every run goes ahead. See {@link toolNamesSent} for what the names are.
+   */
+  admitTools?: (toolNames: readonly string[]) => string | undefined;
+  /** The configured tools that wait behind tool search, which {@link toolNamesSent} leaves out. */
+  waiting?: ReadonlySet<string>;
 };
+
+/**
+ * The tools `BuiltInAgent.run` adds to every run, whatever it was configured with.
+ *
+ * Copied from `@copilotkit/runtime`'s agent (`dist/agent/index.mjs`, where `run` spreads them into
+ * `streamTextParams.tools`), because a count that leaves them out is two short of what the provider
+ * is sent, and a limit is exactly where two matters.
+ */
+export const RUNTIME_STATE_TOOLS = [
+  "AGUISendStateSnapshot",
+  "AGUISendStateDelta",
+] as const;
+
+/**
+ * The names of the tools a built-in run will send its model provider on its first step, before
+ * anything is sent.
+ *
+ * The same union `BuiltInAgent.run` makes: the client's tools from the request, the configured
+ * tools over them (by name, so a client tool the Bot also holds is one tool, not two), and the
+ * runtime's own state tools. Less whatever waits behind tool search, which is registered with the
+ * runtime and not sent until a search finds it, and then only into the room left under the limit.
+ * Counting it would refuse exactly the runs search exists to let through. A factory configuration
+ * declares no tools here.
+ */
+export function toolNamesSent(
+  configuration: BuiltInAgentConfiguration,
+  input: Pick<RunAgentInput, "tools">,
+  waiting: ReadonlySet<string> = new Set(),
+): string[] {
+  const configured =
+    "tools" in configuration ? (configuration.tools ?? []) : [];
+  return [
+    ...new Set([
+      ...(input.tools ?? []).map((tool) => tool.name),
+      ...configured.map((tool) => tool.name),
+      ...RUNTIME_STATE_TOOLS,
+    ]),
+  ].filter((name) => !waiting.has(name));
+}
 
 export class CloningRemoteAgent extends AbstractAgent {
   headers?: AgentHeaders;
@@ -158,6 +210,26 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
+    /*
+     * FIRST, before the history is touched or an attachment is stamped as sent. A run refused here
+     * never started, and nothing downstream should record it as though it had.
+     */
+    const refusal = this.hooks.admitTools?.(
+      toolNamesSent(this.configuration, input, this.hooks.waiting),
+    );
+    if (refusal !== undefined)
+      return of(
+        {
+          type: EventType.RUN_STARTED,
+          threadId: input.threadId,
+          runId: input.runId,
+        } as BaseEvent,
+        {
+          type: EventType.RUN_ERROR,
+          message: refusal,
+          code: TOOL_LIMIT_EXCEEDED,
+        } as BaseEvent,
+      );
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
