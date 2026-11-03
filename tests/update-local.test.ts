@@ -332,3 +332,32 @@ test("an absent worker cannot be accepted just because the server is ready", asy
       .version,
   ).toBe("v0.2.0");
 });
+
+test.each([
+  "postgres://openbot:openbot@postgres:5432/customer_db",
+  "postgres://customer_user:openbot@postgres:5432/openbot",
+  "postgres://openbot:openbot@postgres:5432/openbot?dbname=customer_db",
+])(
+  "bundled backup target mismatch refuses before stopping services: %s",
+  async (databaseUrl) => {
+    const f = fixture();
+    const run: CommandRunner = async (command, options) => {
+      const output = await f.run(command, options);
+      return command.includes("config")
+        ? output.replaceAll(
+            "postgres://openbot:openbot@postgres:5432/openbot",
+            databaseUrl,
+          )
+        : output;
+    };
+    await expect(applyLocalUpdate({ ...f.options, run })).rejects.toThrow(
+      "backup",
+    );
+    expect(
+      f.calls.some(
+        (command) => command.includes(" stop ") || command.includes("pg_dump"),
+      ),
+    ).toBe(false);
+    expect(f.git("rev-parse", "HEAD")).toBe(f.old);
+  },
+);

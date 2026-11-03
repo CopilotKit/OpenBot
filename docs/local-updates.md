@@ -35,6 +35,8 @@ Host topology requires this installation's app, API and routine worker already s
 
 Both modes require Docker Compose and PostgreSQL backup tools. A bundled Compose database uses `pg_dump`/`pg_restore` inside its existing PostgreSQL container. Host/external database backups require host `pg_dump` and `pg_restore` with matching server compatibility and connectivity. The backup directory and files are private, and the database dump is streamed rather than decoded as text.
 
+For an image database URL targeting the `postgres` service, preflight requires its database/user to match that service's `POSTGRES_DB`/`POSTGRES_USER`, port 5432, and no URI query overrides. A different database on the same host is refused before any service is stopped; it requires a reviewed backup path rather than a backup of the container's default database. Connection credentials are never printed or added to visible command arguments by this check.
+
 The target Compose file is resolved with the original project directory/name and existing customer override. Changes to existing volume names, mount identities, computer namespace, tenant path, database identity or preserved customer paths require explicit integration. Custom `COMPOSE_FILE`/`COMPOSE_ENV_FILES` layouts are refused. This adapter supports Docker Compose; it does not select or migrate a desktop's Podman engine. Docker's selected context must already point to the installation's engine.
 
 The accepted source remains pinned in Git. `docker compose restart` retains existing accepted container images; recreating image-mode services manually must also use the accepted manifest's digest overrides. The tool does not rewrite customer `.env` image settings or change the behavior of an arbitrary bare `docker compose up`.

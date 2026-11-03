@@ -309,6 +309,29 @@ function preservedState(
   }
   return true;
 }
+/** The bundled backup command selects POSTGRES_DB/POSTGRES_USER over its local socket.
+ * Refuse a URL that identifies another target before stopping any service. URI query options
+ * may override host/user/dbname, so they require an explicit external backup integration. */
+function requireBundledBackupTarget(
+  configuration: ComposeConfiguration,
+  database: string,
+) {
+  const target = new URL(database);
+  if (target.hostname !== "postgres") return;
+  const postgres = configuration.services.postgres?.environment;
+  const user = postgres?.POSTGRES_USER || "postgres";
+  const name = postgres?.POSTGRES_DB || user;
+  if (
+    target.search ||
+    (target.port && target.port !== "5432") ||
+    decodeURIComponent(target.username) !== user ||
+    decodeURIComponent(target.pathname.slice(1)) !== name
+  ) {
+    throw new Error(
+      "Bundled database backup cannot guarantee the resolved DATABASE_URL target: database/user/port must match the postgres service and URI query overrides are unsupported; configure a reviewed backup path before upgrading",
+    );
+  }
+}
 async function fileSha256(path: string) {
   const digest = createHash("sha256");
   for await (const chunk of createReadStream(path)) digest.update(chunk);
@@ -621,6 +644,8 @@ async function inspect(
         throw new Error(
           "Candidate must preserve the same database identity for server, worker and migration",
         );
+      requireBundledBackupTarget(before, database);
+      requireBundledBackupTarget(after, database);
     }
     plan.composeProject = before.name;
     if (options.topology === "host") await hostStopped(root, env, run);
