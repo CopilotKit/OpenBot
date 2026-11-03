@@ -12,6 +12,7 @@ import {
 import { api, type Conversation, type TranscriptMessage } from "../src/api";
 import { authClient } from "../src/auth";
 import { useLoad } from "../src/use-load";
+import { VoiceTypingButton } from "../src/voice-typing";
 export default function ConversationScreen() {
   const {
     channelId,
@@ -150,13 +151,22 @@ export default function ConversationScreen() {
           maxHeight: 140,
         }}
       />
-      <Button
-        title={sending ? "Sending…" : "Send"}
-        disabled={!conversation?.active || !agentId || !text.trim() || sending}
-        onPress={() => {
-          void send();
-        }}
-      />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <VoiceTypingButton
+          disabled={!conversation?.active || sending}
+          onText={setText}
+          text={text}
+        />
+        <Button
+          title={sending ? "Sending…" : "Send"}
+          disabled={
+            !conversation?.active || !agentId || !text.trim() || sending
+          }
+          onPress={() => {
+            void send();
+          }}
+        />
+      </View>
     </View>
   );
 }

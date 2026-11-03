@@ -12,6 +12,20 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-secure-store",
     ["expo-notifications", { defaultChannel: "openbot" }],
+    [
+      "expo-speech-recognition",
+      {
+        microphonePermission:
+          "OpenBot listens only while you tap the mic, to type what you say.",
+        speechRecognitionPermission:
+          "OpenBot turns your voice into text on this phone.",
+        androidSpeechServicePackages: [
+          "com.google.android.as",
+          "com.google.android.tts",
+          "com.google.android.googlequicksearchbox",
+        ],
+      },
+    ],
   ],
   extra: { ...(projectId ? { eas: { projectId } } : {}) },
 };
