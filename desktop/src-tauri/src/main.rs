@@ -4407,6 +4407,13 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // A signed Mac build updates itself. The window asks once at launch and installs only if
+        // the person says yes; the plugin refuses anything whose minisign signature does not match
+        // the public key compiled in from `tauri.conf.json`, so the endpoint is a place to look
+        // rather than something to trust.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Only so the window can restart into what the updater wrote.
+        .plugin(tauri_plugin_process::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
