@@ -105,6 +105,8 @@ function fixture(topology: "host" | "image" = "image") {
         },
       });
     if (command.includes("inspect"))
+      if (command.includes("{{.State.Running}}")) return "true\n";
+    if (command.includes("inspect"))
       return `${candidate.artifacts.images.server?.reference}\n`;
     if (command.includes("ps")) return "fixture-container\n";
     return "";
@@ -311,4 +313,22 @@ test("failed host readiness stops only candidate processes whose cwd belongs to 
   ).rejects.toThrow("ready");
   expect(f.calls.some((command) => command === "kill -TERM 4242")).toBe(true);
   expect(f.calls.some((command) => command.includes("pkill"))).toBe(false);
+});
+
+test("an absent worker cannot be accepted just because the server is ready", async () => {
+  const f = fixture();
+  const run: CommandRunner = async (command, options) => {
+    if (command.includes("ps"))
+      return command.includes("worker") && !command.includes("server")
+        ? ""
+        : "fixture-server\n";
+    return f.run(command, options);
+  };
+  await expect(applyLocalUpdate({ ...f.options, run })).rejects.toThrow(
+    "worker",
+  );
+  expect(
+    JSON.parse(readFileSync(join(f.root, ".openbot-release.json"), "utf8"))
+      .version,
+  ).toBe("v0.2.0");
 });

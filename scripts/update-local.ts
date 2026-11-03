@@ -909,40 +909,40 @@ export async function applyLocalUpdate(
     )
       throw new Error("Running source baseline changed during verification");
     if (options.topology === "image") {
-      const ids = (
-        await run(
-          compose(
-            ["ps", "--quiet", "server", "worker"],
-            root,
-            initial.composeProject,
-          ),
-          { cwd: root, env: candidateEnv },
+      for (const service of ["server", "worker"]) {
+        const ids = (
+          await run(
+            compose(["ps", "--quiet", service], root, initial.composeProject),
+            { cwd: root, env: candidateEnv },
+          )
         )
-      )
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean);
-      if (!ids.length)
-        throw new Error(
-          "Candidate server and worker containers were not found",
-        );
-      const references = (
-        await run(
-          ["docker", "inspect", "--format", "{{.Config.Image}}", ...ids],
-          { cwd: root },
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean);
+        if (ids.length !== 1)
+          throw new Error(
+            `Expected one running candidate ${service} container`,
+          );
+        const running = (
+          await run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", ...ids],
+            { cwd: root },
+          )
+        ).trim();
+        const reference = (
+          await run(
+            ["docker", "inspect", "--format", "{{.Config.Image}}", ...ids],
+            { cwd: root },
+          )
+        ).trim();
+        if (
+          running !== "true" ||
+          reference !== options.candidate.artifacts.images.server?.reference
         )
-      )
-        .trim()
-        .split("\n");
-      if (
-        references.some(
-          (reference) =>
-            reference !== options.candidate.artifacts.images.server?.reference,
-        )
-      )
-        throw new Error(
-          "Running container image does not match the accepted candidate digest",
-        );
+          throw new Error(
+            `Candidate ${service} is not running the accepted image digest`,
+          );
+      }
     }
     atomicJson(join(root, ACCEPTED), options.candidate);
     phase("accepted");
