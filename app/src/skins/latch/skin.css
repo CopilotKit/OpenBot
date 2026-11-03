@@ -50,6 +50,11 @@
   --latch-card-border: rgb(218 220 224 / 40%);
   --latch-row-line: rgb(218 220 224 / 20%);
   --latch-badge: #ff9500;
+  /* The ☰ menu's own iPhone-style greys. */
+  --latch-menu-sheet: #f9f9fb;
+  --latch-menu-card: #ffffff;
+  --latch-menu-grey: #8e8e93;
+  --latch-menu-line: #e5e5ea;
 }
 
 :root[data-skin="latch"].dark {
@@ -90,6 +95,10 @@
   --latch-card-border: rgb(68 71 70 / 40%);
   --latch-row-line: rgb(68 71 70 / 20%);
   --latch-badge: #ff9500;
+  --latch-menu-sheet: #141416;
+  --latch-menu-card: #1c1c1e;
+  --latch-menu-grey: #a0a0a5;
+  --latch-menu-line: #2c2c2e;
 }
 
 /* The phone's own font, as Latch uses, instead of Inter. */
@@ -238,8 +247,164 @@
 }
 
 :root[data-skin="latch"]
+  [data-slot="sidebar-content"]
   [data-slot="sidebar-menu-button"][data-status="active"],
 :root[data-skin="latch"]
+  [data-slot="sidebar-content"]
   [data-slot="sidebar-menu-button"][aria-current="page"] {
   background: var(--sidebar-accent);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * The phone: the bottom bar and the ☰ menu (see frame.tsx).
+ * ------------------------------------------------------------------------------------------- */
+
+/* About 48px, four places, an icon over a small label, the current one in the accent. */
+:root[data-skin="latch"] [data-slot="latch-bar"] {
+  display: flex;
+  flex-shrink: 0;
+  height: 3.25rem;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 0.5px solid var(--latch-card-border);
+  background: var(--card);
+}
+
+:root[data-skin="latch"] [data-slot="latch-bar-item"] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+:root[data-skin="latch"] [data-slot="latch-bar-item"] svg {
+  width: 1.375rem;
+  height: 1.375rem;
+}
+
+:root[data-skin="latch"] [data-slot="latch-bar-item"][data-status="active"] {
+  color: var(--latch-accent);
+  font-weight: 600;
+}
+
+/* The sheet: small cards 4px apart, 12px in from the sides, a grab handle on top. */
+:root[data-skin="latch"] [data-slot="latch-menu"] {
+  gap: 0.25rem;
+  max-height: 88svh;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 1.25rem 1.25rem 0 0;
+  background: var(--latch-menu-sheet);
+  box-shadow: none;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-handle"] {
+  width: 2rem;
+  height: 3px;
+  margin: 0 auto 0.5rem;
+  border-radius: 9999px;
+  background: var(--latch-menu-grey);
+  opacity: 0.5;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-card"] {
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: var(--latch-menu-card);
+}
+
+/* A card of four buttons: a 22px icon over an 11px label. */
+:root[data-skin="latch"] [data-slot="latch-menu-card"][data-grid] {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 0.5rem 0.25rem;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-tile"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem 0.25rem;
+  border-radius: 0.625rem;
+  color: var(--foreground);
+  font-size: 0.6875rem;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-tile"]:active {
+  background: var(--latch-raised);
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-tile"] svg {
+  width: 1.375rem;
+  height: 1.375rem;
+  color: var(--latch-accent);
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-tile"][data-danger],
+:root[data-skin="latch"] [data-slot="latch-menu-tile"][data-danger] svg {
+  color: var(--destructive);
+}
+
+/* A list row: 20px icon, the name, a grey line under it, an arrow; lines start under the text. */
+:root[data-skin="latch"] [data-slot="latch-menu-row"] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.875rem;
+  color: var(--foreground);
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-row"]:active {
+  background: var(--latch-raised);
+}
+
+:root[data-skin="latch"]
+  [data-slot="latch-menu-row"]
+  + [data-slot="latch-menu-row"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 2.875rem;
+  height: 0.5px;
+  background: var(--latch-menu-line);
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-row"] > svg:first-child {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  color: var(--latch-accent);
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-row-text"] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-row-name"] {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-row-note"] {
+  color: var(--latch-menu-grey);
+  font-size: 0.6875rem;
+}
+
+:root[data-skin="latch"] [data-slot="latch-menu-arrow"] {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--latch-menu-grey);
 }
