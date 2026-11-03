@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
@@ -10,14 +17,13 @@ import { standingRoleMessage } from "../src/copilot";
 import { type CredentialSecretReader, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channelAgents,
   channelMemberships,
   channels,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -50,15 +56,14 @@ afterEach(async () => {
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {
@@ -98,7 +103,24 @@ async function setAgentRun(
     configuration: Record<string, unknown>;
   },
 ) {
-  await database.update(agents).set(run).where(eq(agents.id, id));
+  // A Bot's type is fixed for its life in Intelligence, so a different type is a new Bot under the
+  // same id: the old one purged, this one made in its place with everything else it had.
+  const directory = await useTestBots();
+  const current = await directory.registry.get(id);
+  if (!current) throw new Error(`Intelligence has no Bot ${id}`);
+  if (current.type === run.type) {
+    await directory.update(id, current.version, {
+      configuration: run.configuration,
+    });
+    return;
+  }
+  await directory.registry.purge(id, `test:${crypto.randomUUID()}`);
+  await directory.create({ ...current, ...run });
+}
+
+/** When Intelligence says this Bot was deleted, or null while it is live. */
+async function deletedAtOf(id: string) {
+  return (await (await useTestBots()).registry.get(id))?.deletedAt ?? null;
 }
 
 function idsOf(loaded: Awaited<ReturnType<typeof loadAgents>>) {
@@ -303,7 +325,6 @@ describe("runtime agent loading", () => {
         channelDeletedAt: channels.deletedAt,
         memberUserId: channelMemberships.userId,
         agentId: channelAgents.agentId,
-        profileDeletedAt: agentProfiles.deletedAt,
       })
       .from(channels)
       .innerJoin(
@@ -311,10 +332,6 @@ describe("runtime agent loading", () => {
         eq(channelMemberships.channelId, channels.id),
       )
       .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, channelAgents.agentId),
-      )
       .where(eq(channels.id, deletedOnlyChannel.id));
     expect(retainedDeletedOnlyRows).toHaveLength(1);
     expect(retainedDeletedOnlyRows[0]).toMatchObject({
@@ -322,14 +339,15 @@ describe("runtime agent loading", () => {
       agentId: deletedOnlyProfile.id,
     });
     expect(retainedDeletedOnlyRows[0]?.channelDeletedAt).toBeInstanceOf(Date);
-    expect(retainedDeletedOnlyRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+    expect(
+      (await deletedAtOf(deletedOnlyProfile.id)) ?? undefined,
+    ).toBeInstanceOf(Date);
 
     const retainedLivePreservedRows = await database
       .select({
         channelDeletedAt: channels.deletedAt,
         memberUserId: channelMemberships.userId,
         agentId: channelAgents.agentId,
-        profileDeletedAt: agentProfiles.deletedAt,
       })
       .from(channels)
       .innerJoin(
@@ -337,10 +355,6 @@ describe("runtime agent loading", () => {
         eq(channelMemberships.channelId, channels.id),
       )
       .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, channelAgents.agentId),
-      )
       .where(eq(channels.id, livePreservedChannel.id));
     expect(retainedLivePreservedRows).toHaveLength(1);
     expect(retainedLivePreservedRows[0]).toMatchObject({
@@ -348,7 +362,9 @@ describe("runtime agent loading", () => {
       memberUserId: owner.id,
       agentId: preservedProfile.id,
     });
-    expect(retainedLivePreservedRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+    expect(
+      (await deletedAtOf(preservedProfile.id)) ?? undefined,
+    ).toBeInstanceOf(Date);
 
     const ownerRoster = await loadAgents(owner);
     expect(ownerRoster).not.toContainEqual(

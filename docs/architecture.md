@@ -162,8 +162,9 @@ Activity is held in the browser for the open conversation and is gone on reload.
 
 A coworker is a durable Bot profile:
 
-- `agents` stores runtime identity and endpoint/key reference.
-- `agent_profiles` stores name, title, role, owner, visibility, and deletion state.
+- Intelligence's agent registry holds the Bot: its type, endpoint or prompt and key reference,
+  name, title, role, owner, visibility, and deletion state. Each server holds every Bot in memory
+  and refreshes it from Intelligence's change announcements (`server/src/agents/bot-registry`).
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.

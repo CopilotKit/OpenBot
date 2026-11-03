@@ -60,8 +60,11 @@ export type BotDirectory = {
     changes: BotChanges,
     key?: string,
   ): Promise<Bot>;
-  /** Soft delete: the Bot stops running and leaves every roster; its history stays readable. */
-  remove(id: string, key?: string): Promise<Bot>;
+  /**
+   * Soft delete: the Bot stops running and leaves every roster; its history stays readable. With
+   * `version`, refused (BotVersionConflictError) when the Bot changed since that version.
+   */
+  remove(id: string, key?: string, version?: number): Promise<Bot>;
   restore(id: string, key?: string): Promise<Bot>;
   /** Delete for good. The purge listeners run here and on every other instance. */
   purge(id: string, key?: string): Promise<void>;
@@ -324,8 +327,8 @@ export function createBotDirectory(options: {
       return apply(await registry.update(id, version, changes, key));
     },
 
-    async remove(id, key = idempotencyKey("delete")) {
-      return apply(await registry.remove(id, key));
+    async remove(id, key = idempotencyKey("delete"), version) {
+      return apply(await registry.remove(id, key, version));
     },
 
     async restore(id, key = idempotencyKey("restore")) {

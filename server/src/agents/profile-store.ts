@@ -736,15 +736,26 @@ export function createAgentProfileStore(
     },
 
     async softDelete(actor, id) {
-      const bot = await bots().find(id);
-      const profile = await accessibleProfile(database, actor, bot);
-      if (!bot || !profile) throw new AgentNotFoundError(id);
-      requireManageable(actor, profile);
-      try {
-        await bots().remove(id);
-      } catch (error) {
-        if (error instanceof BotMissingError) throw new AgentNotFoundError(id);
-        throw error;
+      let bot = await bots().find(id);
+      for (let attempt = 1; ; attempt++) {
+        const profile = await accessibleProfile(database, actor, bot);
+        if (!bot || !profile) throw new AgentNotFoundError(id);
+        requireManageable(actor, profile);
+        try {
+          // At the version just checked, so a Bot that became protected meanwhile (a package took
+          // it over) is read again and refused rather than deleted.
+          await bots().remove(id, undefined, bot.version);
+          break;
+        } catch (error) {
+          if (error instanceof BotMissingError)
+            throw new AgentNotFoundError(id);
+          if (
+            !(error instanceof BotVersionConflictError) ||
+            attempt >= EDIT_ATTEMPTS
+          )
+            throw error;
+          bot = await bots().refresh(id);
+        }
       }
 
       /*

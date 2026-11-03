@@ -1283,8 +1283,9 @@ package change like any other and a running deployment notices it on the next bo
 **Deleting a file does not remove the Bot from a deployment that already registered it.** The next
 boot stops declaring it, but its row stays, still owned by the package, so it is still listed and
 still refused by delete as protected. Only a remote coworker whose `endpoint` is blank is retired
-automatically. Retire one that is gone from the package by setting `deleted_at` on its
-`agent_profiles` row, which is what delete does for a Bot somebody made.
+automatically. Retire one that is gone from the package by deleting it in Intelligence's agent
+registry (`DELETE /api/agents/<id>` with the deployment's project key), which is what delete does
+for a Bot somebody made.
 
 ### `channels.yaml`
 

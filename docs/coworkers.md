@@ -6,14 +6,21 @@ A coworker is a Bot with a durable profile and standing role. The role is sent w
 
 | Piece                | Table                           | Purpose                                                                                  |
 | -------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
-| Runtime agent        | `agents`                        | Type (built-in, remote AG-UI or remote Mastra), endpoint or prompt, optional key reference. |
-| Profile              | `agent_profiles`                | Name, title, role, avatar seed, owner, visibility, and soft deletion.                    |
+| Bot                  | Intelligence agent registry     | Type (built-in, remote AG-UI or remote Mastra), endpoint or prompt, key reference, name, title, role, avatar seed, owner, visibility, and soft deletion. |
 | Personal roster      | `agent_preferences`             | Per-user hidden and pinned state.                                                        |
 | Team publication     | `team_bot_publications`         | A Bot its owner has published to the whole team or to named people and groups.          |
 | Channel              | `channels`                      | Conversation membership and coworker binding.                                            |
 | Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                                               |
 
 Package-provided agents are public and ownerless. User-created coworkers are owned by the creator.
+
+A Bot lives in CopilotKit Intelligence's agent registry, not in this deployment's database. Each
+server holds every Bot in memory and keeps it current from Intelligence's change announcements, so
+a Bot made or edited on one server is seen by every other. The key an endpoint sits behind stays in
+this deployment's vault; Intelligence holds only a reference to it. The rows here that belong to a
+Bot (preferences, grants, routines, channel membership and the rest) name it by id and are removed
+when the Bot is deleted for good. A deployment upgrading from a release that kept Bots in its own
+`agents` and `agent_profiles` tables copies them into Intelligence once, at its first boot.
 
 ## Standing role
 

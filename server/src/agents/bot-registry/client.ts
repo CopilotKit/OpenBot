@@ -269,9 +269,11 @@ export function createAgentRegistryClient(settings: AgentRegistrySettings) {
     },
 
     /** Soft delete. Deleting a Bot that is already deleted returns it unchanged. */
-    async remove(id: string, key: string): Promise<Bot> {
+    async remove(id: string, key: string, version?: number): Promise<Bot> {
+      // With `version`, a Bot changed since that version is refused rather than deleted.
       const response = await request("DELETE", path(id), {
         idempotencyKey: key,
+        ...(version === undefined ? {} : { ifMatch: version }),
       });
       if (response.status !== 200) return refusal(response, id, "delete");
       return agentFrom(response);

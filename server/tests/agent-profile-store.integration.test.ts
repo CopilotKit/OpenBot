@@ -1,6 +1,13 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { authFromConfiguration } from "../src/agents/auth-header";
 import {
   AgentNotFoundError,
@@ -19,14 +26,13 @@ import { DEPLOYMENT_ROUTES } from "../src/computer/deployment-routes";
 import { createDatabase } from "../src/db/client";
 import {
   agentPreferences,
-  agentProfiles,
-  agents,
   channelAgents,
   channels,
   deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -46,9 +52,8 @@ afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
     await database.delete(channels).where(eq(channels.id, channelId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  // For good, with this deployment's rows that named them, as deleting the agents row used to.
+  await removeBots(createdAgentIds.splice(0));
   for (const packageId of createdPackageIds.splice(0)) {
     await database
       .delete(deploymentPackages)
@@ -57,6 +62,10 @@ afterEach(async () => {
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {
@@ -100,6 +109,7 @@ async function createProfileFixture(options: {
   title?: string;
   roleDescription?: string;
   avatarSeed?: string;
+  type?: "built_in" | "remote_ag_ui" | "remote_mastra";
   configuration?: Record<string, unknown>;
 }) {
   const agentId = id("seed-agent");
@@ -107,24 +117,21 @@ async function createProfileFixture(options: {
   const title = options.title ?? "Seed Assistant";
   const roleDescription = options.roleDescription ?? "Helps test profiles.";
   const avatarSeed = options.avatarSeed ?? `avatar-${randomUUID()}`;
-  await database.insert(agents).values({
+  await seedBot({
     id: agentId,
     name,
-    type: "remote_ag_ui",
+    type: options.type ?? "remote_ag_ui",
     configuration: options.configuration ?? {
       endpoint: "https://seed.example.test/ag-ui",
     },
-    packageId: options.packageId,
-  });
-  createdAgentIds.push(agentId);
-  await database.insert(agentProfiles).values({
-    agentId,
+    packageId: options.packageId ?? null,
     ownerUserId: options.owner?.id ?? null,
     title,
     roleDescription,
     avatarSeed,
     visibility: options.visibility ?? "private",
   });
+  createdAgentIds.push(agentId);
   return { agentId, name, title, roleDescription, avatarSeed };
 }
 
@@ -142,82 +149,11 @@ function expectListed(
   expect(profiles.some((profile) => profile.id === agentId)).toBe(expected);
 }
 
-function deferred() {
-  let resolve!: () => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, reject, resolve };
-}
-
-async function waitForMutationBlock(
-  applicationName: string,
-  mutationSettled: () => boolean,
-) {
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    const blockedSessions = await database.execute(sql`
-      SELECT pid
-      FROM pg_stat_activity
-      WHERE application_name = ${applicationName}
-        AND cardinality(pg_blocking_pids(pid)) > 0
-      LIMIT 1
-    `);
-    if (blockedSessions.length > 0) return true;
-    if (mutationSettled()) return false;
-  }
-  throw new Error(`Timed out observing blocked session ${applicationName}.`);
-}
-
-async function racePackageAttachment(
-  agentId: string,
-  packageId: string,
-  mutate: (namedStore: AgentProfileStore) => Promise<unknown>,
-) {
-  const applicationName = `profile_store_lock_${randomUUID()}`;
-  const namedDatabaseUrl = new URL(databaseUrl);
-  namedDatabaseUrl.searchParams.set("application_name", applicationName);
-  const namedDatabase = createDatabase(namedDatabaseUrl.toString(), TEST_POOL);
-  const namedStore = createAgentProfileStore(
-    namedDatabase,
-    managedAgentAgUiUrl,
-  );
-  const writeAcquired = deferred();
-  const releaseAttachment = deferred();
-  const attachment = database.transaction(async (transaction) => {
-    await transaction
-      .update(agents)
-      .set({ packageId })
-      .where(eq(agents.id, agentId));
-    writeAcquired.resolve();
-    await releaseAttachment.promise;
-  });
-  void attachment.catch(writeAcquired.reject);
-
-  try {
-    await writeAcquired.promise;
-    let settled = false;
-    const outcomePromise = mutate(namedStore).then(
-      (value) => {
-        settled = true;
-        return { status: "fulfilled", value } as const;
-      },
-      (reason: unknown) => {
-        settled = true;
-        return { reason, status: "rejected" } as const;
-      },
-    );
-    const blocked = await waitForMutationBlock(applicationName, () => settled);
-    releaseAttachment.resolve();
-    await attachment;
-    return { blocked, outcome: await outcomePromise };
-  } finally {
-    releaseAttachment.resolve();
-    await attachment.catch(() => undefined);
-    await namedDatabase.$client.close();
-  }
+/** The Bot as Intelligence holds it now, read past this instance's memory. */
+async function storedBot(agentId: string) {
+  const bot = await (await useTestBots()).registry.get(agentId);
+  if (!bot) throw new Error(`Intelligence has no Bot ${agentId}`);
+  return bot;
 }
 
 /**
@@ -231,11 +167,7 @@ async function agentRow(agentId: string): Promise<{
   type: string;
   configuration: { systemPrompt?: string; endpoint?: string };
 }> {
-  const [row] = await database
-    .select({ type: agents.type, configuration: agents.configuration })
-    .from(agents)
-    .where(eq(agents.id, agentId));
-  if (!row) throw new Error(`no agents row for ${agentId}`);
+  const row = await storedBot(agentId);
   return {
     type: row.type,
     configuration: (row.configuration ?? {}) as {
@@ -265,7 +197,7 @@ describe("agent profile store integration", () => {
    *
    * `registeredAgentFromRow` gives a `built_in` agent its `configuration.systemPrompt` and NO
    * standing role message, so that column is the whole of what such a coworker is ever told —
-   * `agentProfiles.roleDescription` never reaches it. These two tests exist because the pair can
+   * the Bot's role description never reaches it. These two tests exist because the pair can
    * drift silently: creating writes both, and an edit that wrote only the profile left every screen
    * showing new instructions while the Bot went on following the old ones, for good, with nothing
    * anywhere to say so.
@@ -454,15 +386,7 @@ describe("agent profile store integration", () => {
       visibility: "private",
       configuration: { endpoint: "https://preserved.example.test/ag-ui" },
     });
-    const oldTimestamp = new Date("2000-01-01T00:00:00.000Z");
-    await database
-      .update(agents)
-      .set({ updatedAt: oldTimestamp })
-      .where(eq(agents.id, source.agentId));
-    await database
-      .update(agentProfiles)
-      .set({ updatedAt: oldTimestamp })
-      .where(eq(agentProfiles.agentId, source.agentId));
+    const before = await storedBot(source.agentId);
 
     const result = await store.update(owner, source.agentId, {
       name: "Renamed Assistant",
@@ -491,34 +415,23 @@ describe("agent profile store integration", () => {
       systemOwned: false,
       deletedAt: null,
     });
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, source.agentId));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, source.agentId));
-    expect(canonical).toMatchObject({
+    const stored = await storedBot(source.agentId);
+    expect(stored).toMatchObject({
       id: source.agentId,
       name: "Renamed Assistant",
       type: "remote_ag_ui",
       configuration: { endpoint: "https://moved.example.test/ag-ui" },
       packageId: null,
-    });
-    expect(profile).toMatchObject({
       ownerUserId: owner.id,
       title: "Updated Title",
       roleDescription: "Updated role description.",
       avatarSeed: source.avatarSeed,
       visibility: "public",
       deletedAt: null,
+      version: before.version + 1,
     });
-    expect(canonical?.updatedAt.getTime()).toBeGreaterThan(
-      oldTimestamp.getTime(),
-    );
-    expect(profile?.updatedAt.getTime()).toBeGreaterThan(
-      oldTimestamp.getTime(),
+    expect(stored.updatedAt.getTime()).toBeGreaterThan(
+      before.updatedAt.getTime(),
     );
   });
 
@@ -578,7 +491,26 @@ describe("agent profile store integration", () => {
     ).rejects.toBeInstanceOf(ProtectedAgentError);
   });
 
-  test("serializes update authorization against concurrent package attachment", async () => {
+  /*
+   * Somebody else changes the Bot between this store reading it and writing it: a package takes it
+   * over. There is no row lock to wait on any more, because the Bot is in Intelligence; the write is
+   * made at the version the store checked, Intelligence refuses it as stale, and the store reads the
+   * Bot again and refuses on what it now is. The change made behind its back goes straight to the
+   * registry, so this instance's memory may or may not have heard of it yet; either way the answer is
+   * the same.
+   */
+  async function attachBehindTheStore(agentId: string, packageId: string) {
+    const registry = (await useTestBots()).registry;
+    const current = await storedBot(agentId);
+    await registry.update(
+      agentId,
+      current.version,
+      { packageId },
+      `test:${randomUUID()}`,
+    );
+  }
+
+  test("refuses an update when a package took the Bot over since it was read", async () => {
     const owner = await createUser();
     const deploymentPackage = await createPackage();
     const source = await createProfileFixture({
@@ -587,35 +519,20 @@ describe("agent profile store integration", () => {
       title: "Original Title",
       roleDescription: "Original role.",
     });
+    await profileById(owner, source.agentId);
+    await attachBehindTheStore(source.agentId, deploymentPackage.id);
 
-    const { blocked, outcome } = await racePackageAttachment(
-      source.agentId,
-      deploymentPackage.id,
-      (namedStore) =>
-        namedStore.update(owner, source.agentId, {
-          name: "Racing Rename",
-          title: "Racing Title",
-          roleDescription: "Racing role.",
-          visibility: "public",
-        }),
-    );
-
-    expect(outcome.status).toBe("rejected");
-    expect(blocked).toBe(true);
-    if (outcome.status === "rejected") {
-      expect(outcome.reason).toBeInstanceOf(ProtectedAgentError);
-    }
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, source.agentId));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, source.agentId));
-    expect(canonical?.name).toBe(source.name);
-    expect(canonical?.packageId).toBe(deploymentPackage.id);
-    expect(profile).toMatchObject({
+    await expect(
+      store.update(owner, source.agentId, {
+        name: "Racing Rename",
+        title: "Racing Title",
+        roleDescription: "Racing role.",
+        visibility: "public",
+      }),
+    ).rejects.toBeInstanceOf(ProtectedAgentError);
+    expect(await storedBot(source.agentId)).toMatchObject({
+      name: source.name,
+      packageId: deploymentPackage.id,
       deletedAt: null,
       roleDescription: source.roleDescription,
       title: source.title,
@@ -623,32 +540,19 @@ describe("agent profile store integration", () => {
     });
   });
 
-  test("serializes soft-delete authorization against concurrent package attachment", async () => {
+  test("refuses a delete when a package took the Bot over since it was read", async () => {
     const owner = await createUser();
     const deploymentPackage = await createPackage();
     const source = await createProfileFixture({ owner });
+    await profileById(owner, source.agentId);
+    await attachBehindTheStore(source.agentId, deploymentPackage.id);
 
-    const { blocked, outcome } = await racePackageAttachment(
-      source.agentId,
-      deploymentPackage.id,
-      (namedStore) => namedStore.softDelete(owner, source.agentId),
-    );
-
-    expect(outcome.status).toBe("rejected");
-    expect(blocked).toBe(true);
-    if (outcome.status === "rejected") {
-      expect(outcome.reason).toBeInstanceOf(ProtectedAgentError);
-    }
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, source.agentId));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, source.agentId));
-    expect(canonical?.packageId).toBe(deploymentPackage.id);
-    expect(profile?.deletedAt).toBeNull();
+    await expect(
+      store.softDelete(owner, source.agentId),
+    ).rejects.toBeInstanceOf(ProtectedAgentError);
+    const stored = await storedBot(source.agentId);
+    expect(stored.packageId).toBe(deploymentPackage.id);
+    expect(stored.deletedAt).toBeNull();
   });
 
   test("allows an admin to update and soft delete a user-owned profile", async () => {
@@ -802,11 +706,8 @@ describe("agent profile store integration", () => {
     createdAgentIds.push(duplicate.id);
 
     expect(duplicate.hasAuth).toBe(false);
-    const [row] = await database
-      .select({ configuration: agents.configuration })
-      .from(agents)
-      .where(eq(agents.id, duplicate.id));
-    expect(authFromConfiguration(row?.configuration)).toBeNull();
+    const row = await storedBot(duplicate.id);
+    expect(authFromConfiguration(row.configuration)).toBeNull();
   });
 
   test("duplicates a coworker with its own endpoint on a deployment with no managed Bot", async () => {
@@ -826,9 +727,11 @@ describe("agent profile store integration", () => {
   test("refuses to duplicate an endpoint-less coworker with no managed Bot to fall back to", async () => {
     const unmanagedStore = createAgentProfileStore(database, undefined);
     const owner = await createUser();
+    // Neither an address nor an instruction to run on: a Bot in the box whose prompt is empty.
     const source = await createProfileFixture({
       owner,
-      configuration: {},
+      type: "built_in",
+      configuration: { systemPrompt: "" },
     });
 
     await expect(
@@ -836,7 +739,7 @@ describe("agent profile store integration", () => {
     ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
   });
 
-  test("soft deletes a profile from reads and lists while retaining its raw rows", async () => {
+  test("soft deletes a profile from reads and lists while Intelligence keeps the Bot", async () => {
     const owner = await createUser();
     const source = await createProfileFixture({ owner, visibility: "public" });
 
@@ -845,23 +748,15 @@ describe("agent profile store integration", () => {
     expect(await store.get(owner, source.agentId)).toBeNull();
     expectListed(await store.list(owner), source.agentId, false);
     expectListed(await store.list(owner, true), source.agentId, false);
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, source.agentId));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, source.agentId));
-    expect(canonical?.id).toBe(source.agentId);
-    expect(profile?.agentId).toBe(source.agentId);
-    expect(profile?.deletedAt).toBeInstanceOf(Date);
+    const stored = await storedBot(source.agentId);
+    expect(stored.id).toBe(source.agentId);
+    expect(stored.deletedAt).toBeInstanceOf(Date);
     await expect(
       store.setHidden(owner, source.agentId, true),
     ).rejects.toBeInstanceOf(AgentNotFoundError);
   });
 
-  test("rolls back canonical creation when the profile insert fails", async () => {
+  test("leaves no Bot behind when Intelligence refuses the create", async () => {
     const owner = await createUser();
     const name = `Rollback ${randomUUID()}`;
 
@@ -873,11 +768,10 @@ describe("agent profile store integration", () => {
         visibility: "public",
       } as unknown as CreateAgentInput),
     ).rejects.toThrow();
-    const rows = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.name, name));
-    expect(rows).toHaveLength(0);
+    const { bots: everything } = await (await useTestBots()).registry.all({
+      includeDeleted: true,
+    });
+    expect(everything.filter((bot) => bot.name === name)).toHaveLength(0);
   });
 
   /*
@@ -931,10 +825,7 @@ describe("agent profile store integration", () => {
       hidden: false,
       deletedAt: null,
     });
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, created.id));
+    const canonical = await storedBot(created.id);
     expect(canonical).toMatchObject({
       id: created.id,
       name: input.name,

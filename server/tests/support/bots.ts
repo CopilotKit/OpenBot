@@ -18,7 +18,11 @@ import {
   installBotDirectory,
 } from "../../src/agents/bot-registry/directory";
 import { removeBotLocalRows } from "../../src/agents/bot-registry/local-rows";
-import type { Bot, BotType } from "../../src/agents/bot-registry/types";
+import type {
+  Bot,
+  BotChanges,
+  BotType,
+} from "../../src/agents/bot-registry/types";
 import { createDatabase } from "../../src/db/client";
 import { testDatabaseUrl } from "./database";
 
@@ -134,4 +138,21 @@ export async function deleteBot(id: string): Promise<Bot> {
 export async function removeBots(ids: readonly string[]): Promise<void> {
   const directory = await useTestBots();
   for (const id of ids) await directory.purge(id);
+}
+
+/** The Bot as Intelligence holds it now, past this process's memory. Throws when there is none. */
+export async function storedBot(id: string): Promise<Bot> {
+  const bot = await (await useTestBots()).registry.get(id);
+  if (!bot) throw new Error(`Intelligence has no Bot ${id}`);
+  return bot;
+}
+
+/**
+ * Change a Bot the way an edit does, at its current version, through the directory so this process
+ * sees the change at once. For a test that used to `update` the `agents` or `agent_profiles` row.
+ */
+export async function changeBot(id: string, changes: BotChanges): Promise<Bot> {
+  const directory = await useTestBots();
+  const current = await storedBot(id);
+  return directory.update(id, current.version, changes);
 }
