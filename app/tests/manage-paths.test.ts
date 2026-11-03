@@ -35,11 +35,12 @@ describe("where the pages a person manages live", () => {
     const paths = managePaths("personal");
     expect(href(paths.plugins())).toBe("/connections");
     expect(href(paths.plugin("notion"))).toBe("/connections/notion");
+    // Every Bot has every tool here, so one tool or one Bot opens the app's own page.
     expect(href(paths.pluginTool("notion", "search"))).toBe(
-      "/connections/notion/tools/search",
+      "/connections/notion",
     );
     expect(href(paths.pluginBot("notion", "bot-1"))).toBe(
-      "/connections/notion/bots/bot-1",
+      "/connections/notion",
     );
     expect(href(paths.brokerDirectory("composio"))).toBe(
       "/connections/browse/composio",

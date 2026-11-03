@@ -1,3 +1,4 @@
+import { readToolName } from "@openbot/shared/tool-name";
 import {
   IconApps,
   IconBox,
@@ -42,6 +43,7 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -49,7 +51,6 @@ import {
   type GrantedPlugins,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
-import { readToolName } from "@openbot/shared/tool-name";
 import { queryClient } from "@/query-client";
 
 /**
@@ -95,9 +96,12 @@ export function connectorCount(plugins: GrantedPlugins): number {
 
 /** What this Bot may reach: your skills on it, everything granted to it, and who it may ask. */
 export function AccessSections({ agent }: { agent: AgentProfile }) {
+  // Every Bot has every connected app in the personal edition, so there is no switch per app here.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
     <>
-      {agent.mine ? <YourApps agent={agent} /> : null}
+      {agent.mine && !personal ? <YourApps agent={agent} /> : null}
       {agent.mine ? <YourSkills agentId={agent.id} /> : null}
       <Granted agentId={agent.id} mine={agent.mine} />
       <HandoffPanel agentId={agent.id} />

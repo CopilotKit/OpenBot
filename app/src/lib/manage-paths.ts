@@ -18,16 +18,14 @@ export function managePaths(edition: "team" | "personal") {
       plugins: () => linkOptions({ to: "/connections" }),
       plugin: (key: string) =>
         linkOptions({ to: "/connections/$key", params: { key } }),
-      pluginTool: (key: string, tool: string) =>
-        linkOptions({
-          to: "/connections/$key/tools/$tool",
-          params: { key, tool },
-        }),
-      pluginBot: (key: string, agentId: string) =>
-        linkOptions({
-          to: "/connections/$key/bots/$agentId",
-          params: { key, agentId },
-        }),
+      /*
+       * The app's own page for both: every Bot has every tool of a connected app here, so there is
+       * no page for one tool or one Bot. See `personal-defaults.ts` on the server.
+       */
+      pluginTool: (key: string, _tool: string) =>
+        linkOptions({ to: "/connections/$key", params: { key } }),
+      pluginBot: (key: string, _agentId: string) =>
+        linkOptions({ to: "/connections/$key", params: { key } }),
       brokerDirectory: (directory: BrokerDirectory) =>
         directory === "composio"
           ? linkOptions({ to: "/connections/browse/composio" })

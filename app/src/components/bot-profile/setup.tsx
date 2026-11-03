@@ -61,6 +61,7 @@ import {
   agentCapabilitiesQueryOptions,
 } from "@/lib/agents/queries";
 import { isComposing } from "@/lib/composing";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { queryClient } from "@/query-client";
 
@@ -86,6 +87,9 @@ const TEXT_FIELDS: {
 
 /** Who a Bot is and where it runs. Editable by whoever may manage it; read-only for everyone else. */
 export function SetupSections({ agent }: { agent: AgentProfile }) {
+  // One person and one shared computer: nobody to see a Bot, and no computer of its own to give it.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const update = useMutation(updateAgentMutationOptions(queryClient));
   const [editing, setEditing] = useState<TextField | null>(null);
   const save = (patch: Partial<AgentFormValues>) =>
@@ -125,16 +129,20 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
               </Item>
             </Fragment>
           ))}
-          <Separator />
-          <VisibilityRow
-            agent={agent}
-            onSave={(visibility) => save({ visibility })}
-          />
-          <Separator />
-          <IsolatedRow
-            agent={agent}
-            onSave={(isolated) => save({ isolated })}
-          />
+          {personal ? null : (
+            <>
+              <Separator />
+              <VisibilityRow
+                agent={agent}
+                onSave={(visibility) => save({ visibility })}
+              />
+              <Separator />
+              <IsolatedRow
+                agent={agent}
+                onSave={(isolated) => save({ isolated })}
+              />
+            </>
+          )}
           {agent.systemOwned ? (
             <>
               <Separator />

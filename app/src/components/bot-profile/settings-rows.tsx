@@ -82,7 +82,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const research = useQuery(proactiveSettingsQueryOptions());
   const approvals = useQuery(approvalInboxOptions());
 
-  const rows: Row[] = [
+  const allRows: Row[] = [
     {
       to: "/bots/$agentId/responsibilities",
       title: "Responsibilities",
@@ -187,6 +187,22 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       summary: setupSummary(agent),
     },
   ];
+  /*
+   * FOUR ROWS IN THE PERSONAL EDITION. Approval rules and Responsibilities are sections of the
+   * access page there, renamed What it can do, so one page answers what a Bot can do. Reaching you
+   * is Slack, Teams and text, which the personal edition doesn't have.
+   */
+  const rows = personal
+    ? allRows.flatMap((row): Row[] =>
+        row.to === "/bots/$agentId/access"
+          ? [{ ...row, title: "What it can do" }]
+          : row.to === "/bots/$agentId/responsibilities" ||
+              row.to === "/bots/$agentId/reach" ||
+              row.to === "/bots/$agentId/approvals"
+            ? []
+            : [row],
+      )
+    : allRows;
 
   return (
     <PageSection title="Settings for this Bot">
