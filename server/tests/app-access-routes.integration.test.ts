@@ -22,7 +22,6 @@ import {
   mcpTools,
   mcpUserCredentials,
   pluginGrants,
-  sharedUseApprovals,
   teamBotConsents,
   teamBotPublications,
   users,
@@ -32,6 +31,7 @@ import type { BrokerApp } from "../src/plugins/broker";
 import type { AppAccessRequestRecord } from "../src/plugins/plugin-store/app-access";
 import { MAX_PENDING_REQUESTS } from "../src/plugins/route-groups/app-access";
 import { createPluginRoutes } from "../src/plugins/routes";
+import { policy } from "../src/policy/cache";
 import { exposureOf } from "../src/plugins/shared-use";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import {
@@ -41,6 +41,7 @@ import {
 } from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { storedConnectionApprovals, useTestPolicy } from "./support/policy";
 import { stubBroker } from "./support/stub-broker";
 
 /**
@@ -319,9 +320,8 @@ async function clearApps() {
   await database
     .delete(brokeredConnections)
     .where(like(brokeredConnections.app, `%${suite}%`));
-  await database
-    .delete(sharedUseApprovals)
-    .where(eq(sharedUseApprovals.agentId, bot));
+  for (const approval of await storedConnectionApprovals({ agentId: bot }))
+    await policy().deleteConnectionApproval(approval);
   await database.delete(mcpServers).where(ourServers);
   await database
     .delete(mcpUserCredentials)
@@ -333,6 +333,7 @@ async function clearApps() {
 }
 
 beforeAll(async () => {
+  await useTestPolicy();
   for (const user of [person, other, admin, maker])
     await database.insert(users).values({
       id: user,
@@ -837,11 +838,8 @@ describe("answering a request", () => {
       .from(pluginGrants)
       .where(eq(pluginGrants.agentId, bot));
     expect(grants.map((grant) => grant.ref).sort()).toEqual([`${SLACK}/LIST`]);
-    const [approval] = await database
-      .select()
-      .from(sharedUseApprovals)
-      .where(eq(sharedUseApprovals.agentId, bot));
-    expect(approval?.serverId).toBe(SLACK);
+    const [approval] = await storedConnectionApprovals({ agentId: bot });
+    expect(approval?.connectionId).toBe(SLACK);
     expect(eventsOf("app_access.approved")[0]?.payload).toMatchObject({
       request: request.id,
       kind: "grant",

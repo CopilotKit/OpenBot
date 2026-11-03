@@ -1,5 +1,12 @@
 // server/tests/arcade-sibling-collateral.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -10,6 +17,12 @@ import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 /*
  * SCOPING. `audit_events` is append-only and `brokered_connections` is long-lived, so every

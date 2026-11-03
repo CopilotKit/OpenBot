@@ -12,6 +12,7 @@ import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `approval-${randomUUID()}`;
@@ -20,6 +21,7 @@ const owner = `${prefix}-owner`,
 const store = createApprovalStore(database);
 const keys: string[] = [];
 beforeAll(async () => {
+  await useTestPolicy();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: stranger, email: `${stranger}@example.test` },

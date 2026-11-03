@@ -10,7 +10,7 @@ import type {
   LearningSettings,
   PersonalLearningSharing,
 } from "@openbot/shared/learning";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createEnterpriseStore } from "../src/admin/settings-store";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createApp } from "../src/app";
@@ -22,7 +22,6 @@ import {
   standingRoleMessage,
 } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
-import { enterpriseSettings } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import { createLearningRuntime } from "../src/learning/runtime";
@@ -33,6 +32,7 @@ import {
 } from "../src/learning/sharing";
 import { skillArchive } from "./fixtures/learned-skill-archive";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
 
 /*
@@ -290,7 +290,10 @@ const offered = async (
 const sharingAudits = () =>
   audits.filter((event) => event.eventType.startsWith("learning."));
 
-const sharingRow = eq(enterpriseSettings.key, "skill_sharing");
+/** Back to never saved: the default an administrator has not changed. */
+const forgetSharing = async () => {
+  await (await useTestPolicy()).patchSettings({ skillSharing: false });
+};
 let modelUrl: string | undefined;
 
 beforeAll(async () => {
@@ -298,8 +301,7 @@ beforeAll(async () => {
     { id: ada, email: `${ada}@example.test` },
     { id: grace, email: `${grace}@example.test` },
   ]);
-  // Never saved: the default an administrator has not changed.
-  await database.delete(enterpriseSettings).where(sharingRow);
+  await forgetSharing();
   modelUrl = process.env.OPENAI_BASE_URL;
   process.env.OPENAI_BASE_URL = await model.start();
 });
@@ -309,7 +311,7 @@ afterAll(async () => {
   else process.env.OPENAI_BASE_URL = modelUrl;
   await model.stop();
   remote.stop(true);
-  await database.delete(enterpriseSettings).where(sharingRow);
+  await forgetSharing();
   await database.delete(users).where(inArray(users.id, [ada, grace]));
   await database.$client.close();
 });

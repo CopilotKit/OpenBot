@@ -78,6 +78,7 @@ import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
 
@@ -607,6 +608,7 @@ async function consent(serverRowId: string, actionName: string) {
 }
 
 beforeAll(async () => {
+  await useTestPolicy();
   // The administrator walking this journey is a real `users` row, because the attempt rows minted
   // along the way key to one on `actor_id` (with `user_id` held equal to it) and cascade from it.
   await seedPeople(database, [ADMIN]);

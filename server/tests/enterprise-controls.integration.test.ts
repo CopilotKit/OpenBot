@@ -26,10 +26,7 @@ import { createDatabase } from "../src/db/client";
 import {
   actionRecords,
   auditEvents,
-  capabilitySettings,
-  enterpriseSettings,
   modelUsage,
-  networkPolicies,
   revokedAccess,
   scimGroups,
   sessions,
@@ -40,11 +37,13 @@ import {
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { resetTestPolicy, useTestPolicy } from "./support/policy";
 
 /**
- * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
- * stores, the LISTEN/NOTIFY snapshot, the HTTP gate, the in-place store guards, and SCIM through
- * Better Auth's own handler. Needs a database at the current TS schema (TEST_DATABASE_URL).
+ * The enterprise controls against a real PostgreSQL and a real Intelligence, through the same seams
+ * production uses: the stores, the snapshot Intelligence's announcements keep current, the HTTP gate,
+ * the in-place store guards, and SCIM through Better Auth's own handler. Needs a database at the
+ * current TS schema (TEST_DATABASE_URL) and the test Intelligence (support/bots.ts).
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const auditStore = createAuditStore(database);
@@ -82,9 +81,7 @@ const provider: ComputerProvider = {
 let controls: EnterpriseControls;
 
 async function clean() {
-  await database.delete(capabilitySettings);
-  await database.delete(enterpriseSettings);
-  await database.delete(networkPolicies);
+  await resetTestPolicy();
   await database
     .delete(actionRecords)
     .where(like(actionRecords.botId, `ent-bot-${suite}%`));
@@ -102,6 +99,7 @@ const RECORDER_RULE = {
 };
 
 beforeAll(async () => {
+  await useTestPolicy();
   await clean();
   await database.insert(users).values([
     { ...admin, name: "Admin" },
@@ -281,7 +279,7 @@ describe("capability switches", () => {
     expect(bound).toEqual(["+1555"]);
   });
 
-  test("the snapshot follows NOTIFY, so the computer boundary sees a change at once", async () => {
+  test("the snapshot follows a change at once, so the computer boundary sees it", async () => {
     await put(asAdmin, "/api/admin/enterprise/capabilities", {
       scopeKind: "organization",
       capability: "cloudBrowser",
@@ -772,7 +770,7 @@ describe("Skill sharing", () => {
     );
     expect(saved.status).toBe(200);
     expect(await skillSharingAllowed()).toBe(true);
-    // The saving replica refreshes its snapshot before answering; the others on the NOTIFY.
+    // The saving replica refreshes its snapshot before answering; the others on Intelligence's announcement.
     expect(skillSharingInSnapshot()).toBe(true);
     const [row] = await database
       .select()

@@ -63,6 +63,7 @@ import { CHECK_IN_OPENING } from "../src/proactive/window";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /*
  * Check-ins and pings through the real path: real Postgres, the real proactive and delivery stores,
@@ -125,6 +126,7 @@ let calendar: ProactiveSetting;
 const FAR = new Date("2100-01-01T00:00:00Z");
 
 beforeAll(async () => {
+  await useTestPolicy();
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });

@@ -1,5 +1,12 @@
 // server/tests/shared-use-arcade-urls.test.ts
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
@@ -8,6 +15,12 @@ import type { BrokerProvider } from "../src/plugins/access";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);

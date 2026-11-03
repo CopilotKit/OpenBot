@@ -15,7 +15,6 @@ import {
   brokeredConnections,
   mcpServers,
   pluginGrants,
-  sharedUseApprovals,
 } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
@@ -23,6 +22,7 @@ import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { storedConnectionApprovals, useTestPolicy } from "./support/policy";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -102,6 +102,7 @@ const modes = createAccountModeSwitch({
 });
 
 beforeEach(async () => {
+  await useTestPolicy();
   failRevokeFor = null;
   failCreateRule = false;
   revoked.length = 0;
@@ -198,12 +199,9 @@ describe("switching to Shared", () => {
       .where(eq(mcpServers.id, app));
     expect(row?.accountMode).toBe("shared");
     expect(row?.sharedVendorUserId).toMatch(/^openbot-deployment:acme:.+/);
-    expect(
-      await database
-        .select()
-        .from(sharedUseApprovals)
-        .where(eq(sharedUseApprovals.serverId, app)),
-    ).toHaveLength(1);
+    expect(await storedConnectionApprovals({ connectionId: app })).toHaveLength(
+      1,
+    );
     expect(rules).toEqual([
       expect.objectContaining({
         toolRef: `${app}/*`,

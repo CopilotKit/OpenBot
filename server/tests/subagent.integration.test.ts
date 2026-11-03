@@ -31,7 +31,6 @@ import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  approvalPreferences,
   approvalRequests,
   mcpServers,
   mcpTools,
@@ -43,6 +42,7 @@ import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /*
  * A Bot giving part of its work to a subagent, through the real path a person's chat turn takes: real
@@ -360,6 +360,7 @@ function saying(body: AgUiRequest, words: string) {
  * ---------------------------------------------------------------------------------------------- */
 
 beforeAll(async () => {
+  await useTestPolicy();
   llm.on({ predicate: () => true }, async (request) => {
     requests.push(request);
     return script(request);
@@ -551,9 +552,12 @@ beforeEach(async () => {
   searching.most = 0;
   searching.until = 1;
   script = () => ({ content: "Done." });
-  await database
-    .delete(approvalPreferences)
-    .where(eq(approvalPreferences.ownerUserId, person));
+  // This person's approval preferences back to the defaults, as never having saved any.
+  await (await useTestPolicy()).client.deleteApprovalPreferences(
+    person,
+    `test-reset:${randomUUID()}`,
+  );
+  await (await useTestPolicy()).resync();
 });
 
 afterAll(async () => {

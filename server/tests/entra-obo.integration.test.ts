@@ -38,6 +38,7 @@ import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { createRequestActor } from "../src/request-actor";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
 
 /**
@@ -518,6 +519,8 @@ async function backgroundCall(
 }
 
 beforeAll(async () => {
+  // Sign-in and Bot reset read the organization policy (support/policy.ts).
+  await useTestPolicy();
   const pair = await generateKeyPair("RS256", { extractable: true });
   signingKey = pair.privateKey;
   // As Entra publishes its keys: a kid and a use, and no `alg`.

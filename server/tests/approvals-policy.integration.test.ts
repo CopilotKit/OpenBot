@@ -9,19 +9,16 @@ import {
 import { createApprovalStore } from "../src/approvals/store";
 import type { ApprovalCandidate } from "../src/approvals/types";
 import { createDatabase } from "../src/db/client";
-import {
-  approvalTeamRules,
-  approvalTeamSettings,
-  auditEvents,
-} from "../src/db/schema";
+import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { resetTestPolicy, useTestPolicy } from "./support/policy";
 
 /**
- * Rules, team settings, hand-offs and the audit trail, against real tables. Needs a database with
- * the TS schema applied (the coordinator's generated migration, or `drizzle-kit push` on a scratch
- * database). The team settings row is deployment-wide, so this file restores it afterwards.
+ * Rules, team settings, hand-offs and the audit trail, against real tables and a real Intelligence,
+ * which holds the rules and settings (organization policy). The team settings are the project's, so
+ * this file returns the project's policy to the defaults before and after.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -30,28 +27,17 @@ const owner = `${prefix}-owner`;
 const admin = `${prefix}-admin`;
 const store = createApprovalStore(database);
 const service = createApprovalService(store);
-const teamRuleIds: string[] = [];
-let priorTeam: typeof approvalTeamSettings.$inferSelect | undefined;
 
 beforeAll(async () => {
+  await useTestPolicy();
+  await resetTestPolicy();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: admin, email: `${admin}@example.test` },
   ]);
-  [priorTeam] = await database
-    .select()
-    .from(approvalTeamSettings)
-    .where(eq(approvalTeamSettings.id, "team"));
 });
 afterAll(async () => {
-  if (teamRuleIds.length)
-    await database
-      .delete(approvalTeamRules)
-      .where(inArray(approvalTeamRules.id, teamRuleIds));
-  await database
-    .delete(approvalTeamSettings)
-    .where(eq(approvalTeamSettings.id, "team"));
-  if (priorTeam) await database.insert(approvalTeamSettings).values(priorTeam);
+  await resetTestPolicy();
   await database.delete(workItems).where(
     and(
       eq(workItems.kind, "approval.resume"),
@@ -115,7 +101,6 @@ test("personal and team rules layer, the strictest wins, and switching custom ru
     scope: "*",
     behaviour: "ask",
   });
-  teamRuleIds.push(locked.id);
   expect(await suspends(service.gate(candidate()))).toBeTrue();
 
   await service.setTeamSettings(admin, { customRulesEnabled: false });
@@ -251,7 +236,6 @@ test("a saved rule is changed in place, only by its owner, and the change is on 
     scope: "*",
     behaviour: "ask",
   });
-  teamRuleIds.push(locked.id);
   await expect(
     service.updateTeamRule(admin, locked.id, { behaviour: "hand_off" }),
   ).resolves.toMatchObject({ behaviour: "hand_off" });

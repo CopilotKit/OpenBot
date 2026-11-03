@@ -2,6 +2,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -19,7 +20,13 @@ import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 /*
  * Every Shared-app surface was once built, tested through its own factory, and never mounted: the
