@@ -483,9 +483,6 @@ const copiedSchedules = await copyLocalSchedulesToIntelligence(
 );
 if (copiedSchedules.some((step) => step.kind === "copied"))
   await scheduleDirectory.resync();
-// Intelligence purges a purged Bot's schedules with it; the instance that purged it forgets them at
-// once rather than at the next announcement or full read.
-botDirectory.onPurged(() => scheduleDirectory.resync());
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);

@@ -77,9 +77,7 @@ export function useTestBots(): Promise<BotDirectory> {
     // Every Bot's routines, check-ins and responsibilities live in Intelligence too, and much of what
     // a Bot test drives reads them (a channel's work, a Bot's activity), so the schedule directory
     // starts with the Bots, as it does in the server.
-    const schedules = await (await import("./schedules")).useTestSchedules();
-    // As the server does: Intelligence purges a purged Bot's schedules, and this process forgets them.
-    directory.onPurged(() => schedules.resync());
+    await (await import("./schedules")).useTestSchedules();
     return directory;
   })();
   return started;

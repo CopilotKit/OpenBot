@@ -39,6 +39,8 @@ const migrations = join(import.meta.dir, "..", "drizzle");
 const created: string[] = [];
 const opened: Database[] = [];
 const copiedOwners: string[] = [];
+/** Each test makes a database and applies every migration to it, which takes seconds under load. */
+const SLOW = 60_000;
 
 function client() {
   return createScheduleClient(testIntelligence());
@@ -69,7 +71,7 @@ async function freshDeployment(): Promise<Database> {
 afterEach(async () => {
   for (const database of opened.splice(0)) await database.$client.close();
   for (const owner of copiedOwners.splice(0)) await client().purgeOwner(owner);
-});
+}, SLOW);
 
 afterAll(async () => {
   const admin = postgres(administrative.href, { max: 1, onnotice: () => {} });
@@ -202,168 +204,188 @@ async function legacyResponsibilities(database: Database) {
 }
 
 describe("copying a deployment's responsibilities into Intelligence", () => {
-  test("every responsibility, trigger, binding, event and run arrives as it was, and the copy records itself", async () => {
-    const database = await freshDeployment();
-    const legacy = await legacyResponsibilities(database);
+  test(
+    "every responsibility, trigger, binding, event and run arrives as it was, and the copy records itself",
+    async () => {
+      const database = await freshDeployment();
+      const legacy = await legacyResponsibilities(database);
 
-    const outcomes = await copyLocalSchedulesToIntelligence(
-      database,
-      client(),
-      responsibilityCopySteps(database),
-    );
-    expect(outcomes).toEqual([
-      { name: "schedules:responsibilities", kind: "copied", local: 2 },
-      { name: "schedules:responsibility-triggers", kind: "copied", local: 1 },
-      {
-        name: "schedules:responsibility-source-bindings",
-        kind: "copied",
-        local: 1,
-      },
-      { name: "schedules:responsibility-events", kind: "copied", local: 2 },
-      { name: "schedules:responsibility-runs", kind: "copied", local: 2 },
-    ]);
+      const outcomes = await copyLocalSchedulesToIntelligence(
+        database,
+        client(),
+        responsibilityCopySteps(database),
+      );
+      expect(outcomes).toEqual([
+        { name: "schedules:responsibilities", kind: "copied", local: 2 },
+        { name: "schedules:responsibility-triggers", kind: "copied", local: 1 },
+        {
+          name: "schedules:responsibility-source-bindings",
+          kind: "copied",
+          local: 1,
+        },
+        { name: "schedules:responsibility-events", kind: "copied", local: 2 },
+        { name: "schedules:responsibility-runs", kind: "copied", local: 2 },
+      ]);
 
-    const watching = await client().get("responsibilities", legacy.watching.id);
-    expect(watching).toMatchObject({
-      ownerUserId: legacy.owner,
-      agentId: legacy.watching.agentId,
-      channelId: legacy.watching.channelId,
-      threadId: legacy.watching.threadId,
-      title: "Triage deploys",
-      status: "active",
-      progress: "Read three deploy logs.",
-      lastResult: "Deploy 41 went out clean.",
-      subscriptions: [{ source: "github", eventType: "push" }],
-      completedAt: null,
-      deletedAt: null,
-    });
-    expect(watching?.createdAt.toISOString()).toBe(
-      legacy.watching.createdAt.toISOString(),
-    );
-    const finished = await client().get("responsibilities", legacy.finished.id);
-    expect(finished?.status).toBe("completed");
-    expect(finished?.completedAt?.toISOString()).toBe(
-      legacy.finished.completedAt.toISOString(),
-    );
+      const watching = await client().get(
+        "responsibilities",
+        legacy.watching.id,
+      );
+      expect(watching).toMatchObject({
+        ownerUserId: legacy.owner,
+        agentId: legacy.watching.agentId,
+        channelId: legacy.watching.channelId,
+        threadId: legacy.watching.threadId,
+        title: "Triage deploys",
+        status: "active",
+        progress: "Read three deploy logs.",
+        lastResult: "Deploy 41 went out clean.",
+        subscriptions: [{ source: "github", eventType: "push" }],
+        completedAt: null,
+        deletedAt: null,
+      });
+      expect(watching?.createdAt.toISOString()).toBe(
+        legacy.watching.createdAt.toISOString(),
+      );
+      const finished = await client().get(
+        "responsibilities",
+        legacy.finished.id,
+      );
+      expect(finished?.status).toBe("completed");
+      expect(finished?.completedAt?.toISOString()).toBe(
+        legacy.finished.completedAt.toISOString(),
+      );
 
-    // The secret stays in the vault; the trigger and binding name it.
-    expect(
-      await client().get("responsibility-triggers", legacy.trigger.id),
-    ).toMatchObject({
-      responsibilityId: legacy.watching.id,
-      kind: "webhook",
-      config: { kind: "webhook", filter: { eventTypes: ["deploy"] } },
-      credentialRef: legacy.trigger.credentialId,
-      enabled: false,
-    });
-    expect(
-      await client().get("responsibility-source-bindings", legacy.binding.id),
-    ).toMatchObject({
-      repository: "acme/deploys",
-      credentialRef: legacy.binding.credentialId,
-    });
-
-    const events = (
-      await client().all("responsibility-events", { ownerUserId: legacy.owner })
-    ).items;
-    expect(events.map((event) => event.externalId).sort()).toEqual(
-      legacy.events.map((event) => event.externalId).sort(),
-    );
-    // A delivery that arrived before the upgrade is still a duplicate after it.
-    expect(
-      events.find((event) => event.id === legacy.events[0]?.id)?.payload,
-    ).toEqual({ ref: "refs/heads/main" });
-
-    const runs = (
-      await client().all("responsibility-runs", {
+      // The secret stays in the vault; the trigger and binding name it.
+      expect(
+        await client().get("responsibility-triggers", legacy.trigger.id),
+      ).toMatchObject({
         responsibilityId: legacy.watching.id,
-      })
-    ).items;
-    const byId = new Map(runs.map((run) => [run.id, run]));
-    expect(byId.get(legacy.runs[0]?.id ?? "")).toMatchObject({
-      status: "succeeded",
-      replyText: "Deploy 41 went out clean.",
-    });
-    // A run waiting on a person before the upgrade still waits on them after it.
-    expect(byId.get(legacy.runs[1]?.id ?? "")).toMatchObject({
-      status: "waiting",
-      finishedAt: null,
-      waiting: legacy.waiting,
-    });
+        kind: "webhook",
+        config: { kind: "webhook", filter: { eventTypes: ["deploy"] } },
+        credentialRef: legacy.trigger.credentialId,
+        enabled: false,
+      });
+      expect(
+        await client().get("responsibility-source-bindings", legacy.binding.id),
+      ).toMatchObject({
+        repository: "acme/deploys",
+        credentialRef: legacy.binding.credentialId,
+      });
 
-    const recorded = await database
-      .select()
-      .from(intelligenceCopies)
-      .where(eq(intelligenceCopies.name, "schedules:responsibility-runs"));
-    expect(recorded[0]?.copied).toBe(2);
-
-    // Recorded, so it never runs again: a responsibility later purged in Intelligence stays purged.
-    await client().purge("responsibilities", legacy.finished.id);
-    const again = await copyLocalSchedulesToIntelligence(
-      database,
-      client(),
-      responsibilityCopySteps(database),
-    );
-    expect(again.every((step) => step.kind === "done-before")).toBe(true);
-    expect(
-      await client().get("responsibilities", legacy.finished.id),
-    ).toBeNull();
-  });
-
-  test("two replicas copying at once copy each record once and both finish", async () => {
-    const database = await freshDeployment();
-    const legacy = await legacyResponsibilities(database);
-    const [first, second] = await Promise.all([
-      copyLocalSchedulesToIntelligence(
-        database,
-        client(),
-        responsibilityCopySteps(database),
-      ),
-      copyLocalSchedulesToIntelligence(
-        database,
-        client(),
-        responsibilityCopySteps(database),
-      ),
-    ]);
-    expect(first).toHaveLength(5);
-    expect(second).toHaveLength(5);
-    expect(
-      (await client().all("responsibilities", { ownerUserId: legacy.owner }))
-        .items,
-    ).toHaveLength(2);
-    expect(
-      (
-        await client().all("responsibility-runs", {
-          responsibilityId: legacy.watching.id,
-        })
-      ).items,
-    ).toHaveLength(2);
-    expect(
-      (
+      const events = (
         await client().all("responsibility-events", {
           ownerUserId: legacy.owner,
         })
-      ).items,
-    ).toHaveLength(2);
-  });
+      ).items;
+      expect(events.map((event) => event.externalId).sort()).toEqual(
+        legacy.events.map((event) => event.externalId).sort(),
+      );
+      // A delivery that arrived before the upgrade is still a duplicate after it.
+      expect(
+        events.find((event) => event.id === legacy.events[0]?.id)?.payload,
+      ).toEqual({ ref: "refs/heads/main" });
 
-  test("a copy Intelligence does not fully hold stops the boot, loudly, and records nothing", async () => {
-    const database = await freshDeployment();
-    await legacyResponsibilities(database);
-    const real = client();
-    const short = {
-      importRecords: async (
-        collection: Parameters<typeof real.importRecords>[0],
-        records: Parameters<typeof real.importRecords>[1],
-      ) => (await real.importRecords(collection, records)) - 1,
-    };
-    await expect(
-      copyLocalSchedulesToIntelligence(
+      const runs = (
+        await client().all("responsibility-runs", {
+          responsibilityId: legacy.watching.id,
+        })
+      ).items;
+      const byId = new Map(runs.map((run) => [run.id, run]));
+      expect(byId.get(legacy.runs[0]?.id ?? "")).toMatchObject({
+        status: "succeeded",
+        replyText: "Deploy 41 went out clean.",
+      });
+      // A run waiting on a person before the upgrade still waits on them after it.
+      expect(byId.get(legacy.runs[1]?.id ?? "")).toMatchObject({
+        status: "waiting",
+        finishedAt: null,
+        waiting: legacy.waiting,
+      });
+
+      const recorded = await database
+        .select()
+        .from(intelligenceCopies)
+        .where(eq(intelligenceCopies.name, "schedules:responsibility-runs"));
+      expect(recorded[0]?.copied).toBe(2);
+
+      // Recorded, so it never runs again: a responsibility later purged in Intelligence stays purged.
+      await client().purge("responsibilities", legacy.finished.id);
+      const again = await copyLocalSchedulesToIntelligence(
         database,
-        short,
+        client(),
         responsibilityCopySteps(database),
-      ),
-    ).rejects.toBeInstanceOf(ScheduleCopyMismatchError);
-    expect(await database.select().from(intelligenceCopies)).toEqual([]);
-  });
+      );
+      expect(again.every((step) => step.kind === "done-before")).toBe(true);
+      expect(
+        await client().get("responsibilities", legacy.finished.id),
+      ).toBeNull();
+    },
+    SLOW,
+  );
+
+  test(
+    "two replicas copying at once copy each record once and both finish",
+    async () => {
+      const database = await freshDeployment();
+      const legacy = await legacyResponsibilities(database);
+      const [first, second] = await Promise.all([
+        copyLocalSchedulesToIntelligence(
+          database,
+          client(),
+          responsibilityCopySteps(database),
+        ),
+        copyLocalSchedulesToIntelligence(
+          database,
+          client(),
+          responsibilityCopySteps(database),
+        ),
+      ]);
+      expect(first).toHaveLength(5);
+      expect(second).toHaveLength(5);
+      expect(
+        (await client().all("responsibilities", { ownerUserId: legacy.owner }))
+          .items,
+      ).toHaveLength(2);
+      expect(
+        (
+          await client().all("responsibility-runs", {
+            responsibilityId: legacy.watching.id,
+          })
+        ).items,
+      ).toHaveLength(2);
+      expect(
+        (
+          await client().all("responsibility-events", {
+            ownerUserId: legacy.owner,
+          })
+        ).items,
+      ).toHaveLength(2);
+    },
+    SLOW,
+  );
+
+  test(
+    "a copy Intelligence does not fully hold stops the boot, loudly, and records nothing",
+    async () => {
+      const database = await freshDeployment();
+      await legacyResponsibilities(database);
+      const real = client();
+      const short = {
+        importRecords: async (
+          collection: Parameters<typeof real.importRecords>[0],
+          records: Parameters<typeof real.importRecords>[1],
+        ) => (await real.importRecords(collection, records)) - 1,
+      };
+      await expect(
+        copyLocalSchedulesToIntelligence(
+          database,
+          short,
+          responsibilityCopySteps(database),
+        ),
+      ).rejects.toBeInstanceOf(ScheduleCopyMismatchError);
+      expect(await database.select().from(intelligenceCopies)).toEqual([]);
+    },
+    SLOW,
+  );
 });
