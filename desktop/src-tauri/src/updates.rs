@@ -216,23 +216,36 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Value, String> {
     Ok(v)
 }
 
+pub fn distribution_defaults(
+    id: Option<&str>,
+    repository: Option<&str>,
+    channel: Option<&str>,
+) -> Distribution {
+    let repository = repository
+        .filter(|v| !v.is_empty())
+        .unwrap_or("CopilotKit/OpenBot");
+    Distribution {
+        distribution_id: id.filter(|v| !v.is_empty()).unwrap_or(repository).into(),
+        repository: repository.into(),
+        channel: channel.filter(|v| !v.is_empty()).unwrap_or("stable").into(),
+        intelligence_capabilities: Vec::new(),
+    }
+}
+
+pub fn compiled_distribution() -> Distribution {
+    distribution_defaults(
+        option_env!("OPENBOT_DISTRIBUTION_ID"),
+        option_env!("OPENBOT_RELEASE_REPOSITORY"),
+        option_env!("OPENBOT_RELEASE_CHANNEL"),
+    )
+}
+
 pub fn distribution(root: &Path) -> Result<Distribution, String> {
     let policy = match std::fs::read(root.join(DISTRIBUTION)) {
         Ok(bytes) => {
             serde_json::from_slice(&bytes).map_err(|e| format!("invalid {DISTRIBUTION}: {e}"))?
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Distribution {
-            distribution_id: option_env!("OPENBOT_DISTRIBUTION_ID")
-                .unwrap_or("openbot")
-                .into(),
-            repository: option_env!("OPENBOT_RELEASE_REPOSITORY")
-                .unwrap_or("CopilotKit/OpenBot")
-                .into(),
-            channel: option_env!("OPENBOT_RELEASE_CHANNEL")
-                .unwrap_or("stable")
-                .into(),
-            intelligence_capabilities: Vec::new(),
-        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => compiled_distribution(),
         Err(e) => return Err(e.to_string()),
     };
     if policy.distribution_id.trim().is_empty()
@@ -977,6 +990,27 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn updates_native_distribution_defaults_conform_to_publisher() {
+        let vectors: Vec<Value> = serde_json::from_slice(include_bytes!(
+            "../test-fixtures/publisher-distribution.json"
+        ))
+        .unwrap();
+        for vector in vectors {
+            let actual = distribution_defaults(
+                vector["distributionId"].as_str(),
+                vector["repository"].as_str(),
+                vector["channel"].as_str(),
+            );
+            assert_eq!(
+                json!({"id":actual.distribution_id,"repository":actual.repository,"channel":actual.channel}),
+                vector["expected"],
+                "{}",
+                vector["name"]
+            );
+        }
+    }
+
     #[test]
     fn updates_accepts_the_common_release_fixture_and_refuses_unknown_fields() {
         let mut manifest =

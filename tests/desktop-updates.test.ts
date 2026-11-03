@@ -1,8 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shellUpdateManifest } from "../desktop/scripts/shell-update-manifest";
+import {
+  shellDistribution,
+  shellUpdateManifest,
+} from "../desktop/scripts/shell-update-manifest";
+import { readReleaseConfiguration } from "../scripts/release-manifest";
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -101,4 +106,71 @@ test("shell build entrypoint refuses absent trust before native work without exp
   expect(result.stderr.toString()).not.toContain(
     "synthetic-private-test-material",
   );
+});
+
+test("official and fork desktop identities conform to actual publisher defaults", () => {
+  const root = join(import.meta.dir, "..");
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  }).trim();
+  const fixture: {
+    name: string;
+    repository?: string;
+    distributionId?: string;
+    channel?: string;
+    expected: { id: string; repository: string; channel: string };
+  }[] = JSON.parse(
+    readFileSync(
+      join(root, "desktop/src-tauri/test-fixtures/publisher-distribution.json"),
+      "utf8",
+    ),
+  );
+  const manifest = JSON.parse(
+    readFileSync(join(root, "shared/fixtures/releases/candidate.json"), "utf8"),
+  );
+  for (const vector of fixture) {
+    const configured = {
+      OPENBOT_RELEASE_REPOSITORY: vector.repository,
+      OPENBOT_DISTRIBUTION_ID: vector.distributionId,
+      OPENBOT_RELEASE_CHANNEL: vector.channel,
+    };
+    const producer = readReleaseConfiguration(
+      {
+        ...configured,
+        GITHUB_REPOSITORY: vector.repository ?? vector.expected.repository,
+        GITHUB_SHA: commit,
+        VERSION: "v0.3.0",
+        OPENBOT_UPSTREAM_COMMIT: commit,
+        OPENBOT_RELEASE_POLICY: JSON.stringify({
+          compatibility: manifest.compatibility,
+          upgrade: manifest.upgrade,
+        }),
+      },
+      root,
+    );
+    expect({
+      id: producer.distributionId,
+      repository: producer.repository,
+      channel: producer.channel,
+    }).toEqual(vector.expected);
+    expect(shellDistribution(configured)).toEqual(vector.expected);
+  }
+  const githubExpression = (value: string) =>
+    ["$", "{{ ", value, " }}"].join("");
+  for (const file of ["desktop.yml", "desktop-signing.yml"]) {
+    const workflow = readFileSync(
+      join(root, ".github/workflows", file),
+      "utf8",
+    );
+    expect(workflow).toContain(
+      `OPENBOT_DISTRIBUTION_ID: ${githubExpression("vars.OPENBOT_DISTRIBUTION_ID || github.repository")}`,
+    );
+    expect(workflow).toContain(
+      `OPENBOT_RELEASE_REPOSITORY: ${githubExpression("github.repository")}`,
+    );
+    expect(workflow).toContain(
+      `OPENBOT_RELEASE_CHANNEL: ${githubExpression("vars.OPENBOT_RELEASE_CHANNEL || 'stable'")}`,
+    );
+  }
 });

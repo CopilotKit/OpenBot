@@ -1,7 +1,10 @@
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { shellUpdateManifest } from "./shell-update-manifest";
+import {
+  shellDistribution,
+  shellUpdateManifest,
+} from "./shell-update-manifest";
 
 const desktop = fileURLToPath(new URL("..", import.meta.url));
 const bundle = join(desktop, "src-tauri/target/release/bundle");
@@ -37,11 +40,7 @@ const url = `${base.replace(/\/$/, "")}/${encodeURIComponent(basename(artifact))
 const manifest = shellUpdateManifest(
   version,
   [{ target, url, signature: await readFile(signaturePath, "utf8") }],
-  {
-    id: process.env.OPENBOT_DISTRIBUTION_ID ?? "openbot",
-    repository: process.env.OPENBOT_RELEASE_REPOSITORY ?? "CopilotKit/OpenBot",
-    channel: process.env.OPENBOT_RELEASE_CHANNEL ?? "stable",
-  },
+  shellDistribution(process.env),
 );
 await mkdir(output, { recursive: true });
 await copyFile(artifact, join(output, basename(artifact)));

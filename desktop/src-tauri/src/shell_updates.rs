@@ -70,7 +70,8 @@ pub fn unavailable(detail: impl Into<String>) -> Status {
 /// Tauri's artifact signature is checked by the plugin. Additional publisher identity is matched
 /// to the shell build's own independent distribution policy, never to mutable runtime settings.
 pub fn validate_identity(manifest: &Value) -> Result<(), String> {
-    let expected = json!({"id":option_env!("OPENBOT_DISTRIBUTION_ID").unwrap_or("openbot"),"repository":option_env!("OPENBOT_RELEASE_REPOSITORY").unwrap_or("CopilotKit/OpenBot"),"channel":option_env!("OPENBOT_RELEASE_CHANNEL").unwrap_or("stable")});
+    let distribution = crate::updates::compiled_distribution();
+    let expected = json!({"id":distribution.distribution_id,"repository":distribution.repository,"channel":distribution.channel});
     if manifest["distribution"] != expected {
         return Err("native shell update publisher identity does not match this build".into());
     }
@@ -130,7 +131,8 @@ mod tests {
     }
     #[test]
     fn shell_updates_do_not_accept_runtime_candidate_policy_as_shell_trust() {
-        let expected = json!({"distribution":{"id":option_env!("OPENBOT_DISTRIBUTION_ID").unwrap_or("openbot"),"repository":option_env!("OPENBOT_RELEASE_REPOSITORY").unwrap_or("CopilotKit/OpenBot"),"channel":option_env!("OPENBOT_RELEASE_CHANNEL").unwrap_or("stable")}});
+        let distribution = crate::updates::compiled_distribution();
+        let expected = json!({"distribution":{"id":distribution.distribution_id,"repository":distribution.repository,"channel":distribution.channel}});
         validate_identity(&expected).unwrap();
         assert!(validate_identity(
             &json!({"distribution":{"id":"other","repository":"other/fork","channel":"stable"}})

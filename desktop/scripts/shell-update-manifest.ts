@@ -1,6 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
+export function shellDistribution(env: Record<string, string | undefined>) {
+  const repository = env.OPENBOT_RELEASE_REPOSITORY || "CopilotKit/OpenBot";
+  return {
+    id: env.OPENBOT_DISTRIBUTION_ID || repository,
+    repository,
+    channel: env.OPENBOT_RELEASE_CHANNEL || "stable",
+  };
+}
+
 type Platform = { target: string; url: string; signature: string };
 export function shellUpdateManifest(
   version: string,
@@ -69,11 +78,11 @@ if (import.meta.main) {
       signature: await readFile(values.signature?.[index] ?? "", "utf8"),
     })),
   );
-  const result = shellUpdateManifest(values.version, platforms, {
-    id: process.env.OPENBOT_DISTRIBUTION_ID ?? "openbot",
-    repository: process.env.OPENBOT_RELEASE_REPOSITORY ?? "CopilotKit/OpenBot",
-    channel: process.env.OPENBOT_RELEASE_CHANNEL ?? "stable",
-  });
+  const result = shellUpdateManifest(
+    values.version,
+    platforms,
+    shellDistribution(process.env),
+  );
   await writeFile(values.output, `${JSON.stringify(result, null, 2)}\n`, {
     flag: "wx",
   });
