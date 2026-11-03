@@ -1,0 +1,263 @@
+import { describe, expect, test } from "bun:test";
+import { ThreadAlreadyRunningError } from "@copilotkit/runtime/v2";
+import { TASK_ENDING, TASK_FRAME } from "@openbot/shared/task-brief";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { ThreadLockBusyError } from "@openbot/toolkit/lease";
+import {
+  HEADLESS_WAITING_FALLBACK,
+  type TurnRunner,
+} from "@openbot/toolkit/run-turn";
+import { TaskTurnTimeoutError } from "../src/tasks/state";
+import { createTaskTurn } from "../src/tasks/turn";
+
+const SCOPE = {
+  ownerUserId: "owner",
+  channelId: "task-channel",
+  agentId: "assistant",
+  threadId: "task-thread",
+};
+const ASK = "Prepare notes for the Hearth & Co visit.";
+
+function turnWith(
+  runTurn: TurnRunner,
+  options: { final?: boolean; signal?: AbortSignal } = {},
+) {
+  const said: { text: string; agentId: string | null; id: string }[] = [];
+  const busy: boolean[] = [];
+  const run = createTaskTurn({
+    channels: {
+      recordActivity: async (_actor, channelId, activity, source) => {
+        expect(channelId).toBe(SCOPE.channelId);
+        said.push({
+          text: activity.text,
+          agentId: activity.agentId,
+          id: source?.id ?? "",
+        });
+      },
+      signalBusy: async (threadId, value) => {
+        expect(threadId).toBe(SCOPE.threadId);
+        busy.push(value);
+      },
+    },
+    actorFor: async (id) => ({ id, role: "user" }),
+    runTurn,
+  });
+  return {
+    said,
+    busy,
+    start: () =>
+      run(SCOPE, {
+        runId: "task-1",
+        askId: "task-1",
+        text: ASK,
+        signal: options.signal ?? new AbortController().signal,
+        final: options.final ?? false,
+      }),
+  };
+}
+
+describe("a task's turn", () => {
+  test("is the person's ask in the task's conversation, which reads as busy once it starts", async () => {
+    const asked: Parameters<TurnRunner>[0][] = [];
+    const turn = turnWith(async (input) => {
+      asked.push(input);
+      return { replyText: "Here are your notes." };
+    });
+    await turn.start();
+    expect(asked).toHaveLength(1);
+    // The person's message is their ask alone: the frame goes to the model as an instruction.
+    expect(asked[0]).toMatchObject({
+      ...SCOPE,
+      instruction: ASK,
+      userMessage: { id: "task-1", role: "user", content: ASK },
+      initiator: { kind: "person" },
+    });
+    // The conversation reads the ask, then the Bot's reply.
+    expect(turn.said).toEqual([
+      { text: ASK, agentId: null, id: "task-1:input" },
+      {
+        text: "Here are your notes.",
+        agentId: "assistant",
+        id: "task-1:reply",
+      },
+    ]);
+    expect(turn.busy).toEqual([true, false]);
+  });
+
+  test("tells the Bot it is a task and how to end, once per task, so its last line reads plainly and asks only when it must", async () => {
+    const asked: Parameters<TurnRunner>[0][] = [];
+    const turn = turnWith(async (input) => {
+      asked.push(input);
+      return { replyText: "Booked." };
+    });
+    await turn.start();
+    // One id for every turn of the task, so its conversation holds the guidance once.
+    // Named to the model for what it is, not as a skill the person picked.
+    expect(asked[0]?.systemMessages).toEqual([
+      {
+        id: "task:frame",
+        role: "system",
+        content: TASK_FRAME.join("\n"),
+        description: "This conversation is a task",
+      },
+      {
+        id: "task:ending",
+        role: "system",
+        content: TASK_ENDING,
+        description: "How to end your reply in this task",
+      },
+    ]);
+    expect(TASK_ENDING).toContain("Ask them a question only if");
+    expect(TASK_ENDING).toContain('written to the person as "you"');
+    expect(TASK_ENDING).toContain("Don't label");
+  });
+
+  test("records a long reply by how it ends, its next step, not how it starts", async () => {
+    const opening = "I read Danny's email and the thread before it. ".repeat(6);
+    const turn = turnWith(async () => ({
+      replyText: `${opening}\n\n- Draft A: short\n- Draft B: warm\n\nShall I send draft A? It keeps the Friday date.`,
+    }));
+    await turn.start();
+    expect(turn.said.at(-1)).toEqual({
+      text: "Shall I send draft A?",
+      agentId: "assistant",
+      id: "task-1:reply",
+    });
+  });
+
+  test("answers whether its reply asks, read from the whole reply rather than the line it keeps", async () => {
+    const question = `Shall I send draft A to Danny, ${"with the Friday date and the studio address, ".repeat(6)}or wait for you?`;
+    const turn = turnWith(async () => ({
+      replyText: `Both drafts are ready.\n\n${question}`,
+    }));
+    expect(await turn.start()).toEqual({
+      messageId: "task-1:reply",
+      asks: true,
+    });
+    // The line kept is cut short, before its question mark.
+    expect(turn.said.at(-1)?.text).toEndWith("…");
+  });
+
+  test("that stops for Allow once ends waiting on the person, not failed", async () => {
+    const turn = turnWith(async () => {
+      throw new HeadlessToolSuspension(
+        "This action is waiting for your approval.",
+        { kind: "approval", requestId: "a" },
+      );
+    });
+    await turn.start();
+    expect(turn.said.at(-1)).toEqual({
+      text: "This action is waiting for your approval.",
+      agentId: "assistant",
+      id: "task-1:waiting",
+    });
+  });
+
+  test("that stops with no words of its own says in plain words what it waits for", async () => {
+    for (const [kind, line] of [
+      ["approval", "Waiting for you to allow a step."],
+      ["question", "Waiting for your answer."],
+    ] as const) {
+      const turn = turnWith(async () => {
+        throw new HeadlessToolSuspension(HEADLESS_WAITING_FALLBACK, {
+          kind,
+          requestId: "a",
+        });
+      });
+      await turn.start();
+      expect(turn.said.at(-1)?.text).toBe(line);
+    }
+  });
+
+  test("that fails says so to the queue, and nothing in the conversation while it has a run left", async () => {
+    const turn = turnWith(async () => {
+      throw new Error("The model is unavailable.");
+    });
+    await expect(turn.start()).rejects.toThrow("The model is unavailable.");
+    expect(turn.said).toEqual([
+      { text: ASK, agentId: null, id: "task-1:input" },
+    ]);
+  });
+
+  test("refused the conversation's lock on its last run, it says nothing: it never ran", async () => {
+    const error = new ThreadLockBusyError(new Error("Thread lock denied"));
+    const turn = turnWith(
+      async () => {
+        throw error;
+      },
+      { final: true },
+    );
+    await expect(turn.start()).rejects.toBe(error);
+    expect(turn.said).toEqual([
+      { text: ASK, agentId: null, id: "task-1:input" },
+    ]);
+  });
+
+  test("refused by the runner on its last run while a run before it winds down, it says nothing: it never ran", async () => {
+    const error = new ThreadAlreadyRunningError();
+    const turn = turnWith(
+      async () => {
+        throw error;
+      },
+      { final: true },
+    );
+    await expect(turn.start()).rejects.toBe(error);
+    expect(turn.said).toEqual([
+      { text: ASK, agentId: null, id: "task-1:input" },
+    ]);
+  });
+
+  test("stopped at its time limit on its last run, it says it took too long, not that it was cancelled", async () => {
+    const controller = new AbortController();
+    const turn = turnWith(
+      async ({ signal }) => {
+        controller.abort(new TaskTurnTimeoutError(7 * 60_000));
+        expect(signal?.aborted).toBe(true);
+        throw new Error("The headless turn was cancelled.");
+      },
+      { final: true, signal: controller.signal },
+    );
+    await expect(turn.start()).rejects.toThrow("cancelled");
+    expect(turn.said.at(-1)).toEqual({
+      text: "I couldn't finish this: the run took longer than 7 minutes.",
+      agentId: "assistant",
+      id: "task-1:failed",
+    });
+  });
+
+  test("that fails on its last run says so in the conversation, in plain words", async () => {
+    const turn = turnWith(
+      async () => {
+        throw new Error("The routine's turn was stopped after 300s.");
+      },
+      { final: true },
+    );
+    await expect(turn.start()).rejects.toThrow("stopped after 300s");
+    expect(turn.said.at(-1)).toEqual({
+      text: "I couldn't finish this: the run took longer than 5 minutes.",
+      agentId: "assistant",
+      id: "task-1:failed",
+    });
+  });
+
+  test("with files or skills and nothing to read them with, fails rather than dropping them", async () => {
+    const run = createTaskTurn({
+      channels: {
+        recordActivity: async () => {},
+        signalBusy: async () => {},
+      },
+      actorFor: async (id) => ({ id, role: "user" }),
+      runTurn: async () => ({ replyText: "unreachable" }),
+    });
+    await expect(
+      run(SCOPE, {
+        runId: "task-2",
+        askId: "task-2",
+        text: "",
+        attachmentIds: ["12345678-1234-4123-8123-123456789abc"],
+        signal: new AbortController().signal,
+        final: false,
+      }),
+    ).rejects.toThrow("Files and skills are unavailable for this task.");
+  });
+});
