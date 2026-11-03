@@ -112,6 +112,17 @@ export const auditEventTypes = [
    * endpoint that dies mid-answer from one that never answers at all.
    */
   "agent.stream_stalled",
+  /**
+   * A built-in Bot's run refused before its model call, because it would have sent more tools than
+   * the model accepts in one request (Chat Completions: 128).
+   *
+   * The person is told in the run; this is for the admin, who is the one who can fix it and the one
+   * who would otherwise never hear of it. Rare since tool search: an app's tools wait behind a
+   * search and are not counted, so this fires only when what a Bot needs on every step is itself
+   * past the limit. Payload: `bot`, `tools` (what the run would have sent, including the runtime's
+   * and the client's own), `limit`, `provider`.
+   */
+  "agent.tool_limit_refused",
   /*
    * Which of a Bot's tools were put in front of the model for one run, and why those.
    *
