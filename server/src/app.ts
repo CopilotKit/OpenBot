@@ -539,6 +539,8 @@ export function createApp(
        * a local trial, and an operator cannot forget to set it.
        */
       localEvaluation: config.singleUser,
+      // Which product this is: the app shows the personal edition's screens instead of Admin.
+      edition: config.edition,
       transcription: Boolean(config.transcription),
       voice: Boolean(config.voice),
       /*

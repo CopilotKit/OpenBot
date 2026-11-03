@@ -49,6 +49,8 @@ describe("runtime capabilities", () => {
       selfHostBanner: true,
       // Off: this deployment has an identity provider, so it is not somebody's local trial.
       localEvaluation: false,
+      // Which product this is. The app trims its screens for the personal edition.
+      edition: "team",
       transcription: false,
       voice: false,
       // Names only. The sign-in screen reads this to know which buttons to draw.
@@ -76,6 +78,7 @@ describe("runtime capabilities", () => {
       "generativeUi",
       "selfHostBanner",
       "localEvaluation",
+      "edition",
       "transcription",
       "voice",
       "authProviders",
