@@ -8,8 +8,9 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 1. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
-2. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Use
-   `dry_run` first if you want to see the version and the notes without opening anything.
+2. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
+   `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
+   opening anything.
 3. Review the pull request it opens. It updates `package.json`, promotes the changelog's
    `## Unreleased` heading to `## X.Y.Z`, and moves the Helm chart's `appVersion` and the desktop
    Cargo package/lockfile to the same version. Tauri reads its version directly from the root
@@ -17,6 +18,12 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 4. Merge it. That is the publish.
 
 Merging is the trigger, so a release is always a reviewed commit on `main`.
+
+`kind` chooses what the run releases: `stable` (the default), `rc`, `beta` or `final`. A plain
+`patch`, `minor` or `major` from `main` is a `stable` release and works as described above. The
+other three are for a release candidate or beta, and are described under
+[Release candidates and betas](#release-candidates-and-betas) and
+[Finishing a candidate](#finishing-a-candidate).
 
 ## Desktop build versions
 
@@ -72,8 +79,11 @@ The build records what it actually bundled in `build-version.json`: the CLI's so
 exact version and integrity hash, and Node's exact version and SHA-256. A `latest` or a preview URL
 is therefore readable afterwards as the version it turned into.
 
-Cutting a release candidate turns `latest` into that exact version in the file, so the candidate
-and the release built from it carry the same CLI. A final release cannot change the file.
+Cutting a release candidate or beta pins `cli` to an exact version when it names an npm dist-tag,
+whether `latest`, `next` or another. The tag is replaced with the version it resolves to at that
+moment. An exact version and a `https://pkg.pr.new/...` URL are left as they are, because neither
+can move. So the candidate and the release built from it carry the same CLI. A final release cannot
+change the file.
 
 To assemble the bundle locally, from the repository root:
 
@@ -87,19 +97,133 @@ to `desktop/src-tauri/cli-bundle`.
 On a tree without `desktop/src-tauri/tauri.bundled-cli.conf.json`, which is `main` today, CI
 bundles nothing and the installer carries no CLI.
 
+## Internal builds
+
+An internal build is an installer for the team to try, made from any branch. Nothing is published:
+no release, no tag, and nothing on the Releases page.
+
+Run **Internal build** from the Actions tab and choose the branch. Once the workflow is on the
+default branch, the same run starts from a terminal:
+
+```sh
+gh workflow run internal-build.yml --ref my-branch
+```
+
+The run builds the images for that commit, then a Mac (Apple Silicon) installer and a Windows (x64)
+installer. The images are pushed tagged `sha-<commit>` and never `latest`, so the release images
+stay where they are.
+
+Each installer is pinned to what the run built:
+
+- its deployment version is `internal-<sha12>`, the first twelve characters of the commit
+- its images are the `sha-<commit>` images of that commit, by digest
+
+A pinned installer never asks for `releases/latest`. Opening it installs that exact build, and it
+replaces whatever deployment is installed on the machine, keeping its data. OpenBot's database does
+not migrate backwards, so switching to a build with older migrations is the tester's risk.
+
+The installers are run artifacts, kept 30 days. Share them by linking to them from the run
+summary, which lists one link per installer. The summary names the commit and the manifest version,
+and each installer's own section there names its CLI and Node versions. Mac builds are ad-hoc signed
+and Windows builds are unsigned, so the first open needs an exception on both. On a Mac, use the
+exception described under [Desktop build versions](#desktop-build-versions). On Windows, SmartScreen
+warns about an unknown publisher: choose **More info**, then **Run anyway**. For a signed Windows
+build, see [Windows signing](windows-signing.md).
+
+A CLI is bundled only on a tree that has `desktop/src-tauri/tauri.bundled-cli.conf.json`. On a
+branch without it the installer carries no CLI, and the summary says "no CLI bundled".
+
+Opening a customer installer afterwards moves the deployment to the latest release, keeping its
+data. A customer build leaves a deployment alone only when that deployment was not pinned.
+
+## Release candidates and betas
+
+A release candidate or beta is a version people can try before it is the release. It is published
+where testers can find it, and nowhere that would hand it to everybody else.
+
+Run **Create release PR** with `kind` set to `rc` or `beta`. `bump` matters only for the first one,
+because it chooses the version the candidate is heading for. After that the version keeps counting,
+so `0.3.0-rc.1` is followed by `0.3.0-rc.2`.
+
+The first run, started from `main`, cuts the branch `release/X.Y` and opens a release PR into it.
+`from` is optional and only applies to this first run. It names the commit on `main` to cut from, as
+a full commit SHA or a branch name, and the default is the tip of `main`. A short SHA does not work.
+The run refuses a commit that is not on `main`.
+
+Every later candidate runs from `release/X.Y`, by choosing that branch in **Use workflow from**. A
+second run from `main` is refused, because the branch already exists. A `from` on a later run is
+refused too.
+
+A fix goes onto `release/X.Y` through its own pull request, and then becomes the next candidate.
+Merging the release PR is the publish, the same as for a release from `main`. The publish workflow
+also runs on pushes to `release/**`, and decides from the merged pull request that a push is a
+candidate, as it does for `main`. A stable release is never cut from a release branch.
+
+Each candidate or beta is published as a GitHub prerelease. It is never Latest, so customers who
+check for the latest release do not see it. Its images are tagged with the version and
+`sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
+to it, pinned to that version and to those images, the same as an internal build is. The Mac one is
+ad-hoc signed and the Windows one is unsigned, so the first open needs the exceptions described
+under [Internal builds](#internal-builds).
+
+A candidate does not promote the changelog. Its notes are what is under `## Unreleased` at that
+moment, and the final promotes them. A candidate also fixes the CLI choice, as described under
+[Which Intelligence CLI an installer carries](#which-intelligence-cli-an-installer-carries).
+
+## Finishing a candidate
+
+Run **Create release PR** with `kind` set to `final`, from `release/X.Y`. A final started from
+`main` is refused, with a message telling you to run it from the release branch. `bump` has no
+effect, because the version is the candidate's version without its suffix.
+
+The tip of `release/X.Y` must carry a candidate tag. If the branch has moved on since its last
+candidate, the run stops with "Cut a new candidate first". A final ships what a candidate was
+tested as, so it is cut from the commit a candidate was published from and nothing newer.
+
+The final release PR promotes the changelog and moves the same version files as any release. When
+it merges, the publish workflow compares the release against its candidate before it builds
+anything, and fails if anything else changed. The allowed difference is:
+
+- the `version` in `package.json`
+- `CHANGELOG.md`
+- `appVersion` in `charts/openbot/Chart.yaml`
+- the `openbot-desktop` version in `desktop/src-tauri/Cargo.toml` and `Cargo.lock`
+
+A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CLI the candidate
+pinned.
+
+The final is a normal release: it becomes Latest, its images are tagged `latest`, and its
+installers are attached. It becomes Latest only when no newer release already is. A patch from
+`main` can be released while a newer final is out, and that does not move Latest back.
+
+The smoke journey is still required before a final. See
+[The one thing CI cannot do](#the-one-thing-ci-cannot-do). The PR body asks for the result, as it
+does for any stable release.
+
+Afterwards the publish workflow opens a PR titled "Merge release/X.Y back into main". The version,
+the changelog section and every fix made on the release branch exist only there until it merges.
+A PR opened by a workflow does not start CI, so push an empty commit to the release branch or close
+and reopen the PR before merging. If the merge conflicts, a person resolves it.
+
 ## What merging does
 
-`publish-release.yml` runs on every push to `main` and starts by deciding whether the commit is a
-release at all. It asks the API for the pull request that produced the commit, and requires that the
-head branch matches `release/publish/vX.Y.Z`, that the branch is in this repository, and that the
-pull request carries the `release` label. A fork can name a branch anything; it cannot add a label.
+`publish-release.yml` runs on every push to `main` and to `release/**`, and starts by deciding
+whether the commit is a release at all. It asks the API for the pull request that produced the
+commit, and requires that the head branch matches `release/publish/vX.Y.Z`, with a `-rc.N` or
+`-beta.N` suffix for a candidate or beta, that the branch is in this repository, and that the pull
+request carries the `release` label. A fork can name a branch anything; it cannot add a label.
+
+A stable release merges into `main` or `release/X.Y`. A candidate or beta merges only into the
+`release/X.Y` its version names. A labelled release PR merged anywhere else fails the run. A plain
+`patch`, `minor` or `major` from `main` works as it always has.
 
 Then, in order:
 
 - the version in the tree is checked against the branch that is publishing it, and the changelog is
   checked for a section with that number
-- one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the commit
-  and `latest`
+- one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the
+  commit as `sha-<commit>` and, for a stable release, `latest`. A candidate or beta is never tagged
+  `latest`
 - the services `docker-compose.yml` can build are published too, one image each, at
   `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them
@@ -107,8 +231,17 @@ Then, in order:
   stops matching the Dockerfiles in the tree
 - a build provenance attestation is signed with the workflow's OIDC identity and pushed alongside
   every one of them
+- the macOS and Windows installers are built from the commit, with the CLI bundled. A candidate or
+  beta pins the images above. A stable release does not
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
-  and `container-images.json` as an asset
+  (for a candidate or beta, what is under `## Unreleased`), `container-images.json` and the
+  installers as assets. A candidate or beta is marked as a prerelease and never Latest. A stable
+  release becomes Latest only when no newer release already is
+- for a final cut from `release/X.Y`, the merge-back PR opens as described under
+  [Finishing a candidate](#finishing-a-candidate)
+
+The installers are ad-hoc signed on Mac and unsigned on Windows, on every release, as they are in
+every CI build. Signing is still to come.
 
 ## Deploying a release
 
