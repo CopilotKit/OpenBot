@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
+import { withApprovalContext } from "../src/approvals/types";
 import type { AuditInitiator } from "../src/audit";
 import { titleFrom } from "../src/tasks/routes";
 import {
@@ -387,6 +388,43 @@ describe("who is offered start_task", () => {
       { kind: "handoff", id: "h-1", origin: { kind: "person" } },
     ] satisfies AuditInitiator[])
       expect(await offered({ initiator })).toEqual([]);
+  });
+
+  test("refuses a call made in a task's own conversation, whatever built the turn", async () => {
+    const started: string[] = [];
+    const [tool] = await taskTools({
+      actorId: "person",
+      agentId: "bot",
+      initiator: { kind: "person" },
+      start: async ({ task }) => {
+        started.push(task.title);
+        return { id: "t", channelId: "c", title: task.title };
+      },
+      builtIn: async () => true,
+      isTaskThread: async (owner, thread) =>
+        owner === "person" && thread === "task-thread",
+    });
+    if (!tool) throw new Error(`${START_TASK_TOOL} is not held`);
+    const inThread = (threadId: string) =>
+      withApprovalContext(
+        {
+          runId: "run",
+          threadId,
+          toolCallId: "call",
+          toolName: START_TASK_TOOL,
+          args: {},
+          messages: [],
+          state: {},
+          context: [],
+          forwardedProps: {},
+        },
+        async () =>
+          String(await tool.execute({ title: "Again", instruction: "Do it." })),
+      );
+    expect(await inThread("task-thread")).toStartWith("Refused.");
+    expect(started).toEqual([]);
+    expect(await inThread("own-thread")).not.toStartWith("Refused.");
+    expect(started).toEqual(["Again"]);
   });
 
   test("starts at most five tasks in one turn, counted before each start is awaited", async () => {

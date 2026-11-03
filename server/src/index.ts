@@ -1550,6 +1550,8 @@ const loadToolsForActor =
         taskRunner.startAsked(ownerUserId, agentId, task),
       builtIn: isBuiltInBot,
       inTask: turn.task === true,
+      isTaskThread: (ownerUserId, threadId) =>
+        taskStore.isTaskThread(ownerUserId, threadId),
     })),
     ...wakeUpTools({
       store: wakeUpStore,

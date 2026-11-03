@@ -2,6 +2,7 @@ import { START_TASK_TOOL } from "@openbot/shared/task-brief";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { currentApprovalContext } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
 import type { Database } from "../db/client";
 import { agents } from "../db/schema";
@@ -134,6 +135,13 @@ export async function taskTools(options: {
   builtIn: (agentId: string) => Promise<boolean>;
   /** This turn is a task's own. See `AgentResolutionContext.task`. */
   inTask?: boolean;
+  /**
+   * Whether a thread of the person's is a task's own conversation. A person typing in a task's
+   * conversation as an ordinary chat, rather than replying through the task, starts a turn that is
+   * not built as the task's; asked at the call, from the thread the call runs in, so that turn can't
+   * hand the task on either.
+   */
+  isTaskThread?: (ownerUserId: string, threadId: string) => Promise<boolean>;
 }): Promise<GrantedTool[]> {
   if (options.initiator.kind !== "person" || options.inTask) return [];
   if (!(await options.builtIn(options.agentId))) return [];
@@ -159,6 +167,12 @@ export async function taskTools(options: {
         // Counted before the start is awaited, so calls made in parallel are held to it too.
         if (started >= MAX_TASKS_PER_TURN)
           return `Refused. One reply starts at most ${MAX_TASKS_PER_TURN} tasks. Tell the person which ones are under way, and ask them to send the rest in another message.`;
+        const thread = currentApprovalContext()?.threadId;
+        if (
+          thread &&
+          (await options.isTaskThread?.(options.actorId, thread)) === true
+        )
+          return "Refused. This conversation is a task's own: do the work here yourself.";
         started += 1;
         const task = await options.start({
           ownerUserId: options.actorId,
