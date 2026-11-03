@@ -1,0 +1,39 @@
+diff --git a/dist/copilotkit-BuIuo-Z1.cjs b/dist/copilotkit-BuIuo-Z1.cjs
+index b9e461e9b2c9956bd60dad15dba095a73aa9be56..3a18dab99f833e7f8d7a62dbeb578357cf23d064 100644
+--- a/dist/copilotkit-BuIuo-Z1.cjs
++++ b/dist/copilotkit-BuIuo-Z1.cjs
+@@ -5413,7 +5413,7 @@ const CopilotKitProvider = ({ children, runtimeUrl, headers: headersProp = EMPTY
+ 							onVisibilityChange: setInspectorVisible
+ 						}) : null]
+ 					}),
+-					runtimeLicenseWarningStatus === "none" && !resolvedPublicKey && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "no_license" }),
++					null /* NexQN: the "Powered by CopilotKit" no_license banner is not drawn. See docs/nexqn/development-plan.md. */,
+ 					runtimeLicenseWarningStatus === "expired" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "expired" }),
+ 					runtimeLicenseWarningStatus === "invalid" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "invalid" }),
+ 					runtimeLicenseWarningStatus === "expiring" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "expiring" })
+diff --git a/dist/copilotkit-DyxwF9wL.mjs b/dist/copilotkit-DyxwF9wL.mjs
+index 67a5d449238d247b372ae5f885ce355739440a90..46aa0f0700c67df4d03e49af35b82f37bfc141fd 100644
+--- a/dist/copilotkit-DyxwF9wL.mjs
++++ b/dist/copilotkit-DyxwF9wL.mjs
+@@ -5410,7 +5410,7 @@ const CopilotKitProvider = ({ children, runtimeUrl, headers: headersProp = EMPTY
+ 							onVisibilityChange: setInspectorVisible
+ 						}) : null]
+ 					}),
+-					runtimeLicenseWarningStatus === "none" && !resolvedPublicKey && /* @__PURE__ */ jsx(LicenseWarningBanner, { type: "no_license" }),
++					null /* NexQN: the "Powered by CopilotKit" no_license banner is not drawn. See docs/nexqn/development-plan.md. */,
+ 					runtimeLicenseWarningStatus === "expired" && /* @__PURE__ */ jsx(LicenseWarningBanner, { type: "expired" }),
+ 					runtimeLicenseWarningStatus === "invalid" && /* @__PURE__ */ jsx(LicenseWarningBanner, { type: "invalid" }),
+ 					runtimeLicenseWarningStatus === "expiring" && /* @__PURE__ */ jsx(LicenseWarningBanner, { type: "expiring" })
+diff --git a/dist/index.umd.js b/dist/index.umd.js
+index 5a171d0ac5c0f2ef4a176486c22b01a53b8a7c07..96c979dd0f04e68c0cc3f6a255bbcd883ea07e0d 100644
+--- a/dist/index.umd.js
++++ b/dist/index.umd.js
+@@ -7230,7 +7230,7 @@ react_markdown = __toESM(react_markdown);
+ 								onVisibilityChange: setInspectorVisible
+ 							}) : null]
+ 						}),
+-						runtimeLicenseWarningStatus === "none" && !resolvedPublicKey && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "no_license" }),
++						null /* NexQN: the "Powered by CopilotKit" no_license banner is not drawn. See docs/nexqn/development-plan.md. */,
+ 						runtimeLicenseWarningStatus === "expired" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "expired" }),
+ 						runtimeLicenseWarningStatus === "invalid" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "invalid" }),
+ 						runtimeLicenseWarningStatus === "expiring" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LicenseWarningBanner, { type: "expiring" })

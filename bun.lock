@@ -186,6 +186,7 @@
     },
   },
   "patchedDependencies": {
+    "@copilotkit/react-core@1.83.0": "patches/@copilotkit%2Freact-core@1.83.0.patch",
     "@copilotkit/learning@0.0.1": "patches/@copilotkit%2Flearning@0.0.1.patch",
   },
   "overrides": {
