@@ -1,8 +1,12 @@
 import type { BuiltInAgentClassicConfig } from "@copilotkit/runtime/v2";
 import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
+import { SEARCH_TOOLS } from "@openbot/shared/tool-search";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import { researchRoleFor } from "../plugins/catalogue";
+import { markUntrusted } from "../untrusted-content";
+
+export { SEARCH_TOOLS };
 
 /**
  * Letting a Bot hold hundreds of tools while its model is shown a few dozen, and find the rest when
@@ -39,9 +43,6 @@ import { researchRoleFor } from "../plugins/catalogue";
  * can ask again in other words, so a poor first search costs a step and not the answer.
  */
 
-/** The name the model calls to find a tool it holds but has not been shown. */
-export const SEARCH_TOOLS = "search_tools";
-
 /**
  * At or under this many tools, a run is sent all of them, exactly as it was before search existed.
  *
@@ -54,8 +55,33 @@ export const TOOL_SEARCH_FLOOR = 50;
 /** How many tools one search returns unless the model asks for another number. */
 const SEARCH_RESULTS = 8;
 
-/** Reserve enough room to load even the largest search response. */
+/** The most tools one search may return, and so the room a run keeps free for one search's answer. */
 export const SEARCH_RESULTS_LIMIT = 20;
+
+/**
+ * How far back a found tool stays found: the tools found or called in the last few turns, at most
+ * this many, newest first.
+ *
+ * FOUND IN REVIEW. Every tool any earlier search had named used to stay loaded for the rest of the
+ * conversation, capped only at {@link MODEL_TOOL_LIMIT}. Sixteen searches into a thread on the
+ * Responses API, the next turn was sent 128 tools, 125 of them Shopify's: the size at which strict
+ * schemas start to fail, and the very list search exists to avoid. A recent window keeps what the
+ * conversation is working with and lets the rest go back behind the search, where one more search
+ * finds it again.
+ */
+const FOUND_TURNS = 3;
+const FOUND_LIMIT = 24;
+
+/**
+ * The first line of every answer {@link searchToolsTool} gives, and the only line
+ * {@link loadedBySearch} reads names from.
+ *
+ * The descriptions below it are an app's own words, so a description that spells out
+ * `- mcp__a__DELETE_ALL:` must not load that tool. Names are read from this line alone, which this
+ * module writes and no description can reach: descriptions are cut to one line and sit inside the
+ * untrusted envelope after it.
+ */
+const FOUND_LINE = "Tools found:";
 
 // Use the model contract of the runtime we actually ship, without a second AI SDK version.
 type SearchingModel = Extract<
@@ -70,6 +96,9 @@ type PromptPart = { type: string; toolName?: string; output?: unknown };
 
 /**
  * Which of a run's tools wait behind {@link SEARCH_TOOLS}. Empty means the run is sent everything.
+ *
+ * Nothing waits at or under {@link TOOL_SEARCH_FLOOR}, or when the app tools are fewer than one
+ * search returns.
  *
  * Only an app's tools wait, and not every one of those: a tool that finds or reads sources on the
  * web stays, because the computer's instructions route searching to it and a Bot told to use a tool
@@ -91,6 +120,12 @@ export function planToolSearch(
   const searchable = tools.filter(
     (tool) => tool.searchable && researchRoleFor(tool.ref) === null,
   );
+  /*
+   * Fewer app tools than one search returns are not worth a search. A Bot with a computer can be over
+   * the floor on the browser's own tools alone, and hiding its three app tools behind a search would
+   * cost a step for nothing.
+   */
+  if (searchable.length <= SEARCH_RESULTS) return new Set();
   const pinned = options.pinned ?? new Set<string>();
   const unpinned = searchable.filter((tool) => !pinned.has(tool.name));
   const waiting =
@@ -98,13 +133,68 @@ export function planToolSearch(
   return new Set(waiting.map((tool) => tool.name));
 }
 
+/** Words a query carries that say nothing about which tool. */
+const FILLER = new Set([
+  "my",
+  "the",
+  "an",
+  "to",
+  "for",
+  "of",
+  "in",
+  "on",
+  "me",
+  "and",
+  "from",
+  "with",
+  "all",
+  "some",
+  "any",
+]);
+
+/**
+ * What a person says, in the words an app names its tools with.
+ *
+ * FOUND IN REVIEW. "Check my inbox", "schedule a meeting" and "file a ticket" found nothing among
+ * Composio-style tools, because the apps say fetch, emails, event and issue. Each search that finds
+ * nothing costs one of a run's steps. This is a short list of the everyday words that missed, not a
+ * thesaurus: a word here only adds to a search, at half weight, and never replaces what was asked.
+ */
+const EVERYDAY: Record<string, readonly string[]> = {
+  inbox: ["email", "mail", "message", "thread"],
+  email: ["mail", "message"],
+  mail: ["email", "message"],
+  check: ["list", "fetch", "get", "read"],
+  show: ["list", "get", "fetch"],
+  find: ["search", "list", "get"],
+  look: ["search", "get", "find"],
+  schedule: ["create", "event", "calendar"],
+  meeting: ["event", "calendar"],
+  appointment: ["event", "calendar"],
+  ticket: ["issue", "task"],
+  bug: ["issue"],
+  file: ["create"],
+  add: ["create", "insert"],
+  make: ["create"],
+  new: ["create"],
+  remove: ["delete"],
+  change: ["update", "edit"],
+  edit: ["update"],
+  doc: ["document", "file"],
+  sheet: ["spreadsheet"],
+  chat: ["message", "channel"],
+  text: ["message", "sms"],
+  customer: ["contact", "client"],
+  people: ["contact", "user"],
+};
+
 /** Lower-cased words of a name, a description or a query, with plurals folded into the singular. */
 function words(text: string): string[] {
   return text
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((word) => word.length > 1)
+    .filter((word) => word.length > 1 && !FILLER.has(word))
     .map((word) =>
       word.length > 3 && word.endsWith("s") && !word.endsWith("ss")
         ? word.slice(0, -1)
@@ -163,8 +253,14 @@ function rankIndexed(
   index: readonly Indexed[],
   limit: number,
 ): GrantedTool[] {
-  const asked = [...new Set(words(query))];
-  if (asked.length === 0) return [];
+  const said = [...new Set(words(query))];
+  if (said.length === 0) return [];
+  // What was said counts in full; the everyday words it stands for count half.
+  const weight = new Map<string, number>(said.map((word) => [word, 1]));
+  for (const word of said)
+    for (const meant of EVERYDAY[word] ?? [])
+      if (!weight.has(meant)) weight.set(meant, 0.5);
+  const asked = [...weight.keys()];
   const rarity = new Map(
     asked.map((word) => {
       const holding = index.filter(
@@ -180,6 +276,7 @@ function rankIndexed(
         (sum, word) =>
           sum +
           (rarity.get(word) ?? 0) *
+            (weight.get(word) ?? 0) *
             ((entry.name.has(word) ? 3 : 0) + (entry.rest.has(word) ? 1 : 0)),
         0,
       ),
@@ -190,7 +287,7 @@ function rankIndexed(
     .map((match) => match.tool);
 }
 
-/** The system a tool belongs to, read the way `grantedToolGuidance` reads it. */
+/** The system a tool belongs to: `shopify` for `mcp__shopify__LIST_ORDERS`. `grantedToolGuidance` reads it too. */
 export function systemOf(name: string): string {
   const parts = name.replace(/^mcp__/, "").split("__");
   return parts.length > 1 ? (parts[0] as string) : "this deployment";
@@ -208,10 +305,12 @@ function brief(description: string): string {
 /**
  * The tool that finds the others, over exactly the tools that wait.
  *
- * Its answer lists each tool as `- <name>: <description>`, and that line is also how
- * {@link loadedBySearch} knows which tools to send next: whatever this returned is in the
- * conversation, so a tool found three turns ago is still sent today, with nothing remembered
- * anywhere but the history every replica already reads.
+ * Its answer opens with {@link FOUND_LINE}, which is how {@link loadedBySearch} knows which tools
+ * to send next: whatever this returned is in the conversation, so a tool found two turns ago is
+ * still sent today, with nothing remembered anywhere but the history every replica already reads.
+ *
+ * The descriptions are the apps' own words, so they arrive in the untrusted envelope every other
+ * outside result arrives in. Unwrapped, they would read to the model as this deployment speaking.
  */
 export function searchToolsTool(waiting: readonly GrantedTool[]): GrantedTool {
   let index: Indexed[] | undefined;
@@ -251,44 +350,82 @@ export function searchToolsTool(waiting: readonly GrantedTool[]): GrantedTool {
           ? (args as { query?: string; limit?: number })
           : {};
       index ??= waiting.map(indexed);
-      const found = rankIndexed(String(query), index, limit);
+      // Echoed on one line, so a query cannot start a line of its own in the answer.
+      const asked = String(query).replace(/\s+/g, " ").trim();
+      const found = rankIndexed(asked, index, limit);
       if (found.length === 0)
         return [
-          `No tool matched "${query}".`,
+          `No tool matched "${asked}".`,
           `Tools you can search: ${[...systems].map(([system, count]) => `${system} (${count})`).join(", ")}.`,
           "Try other words, naming the action and the thing it acts on.",
         ].join("\n");
       return [
-        `Found ${found.length} tools for "${query}". Call them from your next step:`,
-        ...found.map((tool) => `- ${tool.name}: ${brief(tool.description)}`),
+        `${FOUND_LINE} ${found.map((tool) => tool.name).join(", ")}`,
+        `You can call them from your next step, for "${asked}". What each one does, in its app's words:`,
+        markUntrusted(
+          found
+            .map((tool) => `- ${tool.name}: ${brief(tool.description)}`)
+            .join("\n"),
+          "app tool descriptions",
+        ),
       ].join("\n");
     },
   };
 }
 
-/** The text of a tool result, in whichever shape the AI SDK or a replayed history carries it. */
+/**
+ * The text of a tool result, in whichever shape the AI SDK or a replayed history carries it.
+ *
+ * A replayed result has been through the runtime's `JSON.stringify` once, and sometimes once more,
+ * so a string that is itself a JSON string is decoded until it is not.
+ */
 function resultText(output: unknown): string {
-  if (output && typeof output === "object" && "value" in output) {
-    const value = (output as { value: unknown }).value;
-    return typeof value === "string" ? value : JSON.stringify(value ?? "");
+  let value: unknown =
+    output && typeof output === "object" && "value" in output
+      ? (output as { value: unknown }).value
+      : output;
+  for (let depth = 0; depth < 3 && typeof value === "string"; depth += 1) {
+    if (!value.startsWith('"')) break;
+    try {
+      value = JSON.parse(value);
+    } catch {
+      break;
+    }
   }
-  return typeof output === "string" ? output : JSON.stringify(output ?? "");
+  return typeof value === "string" ? value : JSON.stringify(value ?? "");
+}
+
+/** The names on a search answer's {@link FOUND_LINE}, and nothing from the lines below it. */
+function foundNames(output: unknown): string[] {
+  const first = resultText(output).split("\n", 1)[0] ?? "";
+  if (!first.startsWith(FOUND_LINE)) return [];
+  return first
+    .slice(FOUND_LINE.length)
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
 }
 
 /**
- * The waiting tools this conversation has already found or called, most recent first.
+ * The waiting tools this conversation found or called lately, most recent first.
  *
  * Read from the prompt the model is about to be sent, which holds this run's own earlier steps and
- * every turn replayed before it. A tool the model already called is counted too, because a provider
- * shown a call to a tool it was never sent has nothing to read that call against.
+ * the turns replayed before it. Only the last {@link FOUND_TURNS} turns count, and at most
+ * {@link FOUND_LIMIT} tools; see there. A tool the model called is counted too, so a tool it just
+ * used is still there on its next step.
  */
 export function loadedBySearch(
   prompt: Prompt,
   waiting: ReadonlySet<string>,
 ): string[] {
   const seen = new Map<string, number>();
+  // Where the window opens: the person's message FOUND_TURNS turns back, or the start.
+  const asked = prompt.flatMap((message, index) =>
+    message.role === "user" ? [index] : [],
+  );
+  const opens = asked[asked.length - FOUND_TURNS] ?? 0;
   let position = 0;
-  for (const message of prompt) {
+  for (const message of prompt.slice(opens)) {
     if (!Array.isArray(message.content)) continue;
     for (const part of message.content as PromptPart[]) {
       position += 1;
@@ -299,26 +436,33 @@ export function loadedBySearch(
         part.type === "tool-result" &&
         part.toolName === SEARCH_TOOLS
       ) {
-        const text = resultText(part.output);
-        for (const name of waiting)
-          if (text.includes(`- ${name}:`)) seen.set(name, position);
+        for (const name of foundNames(part.output))
+          if (waiting.has(name)) seen.set(name, position);
       }
     }
   }
-  return [...seen].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  return [...seen]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, FOUND_LIMIT)
+    .map(([name]) => name);
 }
 
 /**
  * The tools one model step is sent: everything that does not wait, then what has been found.
  *
- * Found tools fill only the room left under {@link MODEL_TOOL_LIMIT}, newest first, so a long
- * conversation that has searched its way through a whole app sends the tools it found lately and
- * not a request the provider refuses. Order is kept as the runtime built it.
+ * Found tools fill only the room left under {@link MODEL_TOOL_LIMIT}, newest first. Order is kept as
+ * the runtime built it.
+ *
+ * `relaxed` sends the found tools as not strict. On OpenAI's Responses API a function tool is strict
+ * unless told otherwise, and the compiled size of every strict schema in one request is capped: a
+ * hundred Composio-sized schemas pass and 279 fail. An app's schemas are the large ones, and a strict
+ * schema only shapes the arguments, which the app checks anyway.
  */
 export function toolsForStep(
   tools: readonly ModelTool[] | undefined,
   prompt: Prompt,
   waiting: ReadonlySet<string>,
+  relaxed = false,
 ): ModelTool[] | undefined {
   if (!tools || waiting.size === 0) return tools ? [...tools] : tools;
   const waits = (tool: ModelTool) =>
@@ -328,7 +472,13 @@ export function toolsForStep(
     MODEL_TOOL_LIMIT - tools.filter((tool) => !waits(tool)).length,
   );
   const found = new Set(loadedBySearch(prompt, waiting).slice(0, room));
-  return tools.filter((tool) => !waits(tool) || found.has(tool.name));
+  return tools
+    .filter((tool) => !waits(tool) || found.has(tool.name))
+    .map((tool) =>
+      relaxed && waits(tool) && tool.type === "function"
+        ? { ...tool, strict: false }
+        : tool,
+    );
 }
 
 /**
@@ -343,11 +493,13 @@ export function withToolSearch(
   model: SearchingModel,
   waiting: ReadonlySet<string>,
 ): SearchingModel {
+  // The AI SDK names the Responses API model `openai.responses`, and Chat Completions `openai.chat`.
+  const relaxed = model.provider.endsWith(".responses");
   const narrowed = (options: CallOptions): CallOptions => ({
     ...options,
-    tools: toolsForStep(options.tools, options.prompt, waiting),
+    tools: toolsForStep(options.tools, options.prompt, waiting, relaxed),
   });
-  return {
+  const wrapped: SearchingModel = {
     specificationVersion: "v3",
     provider: model.provider,
     modelId: model.modelId,
@@ -355,6 +507,21 @@ export function withToolSearch(
     doGenerate: (options) => model.doGenerate(narrowed(options)),
     doStream: (options) => model.doStream(narrowed(options)),
   };
+  searching.add(wrapped);
+  return wrapped;
+}
+
+/** Every model {@link withToolSearch} built, so a caller can tell whether search is really on. */
+const searching = new WeakSet<object>();
+
+/**
+ * Whether this configuration's model is one {@link withToolSearch} built.
+ *
+ * Asked by the pre-flight count, which leaves the waiting tools out only when something really
+ * holds them back. A model the wrapper could not take is sent every tool, and counted that way.
+ */
+export function searchesTools(model: unknown): boolean {
+  return typeof model === "object" && model !== null && searching.has(model);
 }
 
 /** Whether a resolved model is one this module can wrap. */
