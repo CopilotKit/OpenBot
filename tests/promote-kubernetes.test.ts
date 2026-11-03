@@ -193,3 +193,48 @@ test("Helm workload metadata alone cannot accept a server reporting another rele
     "identity",
   );
 });
+
+test("a schema transition with customer-disabled migrations refuses before cluster mutation", async () => {
+  const f = fixture();
+  f.options.candidate.compatibility.database.to = "openbot-db-2";
+  writeFileSync(
+    f.options.customerValues[0] ?? "",
+    "migrations:\n  enabled: false\n",
+  );
+  const run: CommandRunner = async (command, options) => {
+    const output = (await f.options.run?.(command, options)) ?? "";
+    return command[0] === "helm" && command[1] === "template"
+      ? "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: server\n"
+      : output;
+  };
+  await expect(promoteKubernetes({ ...f.options, run })).rejects.toThrow(
+    "migration Job",
+  );
+  expect(
+    f.calls.some(
+      (command) =>
+        command[0] === "kubectl" ||
+        (command[0] === "helm" && command[1] === "upgrade"),
+    ),
+  ).toBe(false);
+});
+
+test("schema-transition preflight uses the pinned chart and customer files and accepts the guarded target Job", async () => {
+  const f = fixture();
+  f.options.candidate.compatibility.database.to = "openbot-db-2";
+  const run: CommandRunner = async (command, options) => {
+    const output = (await f.options.run?.(command, options)) ?? "";
+    if (command[0] !== "helm" || command[1] !== "template") return output;
+    return `apiVersion: batch/v1\nkind: Job\nmetadata:\n  labels:\n    app.kubernetes.io/component: migrations\n  annotations:\n    helm.sh/hook: pre-install,pre-upgrade\nspec:\n  template:\n    spec:\n      containers:\n        - name: migrate\n          image: ghcr.io/acme/openbot:v0.3.0@sha256:${"b".repeat(64)}\n          workingDir: /app/server\n          command:\n            - /bin/sh\n            - -ec\n            - |\n              exec /usr/local/bin/bun scripts/migrate.ts\n`;
+  };
+  expect((await planKubernetesPromotion({ ...f.options, run })).allowed).toBe(
+    true,
+  );
+  const render = f.calls.find(
+    (command) => command[0] === "helm" && command[1] === "template",
+  );
+  expect(render).toContain(f.options.chart);
+  expect(render).toContain(f.options.customerValues[0] ?? "");
+  expect(render).toContain("--is-upgrade");
+  expect(f.calls.some((command) => command[0] === "kubectl")).toBe(false);
+});

@@ -3,11 +3,14 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { isMap, isScalar, isSeq, parseAllDocuments } from "yaml";
 import {
   parseReleaseManifest,
   planUpgrade,
@@ -102,6 +105,96 @@ function imageParts(reference: string) {
     digest,
   };
 }
+async function requireRenderedMigration(
+  options: KubernetesPromotionOptions,
+  values: PromotionValues,
+) {
+  const directory = mkdtempSync(join(tmpdir(), "openbot-migration-preflight-"));
+  try {
+    const file = join(directory, "release-values.json");
+    atomicJson(file, values);
+    const rendered = await (options.run ?? runCommand)(
+      [
+        "helm",
+        "template",
+        options.release,
+        resolve(options.chart),
+        "--namespace",
+        options.namespace,
+        "--is-upgrade",
+        ...options.customerValues.flatMap((path) => [
+          "--values",
+          resolve(path),
+        ]),
+        "--values",
+        file,
+      ],
+      { cwd: directory, timeoutMs: (options.timeoutSeconds ?? 300) * 1000 },
+    );
+    const expected = imageParts(selectedImage(options.candidate));
+    const guarded = parseAllDocuments(rendered).some((document) => {
+      if (document.errors.length)
+        throw new Error(
+          "Target chart rendered invalid YAML during migration preflight",
+        );
+      const hook = document.getIn(["metadata", "annotations", "helm.sh/hook"]);
+      if (
+        document.get("kind") !== "Job" ||
+        typeof hook !== "string" ||
+        !hook
+          .split(",")
+          .map((part) => part.trim())
+          .includes("pre-upgrade") ||
+        document.getIn([
+          "metadata",
+          "labels",
+          "app.kubernetes.io/component",
+        ]) !== "migrations"
+      )
+        return false;
+      const containers = document.getIn([
+        "spec",
+        "template",
+        "spec",
+        "containers",
+      ]);
+      return (
+        isSeq(containers) &&
+        containers.items.some((container) => {
+          if (
+            !isMap(container) ||
+            container.get("workingDir") !== "/app/server"
+          )
+            return false;
+          const image = container.get("image");
+          const command = container.get("command");
+          if (typeof image !== "string" || !isSeq(command)) return false;
+          const actual = imageParts(image);
+          const invocation = command.items
+            .map((part) =>
+              isScalar(part) && typeof part.value === "string"
+                ? part.value
+                : "",
+            )
+            .join("\n");
+          return (
+            actual.repository === expected.repository &&
+            actual.digest === expected.digest &&
+            /(?:^|\n)\s*exec\s+(?:\/usr\/local\/bin\/)?bun\s+scripts\/migrate\.ts(?:\s|$)/.test(
+              invocation,
+            )
+          );
+        })
+      );
+    });
+    if (!guarded)
+      throw new Error(
+        "Required database transition has no guarded pre-upgrade migration Job in the effective target chart; migrations must remain enabled",
+      );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 export async function planKubernetesPromotion(
   options: KubernetesPromotionOptions,
 ) {
@@ -180,6 +273,16 @@ export async function planKubernetesPromotion(
     commonAnnotations: annotations,
     server: { podAnnotations: annotations },
   };
+  if (
+    !reasons.length &&
+    current.compatibility.database.to !== candidate.compatibility.database.to
+  ) {
+    try {
+      await requireRenderedMigration(options, values);
+    } catch (error) {
+      reasons.push(error instanceof Error ? error.message : String(error));
+    }
+  }
   return { ...common, allowed: reasons.length === 0, reasons, values };
 }
 function selector(release: string) {

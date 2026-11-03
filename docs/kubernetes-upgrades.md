@@ -20,6 +20,8 @@ bun scripts/update.ts kubernetes plan \
 
 The policy file contains `distributionId`, `repository` and `channel`, as described in [local updates](local-updates.md). The metadata hash must be independently approved; it does not establish publisher authenticity by itself. Use repeated `--values` for ordered customer files. These files remain separate and unchanged. Their Secret references, tenant package mounts, configuration and storage choices remain the customer's source of truth; supply the complete accepted values rather than relying on chart defaults. `--timeout` bounds migration/rollout work. Plan/check does not call the cluster or execute backup commands.
 
+For a declared database schema transition, preflight locally renders the checksum-validated target chart with the exact customer values and pinned release values. The effective render must include the target image's guarded `scripts/migrate.ts` Job as a `pre-upgrade` hook. Disabling migrations, omitting the Job or replacing it with a different image/runner refuses promotion before any cluster operation.
+
 ## Live Helm execution
 
 Replace `plan` with `apply` and add `--acknowledge-interruption`. Only an existing release is upgraded; first installation remains the chart's existing Helm workflow. The tool verifies the current server workload against the supplied accepted digest before mutation and writes private operation/recovery records under `--output`.
@@ -36,7 +38,7 @@ Operators must review configuration/storage differences and ensure no other cont
 
 ## GitOps output
 
-The `gitops` action writes `release-values.json`, `proposed-release.json` and `ORDERING.md` without calling Helm/kubectl or changing a cluster. Commit the pinned values and chart identity to the customer's deployment repository, preserving Secret references and customer values separately.
+The `gitops` action writes `release-values.json`, `proposed-release.json` and `ORDERING.md` without applying a Helm release, calling kubectl or changing a cluster. Schema transitions also render the chart locally for the migration preflight above. Commit the pinned values and chart identity to the customer's deployment repository, preserving Secret references and customer values separately.
 
 The ordering document requires a successful guarded migration phase before server replacement, then readiness/image/release verification and customer workflow acceptance. A controller that only renders Helm templates must implement that ordering: it cannot assume Helm's hook execution exists. No tested Argo CD or Flux synchronization integration is claimed by generated values alone. Reverting Git does not reverse a database migration.
 
