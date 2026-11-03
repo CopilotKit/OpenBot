@@ -32,11 +32,9 @@ import {
   intelligenceChannelMappings,
   proactivePings,
   proactiveSuggestions,
-  responsibilities,
-  responsibilityEvents,
-  responsibilityRuns,
   workItems,
 } from "../db/schema";
+import { responsibilitiesOf } from "../responsibilities/store";
 import { routinesOf } from "../routines/store";
 import { schedules } from "../schedules/directory";
 import { listedTask } from "../tasks/store";
@@ -217,15 +215,7 @@ export function createActivityStore(database: Database) {
       }
 
       // Responsibilities: an active one is standing work; each run is a piece of it.
-      const goals = await database
-        .select()
-        .from(responsibilities)
-        .where(
-          and(
-            eq(responsibilities.ownerUserId, ownerUserId),
-            eq(responsibilities.agentId, agentId),
-          ),
-        );
+      const goals = await responsibilitiesOf(ownerUserId, agentId);
       for (const goal of goals)
         if (goal.status === "active")
           activity.scheduled.push({
@@ -244,23 +234,26 @@ export function createActivityStore(database: Database) {
           });
       if (goals.length > 0) {
         const byId = new Map(goals.map((goal) => [goal.id, goal]));
-        const runs = await database
-          .select({
-            run: responsibilityRuns,
-            eventType: responsibilityEvents.type,
-            source: responsibilityEvents.source,
-          })
-          .from(responsibilityRuns)
-          .innerJoin(
-            responsibilityEvents,
-            eq(responsibilityEvents.id, responsibilityRuns.eventId),
-          )
-          .where(inArray(responsibilityRuns.responsibilityId, [...byId.keys()]))
-          .orderBy(desc(responsibilityRuns.createdAt))
-          .limit(COMPLETED_LIMIT * 2);
-        for (const { run, eventType, source } of runs) {
+        const client = schedules().client;
+        const { items: goalRuns } = await client.page(
+          "responsibility-runs",
+          { responsibilityId: [...byId.keys()] },
+          null,
+          COMPLETED_LIMIT * 2,
+        );
+        // Each run's event says what woke it; read in one listing, as the join did.
+        const eventIds = [...new Set(goalRuns.map((run) => run.eventId))];
+        const events =
+          eventIds.length === 0
+            ? []
+            : (await client.all("responsibility-events", { ids: eventIds }))
+                .items;
+        const eventById = new Map(events.map((event) => [event.id, event]));
+        for (const run of goalRuns) {
           const goal = byId.get(run.responsibilityId);
-          if (!goal) continue;
+          const event = eventById.get(run.eventId);
+          if (!goal || !event) continue;
+          const { type: eventType, source } = event;
           const item: ActivityItem = {
             id: `responsibility-run:${run.id}`,
             kind: "responsibility",

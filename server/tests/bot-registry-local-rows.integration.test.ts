@@ -67,7 +67,10 @@ const OUTLIVES_ITS_BOT = new Set([
  * Legacy tables whose data moved to Intelligence, kept unwritten for one release and read only by
  * the upgrade copy. Intelligence purges the moved records with their agent, so nothing here does.
  */
-const MOVED_TO_INTELLIGENCE = new Set(["routines.agent_id"]);
+const MOVED_TO_INTELLIGENCE = new Set([
+  "routines.agent_id",
+  "responsibilities.agent_id",
+]);
 
 describe("which rows go with a Bot", () => {
   test("every column naming a Bot is cleaned up with it or listed as outliving it", () => {

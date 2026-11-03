@@ -53,6 +53,7 @@ import {
 } from "./agents/bot-registry/local-rows";
 import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import { routineCopySteps } from "./routines/upgrade";
+import { responsibilityCopySteps } from "./responsibilities/upgrade";
 import { createScheduleClient } from "./schedules/client";
 import {
   createScheduleDirectory,
@@ -478,7 +479,7 @@ await scheduleDirectory.start();
 const copiedSchedules = await copyLocalSchedulesToIntelligence(
   database,
   scheduleDirectory.client,
-  [...routineCopySteps(database)],
+  [...routineCopySteps(database), ...responsibilityCopySteps(database)],
 );
 if (copiedSchedules.some((step) => step.kind === "copied"))
   await scheduleDirectory.resync();
@@ -2102,6 +2103,15 @@ const responsibilityAnswerTurn = ({
 };
 const responsibilitySweep = repeatAfterEach(async () => {
   try {
+    // Events accepted by a process that stopped before queueing their runs, and queued runs left
+    // without an item, before this pass dispatches (responsibilities/store.ts).
+    const recovered = await responsibilityStore.recover({
+      owner: workOwner("responsibility"),
+    });
+    if (recovered.ingests || recovered.requeued.length)
+      console.info(
+        JSON.stringify({ type: "responsibility-recovery", ...recovered }),
+      );
     const report = await responsibilityEngine.dispatch({
       owner: workOwner("responsibility"),
       limit: 1,
