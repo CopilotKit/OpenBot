@@ -4,7 +4,8 @@ import {
   parseApprovalContinuation,
 } from "../approvals/types";
 import type { Database } from "../db/client";
-import { intelligenceChannelMappings, routineRuns } from "../db/schema";
+import { intelligenceChannelMappings } from "../db/schema";
+import { finishRoutineRunsWaitingOn } from "../routines/store";
 import { responsibilityRuns } from "../db/schema/responsibilities";
 import type { DeliveryScope } from "../delivery/types";
 import { signInToolResult } from "./service";
@@ -86,20 +87,7 @@ export function createSignInResumer(deps: {
         messageId,
       });
     // A routine firing that was waiting on this sign-in is finished now, as after an approval.
-    await deps.database
-      .update(routineRuns)
-      .set({
-        status: "succeeded",
-        finishedAt: new Date(),
-        error: null,
-        waiting: null,
-      })
-      .where(
-        and(
-          eq(routineRuns.status, "waiting"),
-          sql`${routineRuns.waiting}->>'signInRequestId' = ${request.id}`,
-        ),
-      );
+    await finishRoutineRunsWaitingOn("signInRequestId", request.id);
   };
 }
 

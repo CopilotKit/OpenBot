@@ -383,8 +383,8 @@ export async function dispatchClaimedRoutines(
        * is re-checked at the moment of acting, which is the culler's precedent ("Somebody came back",
        * `culler.ts:~170`): the decision was made elsewhere and the world has moved since.
        *
-       * BESIDE the deleted/disabled branch and before `insertRun`, so a skipped firing leaves no
-       * `routine_runs` row: a run opened with no outcome and nothing coming to give it one shows on
+       * BESIDE the deleted/disabled branch and before `openRunFor`, so a skipped firing leaves no
+       * run record: a run opened with no outcome and nothing coming to give it one shows on
        * the routines page as a firing that started and never ended.
        *
        * Finished, not released, for the same reason as above: re-delivery cannot make a past
@@ -409,12 +409,32 @@ export async function dispatchClaimedRoutines(
       }
 
       /*
-       * The run row first, then the dispatch, because the dispatch is told a run id and nothing else.
-       * From the moment it resolves the run row owns the outcome: the queue's retries are for
+       * The run first, then the dispatch, because the dispatch is told a run id and nothing else.
+       * From the moment it resolves the run owns the outcome: the queue's retries are for
        * DISPATCH failures only, and a turn that failed is final for this firing — the fatigue rule
        * owns that, not this loop.
+       *
+       * THE RUN IS THIS JOB'S OWN WRITE. It lives in Intelligence, so it cannot share a transaction
+       * with this work item; instead its id is derived from the item's key, so the item is the outbox
+       * that guarantees it. The item exists before the run (a run is never written without the job
+       * that fires it), the run exists before the dispatch (a firing never runs without its run), and
+       * an attempt that died after opening the run finds that same run on the retry rather than
+       * opening a second. One the earlier attempt already ran to the end is not dispatched again.
        */
-      const { runId } = await options.routineStore.insertRun(routineId);
+      const { runId, finished } = await options.routineStore.openRunFor(
+        routineId,
+        item.key,
+      );
+      if (finished) {
+        await finishOrSay(
+          options,
+          item.key,
+          routineId,
+          "an earlier attempt already ran this firing",
+        );
+        report.fired.push(routineId);
+        continue;
+      }
       /*
        * A dispatch that throws leaves the row this attempt opened with no status, AND NOTHING HERE
        * CLOSES IT — the reaper above does, once the row is older than any turn could still be

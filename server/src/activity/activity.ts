@@ -35,10 +35,10 @@ import {
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
-  routineRuns,
-  routines,
   workItems,
 } from "../db/schema";
+import { routinesOf } from "../routines/store";
+import { schedules } from "../schedules/directory";
 import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
@@ -169,15 +169,8 @@ export function createActivityStore(database: Database) {
       const now = Date.now();
 
       // Routines: the standing schedule, and each firing.
-      const ownedRoutines = await database
-        .select()
-        .from(routines)
-        .where(
-          and(
-            eq(routines.ownerUserId, ownerUserId),
-            eq(routines.agentId, agentId),
-          ),
-        );
+      // Live in Intelligence: a deleted routine and its firings are gone from here, as before.
+      const ownedRoutines = await routinesOf(ownerUserId, agentId);
       for (const routine of ownedRoutines)
         if (routine.enabled)
           activity.scheduled.push({
@@ -196,12 +189,12 @@ export function createActivityStore(database: Database) {
         const byId = new Map(
           ownedRoutines.map((routine) => [routine.id, routine]),
         );
-        const runs = await database
-          .select()
-          .from(routineRuns)
-          .where(inArray(routineRuns.routineId, [...byId.keys()]))
-          .orderBy(desc(routineRuns.startedAt))
-          .limit(COMPLETED_LIMIT * 2);
+        const { items: runs } = await schedules().client.page(
+          "routine-runs",
+          { routineId: [...byId.keys()] },
+          null,
+          COMPLETED_LIMIT * 2,
+        );
         for (const run of runs) {
           const routine = byId.get(run.routineId);
           if (!routine) continue;
