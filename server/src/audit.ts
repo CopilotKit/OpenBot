@@ -1,3 +1,4 @@
+import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   and,
@@ -841,6 +842,12 @@ function initiatorColumns(initiator: AuditInitiator | undefined) {
 
 /** One row as written, handed to anything that streams the trail elsewhere. */
 export type AuditTapEvent = {
+  /** Persisted row identity, stable across analytics delivery attempts. */
+  id?: string;
+  createdAt?: Date;
+  /** Trusted native/headless action scope; never read from an analytics client. */
+  runId?: string;
+  threadId?: string;
   eventType: string;
   targetType: string;
   targetId?: string;
@@ -873,10 +880,18 @@ export function createAuditStore(database: Database): AuditStore {
         ...initiatorColumns(initiator),
         payload: redactAuditPayload(event.payload) as Record<string, unknown>,
       };
-      await database.insert(auditEvents).values(row);
+      const [persisted] = await database
+        .insert(auditEvents)
+        .values(row)
+        .returning({ id: auditEvents.id, createdAt: auditEvents.createdAt });
       for (const tap of auditTaps) {
         try {
-          tap(row);
+          const run = currentApprovalContext();
+          tap({
+            ...row,
+            ...persisted,
+            ...(run ? { runId: run.runId, threadId: run.threadId } : {}),
+          });
         } catch (error) {
           console.error(
             JSON.stringify({

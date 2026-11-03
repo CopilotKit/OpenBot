@@ -45,7 +45,8 @@
     "twilio": "5.13.0",
     "web-bot-auth": "0.2.0",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@copilotkit/shared": "1.83.0"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.43.0",
