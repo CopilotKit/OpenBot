@@ -1,6 +1,5 @@
 import { IconKey, IconLockOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { linkOptions } from "@tanstack/react-router";
 import {
   PageEmpty,
   PageRows,
@@ -28,8 +27,7 @@ import { queryClient } from "@/query-client";
  * The site and username only: a password is write-only, and this page can delete one but never show
  * it. A saved login is used only when you confirm it in a sign-in form.
  *
- * Under Settings in the team edition. Under Connections in the personal one, beside the apps and
- * keys, so every way a Bot signs in to something is in one place.
+ * Under Settings. The personal edition calls it Saved logins, and links to it from Connections too.
  */
 export function PasswordsPage() {
   const personal =
@@ -38,14 +36,6 @@ export function PasswordsPage() {
   const remove = useMutation(deleteSavedLoginMutationOptions(queryClient));
   return (
     <PageShell
-      backButton={
-        personal
-          ? {
-              label: "Connections",
-              linkProps: linkOptions({ to: "/connections" }),
-            }
-          : undefined
-      }
       title={personal ? "Saved logins" : "Passwords"}
       description="Manage saved website logins. Bots cannot see your passwords, and you approve each use."
     >

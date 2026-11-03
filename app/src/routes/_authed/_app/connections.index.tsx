@@ -528,13 +528,13 @@ function RouteComponent() {
         ) : null}
       </PageSection>
       {/*
-       * The rest of what a Bot signs in with, here rather than under Settings, so every sign-in and
-       * key is on one page in the personal edition.
+       * The rest of what a Bot signs in with. Saved logins and keys live under Settings; these rows
+       * are a way in from beside the apps that use them, in the personal edition.
        */}
       {personal ? (
         <PageSection title="Sign-ins and keys">
           <PageRows>
-            <Item render={<Link to="/connections/logins" />} size="sm">
+            <Item render={<Link to="/settings/passwords" />} size="sm">
               <ItemMedia variant="icon">
                 <IconLock />
               </ItemMedia>

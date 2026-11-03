@@ -26,7 +26,6 @@ import {
 import type { PluginsPage } from "@/lib/plugins/queries";
 import { Route as PersonalSettingsRoute } from "@/routes/_authed/settings/_personal";
 import { Route as LearningRoute } from "@/routes/_authed/settings/learning";
-import { Route as PasswordsRoute } from "@/routes/_authed/settings/passwords";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -55,6 +54,8 @@ function clientFor(edition: "team" | "personal" | undefined) {
 }
 
 const PERSONAL_ENTRIES = [
+  ["Saved logins", "/settings/passwords"],
+  ["Keys", "/settings/credentials"],
   ["Skills for every Bot", "/settings/skills"],
   ["Computer", "/settings/computer"],
   ["Activity", "/settings/activity"],
@@ -81,26 +82,13 @@ describe("the Settings sidebar", () => {
     ).toBe(false);
   });
 
-  test("has no Passwords or Credentials, which are on Connections with the apps", async () => {
+  test("keeps saved logins and keys, named as on Connections", () => {
     const titles = settingsSidebarItems("personal").map((item) => item.title);
     expect(titles).not.toContain("Passwords");
     expect(titles).not.toContain("Credentials");
     expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
       "Passwords",
     );
-    const guard = PasswordsRoute.options.beforeLoad as unknown as (input: {
-      context: { queryClient: QueryClient };
-    }) => Promise<unknown>;
-    let sentTo: unknown = "open";
-    try {
-      await guard({ context: { queryClient: clientFor("personal") } });
-    } catch (thrown) {
-      sentTo = isRedirect(thrown) ? thrown.options.to : thrown;
-    }
-    expect(sentTo).toBe("/connections/logins");
-    await expect(
-      guard({ context: { queryClient: clientFor("team") } }),
-    ).resolves.toBeUndefined();
   });
 
   test("has no Learning page, which is about sharing Skills with other people", async () => {

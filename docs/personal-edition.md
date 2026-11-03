@@ -68,8 +68,8 @@ account are the same decision when one person makes both:
   conversation). An app can't be taken from one Bot; turning it off takes it from all of them. See
   `server/src/plugins/personal-defaults.ts`.
 - A connected tile opens `/connections/<app>`: its tools, your account, and turning it off.
-- **Sign-ins and keys**, below the grid: saved website logins at `/connections/logins` and API keys at
-  `/connections/keys`.
+- **Sign-ins and keys**, below the grid, links to saved website logins and API keys, which live under
+  Settings.
 - **Routines is always on**, here as in the team edition: every Bot has all of its tools, and it
   can't be turned off. See [Routines](routines.md).
 
@@ -81,10 +81,9 @@ carries on once it is connected.
 four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before
 doing, and its goals) and Setup.
 
-**Settings** holds Skills for every Bot, Computer and Activity (the audit trail). Where Admin was,
-**OpenBot for Business** opens a list of what the team edition adds. An old `/admin/...`,
-`/settings/plugins/...`, `/settings/credentials` or `/settings/passwords` address opens the same page
-where it is now. There is no Learning page, Sharing, Visibility, Isolated, or Reaching you, which are
+**Settings** holds Saved logins, Keys, Skills for every Bot, Computer and Activity (the audit trail).
+Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
+`/admin/...` or `/settings/plugins/...` address opens the same page where it is now. There is no Learning page, Sharing, Visibility, Isolated, or Reaching you, which are
 all about other people, other computers or Slack and Teams.
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,

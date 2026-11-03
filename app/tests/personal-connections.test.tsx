@@ -223,14 +223,14 @@ describe("Connections in the personal edition", () => {
     expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
   });
 
-  test("holds saved logins and keys too, so every sign-in is on one page", async () => {
+  test("links to saved logins and keys, which live under Settings", async () => {
     const { view } = draw("personal");
     await view.findByTestId("account-notion");
     expect(
       view.getByRole("link", { name: /Saved logins/ }).getAttribute("href"),
-    ).toBe("/connections/logins");
+    ).toBe("/settings/passwords");
     expect(view.getByRole("link", { name: /^Keys/ }).getAttribute("href")).toBe(
-      "/connections/keys",
+      "/settings/credentials",
     );
   });
 

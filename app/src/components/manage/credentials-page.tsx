@@ -24,7 +24,7 @@ import { useManagePaths } from "@/lib/manage-paths";
 
 export function CredentialsPage() {
   const paths = useManagePaths();
-  // Under Connections in the personal edition, beside the apps that use these keys.
+  // Called Keys in the personal edition, which links here from Connections too.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const queryClient = useQueryClient();
@@ -45,11 +45,6 @@ export function CredentialsPage() {
           <IconPlus />
           Add credential
         </Button>
-      }
-      backButton={
-        personal
-          ? { label: "Connections", linkProps: paths.plugins() }
-          : undefined
       }
       description={
         personal
