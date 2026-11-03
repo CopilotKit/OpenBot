@@ -34,9 +34,10 @@ jobs:
       UPSTREAM_TAG: ${{ inputs.tag }}
       UPSTREAM_COMMIT: ${{ inputs.commit }}
       UPGRADE_CHECKS: ${{ vars.OPENBOT_UPGRADE_CHECKS || '[["bun","install","--frozen-lockfile"],["bun","test"],["bun","run","typecheck"]]' }}
-      CANDIDATE: ${{ runner.temp }}/openbot-upstream-candidate
       UPGRADE_BRANCH: upgrade/upstream-${{ github.run_id }}
     steps:
+      - name: Set isolated candidate path
+        run: echo "CANDIDATE=$RUNNER_TEMP/openbot-upstream-candidate" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main

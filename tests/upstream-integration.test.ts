@@ -341,6 +341,18 @@ describe("release source artifacts", () => {
 });
 
 describe("release workflow invariants", () => {
+  test("the candidate path uses runner environment only inside a supported step", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../.github/workflows/upstream-upgrade.yml"),
+      "utf8",
+    );
+    const jobEnvironment = source.match(/ {4}env:\n([\s\S]*?) {4}steps:/)?.[1];
+    expect(jobEnvironment).toBeDefined();
+    expect(jobEnvironment).not.toContain("${{ runner.");
+    expect(source).toContain(
+      'echo "CANDIDATE=$RUNNER_TEMP/openbot-upstream-candidate" >> "$GITHUB_ENV"',
+    );
+  });
   test.each(["publish-release", "upstream-upgrade"])(
     "%s is valid YAML with pinned actions",
     (name) => {
