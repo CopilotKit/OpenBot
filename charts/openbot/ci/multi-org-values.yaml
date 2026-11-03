@@ -1,0 +1,90 @@
+# One organization's OpenBot, in a cluster it shares with other organizations' OpenBots.
+#
+# Each organization is its own release of this chart, installed by hand into a namespace of its own:
+#
+#   helm install acme charts/openbot -n acme -f acme.yaml
+#
+# This file is what changes from one organization to the next: its namespaces, its database, its
+# address, its Intelligence project key and its sign-in. The cluster-wide pieces (the agent-sandbox
+# controller, the RuntimeClass, the ingress controller, the shared PostgreSQL) are installed once and
+# named here, never created by a release. See "Several organizations in one cluster" in the README.
+#
+# CI renders this file as two organizations side by side (scripts/check-chart-tenancy.ts) and fails if
+# either could select, reach or overwrite anything of the other's.
+config:
+  # The organization's own address. Each release's Ingress host has to be different, or the ingress
+  # controller has two releases claiming one host.
+  publicUrl: https://acme.openbot.example.com
+  initialAdminEmails: admin@acme.example
+  # The organization's own sign-in, and its own domain.
+  allowedEmailDomains: acme.example
+  auth:
+    google:
+      clientId: acme.apps.googleusercontent.com
+  intelligence:
+    apiUrl: https://api.intelligence.copilotkit.ai
+    gatewayWsUrl: wss://realtime.intelligence.copilotkit.ai
+
+# The organization's own database on the shared PostgreSQL, created by hand before installing (a
+# database and a login role of its own, with CONNECT revoked from everybody else). The URL is in a
+# Secret in the organization's namespace.
+postgresql:
+  enabled: false
+database:
+  existingSecret: openbot-database
+
+secrets:
+  # Rendering examples only. A real organization keeps these in a Secret of its own
+  # (`secrets.existingSecret`) and generates each one for it; nothing here is shared between
+  # organizations. The Intelligence key is the one for the organization's own project.
+  betterAuthSecret: "example-for-rendering-only-at-least-32-chars"
+  intelligenceApiKey: "example-for-rendering-only"
+  googleClientSecret: "example-for-rendering-only"
+  computerToken: "example-for-rendering-only"
+  workerSharedSecret: "example-for-rendering-only"
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: acme.openbot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+computers:
+  mode: sandbox
+  # gVisor, through a RuntimeClass the cluster has once for every organization.
+  runtimeClassName: gvisor
+  sandbox:
+    # A namespace of the organization's own, created before installing. The chart refuses a computers
+    # namespace another release already holds.
+    namespace: acme-computers
+
+routines:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+  # The service range the Kubernetes API server answers on. The cluster's, so the same for every
+  # organization in it.
+  kubernetesApiCidr: 10.96.0.0/12
+  # Only the ingress controller reaches the API, so another organization's pods cannot open it
+  # directly.
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  # The shared PostgreSQL, which every organization's API reaches; each one reaches only its own
+  # database on it, by its login role.
+  extraEgress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbot-postgres
+          podSelector:
+            matchLabels:
+              app: openbot-postgres
+      ports:
+        - port: 5432
+          protocol: TCP

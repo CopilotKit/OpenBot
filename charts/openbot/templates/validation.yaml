@@ -116,6 +116,30 @@ This template renders nothing.
 {{- end }}
 
 {{- /*
+  Two releases in one computers namespace.
+
+  Each organization's OpenBot is its own release, and its computers have to be in a namespace no
+  other release uses: the server lists every Sandbox in its namespace, its culler suspends whichever
+  of them its own database has no recent use for (another release's, every time), and its Role grants
+  every Sandbox there. See `openbot.computersClaimName` in `_helpers.tpl`.
+
+  The claim beside the computers already makes Helm refuse the second install, with a message about
+  ownership metadata. This reads the claim first so the refusal says which release holds the
+  namespace and what to set instead. `lookup` answers nothing without a cluster, so `helm template`
+  skips it, and the collision is what is left to stop an install.
+*/}}
+{{- if eq .Values.computers.mode "sandbox" }}
+{{- $computersNamespace := include "openbot.computersNamespace" . }}
+{{- $claim := lookup "v1" "ConfigMap" $computersNamespace (include "openbot.computersClaimName" .) }}
+{{- if $claim }}
+{{- $holder := $claim.data | default dict }}
+{{- if or (ne (toString $holder.release) .Release.Name) (ne (toString $holder.namespace) .Release.Namespace) }}
+{{- fail (printf "The namespace %s already holds the computers of release %s in namespace %s. Each OpenBot release needs a computers namespace of its own: the server lists, and the culler suspends, every Sandbox in its namespace, and its Role grants every Sandbox there, so a second release would see the first one's computers and suspend them. Create a namespace for this release's computers (kubectl create namespace %s-computers) and set computers.sandbox.namespace to it." $computersNamespace (toString $holder.release) (toString $holder.namespace) .Release.Name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
   A pool of warm computers that nothing takes one from.
 
   `warmPool.enabled` renders a `SandboxWarmPool`, grants the service account `create` and `delete` on

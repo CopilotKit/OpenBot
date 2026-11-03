@@ -175,6 +175,43 @@ name it. Nothing else in the chart consults it.
 {{- $cidr -}}
 {{- end -}}
 
+{{/*
+The namespace this release's computers run in.
+
+ONE ANSWER FOR EVERY TEMPLATE THAT NAMES IT: the Role that lets the server manage Sandboxes, the
+variable that tells the server where to create them, the network policy that fences them, and the
+claim that keeps a second release out. If any two of those disagreed, the server would create
+computers somewhere its policy does not cover, or its credential would reach somewhere its computers
+are not.
+
+`sandbox` only. A shared computer is a StatefulSet of this release's own, so it runs beside the
+server in the release's namespace, and `external` runs nothing here at all.
+*/}}
+{{- define "openbot.computersNamespace" -}}
+{{- if eq .Values.computers.mode "sandbox" -}}
+{{- default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{- else -}}
+{{- .Release.Namespace -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The one object in a computers namespace whose name is NOT release-scoped, on purpose.
+
+A computers namespace belongs to exactly one release. The server lists every Sandbox in it (the
+culler suspends what it finds idle, and the fleet page shows what it finds), and its Role grants
+every Sandbox in it, because Kubernetes RBAC cannot narrow a grant by label. A second release
+sharing the namespace would therefore see the first one's computers, and its culler would suspend
+them: they have no audit rows in its database, so they read as idle since the day they started.
+
+A fixed name makes that a collision rather than a silent overlap. Helm refuses to install an object
+that another release already owns, and `validation.yaml` reads this one first to say which release
+holds the namespace.
+*/}}
+{{- define "openbot.computersClaimName" -}}
+openbot-computers
+{{- end -}}
+
 {{- define "openbot.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "openbot.fullname" .) .Values.serviceAccount.name -}}
@@ -351,7 +388,7 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: {{ .Values.computers.url | quote }}
 {{- else if eq .Values.computers.mode "sandbox" }}
 - name: COMPUTER_SANDBOX_NAMESPACE
-  value: {{ default .Release.Namespace .Values.computers.sandbox.namespace | quote }}
+  value: {{ include "openbot.computersNamespace" . | quote }}
 - name: COMPUTER_SANDBOX_IDLE_AFTER
   value: {{ .Values.computers.sandbox.idleAfter | quote }}
 - name: COMPUTER_SANDBOX_TEMPLATE_FILE

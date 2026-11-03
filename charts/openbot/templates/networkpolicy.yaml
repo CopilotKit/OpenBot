@@ -32,9 +32,35 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- /*
+      Who may open the API's port.
+
+      Anybody, unless `networkPolicy.ingressFrom` names who: that is how this policy has always
+      behaved, and a deployment whose ingress controller sits in another namespace keeps working
+      through an upgrade. Several organizations in one cluster name their ingress controller there,
+      because otherwise any pod in any namespace, another organization's included, can open this port
+      directly rather than through the address people use.
+
+      The routines sweep is let in beside whatever is named, because `SERVER_INTERNAL_URL` is this
+      Service and it is the one caller inside the release.
+    */}}
+    {{- $ingressFrom := .Values.networkPolicy.ingressFrom }}
+    {{- if $ingressFrom }}
+    - from:
+        {{- if (.Values.routines).enabled }}
+        - podSelector:
+            matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" "routines") | indent 14 }}
+        {{- end }}
+{{ toYaml $ingressFrom | indent 8 }}
+      ports:
+        - port: {{ .Values.server.service.port }}
+          protocol: TCP
+    {{- else }}
     - ports:
         - port: {{ .Values.server.service.port }}
           protocol: TCP
+    {{- end }}
     {{- with .Values.networkPolicy.extraIngress }}
 {{ toYaml . | indent 4 }}
     {{- end }}
@@ -50,6 +76,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: postgresql
+              {{- /* This release's database, not another release's in the same namespace. */}}
+              app.kubernetes.io/instance: {{ .Release.Name }}
       ports:
         - port: 5432
           protocol: TCP
@@ -61,11 +89,20 @@ spec:
       Easy to forget, because nothing about the API looks like it talks to another pod: the browser is
       behind a Service and reads like an outside address. On a cluster that enforces policy, leaving
       this out means every Bot action fails and the API looks broken rather than fenced.
+
+      THIS RELEASE'S COMPUTERS, IN THE NAMESPACE THEY RUN IN. The rule used to name only the
+      component, with no namespace, which meant two things. In `mode: sandbox` with
+      `computers.sandbox.namespace` set, the computers are not in this namespace, so the rule matched
+      none of them and every Bot action failed on a cluster that enforces policy. And with two
+      releases in one namespace, it let this API reach the other release's computers.
     */}}
     - to:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              app.kubernetes.io/component: computer
+              kubernetes.io/metadata.name: {{ include "openbot.computersNamespace" . }}
+          podSelector:
+            matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" "computer") | indent 14 }}
       ports:
         - port: 4100
           protocol: TCP
@@ -137,11 +174,19 @@ addressing another pod, a node, or a cloud metadata endpoint, and naming the exc
 way to say that without also saying which websites exist.
 
 Ingress is the API server and nothing else. The gateway is the only thing that may drive it.
+
+IN THE NAMESPACE THE COMPUTERS RUN IN. A policy fences only pods in its own namespace, and in
+`mode: sandbox` with `computers.sandbox.namespace` set, the computers are not in the release's. This
+policy used to be written into the release's namespace whatever the mode, so a deployment that put
+its computers in a namespace of their own, which is what several organizations in one cluster do,
+had computers no policy selected: any pod in the cluster could reach them, and they could reach
+anything. The API is named by namespace as well as by label for the same reason.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "openbot.componentName" (dict "root" . "component" $computer) }}
+  namespace: {{ include "openbot.computersNamespace" . }}
   labels:
 {{ include "openbot.componentLabels" (dict "root" . "component" $computer) | indent 4 }}
 spec:
@@ -153,7 +198,10 @@ spec:
     - Egress
   ingress:
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
             matchLabels:
 {{ include "openbot.componentSelectorLabels" (dict "root" . "component" "server") | indent 14 }}
       ports:
@@ -217,6 +265,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: postgresql
+              {{- /* This release's database, not another release's in the same namespace. */}}
+              app.kubernetes.io/instance: {{ .Release.Name }}
       ports:
         - port: 5432
           protocol: TCP
@@ -278,6 +328,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: postgresql
+              {{- /* This release's database, not another release's in the same namespace. */}}
+              app.kubernetes.io/instance: {{ .Release.Name }}
       ports:
         - port: 5432
           protocol: TCP
@@ -337,6 +389,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: postgresql
+              {{- /* This release's database, not another release's in the same namespace. */}}
+              app.kubernetes.io/instance: {{ .Release.Name }}
       ports:
         - port: 5432
           protocol: TCP

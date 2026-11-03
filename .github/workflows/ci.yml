@@ -166,7 +166,7 @@ jobs:
       # One red target must not hide whether another is red too.
       fail-fast: false
       matrix:
-        target: [self-hosted, eks, eks-sandbox, gke, aks]
+        target: [self-hosted, eks, eks-sandbox, gke, aks, multi-org]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -309,6 +309,13 @@ jobs:
       # review, the other by a live upgrade after the first had been fixed one key over.
       - name: A new values key can be absent
         run: bun scripts/check-new-values-keys.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
+      # And that two organizations can each have a release of this target in one cluster. Every way
+      # of breaking that renders and installs cleanly: a selector without the release label, a
+      # policy in the wrong namespace, a name that is the namespace's rather than the release's. So
+      # this renders the target as two releases, in namespaces of their own and then in one, and
+      # fails on anything either could select, reach or overwrite of the other's.
+      - name: Two organizations in one cluster
+        run: bun scripts/check-chart-tenancy.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
 
   test:
     name: tests
