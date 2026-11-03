@@ -3,6 +3,7 @@ import Avatar from "boring-avatars";
 import { memo, type ReactNode } from "react";
 import { useBotLook } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { SolidFace } from "@/components/agents/solid-face";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
 
@@ -30,8 +31,9 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
-  const orbs = useBotLook() === "orb";
-  const face = orbs ? orbFace : boringFace;
+  const look = useBotLook();
+  const orbs = look === "orb";
+  const face = orbs ? orbFace : look === "solid" ? solidFace : boringFace;
   const avatar =
     participantIds.length === 1 ? (
       face(participantIds[0], size)
@@ -91,6 +93,23 @@ function boringFace(id: string, size: number) {
 
 function orbFace(id: string, size: number) {
   return <OrbFace id={id} size={size} />;
+}
+
+function solidFace(id: string, size: number) {
+  return <SeededSolidFace id={id} size={size} />;
+}
+
+/** As the orbs are: seeded from the Bot's `avatarSeed`, so it is one colour everywhere. */
+function SeededSolidFace({ id, size }: { id: string; size: number }) {
+  const { data: seed } = useQuery({
+    ...agentListQueryOptions(),
+    select: (agents) => agents.find((agent) => agent.id === id)?.avatarSeed,
+  });
+  return (
+    <span aria-hidden="true" className="contents">
+      <SolidFace name={id} seed={seed ?? id} size={size} />
+    </span>
+  );
 }
 
 /** A participant that is not a listed Bot, such as a computer, is seeded by its id. */

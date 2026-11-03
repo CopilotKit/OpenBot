@@ -11,5 +11,5 @@ export const latch: Skin = {
   name: "Latch",
   description:
     "Small and tidy: rounded cards, small caps labels and one blue accent.",
-  botLook: "face",
+  botLook: "solid",
 };

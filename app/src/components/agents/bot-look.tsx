@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 
-/** How a Bot is drawn: as its orb, or as the generated face. */
-export type BotLook = "orb" | "face";
+/** How a Bot is drawn: as its orb, as the generated face, or as a solid coloured face with eyes. */
+export type BotLook = "orb" | "face" | "solid";
 
 /*
  * Set once, from the active skin's `botLook` (see `_authed.tsx`), so a component asks how to draw a
