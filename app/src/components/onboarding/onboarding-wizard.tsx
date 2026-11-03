@@ -47,7 +47,7 @@ export type OnboardingStep = {
   secondary?: { label: string; onClick?: (next: () => void) => void };
   /**
    * An optional step keeps the second button's place even while it has none, so the primary stays
-   * put for the whole step: Get notified drops Not now once the browser has answered.
+   * put for the whole step.
    */
   optional?: boolean;
   /** A line about the step, above the buttons. */
@@ -99,9 +99,8 @@ function Pane({
 /**
  * The steps, moved through one at a time inside {@link OnboardingFrame}.
  *
- * WHERE SOMEBODY IS, BY ID. The list grows after it first draws: the self-hosting step joins once
- * the server says this is somebody trying OpenBot alone, and that answer can arrive while they are
- * on step two. Held as an index, their place would slide; held as an id, the step they are on stays
+ * WHERE SOMEBODY IS, BY ID. The list grows after it first draws: Talk to us joins once the server
+ * says this is somebody trying OpenBot alone, and that answer can arrive while they are on Welcome. Held as an index, their place would slide; held as an id, the step they are on stays
  * the step they are on, and only the list around it changes.
  *
  * WHO HOLDS THE ID. The route does, through `stepId` and `onMove`, because the step lives in the
@@ -170,8 +169,7 @@ export function OnboardingWizard({
   };
   /*
    * On from the step this was handed to, not from whichever step is current when it runs: a step
-   * that moves on after a beat (Get notified, once the browser said yes) must not skip a step if
-   * the person pressed Back or Continue during that beat.
+   * that moves on after a beat must not skip a step if the person pressed Back during that beat.
    */
   const showing = useRef(step?.id);
   showing.current = step?.id;

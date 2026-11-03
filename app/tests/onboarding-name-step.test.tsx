@@ -35,7 +35,7 @@ function client(needsName = true) {
     email: "dev@openbot.local",
     name: needsName ? "dev@openbot.local" : "Sam",
     needsName,
-    onboarding: { completedAt: null, step: 9 },
+    onboarding: { completedAt: null, step: 3 },
   });
   return query;
 }
@@ -56,8 +56,8 @@ function NameOnboarding({
       initialStepId="name"
       steps={[
         {
-          id: "notify",
-          title: "Get notified",
+          id: "welcome",
+          title: "Welcome to OpenBot",
           intro: () => <StepIntro />,
         },
         name,

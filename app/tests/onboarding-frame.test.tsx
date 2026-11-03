@@ -144,14 +144,18 @@ test("the step's words and its picture sit in their own panes, words first", () 
       demo &&
       intro.compareDocumentPosition(demo) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  // The desktop's two columns: the picture fills the left, held in view, and the words the right,
-  // with the buttons at the bottom of their pane.
-  expect(demo?.className).toContain("lg:col-start-1");
+  // The desktop's two columns: the words on the left, with the buttons at the bottom of their
+  // pane, and the picture filling the right, held in view, with its border on the words' side.
+  expect(intro?.className).toContain("lg:col-start-1");
+  expect(demo?.className).toContain("lg:col-start-2");
   expect(demo?.className).toContain("lg:sticky");
-  expect(intro?.className).toContain("lg:col-start-2");
+  expect(demo?.className).toContain("lg:border-l");
+  expect(demo?.className).not.toContain("lg:border-r");
   const footer = view.container.querySelector("footer");
-  expect(footer?.className).toContain("lg:col-start-2");
+  expect(footer?.className).toContain("lg:col-start-1");
   expect(footer?.className).toContain("lg:row-start-4");
+  const header = view.container.querySelector("header");
+  expect(header?.className).toContain("lg:col-start-1");
 });
 
 test("a step with its picture first puts it above the heading on a phone", () => {
@@ -164,9 +168,9 @@ test("a step with its picture first puts it above the heading on a phone", () =>
   const demo = view.container.querySelector("[data-onboarding-demo]");
   expect(demo?.className).toContain("row-start-2");
   expect(intro?.className).toContain("row-start-3");
-  // On a desktop it is still the left-hand pane, and the words still head the right.
+  // On a desktop it is still the right-hand pane, and the words still head the left.
   expect(intro?.className).toContain("lg:row-start-2");
-  expect(demo?.className).toContain("lg:col-start-1");
+  expect(demo?.className).toContain("lg:col-start-2");
   // Without the phone's margin under it, which would stop the stretched pane short of the bottom.
   expect(demo?.className).toContain("lg:my-0");
 });
@@ -195,6 +199,20 @@ test("Back returns, and hides again on the first step", async () => {
   expect(phoneBack(view)).toBeNull();
 });
 
+test("a single step has no step list and no dashes, since there is nowhere else to be", () => {
+  const view = draw({ steps: [plain("only", "Only")] });
+
+  expect(view.getByRole("heading", { name: "Only" })).toBeTruthy();
+  expect(view.container.querySelector("[data-onboarding-steps]")).toBeNull();
+  expect(view.queryByRole("progressbar")).toBeNull();
+  expect(phoneBack(view)).toBeNull();
+  expect(desktopBack(view)).toBeNull();
+  // The product's name still heads the desktop's pane.
+  expect(view.container.querySelector("header")?.textContent).toContain(
+    "OpenBot",
+  );
+});
+
 test("a step that joins the list later does not move somebody off theirs", () => {
   const view = draw({ initialStepId: "two" });
 
@@ -208,7 +226,7 @@ test("a step that joins the list later does not move somebody off theirs", () =>
   expect(progress(view).getAttribute("aria-valuetext")).toBe("Step 2 of 4");
 });
 
-/** Three steps where the second is optional, the way Connect your apps is. */
+/** Three steps where the second is optional, the way Talk to us is. */
 const OPTIONAL: OnboardingStep[] = [
   plain("one", "One"),
   {
