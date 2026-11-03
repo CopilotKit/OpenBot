@@ -177,8 +177,8 @@ function milestones(
       };
 }
 milestones("connection", "setup", "human", {
-  attempted: ["mcp.account_connected"],
-  completed: ["mcp.connection_verified", "mcp.account_disconnected"],
+  attempted: ["mcp.account_connected", "mcp.connection_verified"],
+  completed: ["mcp.account_disconnected"],
   failed: ["mcp.authorization_unreconciled"],
   cancelled: ["mcp.authorization_cancelled"],
 });
@@ -250,6 +250,23 @@ export function projectAuditMilestone(
 ): Milestone | null {
   const found = auditMilestones[event.eventType];
   if (!found) return null;
+  if (event.eventType === "mcp.connection_verified") {
+    // The same audit name records a clean check, a failed named probe, or an
+    // unchecked connection. The writers use a null action when no probe ran.
+    const verified = event.payload.verified;
+    const probeRan =
+      typeof event.payload.action === "string" &&
+      event.payload.action.trim().length > 0;
+    return {
+      ...found,
+      outcome:
+        verified === true
+          ? "completed"
+          : verified === false && probeRan
+            ? "failed"
+            : "attempted",
+    };
+  }
   if (event.eventType === "approval.person_decided") {
     const verdict = event.payload.decision ?? event.payload.effect;
     return { ...found, outcome: verdict === "deny" ? "rejected" : "completed" };

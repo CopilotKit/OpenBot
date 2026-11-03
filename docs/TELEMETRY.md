@@ -32,7 +32,7 @@ The audit tap supplies the actual row ID after insertion; the exporter rebuilds 
 
 | Family | Authoritative source | Projection and limits |
 | --- | --- | --- |
-| Connections | Account connected/verified/disconnected, authorization cancelled/unreconciled | Setup attempt/verification/failure/cancellation; source event distinguishes disconnect. No vendor URLs/names/scopes. |
+| Connections | Account connected/verified/disconnected, authorization cancelled/unreconciled | Setup attempt/verification/failure/cancellation; verification completes only with `verified=true`. `verified=false` with a named probe is a failed check, not proof of bad credentials; unchecked, unreachable or missing evidence stays attempted. Source event distinguishes disconnect. No vendor URLs/names/scopes, probe names or failure text. |
 | Tool use | `mcp.call_succeeded/failed/rejected`, callback refused | Automated use completed/failed/rejected. Tool arguments, results and names excluded. |
 | Approval | Evaluated policy outcome; person decision; withdrawal | Requested/rejected/attempted, human completion/rejection, cancellation. Withdrawal is not proof the person abandoned work. |
 | Bots | Created/duplicated/updated/paused/resumed/deleted; isolation refused | Setup/state transitions. Run evidence measures use; no customer-authored names. |

@@ -73,6 +73,46 @@ test("audit export projects closed categories only and discards raw content", ()
   ).toBeNull();
 });
 
+test.each([
+  {
+    label: "verified",
+    payload: { verified: true, action: "private-probe" },
+    outcome: "completed",
+  },
+  {
+    label: "observed failed check",
+    payload: { verified: false, action: "private-probe" },
+    outcome: "failed",
+  },
+  {
+    label: "unchecked connection",
+    payload: { verified: false, action: null },
+    outcome: "attempted",
+  },
+  {
+    label: "unreachable check",
+    payload: { verified: false, action: null, unreachable: "private-failure" },
+    outcome: "attempted",
+  },
+  {
+    label: "missing verification evidence",
+    payload: { action: "private-probe" },
+    outcome: "attempted",
+  },
+] as const)(
+  "connection verification projects $label without exporting probe details",
+  ({ payload, outcome }) => {
+    expect(
+      projectAuditMilestone({ eventType: "mcp.connection_verified", payload }),
+    ).toEqual({
+      capability: "connection",
+      stage: "setup",
+      outcome,
+      actor_kind: "human",
+    });
+  },
+);
+
 test("consumption accepts existing actions and refuses identity/content injection", () => {
   const valid = {
     kind: "result_viewed",
