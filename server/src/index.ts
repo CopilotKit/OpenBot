@@ -105,6 +105,7 @@ import {
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
+  stagedAttachmentTtlHours,
 } from "./channels/attachments";
 import {
   createChannelEventHub,
@@ -178,6 +179,11 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { createFilesClient, installFilesClient } from "./files/client";
+import {
+  copyLocalAttachmentsToIntelligence,
+  copyLocalPageFramesToIntelligence,
+} from "./files/upgrade";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -476,6 +482,21 @@ await botDirectory.start();
 // An upgraded deployment's Bots, copied from the local tables once (agents/bot-registry/upgrade.ts).
 await copyLocalBotsToIntelligence(database, botDirectory);
 /*
+ * Chat attachments and the screenshots browser turns keep live in Intelligence's file store
+ * (files/client.ts). Installed before anything serves or reads one, and an upgraded deployment's
+ * files copied in from the local tables once (files/upgrade.ts), loud when any is missing.
+ */
+installFilesClient(
+  createFilesClient({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+);
+await copyLocalAttachmentsToIntelligence(database, {
+  stagedTtlHours: stagedAttachmentTtlHours(process.env),
+});
+await copyLocalPageFramesToIntelligence(database);
+/*
  * Each person's memories and memory sources live in Intelligence (memory/intelligence.ts), on every plan.
  * Every turn reads them, so each instance holds a person's memory once read, kept fresh by Intelligence's
  * `memory_changes` announcements and a timer (memory/cache.ts). An upgraded deployment's memory is copied
@@ -735,7 +756,7 @@ const componentCatalog = headlessComponentCatalog({
   audit: auditSink(bootAuditStore),
 });
 // One store: the gateway writes through it, a route reads it, and the sweep below takes the old ones out.
-const pageFrameStore = createPageFrameStore(database);
+const pageFrameStore = createPageFrameStore();
 let deliveryNotifications: (
   scope: DeliveryScope,
   input: {

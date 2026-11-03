@@ -56,17 +56,12 @@ Use `bun run dev` only when you want the app and API server without starting the
 
 `start.sh` hands every selected Docker service to `docker compose up -d` on every run, so one whose configuration changed is recreated and an unchanged one is left as it is. It leaves an API server or app that already answers as OpenBot alone, restarts the API server when it refuses the worker's secret or has no routines route, and reports when a port is held by another process.
 
-**Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
-message is sent, and the only thing that reclaims the ones never sent is
-`bun scripts/cull-staged-attachments.ts` from `server/`, which the Helm chart runs hourly and which
-neither `docker-compose.yml` nor `start.sh` starts. It needs only `DATABASE_URL`, and takes a
-retention window in hours as its one optional argument, defaulting to 24. On a laptop that is
-usually nothing, because the rows are small and the database is yours. It stops being nothing at
-thirty-two: one person may hold that many unsent files across every channel at once, the refusal on
-the next one promises they are cleared within a day, and where nothing sweeps they are not, so a
-long-lived local deployment can reach a state where attaching anything is refused. Removing a file
-in the composer deletes it outright, so it takes abandoned drafts rather than ordinary use.
-[deployment.md](deployment.md) says the same for a real deployment.
+**Staged attachments expire.** A file dropped into the composer is stored in Intelligence's file
+store before the message is sent, with an expiry `OPENBOT_STAGED_ATTACHMENT_TTL_HOURS` from then (24
+by default; `off` keeps them). Intelligence deletes the ones never sent when that passes, so a local
+deployment needs nothing running for it. `bun scripts/cull-staged-attachments.ts` from `server/`
+sweeps the unsent rows left in the local `attachments` table from before attachments moved; it needs
+only `DATABASE_URL`. [deployment.md](deployment.md) says the same for a real deployment.
 
 ## Migrations
 

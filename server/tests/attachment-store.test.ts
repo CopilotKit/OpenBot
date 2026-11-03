@@ -18,11 +18,18 @@ import {
   channels,
   users,
 } from "../src/db/schema";
+import { filesClient } from "../src/files/client";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import {
+  attachmentsInChannel,
+  seedAttachment,
+  useTestFiles,
+} from "./support/files";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
+useTestFiles();
 
 const testPrefix = `attachment-store-${randomUUID()}`;
 const createdAttachmentIds: string[] = [];
@@ -31,7 +38,7 @@ const createdUserIds: string[] = [];
 
 afterEach(async () => {
   for (const id of createdAttachmentIds.splice(0)) {
-    await database.delete(attachments).where(eq(attachments.id, id));
+    await filesClient().delete(id, `test:${randomUUID()}`);
   }
   for (const id of createdChannelIds.splice(0)) {
     await database.delete(channels).where(eq(channels.id, id));
@@ -65,33 +72,28 @@ async function seedChannel(db: typeof database) {
   return { userId, channelId };
 }
 
-describe("an attachment's bytes through the bytea column", () => {
+describe("an attachment's bytes through Intelligence's file store", () => {
   test("survive the round trip unchanged, byte for byte", async () => {
     const { userId, channelId } = await seedChannel(database);
-    // Deliberately includes both a null byte and 0xff: a driver that
-    // treats bytea as text would mangle one of these on the way through.
+    // Deliberately includes both a null byte and 0xff: a transport that
+    // treats bytes as text would mangle one of these on the way through.
     const payload = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00, 0xff]);
 
-    const [inserted] = await database
-      .insert(attachments)
-      .values({
-        channelId,
-        uploadedBy: userId,
-        name: "test.bin",
-        mimeType: "application/octet-stream",
-        sizeBytes: payload.byteLength,
-        bytes: payload,
-      })
-      .returning();
-    createdAttachmentIds.push(inserted.id);
+    const id = await seedAttachment({
+      channelId,
+      uploadedBy: userId,
+      name: "test.bin",
+      mimeType: "application/octet-stream",
+      bytes: payload,
+    });
+    createdAttachmentIds.push(id);
 
-    const [read] = await database
-      .select()
-      .from(attachments)
-      .where(eq(attachments.id, inserted.id));
+    const read = await filesClient().content(id);
+    const file = await filesClient().get(id);
 
-    expect(Buffer.compare(read.bytes, payload)).toBe(0);
-    expect(read.attachedAt).toBeNull();
+    expect(Buffer.compare(read ?? Buffer.alloc(0), payload)).toBe(0);
+    expect(file?.sizeBytes).toBe(payload.byteLength);
+    expect(file?.committedAt).toBeNull();
   });
 });
 
@@ -281,12 +283,11 @@ function uploadRequest(
   );
 }
 
-/** The rows this channel holds, so a refusal can be checked against its own channel and no other. */
+/** The files this channel holds, so a refusal can be checked against its own channel and no other. */
 async function rowsIn(channelId: string) {
-  return await database
-    .select({ id: attachments.id })
-    .from(attachments)
-    .where(eq(attachments.channelId, channelId));
+  return (await attachmentsInChannel(channelId)).map((file) => ({
+    id: file.id,
+  }));
 }
 
 describe("the body limit in front of the upload route", () => {

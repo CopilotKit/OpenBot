@@ -72,9 +72,15 @@ exactly as the server does: give it the same env file and add those two. Until s
 routine is stored, its next run time is computed, the Routines page shows it, and it never fires.
 See [routines.md](routines.md).
 
-**The staged-attachment sweep.** Same shape as the routines schedule, with a consequence worth
-stating on its own: a file dropped into the composer is stored before it is sent, and nothing in
-this image reclaims the ones that never were. The sweep is `bun scripts/cull-staged-attachments.ts`
+**The staged-attachment window.** A file dropped into the composer is stored before it is sent.
+Attachments live in Intelligence's file store, and each staged one is stored with an expiry:
+`OPENBOT_STAGED_ATTACHMENT_TTL_HOURS` from now (24 by default, a fraction is a fraction of an hour,
+`off` keeps staged files until they are sent or removed). Intelligence deletes it when that passes;
+a send clears it. The Helm chart writes the variable from `attachments.culler`.
+
+**The staged-attachment sweep.** Before attachments moved into Intelligence they were rows in this
+deployment's database, which keeps that table, unwritten, for one release; this sweep reclaims the
+unsent rows left in it. Same shape as the routines schedule. The sweep is `bun scripts/cull-staged-attachments.ts`
 from `/app/server`, one pass then exit, which the Helm chart runs hourly and which deletes unsent
 attachments older than 24 hours — the window is the script's one positional argument, so
 `bun scripts/cull-staged-attachments.ts 72` keeps them for three days, and a fraction is a fraction
