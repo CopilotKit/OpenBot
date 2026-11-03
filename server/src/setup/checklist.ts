@@ -10,7 +10,7 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
 /**
  * The setup checklist: one row for each thing this deployment depends on, and what it says about it.
  *
- * Onboarding's "Check your setup" step and Settings → Setup draw it. It answers what an admin is
+ * Settings → Setup draws it, and the Settings sidebar counts what needs setup for an admin. It answers what an admin is
  * about to ask after a first run, "what is set up, and what still needs doing", from the server's
  * own configuration and state rather than from a list the app keeps.
  *
@@ -35,7 +35,7 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
  * reader rather than by the page: onboarding is a page anybody opens, so the server decides per
  * reader and a member's browser never holds the deployment's configuration vocabulary.
  *
- * A person's own apps have no row here: the Connect your apps step draws those.
+ * A person's own apps have no row here: Connections lists those.
  */
 
 /** The guides a fix links to. The repository is where the docs ship from. */

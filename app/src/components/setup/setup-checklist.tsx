@@ -44,8 +44,8 @@ const PRODUCT = appConfig.brand.productName;
  * What this deployment has, and what still needs setting up: one row each, with a pill saying
  * Ready, Not checked or Needs setup.
  *
- * Drawn in two places: onboarding's Check your setup step, and Settings → Setup, where an admin
- * comes back to it after setting a variable and restarting OpenBot.
+ * Drawn on Settings → Setup, where an admin checks it, and comes back to it after setting a
+ * variable and restarting OpenBot. Onboarding leaves it out: none of it blocks the first task.
  *
  * The rows, their sentences and their fixes are the server's (see `lib/setup/queries.ts`): this
  * draws them, and holds the one thing only a browser can do, which is asking it to check again.
@@ -156,10 +156,18 @@ export function summaryOf(rows: SetupRow[]): string {
   const required = gaps.filter((row) => row.required).length;
   const things =
     gaps.length === 1 ? "1 thing needs" : `${gaps.length} things need`;
+  /*
+   * Says what to do, not only how many: an admin reading "works without them" was left unsure
+   * whether to act. Optional gaps are features to add when wanted; required ones come first.
+   */
+  const optional =
+    gaps.length === 1
+      ? "1 optional feature isn't set up yet"
+      : `${gaps.length} optional features aren't set up yet`;
   const needs =
     required > 0
-      ? `${things} setup, and ${required === 1 ? "1 is" : `${required} are`} required.`
-      : `${things} setup. ${PRODUCT} works without ${gaps.length === 1 ? "it" : "them"}.`;
+      ? `${things} setup, and ${required === 1 ? "1 is" : `${required} are`} required. Set up the required ${required === 1 ? "one" : "ones"} first.`
+      : `${PRODUCT} is ready to use. ${optional}. Each says how to add it.`;
   return notChecked ? `${needs} ${notChecked}` : needs;
 }
 

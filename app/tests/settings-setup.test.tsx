@@ -61,6 +61,10 @@ const originalFetch = globalThis.fetch;
 let role: "admin" | "user";
 let localEvaluation: boolean;
 let rechecked: number;
+/** Every path asked for, to say what a member's sidebar never reads. */
+let requested: string[];
+/** What `GET /api/setup` answers. */
+let checklist: { audience: string; rows: unknown[] };
 const defaults = queryClient.getDefaultOptions();
 
 beforeEach(() => {
@@ -72,9 +76,12 @@ beforeEach(() => {
   role = "admin";
   localEvaluation = false;
   rechecked = 0;
+  requested = [];
+  checklist = CHECKLIST;
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      requested.push(path);
       if (path === "/api/me")
         return Response.json({
           user: {
@@ -91,7 +98,7 @@ beforeEach(() => {
         rechecked += 1;
         return Response.json({ checklist: CHECKLIST });
       }
-      if (path === "/api/setup") return Response.json({ checklist: CHECKLIST });
+      if (path === "/api/setup") return Response.json({ checklist });
       return Response.json({});
     },
     { preconnect: originalFetch.preconnect },
@@ -209,8 +216,73 @@ test("the one person on a local install gets the page", async () => {
 test("the sidebar lists Setup for an admin", async () => {
   const view = sidebar();
 
-  const link = await view.findByRole("link", { name: "Setup" });
+  const link = await view.findByRole("link", { name: /^Setup/ });
   expect(link.getAttribute("href")).toBe("/settings/setup");
+});
+
+/** A checklist row, needing setup unless told otherwise. */
+const row = (id: string, over: Record<string, unknown> = {}) => ({
+  id,
+  scope: "deployment",
+  title: id,
+  required: false,
+  status: "needs_setup",
+  ready: false,
+  detail: "",
+  fix: { kind: "env", names: ["SOME_KEY"], docsUrl: "https://example.test" },
+  ...over,
+});
+
+/** The sidebar's Setup link, once it reads `text`, the count's words included. */
+const setupLink = (view: ReturnType<typeof render>, text: string) =>
+  waitFor(() => {
+    const link = view.getByRole("link", { name: /^Setup/ });
+    expect(link.textContent).toBe(text);
+    return link;
+  });
+
+test("an admin's sidebar counts beside Setup the rows they can fix", async () => {
+  checklist = {
+    audience: "admin",
+    rows: [
+      row("model"),
+      row("apps"),
+      // Nothing to do about it here, so not counted.
+      row("computer", { fix: null }),
+      row("search", { status: "ready", ready: true }),
+    ],
+  };
+  const view = sidebar();
+
+  const link = await setupLink(view, "Setup, 2 need setup");
+  const badge = link.parentElement?.querySelector(
+    '[data-sidebar="menu-badge"]',
+  );
+  expect(badge?.textContent).toBe("2");
+  // Said once, in the link's name: the number on its own is hidden.
+  expect(badge?.getAttribute("aria-hidden")).toBe("true");
+});
+
+test("one row to fix reads in the singular", async () => {
+  checklist = { audience: "admin", rows: [row("model")] };
+  const view = sidebar();
+
+  expect(await setupLink(view, "Setup, 1 needs setup")).toBeTruthy();
+});
+
+test("an admin with nothing to fix sees Setup without a count", async () => {
+  checklist = {
+    audience: "admin",
+    rows: [row("model", { status: "ready", ready: true })],
+  };
+  const view = sidebar();
+
+  await view.findByRole("link", { name: /^Setup/ });
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+  expect(view.getByRole("link", { name: /^Setup/ }).textContent).toBe("Setup");
+  expect(view.container.querySelector('[data-sidebar="menu-badge"]')).toBe(
+    null,
+  );
 });
 
 test("the sidebar never offers Setup to a member", async () => {
@@ -219,5 +291,10 @@ test("the sidebar never offers Setup to a member", async () => {
 
   await view.findByRole("link", { name: "General" });
   await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-  expect(view.queryByRole("link", { name: "Setup" })).toBeNull();
+  expect(view.queryByRole("link", { name: /^Setup/ })).toBeNull();
+  // Nor is the checklist asked for: there is nothing in it a member could fix.
+  expect(requested).not.toContain("/api/setup");
+  expect(view.container.querySelector('[data-sidebar="menu-badge"]')).toBe(
+    null,
+  );
 });

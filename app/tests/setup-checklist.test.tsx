@@ -8,16 +8,8 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-  within,
-} from "@testing-library/react";
-import { StepIntro } from "@/components/onboarding/onboarding-frame";
-import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
-import { SetupChecklist } from "@/components/setup/setup-checklist";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { SetupChecklist, summaryOf } from "@/components/setup/setup-checklist";
 import type {
   SetupChecklist as Checklist,
   SetupRow,
@@ -26,8 +18,8 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The setup checklist onboarding's "Check your setup" step draws. It draws what the server decided,
- * row by row, and lets somebody check again and open the page that closes a gap.
+ * The setup checklist Settings → Setup draws. It draws what the server decided, row by row, and
+ * lets somebody check again and open the page that closes a gap.
  */
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost:3010" }));
@@ -180,7 +172,9 @@ test("Ready and Needs setup rows come from the server's answer", async () => {
     ),
   ).not.toBeNull();
   expect(
-    view.getByText("3 things need setup, and 1 is required."),
+    view.getByText(
+      "3 things need setup, and 1 is required. Set up the required one first.",
+    ),
   ).not.toBeNull();
 });
 
@@ -332,7 +326,7 @@ test("a key nobody has checked reads Not checked, never Ready", async () => {
   expect(view.getByText("1 thing isn't checked yet.")).not.toBeNull();
 });
 
-test("optional gaps alone say OpenBot works without them", async () => {
+test("optional gaps alone say OpenBot is ready, and that each says how to add it", async () => {
   serving({
     audience: "admin",
     rows: ADMIN.rows.map((row) =>
@@ -342,8 +336,24 @@ test("optional gaps alone say OpenBot works without them", async () => {
   const view = draw();
 
   expect(
-    await view.findByText("2 things need setup. OpenBot works without them."),
+    await view.findByText(
+      "OpenBot is ready to use. 2 optional features aren't set up yet. Each says how to add it.",
+    ),
   ).not.toBeNull();
+});
+
+test("the summary counts in the singular and the plural", () => {
+  const gap = (id: SetupRow["id"], required = false) =>
+    ROW({ id, required, ready: false, status: "needs_setup" });
+  expect(summaryOf([gap("chat")])).toBe(
+    "OpenBot is ready to use. 1 optional feature isn't set up yet. Each says how to add it.",
+  );
+  expect(summaryOf([gap("model", true), gap("intelligence", true)])).toBe(
+    "2 things need setup, and 2 are required. Set up the required ones first.",
+  );
+  expect(summaryOf([gap("model", true)])).toBe(
+    "1 thing needs setup, and 1 is required. Set up the required one first.",
+  );
 });
 
 test("a check that fails says so, and Check again stays", async () => {
@@ -354,38 +364,4 @@ test("a check that fails says so, and Check again stays", async () => {
     await view.findByText("Couldn't check your setup. Check again."),
   ).not.toBeNull();
   expect(view.getByRole("button", { name: "Check again" })).not.toBeNull();
-});
-
-test("moving on works with a required gap still open", async () => {
-  serving(ADMIN);
-  const view = render(
-    <QueryClientProvider client={queryClient}>
-      <OnboardingWizard
-        initialStepId="setup"
-        steps={[
-          {
-            id: "setup",
-            title: "Check your setup",
-            intro: () => <StepIntro title="Check your setup" />,
-            demo: () => <SetupChecklist openPage={() => {}} />,
-          },
-          {
-            id: "name",
-            title: "Your name",
-            intro: () => <StepIntro title="Let's get to it." />,
-          },
-        ]}
-      />
-    </QueryClientProvider>,
-  );
-
-  await view.findByText("3 things need setup, and 1 is required.");
-  const next = view.getByRole("button", { name: "Continue" });
-  expect((next as HTMLButtonElement).disabled).toBe(false);
-  fireEvent.click(next);
-  await waitFor(() =>
-    expect(
-      view.getByRole("heading", { name: "Let's get to it." }),
-    ).toBeTruthy(),
-  );
 });

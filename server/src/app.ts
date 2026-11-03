@@ -471,7 +471,7 @@ export function createApp(
     /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
     lifecycle?: BotLifecycleServices;
     /**
-     * The setup checklist onboarding's "Check your setup" step draws, read from this server's own
+     * The setup checklist Settings → Setup draws, read from this server's own
      * configuration and state. See setup/checklist.ts. Absent, `/api/setup` is not mounted.
      */
     setup?: SetupSources;

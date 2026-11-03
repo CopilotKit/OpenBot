@@ -1130,7 +1130,7 @@ useful answer is that the image could not be fetched. Somewhere that must never 
 
 ## Setup checklist
 
-Onboarding's Check your setup step, and **Settings → Setup** afterwards, show one row each for
+**Settings → Setup** shows admins one row each for
 CopilotKit Intelligence, the AI model, the Bot computer, more apps (Composio or Arcade) and Slack and
 Teams. They are read from `GET /api/setup`, and `POST /api/setup/check` asks again.
 

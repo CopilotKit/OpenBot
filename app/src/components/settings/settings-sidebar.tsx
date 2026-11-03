@@ -18,13 +18,14 @@ import {
   SidebarGroup,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { mayOpenSetup } from "@/lib/setup/queries";
+import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
@@ -100,6 +101,21 @@ export function SettingsSidebar({
   const user = useQuery(currentUserQueryOptions()).data;
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions()).data;
   const canSetUp = mayOpenSetup(user, capabilities);
+  /*
+   * What an admin can act on, counted beside Setup: rows that need setup and say how. Onboarding
+   * leaves the checklist out, so this is where an admin learns something is waiting on them. Never
+   * asked for anybody else, who could not fix any of it.
+   */
+  const checklist = useQuery({
+    ...setupChecklistQueryOptions(),
+    enabled: canSetUp,
+  }).data;
+  const toFix =
+    checklist?.audience === "admin"
+      ? checklist.rows.filter(
+          (row) => row.status === "needs_setup" && row.fix !== null,
+        ).length
+      : 0;
   return (
     <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}
@@ -138,9 +154,19 @@ export function SettingsSidebar({
                     >
                       <option.icon className="mr-2 h-4 w-4" />
                       {option.title}
+                      {option.setup && toFix > 0 ? (
+                        <span className="sr-only">
+                          , {toFix} {toFix === 1 ? "needs" : "need"} setup
+                        </span>
+                      ) : null}
                     </Link>
                   )}
                 />
+                {option.setup && toFix > 0 ? (
+                  <SidebarMenuBadge aria-hidden="true">
+                    {toFix}
+                  </SidebarMenuBadge>
+                ) : null}
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
