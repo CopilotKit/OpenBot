@@ -29,7 +29,6 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
-  pluginGrants,
   users,
 } from "../src/db/schema";
 import {
@@ -64,7 +63,8 @@ import {
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import fileActions from "./fixtures/composio-file-actions.json";
-import { removeBots, seedBot, useTestBots } from "./support/bots";
+import { ConfigurationMissingError } from "../src/configuration/client";
+import { changeAccess, removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -75,6 +75,25 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * is itself the property being asserted: a tool a Bot was never given must not reach the vault or
  * the vendor, so there is nothing to stub.
  */
+
+/**
+ * Take back one tool's grants from these Bots only, as test cleanup: never a revoke by ref alone,
+ * which would take an administrator's grant for a Bot people use. A Bot already purged held nothing.
+ */
+async function revokeFor(botIds: string[], ref: string) {
+  try {
+    await changeAccess([{ op: "revokeMatching", kind: "mcp", botIds, ref }]);
+  } catch (error) {
+    if (!(error instanceof ConfigurationMissingError)) throw error;
+    for (const botId of botIds) {
+      await changeAccess([{ op: "revoke", botId, kind: "mcp", ref }]).catch(
+        (missing: unknown) => {
+          if (!(missing instanceof ConfigurationMissingError)) throw missing;
+        },
+      );
+    }
+  }
+}
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -473,16 +492,9 @@ afterAll(async () => {
    * use. This suite did exactly that once: it ran, and a Bot silently stopped being able to search
    * Drive, with an audit row showing the grant had been made and nothing showing it removed.
    *
-   * The primary key is (kind, ref, agent_id). Two of the three are not a row.
+   * A grant is (kind, ref, Bot). Two of the three are not a grant.
    */
-  await database
-    .delete(pluginGrants)
-    .where(
-      and(
-        eq(pluginGrants.ref, ref),
-        inArray(pluginGrants.agentId, [holderId, strangerId]),
-      ),
-    );
+  await revokeFor([holderId, strangerId], ref);
   // Suite-scoped, so it is this suite's whatever else is true of the server.
   await database
     .delete(mcpTools)
@@ -1153,14 +1165,7 @@ describe("a grant on a tool the vendor no longer lists", () => {
   const withdrawnRef = `${serverId}/${withdrawnName}`;
 
   afterAll(async () => {
-    await database
-      .delete(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.ref, withdrawnRef),
-          eq(pluginGrants.agentId, holderId),
-        ),
-      );
+    await revokeFor([holderId], withdrawnRef);
     await database
       .delete(mcpTools)
       .where(
@@ -1570,14 +1575,7 @@ describe("refresh token rotation", () => {
     for (const id of vaultRows) {
       await database.delete(credentials).where(eq(credentials.id, id));
     }
-    await database
-      .delete(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.ref, rotationRef),
-          eq(pluginGrants.agentId, rotationBotId),
-        ),
-      );
+    await revokeFor([rotationBotId], rotationRef);
     await database
       .delete(mcpTools)
       .where(
@@ -2610,14 +2608,7 @@ describe("a dynamic client the vendor has evicted", () => {
         ),
       );
     await clientFixture.restore();
-    await database
-      .delete(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.ref, dynamicRef),
-          eq(pluginGrants.agentId, dynamicBotId),
-        ),
-      );
+    await revokeFor([dynamicBotId], dynamicRef);
     await database
       .delete(mcpTools)
       .where(
@@ -4432,15 +4423,13 @@ async function freshDatabase(): Promise<Database> {
     );
   }
   /*
-   * The Bot's own grants, never a delete by ref.
+   * The Bot's own grants, never a revoke by ref.
    *
-   * The primary key is (kind, ref, agent_id), and `gmail/GMAIL_FETCH_EMAILS` is a real action of a
-   * real app: a delete by ref alone would take an administrator's grant for a Bot people use. This
-   * file has already done that once — the `afterAll` near the top of it says what that cost.
+   * A grant is (kind, ref, Bot), and `gmail/GMAIL_FETCH_EMAILS` is a real action of a real app: a
+   * revoke by ref alone would take an administrator's grant for a Bot people use. This file has
+   * already done that once — the `afterAll` near the top of it says what that cost. Purging the Bot
+   * takes its grants with it, in Intelligence, and nobody else's.
    */
-  await database
-    .delete(pluginGrants)
-    .where(eq(pluginGrants.agentId, "bot_helper"));
   await removeBots(["bot_helper"]);
   // The actions before the servers. `mcp_tools` cascades on the server row anyway, so this is what
   // clears actions a previous run left against a server row it is not what created.
@@ -8455,14 +8444,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
   });
 
   afterAll(async () => {
-    await database
-      .delete(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.ref, faultRef),
-          eq(pluginGrants.agentId, faultBotId),
-        ),
-      );
+    await revokeFor([faultBotId], faultRef);
     // The tools go with the server row, which cascades; both ids carry this run's suffix, so
     // neither can be a row the deployment configured.
     await database.delete(mcpServers).where(eq(mcpServers.id, faultServerId));

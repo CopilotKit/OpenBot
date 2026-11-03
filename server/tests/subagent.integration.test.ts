@@ -35,13 +35,12 @@ import {
   approvalRequests,
   mcpServers,
   mcpTools,
-  pluginGrants,
   users,
   workItems,
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
-import { removeBots, seedBot } from "./support/bots";
+import { changeAccess, removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -516,11 +515,15 @@ beforeAll(async () => {
       destructive: true,
     },
   ]);
-  await database.insert(pluginGrants).values(
+  await changeAccess(
     [SEARCH, POST].map((tool) => ({
+      op: "grant" as const,
+      botId,
       kind: "mcp" as const,
       ref: `${SERVER}/${tool}`,
-      agentId: botId,
+      grantedBy: null,
+      grantedAs: "admin" as const,
+      ifGranted: "replace" as const,
     })),
   );
   roster.set(botId, {
@@ -583,7 +586,7 @@ afterAll(async () => {
         ),
       ),
     );
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
+  // The Bot's grants go with it below: purging a Bot takes its access with it, in Intelligence.
   await database.delete(mcpTools).where(eq(mcpTools.serverId, SERVER));
   await database.delete(mcpServers).where(eq(mcpServers.id, SERVER));
   await removeBots([botId]);

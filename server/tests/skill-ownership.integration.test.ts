@@ -4,10 +4,10 @@ import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import { skills, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -82,17 +82,17 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(skills)
-    .where(
-      inArray(skills.slug, [
-        aliceSkill,
-        bobSkill,
-        deploymentSkill,
-        `written-${suite}`,
-        `catalogue-${suite}`,
-      ]),
-    );
+  const configuration = await useTestConfiguration();
+  for (const slug of [
+    aliceSkill,
+    bobSkill,
+    deploymentSkill,
+    `written-${suite}`,
+    `catalogue-${suite}`,
+  ]) {
+    await configuration.client.skills.remove(slug, `test:${randomUUID()}`);
+    configuration.skills.forget(slug);
+  }
   await removeBots([aliceBot, sharedBot]);
   await database.delete(users).where(inArray(users.id, [alice, bob]));
 });
@@ -166,16 +166,22 @@ describe("editing keeps ownership", () => {
    */
   test("saving over a catalogue skill makes it the deployment's own", async () => {
     const slug = `catalogue-${suite}`;
-    await database.insert(skills).values({
-      id: slug,
-      slug,
-      ownerUserId: null,
-      title: "Shipped",
-      summary: "",
-      instructions: "As shipped.",
-      origin: "catalogue",
-      installedBy: null,
-    });
+    const configuration = await useTestConfiguration();
+    configuration.skills.apply(
+      await configuration.client.skills.create(
+        slug,
+        {
+          ownerUserId: null,
+          title: "Shipped",
+          summary: "",
+          instructions: "As shipped.",
+          origin: "catalogue",
+          installedBy: null,
+          tools: [],
+        },
+        `test:${randomUUID()}`,
+      ),
+    );
 
     await store.installSkill({
       slug,
@@ -186,10 +192,7 @@ describe("editing keeps ownership", () => {
       by: "admin@example.test",
     });
 
-    const [row] = await database
-      .select({ origin: skills.origin, installedBy: skills.installedBy })
-      .from(skills)
-      .where(inArray(skills.slug, [slug]));
+    const row = await configuration.client.skills.get(slug);
     expect(row?.origin).toBe("yours");
     // Who first installed it is a first-write fact, and a re-save does not rewrite it.
     expect(row?.installedBy).toBeNull();

@@ -7,16 +7,16 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, pluginGrants, workItems } from "../src/db/schema";
+import { auditEvents, workItems } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { createWorkQueue } from "../src/work/queue";
-import { removeBots, seedBot } from "./support/bots";
+import { changeAccess, removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -96,7 +96,8 @@ async function clean() {
   await database
     .delete(workItems)
     .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
-  await database.delete(pluginGrants).where(inArray(pluginGrants.agentId, ALL));
+  // No Bot of the suite's holds another: what a test granted is taken back.
+  await changeAccess([{ op: "revokeMatching", kind: "bot", botIds: ALL }]);
 }
 
 // Made once: every test reads the same three Bots and changes none of them.

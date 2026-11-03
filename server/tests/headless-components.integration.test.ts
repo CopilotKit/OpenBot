@@ -22,11 +22,7 @@ import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
-import {
-  removeBots,
-  removeTestComponents,
-  seedBot,
-} from "./support/bots";
+import { removeBots, removeTestComponents, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**

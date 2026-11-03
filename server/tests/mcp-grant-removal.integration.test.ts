@@ -1,13 +1,18 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, mcpTools, pluginGrants } from "../src/db/schema";
+import { mcpServers, mcpTools } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  storedAccess,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -97,7 +102,6 @@ function listing(name: string) {
 
 afterAll(async () => {
   useComposioClient(null);
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
   await database
     .delete(mcpTools)
     .where(inArray(mcpTools.serverId, [serverId, keptServerId]));
@@ -139,10 +143,9 @@ test("removing an app takes its grants with it, and adding it back grants nothin
   useComposioClient(listing(actionName));
   await store.removeServer(serverId, "admin@openbot.test");
 
-  const left = await database
-    .select({ ref: pluginGrants.ref })
-    .from(pluginGrants)
-    .where(and(eq(pluginGrants.ref, ref), eq(pluginGrants.agentId, botId)));
+  // The Bot's access as Intelligence holds it, past this process's copy.
+  const held = (await storedAccess(botId)).grants;
+  const left = held.filter((grant) => grant.ref === ref);
   expect(left).toEqual([]);
 
   const removal = events.find(
@@ -151,10 +154,7 @@ test("removing an app takes its grants with it, and adding it back grants nothin
   expect(removal?.payload.releasedGrants).toEqual([ref]);
   expect(removal?.payload.bots).toEqual([botId]);
 
-  const kept = await database
-    .select({ ref: pluginGrants.ref })
-    .from(pluginGrants)
-    .where(and(eq(pluginGrants.ref, keptRef), eq(pluginGrants.agentId, botId)));
+  const kept = held.filter((grant) => grant.ref === keptRef);
   expect(kept).toHaveLength(1);
 
   await store.addBrokeredApp({
@@ -212,10 +212,9 @@ test("a re-added app a Bot was never granted again refuses the call", async () =
       }),
     ).rejects.toThrow(noAuthRef);
   } finally {
-    await database
-      .delete(pluginGrants)
-      .where(eq(pluginGrants.agentId, botId))
-      .catch(() => undefined);
+    await changeAccess([
+      { op: "revokeMatching", kind: "mcp", botIds: [botId] },
+    ]).catch(() => undefined);
     await database
       .delete(mcpTools)
       .where(eq(mcpTools.serverId, noAuthServerId))

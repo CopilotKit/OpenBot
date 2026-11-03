@@ -133,13 +133,11 @@ async function seedPreviousRelease() {
     origin: "yours",
     installedBy: owner,
   });
-  await database
-    .insert(skillTools)
-    .values({
-      skillId: skillSlug,
-      ref: "github/list_issues",
-      declaredBy: owner,
-    });
+  await database.insert(skillTools).values({
+    skillId: skillSlug,
+    ref: "github/list_issues",
+    declaredBy: owner,
+  });
   await database.insert(pluginGrants).values([
     { kind: "skill", ref: skillSlug, agentId: botId, grantedBy: owner },
     {
@@ -150,14 +148,12 @@ async function seedPreviousRelease() {
       grantedAs: "owner",
     },
   ]);
-  await database
-    .insert(teamBotPublications)
-    .values({
-      agentId: botId,
-      publishedBy: owner,
-      audience: "people",
-      publishedAt,
-    });
+  await database.insert(teamBotPublications).values({
+    agentId: botId,
+    publishedBy: owner,
+    audience: "people",
+    publishedAt,
+  });
   await database.insert(teamBotAudience).values([
     { agentId: botId, kind: "user", value: teammate },
     { agentId: botId, kind: "group", value: "Sales" },

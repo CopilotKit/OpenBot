@@ -1,16 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-} from "../src/db/schema";
+import { auditEvents, mcpServers, mcpTools } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { removeBots, seedBot } from "./support/bots";
@@ -102,10 +97,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(pluginGrants)
-    .where(and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.ref, ref)));
-  await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
+  // The grants go with the Bots below: purging a Bot takes its access with it, in Intelligence.
   await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
   await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
   await removeBots([holderId, strangerId]);
