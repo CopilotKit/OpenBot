@@ -1,11 +1,11 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { requireAdmin, type AppVariables } from "../auth/guards";
-import { parseConsumption, type ProductTelemetry } from "./product";
+import type { AppVariables } from "../auth/guards";
+import { type ProductTelemetry, parseConsumption } from "./product";
 
 export function createProductTelemetryRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
-  telemetry: Pick<ProductTelemetry, "consume" | "health">,
+  telemetry: Pick<ProductTelemetry, "consume">,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser);
@@ -24,16 +24,9 @@ export function createProductTelemetryRoutes(
       }
       const event = parseConsumption(raw);
       if (!event) return c.json({ error: "Invalid event" }, 400);
-      const result = await telemetry.consume(c.var.actor.id, event);
-      if (result === "missing")
-        return c.json({ error: "Result unavailable" }, 404);
-      return c.body(null, result === "recorded" ? 204 : 202);
+      await telemetry.consume(c.var.actor.id, event);
+      return c.body(null, 204);
     },
   );
-  routes.get("/health", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
-    return c.json(telemetry.health());
-  });
   return routes;
 }

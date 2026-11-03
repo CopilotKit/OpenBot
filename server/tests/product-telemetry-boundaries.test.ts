@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { EventType, type RunAgentInput } from "@ag-ui/client";
-import { lastValueFrom, toArray } from "rxjs";
+import type { LambdaSendOptions } from "@copilotkit/shared";
 import { CloningRemoteAgent } from "@openbot/toolkit/copilotkit/agents";
+import { lastValueFrom, toArray } from "rxjs";
 import { ProductFixtureAgent } from "../scripts/support/product-run";
-import { productStoreFixture } from "../scripts/support/product-store";
 import { createProductTelemetry } from "../src/telemetry/product";
 import {
   prepareProductRequest,
@@ -11,13 +11,16 @@ import {
 } from "../src/telemetry/product-boundaries";
 
 async function fixture(deploymentId = "deployment") {
-  const f = productStoreFixture({ deploymentId, salt: `salt-${deploymentId}` });
+  const sent: LambdaSendOptions[] = [];
   const telemetry = await createProductTelemetry({
-    store: f.store,
+    privacyKey: "synthetic-key",
+    deploymentId,
     env: { OPENBOT_PRODUCT_TELEMETRY: "1" },
-    send: async () => {},
+    send: async (event) => {
+      sent.push(event);
+    },
   });
-  return { ...f, telemetry };
+  return { sent, telemetry };
 }
 const input: RunAgentInput = {
   threadId: "thread",
@@ -51,13 +54,13 @@ test("request boundary replaces client claims, preserves application fields and 
   const body = await first!.json();
   const retry = await second!.json();
   expect(body.forwardedProps.openbotTelemetry.forged).toBeUndefined();
-  expect(body.forwardedProps.openbotTelemetry.context.app_id).toBe("openbot");
-  expect(body.forwardedProps.openbotTelemetry.context.root_task_id).toBe(
-    retry.forwardedProps.openbotTelemetry.context.root_task_id,
+  expect(body.forwardedProps.openbotTelemetry.app_id).toBe("openbot");
+  expect(body.forwardedProps.openbotTelemetry.root_task_id).toBe(
+    retry.forwardedProps.openbotTelemetry.root_task_id,
   );
   expect(body.messages).toEqual(input.messages);
 });
-test("signed run context cannot cross actors, deployments or threads", async () => {
+test("run metadata is isolated across actors and deployments without authorization receipts", async () => {
   const f = await fixture();
   const enriched = await productHeadlessBoundary(f.telemetry)(input, {
     ownerUserId: "actor-one",
@@ -80,8 +83,14 @@ test("signed run context cannot cross actors, deployments or threads", async () 
       .middleware("actor-one")({ ...enriched, threadId: "other-thread" }, next)
       .pipe(toArray()),
   );
-  expect(f.runs.size).toBe(0);
-  expect(other.runs.size).toBe(0);
+  await f.telemetry.flush();
+  await other.telemetry.flush();
+  const accepted = f.sent.filter((e) => e.event.endsWith("run_accepted"));
+  expect(accepted[0]?.properties?.user_id).not.toBe(
+    accepted[1]?.properties?.user_id,
+  );
+  expect(accepted[0]?.properties?.trigger).toBe("unknown");
+  expect(other.sent[0]?.properties?.deployment_id).toBe("another-deployment");
 });
 test("custom remote clone retains product middleware and full forwarded context", async () => {
   const f = await fixture();
@@ -106,6 +115,7 @@ test("custom remote clone retains product middleware and full forwarded context"
     forwardedProps: enriched.forwardedProps,
   });
   await f.telemetry.flush();
-  expect(f.runs.get("run")?.context.trigger).toBe("routine");
-  expect(f.runs.get("run")?.outcome).toBe("success");
+  expect(
+    f.sent.find((e) => e.event.endsWith("run_terminal"))?.properties,
+  ).toMatchObject({ trigger: "routine", outcome: "success" });
 });

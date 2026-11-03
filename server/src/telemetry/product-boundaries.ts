@@ -2,9 +2,9 @@ import type { CopilotRuntimeHooks } from "@copilotkit/runtime/v2";
 import type { createTurnRunner } from "@openbot/toolkit/run-turn";
 import type { IdentifyActor } from "../copilot";
 import {
+  type ProductTelemetry,
   productRunForwardedProps,
   triggerForInitiator,
-  type ProductTelemetry,
 } from "./product";
 
 export function productRuntimeHook(
@@ -39,7 +39,7 @@ export async function prepareProductRequest(
     const lastUser = [...messages]
       .reverse()
       .find((m) => m?.role === "user" && typeof m.id === "string");
-    const receipt = await telemetry.prepare({
+    const context = await telemetry.prepare({
       actorUserId: actor.id,
       threadId: body.threadId,
       runId: body.runId,
@@ -58,7 +58,7 @@ export async function prepareProductRequest(
     return new Request(request, {
       body: JSON.stringify({
         ...body,
-        forwardedProps: { ...forwardedProps, openbotTelemetry: receipt },
+        forwardedProps: { ...forwardedProps, openbotTelemetry: context },
       }),
     });
   } catch {
@@ -75,7 +75,7 @@ export function productHeadlessBoundary(
 ): NonNullable<Parameters<typeof createTurnRunner>[0]["prepareRunInput"]> {
   return async (input, turn) => {
     const lineage = turn.telemetry;
-    const receipt = await telemetry.prepare({
+    const context = await telemetry.prepare({
       actorUserId: turn.ownerUserId,
       threadId: input.threadId,
       runId: input.runId,
@@ -89,7 +89,7 @@ export function productHeadlessBoundary(
     });
     return {
       ...input,
-      forwardedProps: productRunForwardedProps(input, receipt),
+      forwardedProps: productRunForwardedProps(input, context),
     };
   };
 }
@@ -101,7 +101,7 @@ export async function productHandoffInput<
   actorUserId: string,
   parentRunId: string,
 ) {
-  const receipt = await telemetry.prepare({
+  const context = await telemetry.prepare({
     actorUserId,
     threadId: input.threadId,
     runId: input.runId,
@@ -111,6 +111,6 @@ export async function productHandoffInput<
   });
   return {
     ...input,
-    forwardedProps: { ...input.forwardedProps, openbotTelemetry: receipt },
+    forwardedProps: { ...input.forwardedProps, openbotTelemetry: context },
   };
 }

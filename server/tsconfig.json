@@ -55,7 +55,6 @@
     "tests/stub-broker.test.ts",
     "tests/product-telemetry.test.ts",
     "tests/product-telemetry-routes.test.ts",
-    "tests/product-telemetry-boundaries.test.ts",
-    "tests/product-telemetry-store.integration.test.ts"
+    "tests/product-telemetry-boundaries.test.ts"
   ]
 }

@@ -1,13 +1,12 @@
 /** Synthetic producer canary. No model, customer database, message content or licence required. */
 import {
   AbstractAgent,
-  EventType,
   type BaseEvent,
+  EventType,
   type RunAgentInput,
 } from "@ag-ui/client";
 import { from, lastValueFrom, toArray } from "rxjs";
 import { createProductTelemetry } from "../src/telemetry/product";
-import { productStoreFixture } from "./support/product-store";
 
 const canaryId =
   process.env.OPENBOT_CANARY_ID ??
@@ -16,12 +15,9 @@ if (!/^[A-Za-z0-9_-]{1,100}$/.test(canaryId))
   throw new Error(
     "OPENBOT_CANARY_ID must be 1-100 letters, digits, underscores or hyphens",
   );
-const { store } = productStoreFixture({
-  deploymentId: canaryId,
-  salt: `synthetic-${canaryId}`,
-});
 const telemetry = await createProductTelemetry({
-  store,
+  deploymentId: canaryId,
+  privacyKey: "synthetic-canary-key",
   env: {
     OPENBOT_PRODUCT_TELEMETRY: "1",
     NODE_ENV: "test",
@@ -52,7 +48,7 @@ class CanaryAgent extends AbstractAgent {
   }
 }
 const actor = "synthetic-canary-user";
-const receipt = await telemetry.prepare({
+const context = await telemetry.prepare({
   actorUserId: actor,
   threadId: `${canaryId}-thread`,
   runId: `${canaryId}-run`,
@@ -67,7 +63,7 @@ const input: RunAgentInput = {
   state: {},
   tools: [],
   context: [],
-  forwardedProps: { openbotTelemetry: receipt },
+  forwardedProps: { openbotTelemetry: context },
 };
 await lastValueFrom(
   telemetry.middleware(actor)(input, new CanaryAgent()).pipe(toArray()),
@@ -91,11 +87,9 @@ await telemetry.flush();
 console.info(
   JSON.stringify({
     canary_id: canaryId,
-    producer_health: telemetry.health(),
     expected_events: [
       "run_accepted",
       "run_terminal",
-      "first_human_success",
       "capability",
       "result_viewed",
     ],

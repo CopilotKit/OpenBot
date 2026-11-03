@@ -66,17 +66,14 @@ import { ApprovalRefusedError } from "./approvals/types";
 import { createServerApprovalService } from "./approvals/wiring";
 import {
   type AuditInitiator,
-  auditSink,
   addAuditTap,
+  auditSink,
   createAuditReader,
   createAuditStore,
   DEPLOYMENT_INITIATOR,
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "./audit";
-import { createProductTelemetry } from "./telemetry/product";
-import { createProductStore } from "./telemetry/product-store";
-import { productHeadlessBoundary } from "./telemetry/product-boundaries";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
@@ -295,6 +292,8 @@ import { createTaskRunner } from "./tasks/runner";
 import { createTaskStore } from "./tasks/store";
 import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
+import { createProductTelemetry } from "./telemetry/product";
+import { productHeadlessBoundary } from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -316,9 +315,9 @@ clearLearningRevisionFallback();
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
 const productTelemetry = await createProductTelemetry({
-  store: createProductStore(database),
+  privacyKey: config.keyEncryptionKey,
+  deploymentId: config.deploymentId,
 });
-await productTelemetry.start();
 addAuditTap(productTelemetry.recordAudit);
 const prepareProductRunInput = productHeadlessBoundary(productTelemetry);
 const profileStore = createProfileStore(database);

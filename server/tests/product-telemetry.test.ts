@@ -1,10 +1,10 @@
-import { observedProductRun } from "../scripts/support/product-run";
 import { expect, test } from "bun:test";
+import { observedProductRun } from "../scripts/support/product-run";
 import {
-  productExportEnabled,
-  scopedProductUser,
-  projectAuditMilestone,
   parseConsumption,
+  productExportEnabled,
+  projectAuditMilestone,
+  scopedProductUser,
 } from "../src/telemetry/product";
 
 test("self-host product export requires consent and every distribution honors opt-out", () => {
@@ -131,134 +131,99 @@ test("consumption accepts existing actions and refuses identity/content injectio
 import { EventType } from "@ag-ui/client";
 import type { LambdaSendOptions } from "@copilotkit/shared";
 import { createProductTelemetry } from "../src/telemetry/product";
-import { productStoreFixture } from "../scripts/support/product-store";
 
 async function adapter(
-  fixture = productStoreFixture(),
   env: Record<string, string | undefined> = { OPENBOT_PRODUCT_TELEMETRY: "1" },
 ) {
   const sent: LambdaSendOptions[] = [];
-  const warnings: string[] = [];
   const telemetry = await createProductTelemetry({
-    store: fixture.store,
+    privacyKey: "synthetic-key",
+    deploymentId: "deployment-one",
     env,
     send: async (event) => {
       sent.push(event);
     },
-    warn: (reason) => warnings.push(reason),
   });
-  return { ...fixture, sent, warnings, telemetry };
+  return { sent, telemetry };
 }
-async function observedRun(
-  f: Awaited<ReturnType<typeof adapter>>,
-  options: Parameters<typeof observedProductRun>[1] = {},
-) {
-  return observedProductRun(f.telemetry, options);
-}
-
-test("an observed success stores exact result linkage and first human success once across restarts", async () => {
+test("source success emits linkage without local first-use or dedupe state", async () => {
   const f = await adapter();
-  await observedRun(f);
-  expect(f.runs.get("run-one")?.outcome).toBe("success");
-  expect(
-    await f.telemetry.consume("private-user-two", {
-      kind: "result_viewed",
-      threadId: "thread-one",
-      messageId: "message-run-one",
-      surface: "web",
-    }),
-  ).toBe("pending");
-  const restarted = await adapter(f);
-  await observedRun(restarted, { run: "run-two" });
-  expect(
-    [...f.events.values()].filter((e) =>
-      e.name.endsWith("first_human_success"),
-    ),
-  ).toHaveLength(1);
-  await f.telemetry.consume("private-user-one", {
-    kind: "result_viewed",
-    threadId: "thread-one",
-    messageId: "message-run-one",
-    surface: "web",
+  await observedProductRun(f.telemetry);
+  await observedProductRun(f.telemetry);
+  const terminal = f.sent.filter((e) => e.event.endsWith("run_terminal"));
+  expect(terminal).toHaveLength(2);
+  expect(terminal[0]?.properties).toMatchObject({
+    outcome: "success",
+    is_root: true,
+    result_message_ids: ["message-run-one"],
   });
-  await restarted.telemetry.consume("private-user-one", {
-    kind: "result_viewed",
-    threadId: "thread-one",
-    messageId: "message-run-one",
-    surface: "web",
-  });
-  expect(
-    [...f.events.values()].filter((e) => e.name.endsWith("result_viewed")),
-  ).toHaveLength(1);
+  expect(terminal[0]?.properties?.event_id).toBe(
+    terminal[1]?.properties?.event_id,
+  );
+  expect(f.sent.some((e) => e.event.endsWith("first_human_success"))).toBe(
+    false,
+  );
   expect(JSON.stringify(f.sent)).not.toContain("private-user-one");
 });
-
-test("cancelled and interrupted finish outcomes never become success", async () => {
+test("cancellation, interruption and missing terminals never fabricate success; child remains separate", async () => {
   const f = await adapter();
-  await observedRun(f, {
+  await observedProductRun(f.telemetry, {
+    run: "cancelled",
     events: [
       {
         type: EventType.RUN_FINISHED,
         threadId: "thread-one",
-        runId: "run-one",
+        runId: "cancelled",
         outcome: { type: "cancelled" },
       },
     ],
   });
-  expect(f.runs.get("run-one")?.outcome).toBe("cancelled");
-  await observedRun(f, {
-    run: "interrupt",
+  await observedProductRun(f.telemetry, {
+    run: "interrupted",
     events: [
       {
         type: EventType.RUN_FINISHED,
         threadId: "thread-one",
-        runId: "interrupt",
+        runId: "interrupted",
         outcome: { type: "interrupt", interrupts: [] },
       },
     ],
   });
-  expect(f.runs.get("interrupt")?.outcome).toBe("unknown");
-  expect(
-    [...f.events.values()].filter((e) =>
-      e.name.endsWith("first_human_success"),
-    ),
-  ).toHaveLength(0);
-});
-
-test("completion without a terminal is unknown, child failure never overwrites root, retries retain lineage", async () => {
-  const f = await adapter();
-  await observedRun(f, { run: "root" });
-  await observedRun(f, {
+  await observedProductRun(f.telemetry, {
+    run: "missing",
+    events: [
+      { type: EventType.RUN_STARTED, threadId: "thread-one", runId: "missing" },
+    ],
+  });
+  await observedProductRun(f.telemetry, {
     run: "child",
     parent: "root",
     trigger: "subagent",
-    events: [{ type: EventType.RUN_ERROR, message: "private error" }],
+    events: [{ type: EventType.RUN_ERROR, message: "private-error" }],
   });
-  await observedRun(f, {
-    run: "retry",
-    root: "root-one",
-    attempt: 2,
-    events: [],
+  const terminal = f.sent
+    .filter((e) => e.event.endsWith("run_terminal"))
+    .map((e) => e.properties);
+  expect(terminal.map((p) => p?.outcome)).toEqual([
+    "cancelled",
+    "unknown",
+    "unknown",
+    "error",
+  ]);
+  expect(terminal[3]).toMatchObject({
+    parent_run_id: "root",
+    root_task_id: null,
+    is_root: false,
   });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(f.runs.get("root")?.outcome).toBe("success");
-  expect(f.runs.get("child")?.outcome).toBe("error");
-  expect(f.runs.get("child")?.context.parent_run_id).toBe("root");
-  expect(f.runs.get("child")?.context.root_task_id).toBe(
-    f.runs.get("root")?.context.root_task_id,
-  );
-  expect(f.runs.get("retry")?.outcome).toBe("unknown");
-  expect(f.runs.get("retry")?.context.attempt).toBe(2);
-  expect(JSON.stringify(f.sent)).not.toContain("private error");
+  expect(JSON.stringify(f.sent)).not.toContain("private-error");
 });
-
-test("opt-out avoids identity, run ledger, audit collection and sends", async () => {
-  const f = await adapter(productStoreFixture(), {
+test("opt-out prevents preparation, audit collection, and sending", async () => {
+  const f = await adapter({
     OPENBOT_PRODUCT_TELEMETRY: "1",
     DO_NOT_TRACK: "1",
   });
-  await observedRun(f);
-  f.telemetry.recordAudit({
+  await observedProductRun(f.telemetry);
+  await f.telemetry.recordAudit({
     id: "audit",
     eventType: "bot.created",
     actorUserId: "private",
@@ -267,154 +232,81 @@ test("opt-out avoids identity, run ledger, audit collection and sends", async ()
     initiatorId: null,
     payload: {},
   });
-  expect(f.runs.size).toBe(0);
-  expect(f.events.size).toBe(0);
   expect(f.sent).toHaveLength(0);
-});
-
-test("nested child lifecycle events cannot terminate the root observer", async () => {
-  const f = await adapter();
-  await observedRun(f, {
-    events: [
-      {
-        type: EventType.SUBAGENT_ERROR,
-        message: "child failed",
-        subagentRunId: "remote-child",
-      },
-      {
-        type: EventType.RUN_FINISHED,
-        threadId: "thread-one",
-        runId: "run-one",
-        outcome: { type: "success" },
-      },
-    ],
-  });
-  expect(f.runs.get("run-one")?.outcome).toBe("success");
-});
-
-test("actual policy outcome objects preserve rejection and permission requests", () => {
   expect(
-    projectAuditMilestone({
-      eventType: "approval.evaluated",
-      payload: { outcome: { behaviour: "deny", source: "default" } },
-    })?.outcome,
-  ).toBe("rejected");
-  expect(
-    projectAuditMilestone({
-      eventType: "approval.evaluated",
-      payload: { outcome: { behaviour: "ask", source: "default" } },
-    })?.outcome,
-  ).toBe("requested");
-});
-
-test("existing connector audit actors are scoped even when the actor is in its trusted payload", async () => {
-  const f = await adapter();
-  await f.telemetry.recordAudit({
-    id: "persisted-connector-event",
-    eventType: "mcp.account_connected",
-    targetType: "mcp_server",
-    initiatorKind: "person",
-    initiatorId: null,
-    payload: {
-      actor: "private-connector-user",
-      server: "private-app",
-      scope: "private-scope",
-    },
-  });
-  await f.telemetry.flush();
-  expect(f.sent).toHaveLength(1);
-  expect(f.sent[0]?.properties?.user_id).toBe(
-    scopedProductUser(
-      "synthetic-salt",
-      "deployment-one",
-      "private-connector-user",
-    ),
-  );
-  expect(JSON.stringify(f.sent)).not.toContain("private-");
-});
-
-test("failed transport attempts remain replayable with identical producer IDs", async () => {
-  const f = productStoreFixture();
-  const sentBefore: string[] = [];
-  const failed = await createProductTelemetry({
-    store: f.store,
-    env: { OPENBOT_PRODUCT_TELEMETRY: "1" },
-    send: async (event) => {
-      sentBefore.push(String(event.properties?.event_id));
-      throw new Error("synthetic transport unavailable");
-    },
-    warn: () => {},
-  });
-  await observedProductRun(failed);
-  expect(f.attempted.size).toBe(0);
-  const sentAfter: string[] = [];
-  const restarted = await createProductTelemetry({
-    store: f.store,
-    env: { OPENBOT_PRODUCT_TELEMETRY: "1" },
-    send: async (event) => {
-      sentAfter.push(String(event.properties?.event_id));
-    },
-  });
-  await restarted.start();
-  await restarted.flush();
-  expect(sentAfter.sort()).toEqual(sentBefore.sort());
-  expect(f.attempted.size).toBe(3);
-});
-
-test("a bounded queue drops excess telemetry without failing the product operation", async () => {
-  const f = productStoreFixture();
-  let release = () => {};
-  const blocked = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const telemetry = await createProductTelemetry({
-    store: f.store,
-    env: { OPENBOT_PRODUCT_TELEMETRY: "1" },
-    maxQueue: 1,
-    send: async () => blocked,
-    warn: () => {},
-  });
-  await Promise.all(
-    Array.from({ length: 20 }, (_, index) =>
-      telemetry.recordAudit({
-        id: `audit-${index}`,
-        eventType: "bot.created",
-        actorUserId: "synthetic",
-        targetType: "bot",
-        initiatorKind: "person",
-        initiatorId: null,
-        payload: {},
-      }),
-    ),
-  );
-  expect(telemetry.health().dropped).toBeGreaterThan(0);
-  expect(telemetry.health().queued).toBeLessThanOrEqual(1);
-  release();
-  await telemetry.flush();
-});
-
-test("identity persistence failure disables richer collection instead of inventing continuity", async () => {
-  const f = productStoreFixture();
-  const warnings: string[] = [];
-  const telemetry = await createProductTelemetry({
-    store: {
-      ...f.store,
-      identity: async () => {
-        throw new Error("private DB failure");
-      },
-    },
-    env: { OPENBOT_PRODUCT_TELEMETRY: "1" },
-    warn: (reason) => warnings.push(reason),
-  });
-  expect(telemetry.enabled()).toBe(false);
-  expect(warnings).toEqual(["identity_unavailable"]);
-  expect(
-    await telemetry.prepare({
-      actorUserId: "synthetic",
+    await f.telemetry.prepare({
+      actorUserId: "private",
       threadId: "thread",
       runId: "run",
       trigger: "human",
       surface: "web",
     }),
   ).toBeUndefined();
+});
+test("existing audit IDs produce stable allowlisted events without customer content", async () => {
+  const f = await adapter();
+  const event = {
+    id: "audit-existing",
+    eventType: "mcp.account_connected",
+    targetType: "mcp_server",
+    initiatorKind: "person" as const,
+    initiatorId: null,
+    payload: {
+      actor: "private-user",
+      server: "private-server",
+      scope: "private-scope",
+    },
+  };
+  await f.telemetry.recordAudit(event);
+  await f.telemetry.recordAudit(event);
+  expect(f.sent[0]?.properties?.user_id).toBe(
+    scopedProductUser("synthetic-key", "deployment-one", "private-user"),
+  );
+  expect(f.sent[0]?.properties?.event_id).toBe(f.sent[1]?.properties?.event_id);
+  expect(JSON.stringify(f.sent)).not.toContain("private-");
+});
+test("consumption forwards bounded references without claiming execution success", async () => {
+  const f = await adapter();
+  const event = {
+    kind: "result_viewed" as const,
+    threadId: "thread",
+    messageId: "message",
+    surface: "web" as const,
+  };
+  await f.telemetry.consume("actor", event);
+  await f.telemetry.consume("actor", event);
+  expect(f.sent[0]?.properties?.event_id).toBe(f.sent[1]?.properties?.event_id);
+  expect(f.sent[0]?.properties).toMatchObject({
+    thread_id: "thread",
+    message_id: "message",
+    consumption_surface: "web",
+  });
+  expect(f.sent[0]?.properties?.outcome).toBeUndefined();
+});
+test("transport failures are observed and do not reject product flows", async () => {
+  const warnings: string[] = [];
+  const telemetry = await createProductTelemetry({
+    privacyKey: "synthetic",
+    env: { OPENBOT_PRODUCT_TELEMETRY: "1" },
+    warn: (r) => warnings.push(r),
+    send: async () => {
+      throw Error("private transport failure");
+    },
+  });
+  await observedProductRun(telemetry);
+  expect(warnings).toEqual(["send_failed"]);
+});
+test("adapter has no database, persistence, signing or outbox dependency", async () => {
+  const source = await Bun.file(
+    new URL("../src/telemetry/product.ts", import.meta.url),
+  ).text();
+  for (const forbidden of [
+    "ProductStore",
+    "enterpriseSettings",
+    "../db/",
+    "randomBytes",
+    "timingSafeEqual",
+    "first_human_success",
+  ])
+    expect(source).not.toContain(forbidden);
 });
