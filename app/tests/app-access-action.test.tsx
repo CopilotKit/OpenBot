@@ -56,7 +56,7 @@ type Sent = { method: string; url: string; body: unknown };
 function mounted(
   access: AppAccess,
   answer?: { status: number; body: unknown },
-  options: { admin?: boolean } = {},
+  options: { admin?: boolean; personal?: boolean } = {},
 ) {
   const sent: Sent[] = [];
   const opened: string[] = [];
@@ -82,6 +82,8 @@ function mounted(
     });
     if (options.admin && url === "/api/me")
       return Response.json({ user: { id: "usr_admin", role: "admin" } });
+    if (options.personal && url === "/api/capabilities")
+      return Response.json({ edition: "personal" });
     if (options.admin && url === "/api/agents/expenses")
       return Response.json({ agent: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
@@ -500,6 +502,41 @@ test.each([
     );
   },
 );
+
+test.each(["disabled", "not_granted"] as const)(
+  "in the personal edition, %s is one Connect: turn it on, then sign in in a new tab",
+  async (state) => {
+    const { view, sent, opened } = mounted(
+      appAccess({
+        state,
+        unavailable: state === "disabled" ? "absent" : null,
+      }),
+      undefined,
+      { admin: true, personal: true },
+    );
+    const button = await view.findByRole("button", { name: "Connect Gmail" });
+    expect(button.textContent).toBe("Connect");
+    fireEvent.click(button);
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    expect(
+      sent.filter((call) => call.method === "POST").map((call) => call.url),
+    ).toEqual([
+      "/api/plugins/for/expenses/apps/composio-gmail/approve",
+      "/api/plugins/servers/composio-gmail/connect?returnTo=settings",
+    ]);
+  },
+);
+
+test("in the personal edition, the card says what is missing rather than who to ask", () => {
+  for (const state of ["disabled", "not_granted"] as const) {
+    const sentence = appAccessSentence(
+      appAccess({ state, unavailable: state === "disabled" ? "absent" : null }),
+      undefined,
+      "personal",
+    );
+    expect(sentence).toBe("Gmail isn't connected yet.");
+  }
+});
 
 test("an admin's press that cannot be carried out says what is missing", async () => {
   const { view } = mounted(

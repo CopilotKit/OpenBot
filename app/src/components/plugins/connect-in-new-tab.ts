@@ -104,9 +104,29 @@ export function useConnectInNewTab() {
     return tab;
   };
 
-  const open = (serverId: string) => {
+  /**
+   * `first` runs between claiming the tab and asking for the consent, for a press that has to turn
+   * the app on before it can be connected (the personal edition's chat card). The tab is claimed
+   * before it, on the click, for the reason above; if it fails, the tab goes and `first`'s caller
+   * shows why.
+   */
+  const open = (serverId: string, first?: () => Promise<unknown>) => {
     const tab = claimTab();
     handle.current = tab;
+    if (first) {
+      first().then(
+        () => ask(serverId, tab),
+        () => {
+          tab?.close();
+          handle.current = null;
+        },
+      );
+      return;
+    }
+    ask(serverId, tab);
+  };
+
+  const ask = (serverId: string, tab: Window | null) => {
     connect.mutate(serverId, {
       onSuccess: (start) => {
         /*

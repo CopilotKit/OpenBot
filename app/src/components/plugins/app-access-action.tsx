@@ -12,6 +12,7 @@ import {
 } from "@/lib/app-access/mutations";
 import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { queryClient } from "@/query-client";
 
@@ -41,9 +42,24 @@ import { queryClient } from "@/query-client";
  * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
  * for the one state that asks the person a question about it.
  */
-export function appAccessSentence(access: AppAccess, bot?: string): string {
+export function appAccessSentence(
+  access: AppAccess,
+  bot?: string,
+  edition: "team" | "personal" = "team",
+): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
+  /*
+   * No admin in the personal edition: the button beside this turns the app on and connects it
+   * (`PersonalConnectAction`), so the sentence says what is missing, not who to ask.
+   */
+  if (
+    edition === "personal" &&
+    (access.state === "not_granted" ||
+      (access.state === "disabled" &&
+        (access.unavailable === null || access.unavailable === "absent")))
+  )
+    return `${name} isn't connected yet.`;
   switch (access.state) {
     case "ready":
       if (owners)
@@ -121,8 +137,17 @@ export function AppAccessAction({
    * the one press 403 for anybody else, and `SharedAppNotice` already reads the role the same way.
    */
   const me = useQuery(currentUserQueryOptions()).data;
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
+  if (
+    personal &&
+    (access.state === "not_granted" ||
+      (access.state === "disabled" &&
+        (access.unavailable === null || access.unavailable === "absent")))
+  )
+    return <PersonalConnectAction access={access} agentId={agentId} />;
   if (access.state === "reconnect" && access.accountHolder === "owner")
     return null;
   if (access.state === "not_connected" || access.state === "reconnect")
@@ -345,6 +370,105 @@ function OwnerGiveAction({
             : access.needsConnect
               ? "Connect and allow"
               : "Allow"}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The personal edition's one press, for an app the one person hasn't turned on yet: turn it on and,
+ * where it signs in, start the sign-in in a new tab, all on the same press. Turning it on goes
+ * through the same approval an administrator's "Turn on and give it" does, catalogue and broker
+ * apps alike, and the server then gives every Bot every tool (`personal-defaults.ts`). An app that
+ * needs a key typed opens its page instead, which is where the key goes.
+ */
+function PersonalConnectAction({
+  agentId,
+  access,
+}: {
+  agentId: string;
+  access: AppAccess;
+}) {
+  const approve = useMutation(approveBotAppMutationOptions(queryClient));
+  const tab = useConnectInNewTab();
+  const { waiting } = tab;
+  const name = access.displayName;
+  const signsIn = access.connect === "oauth" || access.connect === "consent";
+
+  // Watched as `ConnectAction` watches: the card reads the app again until it is ready.
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: appAccessKeys.all });
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  const turnOn = () => approve.mutateAsync({ agentId, app: access.key });
+
+  if (access.connect === "key" || tab.needsKey)
+    return (
+      <Button
+        render={<Link params={{ key: access.key }} to="/connections/$key" />}
+        aria-label={`Set up ${name}`}
+        size="sm"
+      >
+        Set up
+      </Button>
+    );
+
+  const error = approve.error?.message ?? tab.error;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {error ? (
+        <p className="text-destructive text-xs" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {tab.blockedUrl ? (
+        <p className="text-xs" role="status">
+          This browser blocked the tab.{" "}
+          <a
+            className="underline underline-offset-2"
+            href={tab.blockedUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open {name}'s sign-in
+          </a>
+          .
+        </p>
+      ) : waiting ? (
+        <p className="text-muted-foreground text-xs" role="status">
+          Finish in the tab that opened.
+        </p>
+      ) : null}
+      <Button
+        aria-label={
+          waiting || approve.isPending
+            ? undefined
+            : `${signsIn ? "Connect" : "Turn on"} ${name}`
+        }
+        disabled={approve.isPending || tab.pending}
+        onClick={() => {
+          approve.reset();
+          if (signsIn) {
+            tab.stopWaiting();
+            tab.open(access.key, turnOn);
+            return;
+          }
+          // Nothing to sign in to: on is ready, and every query is read again for the next turn.
+          void turnOn().then(() => queryClient.invalidateQueries());
+        }}
+        size="sm"
+      >
+        {waiting
+          ? `Waiting for ${name}…`
+          : approve.isPending
+            ? "Turning on…"
+            : signsIn
+              ? "Connect"
+              : "Turn on"}
       </Button>
     </div>
   );

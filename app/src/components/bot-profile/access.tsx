@@ -324,6 +324,8 @@ function YourSkills({ agentId }: { agentId: string }) {
  */
 function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
   const me = useQuery(currentUserQueryOptions()).data;
+  const edition =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
   const apps = useQuery(botAppsQueryOptions(agentId));
   // Both, so no row is drawn without its state and then redrawn with one a moment later.
@@ -382,10 +384,10 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
                      */}
                     <ItemDescription className="line-clamp-none">
                       {app.state === "ready"
-                        ? [appAccessSentence(app)]
+                        ? [appAccessSentence(app, undefined, edition)]
                             .concat(labels.length > 0 ? [toolList(labels)] : [])
                             .join(" ")
-                        : appAccessSentence(app)}
+                        : appAccessSentence(app, undefined, edition)}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
