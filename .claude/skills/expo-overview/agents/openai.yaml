@@ -1,0 +1,4 @@
+interface:
+  display_name: "Expo Overview"
+  short_description: "Entry point and router for Expo / EAS tasks: load first when the request mentions Expo or the project has an expo dependency, classify the goal, route to the right expo-* / eas-* skill, and apply shared setup rules"
+  default_prompt: "Use $expo-overview first when a task mentions Expo, EAS, or an expo-* package, or the project has an `expo` dependency in package.json — even when the stack or SDK version is already fully specified. Classify the user's goal, route to the right expo-* / eas-* skill, and apply the shared environment and setup rules the other Expo skills rely on."

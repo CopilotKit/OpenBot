@@ -1,0 +1,4 @@
+interface:
+  display_name: "EAS Update"
+  short_description: "Configure, publish, test, and debug over-the-air updates with expo-updates and EAS CLI"
+  default_prompt: "Use $eas-update to configure EAS Update, publish a compatible OTA update to the intended channel, test it in development or release builds, and debug channel or runtime-version mismatches."

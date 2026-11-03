@@ -1,0 +1,4 @@
+interface:
+  display_name: "Expo Project Structure"
+  short_description: "Recommended folder structure for new Expo apps"
+  default_prompt: "Use $expo-project-structure to lay out a new Expo app: the src/ layout, routes-only app/ directory, screens, components, server code separation, and platform-specific files."

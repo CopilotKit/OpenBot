@@ -1,0 +1,4 @@
+interface:
+  display_name: "Expo Brownfield"
+  short_description: "Embed Expo screens in existing native iOS and Android apps"
+  default_prompt: "Use $expo-brownfield when adding Expo or React Native to an existing native app, choosing isolated vs integrated brownfield architecture, embedding SwiftUI/UIKit screens or AAR/XCFramework outputs, wiring Gradle or CocoaPods, and troubleshooting native integration issues."
