@@ -136,10 +136,12 @@ export function createActorAgentResolver(
     return resolveRuntimeAgents(
       () => Promise.resolve(runnable),
       deps.model,
-      () =>
+      (botIds) =>
         deps.resolveModelApiKey({
           userId: actor.id,
-          ...(onlyAgentId ? { botId: onlyAgentId } : {}),
+          // The one Bot this run builds, or every built-in Bot it builds: the key is resolved once
+          // for all of them, so that is the honest answer to which Bots read it.
+          botId: onlyAgentId ?? botIds?.join(",").slice(0, 200),
         }),
       deps.stallGuard,
       deps.loadToolsForActor?.(actor.id, context?.initiator),

@@ -110,9 +110,7 @@ function pause(attempt: number) {
 
 /** Every page of a cursor listing. There is no cap: the cursor decides the end. */
 export async function walkPages<T>(
-  page: (
-    cursor: string | null,
-  ) => Promise<{
+  page: (cursor: string | null) => Promise<{
     items: T[];
     nextCursor: string | null;
     joinCode: string | null;

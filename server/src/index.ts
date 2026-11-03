@@ -1457,6 +1457,7 @@ void reportModelAvailability({
 const resolveRuntimeModelApiKey = (reader?: {
   userId?: string;
   botId?: string;
+  purpose?: string;
 }) =>
   resolveModelApiKey({
     reader: credentialStore,
@@ -1464,7 +1465,7 @@ const resolveRuntimeModelApiKey = (reader?: {
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
     accessor: {
-      purpose: "model_run",
+      purpose: reader?.purpose ?? "model_run",
       userId: reader?.userId ?? null,
       botId: reader?.botId ?? null,
     },
@@ -2650,7 +2651,8 @@ const channelSummaries = {
   transcript: routineIntelligence,
   title: createChannelTitler({
     model: runtimeModel.defaultModel,
-    resolveApiKey: resolveRuntimeModelApiKey,
+    resolveApiKey: () =>
+      resolveRuntimeModelApiKey({ purpose: "conversation_title" }),
   }),
   owner: workOwner("summariser"),
 };
@@ -2852,7 +2854,8 @@ const app = createApp(
     store: createVoiceSessionStore(database, channelStore),
     summarize: createVoiceSummarizer({
       model: runtimeModel,
-      resolveApiKey: resolveRuntimeModelApiKey,
+      resolveApiKey: () =>
+        resolveRuntimeModelApiKey({ purpose: "voice_summary" }),
     }),
     channels: channelStore,
   },
