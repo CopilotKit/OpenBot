@@ -1079,6 +1079,7 @@ export function ChannelChat({
             taskRunning={agent.isRunning || runsInFlight > 0}
           />
           <ConversationView
+            threadId={channel.threadId}
             voiceCall={
               call.available
                 ? {
