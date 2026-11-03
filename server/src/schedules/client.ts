@@ -68,7 +68,8 @@ export class ScheduleAlreadyExistsError extends ScheduleError {
 export class ScheduleConflictError extends ScheduleError {
   constructor(
     message: string,
-    readonly constraint: string | null,
+    /** The rule Intelligence names, e.g. `one_open_suggestion_per_dedupe_key`. */
+    readonly rule: string | null,
     readonly existingId: string | null,
     details: Record<string, unknown>,
   ) {
@@ -131,19 +132,21 @@ export type CheckInRunSummaryRow = {
   agentId: string;
   outcome: string;
   skipReason: string | null;
-  count: number;
+  runs: number;
 };
 
 export type CheckInSuggestionSummaryRow = {
   agentId: string;
   status: string;
-  count: number;
+  items: number;
+  /** How many of them a ping carried to the person. */
   delivered: number;
 };
 
 export type CheckInPingSummary = {
   pings: number;
   people: number;
+  /** The average number of items an offered ping carried, or null when none was offered. */
   itemsPerPing: number | null;
 };
 
@@ -253,7 +256,7 @@ export function createScheduleClient(settings: ScheduleClientSettings) {
     if (code === "SCHEDULE_CONFLICT")
       throw new ScheduleConflictError(
         message ?? `Intelligence refused ${collection} ${id}: a unique rule.`,
-        typeof details.constraint === "string" ? details.constraint : null,
+        typeof details.rule === "string" ? details.rule : null,
         typeof details.existingId === "string" ? details.existingId : null,
         details,
       );
@@ -522,10 +525,6 @@ export function createScheduleClient(settings: ScheduleClientSettings) {
       >;
     },
 
-    /**
-     * Pings delivery was offered since `since`: how many, to how many people, and how many items each
-     * carried on average (null when there were none).
-     */
     async checkInPingSummary(since: Date): Promise<CheckInPingSummary> {
       const query = new URLSearchParams({ since: since.toISOString() });
       const response = await request(
@@ -537,19 +536,30 @@ export function createScheduleClient(settings: ScheduleClientSettings) {
       return (await response.json()) as CheckInPingSummary;
     },
 
-    /** Remove finished history older than `before`. Returns how many records went. */
+    /**
+     * Remove finished history older than `before`, every batch of it. Returns how many records went.
+     * Intelligence deletes a bounded batch per call and says when there is more.
+     */
     async prune(
       collection: "check-in-runs" | "check-in-pings",
       before: Date,
     ): Promise<number> {
-      const response = await request(
-        "POST",
-        `${collectionPath(collection)}/prune`,
-        { body: { before: before.toISOString() } },
-      );
-      if (response.status !== 200)
-        return refusal(response, collection, "*", "prune");
-      return ((await response.json()) as { deleted: number }).deleted;
+      let deleted = 0;
+      for (;;) {
+        const response = await request(
+          "POST",
+          `${collectionPath(collection)}/prune`,
+          { body: { before: before.toISOString() } },
+        );
+        if (response.status !== 200)
+          return refusal(response, collection, "*", "prune");
+        const body = (await response.json()) as {
+          deleted: number;
+          more?: boolean;
+        };
+        deleted += body.deleted;
+        if (!body.more) return deleted;
+      }
     },
 
     /** Purge everything this person owns across every collection: a person removed for good. */
@@ -587,11 +597,7 @@ export function createScheduleClient(settings: ScheduleClientSettings) {
     );
     if (response.status !== 200)
       return refusal(response, collection, "*", "summarize");
-    const body = (await response.json()) as
-      | { rows?: unknown[]; items?: unknown[] }
-      | unknown[];
-    if (Array.isArray(body)) return body;
-    return body.rows ?? body.items ?? [];
+    return ((await response.json()) as { counts: unknown[] }).counts;
   }
 
   async function purgeBy(
