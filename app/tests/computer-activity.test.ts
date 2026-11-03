@@ -153,7 +153,11 @@ describe("the activity a pane shows", () => {
   test("a call already answered when its conversation opened says what, not when", () => {
     recordActivity("bot-1", [{ id: "f-1", did: ran("date") }]);
 
-    expect(activityFor("bot-1")[0]?.at).toBeUndefined();
+    // The entry has to be there for its missing time to mean anything.
+    const [entry] = activityFor("bot-1");
+    if (!entry) throw new Error("The call was not recorded.");
+    expect(entry.subject).toBe("date");
+    expect(entry.at).toBeUndefined();
   });
 
   test("wiping a computer forgets what ran on it, and reading the conversation again does not bring it back", () => {
