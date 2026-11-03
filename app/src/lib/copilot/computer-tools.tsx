@@ -1,3 +1,4 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
@@ -389,7 +390,7 @@ export function ComputerTools() {
           detail={
             // Show refusal reason instead of an internal element ref.
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : (labelOf(result) ??
                 (typeof args?.ref === "string" ? args.ref : undefined))
           }
@@ -606,7 +607,7 @@ export function ComputerTools() {
           label="Listed files"
           detail={
             outcome.refused === true || didNotWork(outcome)
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : entries.length
                 ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
                 : "nothing saved yet"
@@ -644,7 +645,7 @@ export function ComputerTools() {
           label="Read file"
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
@@ -713,7 +714,7 @@ export function ComputerTools() {
           label="Ran a command"
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : typeof args?.command === "string"
                 ? args.command
                 : undefined
@@ -772,7 +773,7 @@ export function ComputerTools() {
           // Show the path, never file contents.
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : typeof args?.path === "string"
                 ? args.path
                 : undefined

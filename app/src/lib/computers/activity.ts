@@ -1,3 +1,4 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import type { Message } from "@ag-ui/core";
 import { useCopilotKit } from "@copilotkit/react-core/v2";
 import { useEffect } from "react";
@@ -251,7 +252,10 @@ function argumentsOf(text: string): Record<string, unknown> {
  */
 export function outputOf(result: ToolOutcome): string {
   if (result.refused === true || result.ok === false) {
-    return typeof result.reason === "string" ? result.reason : "";
+    // The reason was written to the Bot ("Do not try this action ... again"); a person reads theirs.
+    return typeof result.reason === "string"
+      ? outcomeForPerson(result.reason)
+      : "";
   }
 
   // `text`, which is what the read route answers with. Not `contents`: that is the name on the way

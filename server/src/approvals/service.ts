@@ -1,6 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import {
+  ALREADY_WAITING,
+  DECLINED_BY_PERSON,
+  WITHDRAWN_APPROVALS_OFF,
+  WITHDRAWN_RULE_ALLOWS,
+} from "@openbot/shared/approval-outcomes";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { PERSON_INITIATOR } from "../audit";
 import {
@@ -32,19 +38,14 @@ import {
   withApprovalContext,
 } from "./types";
 
-/**
- * What the Bot is told when the person says no. Plain, and distinct from a policy or boundary
- * refusal, so the model reports it truthfully and does not go looking for another way round it.
- */
-export const DECLINED_BY_PERSON =
-  "The person declined this action when you asked for their approval, so it was not done. This was their decision, not a policy or a boundary. Do not try this action, or anything equivalent, again in this conversation unless the person asks you to in words; tell them you did not do it because they declined.";
-/** What a Bot retrying an action that is still waiting is told, instead of opening a second request. */
-export const ALREADY_WAITING =
-  "An identical request is already waiting for the person's decision on the Bot's page in OpenBot, so this was not done and no second request was made. Do not repeat it; wait for their answer.";
-export const WITHDRAWN_APPROVALS_OFF =
-  "Not done: this request was withdrawn because the person switched off asking before changes. Try the action again if it is still needed.";
-export const WITHDRAWN_RULE_ALLOWS =
-  "Not done: this request was withdrawn because a rule the person saved now allows it without asking. Try the action again if it is still needed.";
+// The sentences a Bot is told about a step that was not done live with their person-facing
+// versions (shared/approval-outcomes.ts), so the app translates exactly what is sent here.
+export {
+  ALREADY_WAITING,
+  DECLINED_BY_PERSON,
+  WITHDRAWN_APPROVALS_OFF,
+  WITHDRAWN_RULE_ALLOWS,
+};
 /** Why a change in a check-in task waits for the person, on its card where they decide it. */
 export const TASK_ASKS =
   "Tasks started from a check-in ask before every change.";

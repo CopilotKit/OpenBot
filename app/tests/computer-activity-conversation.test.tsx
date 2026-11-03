@@ -8,6 +8,7 @@ import {
 } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
@@ -535,6 +536,90 @@ test("a command that waits for approval shows once the person allows it and its 
   expect(entries(view)).toHaveLength(1);
   expect(gated).toHaveLength(1);
   expect(direct.filter((route) => route === "/exec")).toEqual([]);
+});
+
+test("a command the person declines shows as declined in their words, not in the sentence the Bot is told", async () => {
+  turns = [
+    {
+      call: {
+        id: "call-rm",
+        name: "computer_run_command",
+        args: { command: "rm -rf build" },
+      },
+    },
+  ];
+  gate = (step) => {
+    inbox = [
+      {
+        id: "approval-2",
+        status: "pending",
+        action: {
+          botId: bot,
+          toolRef: "computer_run_command",
+          effect: "write",
+          scope: "workspace",
+          threadId: channel.threadId,
+          toolCallId: step.toolCallId,
+          args: step.args,
+          target: {},
+        },
+      },
+    ];
+    return NativeResponse.json(
+      {
+        waiting: true,
+        approvalId: "approval-2",
+        reason: "This action needs your approval.",
+      },
+      { status: 202 },
+    );
+  };
+  const reply = "I didn't delete the build folder, because you declined.";
+  onDecision = () => {
+    // A declined step is answered with the sentence the server tells the Bot, stored as the call's result.
+    inbox = inbox.map((request) => ({ ...request, status: "completed" }));
+    stored = [
+      ...stored,
+      {
+        id: "result-call-rm",
+        role: "tool",
+        toolCallId: "call-rm",
+        content: DECLINED_BY_PERSON,
+      },
+      { id: "reply-after-decline", role: "assistant", content: reply },
+    ];
+  };
+  const view = render(app());
+  const user = await ask(view, "Clear out the build folder.");
+
+  await user.click(
+    await view.findByRole("button", { name: "Deny" }, { timeout: 5000 }),
+  );
+  act(() => {
+    queryClient.setQueryData<InfiniteData<ChannelPage>>(
+      channelKeys.list(),
+      (data) => {
+        if (!data) return data;
+        const next = applyChannelEvent(data, {
+          channelId: channel.id,
+          lastMessage: reply,
+          lastMessageAt: "2026-11-03T09:02:03.000Z",
+          lastMessageAgentId: bot,
+        });
+        return next === "unknown" ? data : next;
+      },
+    );
+  });
+  expect(await view.findByText(reply, {}, { timeout: 5000 })).toBeTruthy();
+
+  const pane = activityOf(view);
+  expect(
+    await pane.findByText("rm -rf build", {}, { timeout: 3000 }),
+  ).toBeTruthy();
+  expect(pane.getByText("You declined it.")).toBeTruthy();
+  // The sentence written to the model never reaches the person, in the pane or in the transcript.
+  expect(view.container.textContent).not.toContain("Do not try this action");
+  expect(entries(view)).toHaveLength(1);
 });
 
 test("a file the Bot saves shows its path and size, never its contents, beside a file it reads", async () => {
