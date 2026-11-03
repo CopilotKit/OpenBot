@@ -496,11 +496,18 @@ await copyLocalAttachmentsToIntelligence(database, {
   stagedTtlHours: stagedAttachmentTtlHours(process.env),
 });
 await copyLocalPageFramesToIntelligence(database);
+// Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
+// upgrading deployment's own Bots are not in Intelligence yet.
+await sweepPurgedBotRows(
+  database,
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
 /*
  * Each person's memories and memory sources live in Intelligence (memory/intelligence.ts), on every plan.
  * Every turn reads them, so each instance holds a person's memory once read, kept fresh by Intelligence's
  * `memory_changes` announcements and a timer (memory/cache.ts). An upgraded deployment's memory is copied
- * in from the local tables once (memory/upgrade.ts), after its Bots, loud when any is missing.
+ * in from the local tables once (memory/upgrade.ts), after its Bots and after the rows of Bots purged
+ * meanwhile are swept, loud when any is missing.
  */
 const memoryIntelligence = createIntelligenceMemory({
   apiUrl: config.runtime.intelligence.apiUrl,
@@ -518,12 +525,6 @@ const memoryCache = createMemoryCache({
   },
 });
 memoryCache.start();
-// Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
-// upgrading deployment's own Bots are not in Intelligence yet.
-await sweepPurgedBotRows(
-  database,
-  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
-);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
