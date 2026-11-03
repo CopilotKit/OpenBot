@@ -105,3 +105,19 @@ export const workItems = pgTable(
       .where(sql`${table.finishedAt} IS NULL`),
   ],
 );
+
+/**
+ * A named lock any replica can take for a few seconds, without holding a database connection.
+ *
+ * For a sequence that reads from Intelligence, decides, and writes back to Intelligence: a row lock
+ * or an advisory lock would mean holding an OpenBot transaction (or a pooled connection) across the
+ * Intelligence calls, which nothing here may do. Taking the lock is one statement that wins only when
+ * nobody holds the name or the holder's time has run out, so a replica that dies holding one frees it
+ * by expiring rather than by anybody noticing. Operational and disposable: an empty table is correct.
+ * See `work/local-lock.ts`.
+ */
+export const localLocks = pgTable("local_locks", {
+  name: text("name").primaryKey(),
+  holder: text("holder").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
