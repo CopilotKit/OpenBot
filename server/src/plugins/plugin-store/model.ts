@@ -1199,6 +1199,12 @@ export type PluginStoreOptions = {
   privateShareCheck?: CheckPrivateShare;
   /** Who may steer a run that uses a Shared app's account. Absent, every shared call is refused. */
   sharedUse?: SharedUseGate;
+  /**
+   * Remove every Shared app approval given at an app, once its row is removed. They went with the row
+   * by a foreign key; they live in Intelligence's organization policy now, so the server wires this
+   * (`plugins/shared-use-store.ts`, `deleteApprovalsAt`). Absent, there are none to remove.
+   */
+  removeSharedApprovals?: (serverId: string) => Promise<void>;
   database: Database;
   auditStore: AuditStore;
   /**

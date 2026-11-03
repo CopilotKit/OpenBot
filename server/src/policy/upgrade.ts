@@ -15,16 +15,18 @@
  * stored (`If-None-Match: *`), a rule only under an id Intelligence does not have. A server of this
  * release that already saved a change there keeps it.
  *
- * SAFE TO RUN ANY NUMBER OF TIMES, FROM ANY NUMBER OF REPLICAS AT ONCE. Each write carries an
- * idempotency key made from the record it copies, so two replicas copying the same row send the same
- * request and Intelligence answers the second with the first's result; a write that lost the race to
- * a different one is refused by its precondition and left alone.
+ * SAFE TO RUN ANY NUMBER OF TIMES, FROM ANY NUMBER OF REPLICAS AT ONCE. The preconditions are what
+ * make a record copied once: two replicas copying the same row both send it, the first is stored and
+ * the second is refused by its precondition and left alone. Each write also carries an idempotency
+ * key, made from the record and this run, so a retry after a lost response is the same write. Not
+ * from the record alone: a key outlives its write by a day, and a later run (after a failed one, or
+ * over a record removed since) must write again, not be answered with a write that no longer stands.
  *
  * LOUD ON A MISMATCH. A record Intelligence refuses, or one missing after the copy, stops the boot with
  * the records named. Running on with half an organization's policy copied would enforce rules nobody
  * set, or drop rules somebody did, and say nothing.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
@@ -41,7 +43,11 @@ import {
   sharedUseApprovals,
 } from "../db/schema";
 import type { PolicyCache } from "./cache";
-import { PolicyAlreadyExistsError, PolicyVersionConflictError } from "./client";
+import {
+  PolicyAlreadyExistsError,
+  PolicyVersionConflictError,
+  policyFailure,
+} from "./client";
 import type {
   ApprovalRuleDraft,
   ConnectionApprovalMember,
@@ -61,9 +67,9 @@ export type PolicyCopyOutcome =
   | { kind: "done-before" }
   | { kind: "copied"; local: number; written: number; present: number };
 
-/** The same key for the same copy from every replica, so their copies are one write. */
-function upgradeKey(kind: string, record: unknown): string {
-  return `openbot-upgrade:policy:${kind}:${createHash("sha256").update(JSON.stringify(record)).digest("hex")}`;
+/** The key for one record's write in one run: the same for a retry of that write, new for a new run. */
+function upgradeKey(run: string, kind: string, record: unknown): string {
+  return `openbot-upgrade:policy:${kind}:${createHash("sha256").update(JSON.stringify({ run, record })).digest("hex")}`;
 }
 
 /** The old `enterprise_settings` rows, as Intelligence's one settings record. Unknown keys are not settings. */
@@ -134,6 +140,7 @@ export async function copyLocalPolicyToIntelligence(
   if (done) return { kind: "done-before" };
 
   const client = cache.client;
+  const run = randomUUID();
   const settingsRows = await database.select().from(enterpriseSettings);
   const [teamRow] = await database.select().from(approvalTeamSettings);
   const [boundaryRow] = await database.select().from(actionPolicy);
@@ -158,9 +165,7 @@ export async function copyLocalPolicyToIntelligence(
         error instanceof PolicyAlreadyExistsError
       )
         return;
-      refused.push(
-        `${what}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      refused.push(`${what}: ${policyFailure(error)}`);
     }
   };
 
@@ -187,7 +192,7 @@ export async function copyLocalPolicyToIntelligence(
   if (hasSettings) {
     const patch = { ...settingsPatch, updatedBy: lastSettingsAuthor };
     await copy("settings", () =>
-      client.patchSettings(patch, upgradeKey("settings", patch), {
+      client.patchSettings(patch, upgradeKey(run, "settings", patch), {
         ifMatch: 0,
       }),
     );
@@ -204,7 +209,7 @@ export async function copyLocalPolicyToIntelligence(
       client.putActionBoundary(
         boundary,
         boundaryRow.updatedBy,
-        upgradeKey("action-boundary", boundary),
+        upgradeKey(run, "action-boundary", boundary),
         { ifMatch: 0 },
       ),
     );
@@ -223,7 +228,7 @@ export async function copyLocalPolicyToIntelligence(
           key,
           row.allowed,
           row.updatedBy,
-          upgradeKey("capability", { key, allowed: row.allowed }),
+          upgradeKey(run, "capability", { key, allowed: row.allowed }),
           { ifNoneMatch: true },
         ),
     );
@@ -245,7 +250,7 @@ export async function copyLocalPolicyToIntelligence(
         key,
         rule,
         row.updatedBy,
-        upgradeKey("network", { key, rule }),
+        upgradeKey(run, "network", { key, rule }),
         { ifNoneMatch: true },
       ),
     );
@@ -261,7 +266,7 @@ export async function copyLocalPolicyToIntelligence(
       client.patchApprovalPreferences(
         row.ownerUserId,
         patch,
-        upgradeKey("preferences", { user: row.ownerUserId, patch }),
+        upgradeKey(run, "preferences", { user: row.ownerUserId, patch }),
         { ifMatch: 0 },
       ),
     );
@@ -295,7 +300,7 @@ export async function copyLocalPolicyToIntelligence(
   ];
   for (const draft of ruleDrafts) {
     await copy(`approval rule ${draft.id}`, () =>
-      client.createApprovalRule(draft, upgradeKey("rule", draft)),
+      client.createApprovalRule(draft, upgradeKey(run, "rule", draft)),
     );
   }
 
@@ -326,7 +331,7 @@ export async function copyLocalPolicyToIntelligence(
         client.putConnectionApproval(
           key,
           draft,
-          upgradeKey("connection-approval", { key, draft }),
+          upgradeKey(run, "connection-approval", { key, draft }),
           { ifNoneMatch: true },
         ),
     );

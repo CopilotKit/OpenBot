@@ -29,6 +29,7 @@ import {
   type OrgPolicyClient,
   PolicyVersionConflictError,
   type Precondition,
+  policyFailure,
   policyIdempotencyKey,
 } from "./client";
 import {
@@ -261,7 +262,7 @@ export function createPolicyCache(options: {
           resource: change.resource,
           key: change.key,
           note: "The next full read picks the change up.",
-          error: error instanceof Error ? error.message : String(error),
+          error: policyFailure(error),
         }),
       );
     }
@@ -350,7 +351,7 @@ export function createPolicyCache(options: {
         note: loaded
           ? "Still enforcing the policy this instance last read."
           : "No policy has been read yet, so every capability-gated action is refused.",
-        error: error instanceof Error ? error.message : String(error),
+        error: policyFailure(error),
       }),
     );
 

@@ -940,6 +940,7 @@ export function createSharedUseStore(
 
   return {
     appIdOf,
+    deleteApprovalsAt,
     approvalFor,
     approvalSource,
     admitsPerson,

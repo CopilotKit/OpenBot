@@ -35,22 +35,38 @@ export type OrgPolicySettings = {
   fetch?: typeof fetch;
 };
 
-/** Intelligence refused or could not answer. `code` is the policy error code when it sent one. */
+/**
+ * Intelligence refused or could not answer. `message` is what a person reads when a screen shows the
+ * failure (admin routes and Settings answer with it); `detail` is what happened, for the log.
+ * `code` is the policy error code when Intelligence sent one.
+ */
 export class PolicyError extends Error {
   constructor(
     message: string,
     readonly status: number | null,
     readonly code: string | null,
+    readonly detail: string = message,
   ) {
     super(message);
     this.name = "PolicyError";
   }
 }
 
+/** What to log about a failure: a policy error's detail, or the error's own message. */
+export function policyFailure(error: unknown): string {
+  if (error instanceof PolicyError) return error.detail;
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** The record changed since it was read, or (for a fill) somebody stored one first. */
 export class PolicyVersionConflictError extends PolicyError {
   constructor(what: string) {
-    super(`${what} changed since it was read.`, 412, "POLICY_VERSION_CONFLICT");
+    super(
+      "Someone else changed this at the same time. Reload the page and try again.",
+      412,
+      "POLICY_VERSION_CONFLICT",
+      `${what} changed since it was read.`,
+    );
     this.name = "PolicyVersionConflictError";
   }
 }
@@ -58,7 +74,12 @@ export class PolicyVersionConflictError extends PolicyError {
 /** No such record in Intelligence. */
 export class PolicyNotFoundError extends PolicyError {
   constructor(what: string) {
-    super(`${what} is not in Intelligence.`, 404, "POLICY_NOT_FOUND");
+    super(
+      "That setting no longer exists. Reload the page.",
+      404,
+      "POLICY_NOT_FOUND",
+      `${what} is not in Intelligence.`,
+    );
     this.name = "PolicyNotFoundError";
   }
 }
@@ -66,7 +87,12 @@ export class PolicyNotFoundError extends PolicyError {
 /** An approval rule with this id already exists, revoked or not. */
 export class PolicyAlreadyExistsError extends PolicyError {
   constructor(what: string) {
-    super(`${what} already exists.`, 409, "POLICY_ALREADY_EXISTS");
+    super(
+      "That rule already exists.",
+      409,
+      "POLICY_ALREADY_EXISTS",
+      `${what} already exists.`,
+    );
     this.name = "PolicyAlreadyExistsError";
   }
 }
@@ -74,9 +100,24 @@ export class PolicyAlreadyExistsError extends PolicyError {
 /** The approval rule is revoked, so it cannot be changed. */
 export class PolicyRuleRevokedError extends PolicyError {
   constructor(what: string) {
-    super(`${what} is revoked.`, 409, "POLICY_RULE_REVOKED");
+    super(
+      "That rule was removed. Reload the page.",
+      409,
+      "POLICY_RULE_REVOKED",
+      `${what} is revoked.`,
+    );
     this.name = "PolicyRuleRevokedError";
   }
+}
+
+/** What a person reads when a read or a write did not go through. */
+const READS = new Set(["read", "list", "subscribe to"]);
+function sentenceFor(action: string, status: number | null): string {
+  if (READS.has(action))
+    return "Couldn't load these settings. Reload the page.";
+  if (status !== null && status >= 400 && status < 500)
+    return "That change wasn't saved. Check it and try again.";
+  return "Couldn't save that change. Try again in a moment.";
 }
 
 /** A conditional write: only this version, or only while nothing is stored. */
@@ -156,9 +197,10 @@ export function createOrgPolicyClient(settings: OrgPolicySettings) {
         // send again, and a read is safe to repeat.
         if (response.status >= 500 && attempt < ATTEMPTS) {
           lastError = new PolicyError(
-            `Intelligence answered ${response.status} to ${method} ${path}.`,
+            sentenceFor(method === "GET" ? "read" : "save", null),
             response.status,
             await errorCode(response),
+            `Intelligence answered ${response.status} to ${method} ${path}.`,
           );
           await pause(attempt);
           continue;
@@ -171,9 +213,10 @@ export function createOrgPolicyClient(settings: OrgPolicySettings) {
     }
     if (lastError instanceof PolicyError) throw lastError;
     throw new PolicyError(
+      sentenceFor(method === "GET" ? "read" : "save", null),
+      null,
+      null,
       `Could not reach Intelligence for ${method} ${path}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-      null,
-      null,
     );
   }
 
@@ -189,9 +232,10 @@ export function createOrgPolicyClient(settings: OrgPolicySettings) {
       throw new PolicyAlreadyExistsError(what);
     if (code === "POLICY_RULE_REVOKED") throw new PolicyRuleRevokedError(what);
     throw new PolicyError(
-      `Intelligence refused to ${action} ${what}: ${response.status}${code ? ` ${code}` : ""}.`,
+      sentenceFor(action, response.status),
       response.status,
       code,
+      `Intelligence refused to ${action} ${what}: ${response.status}${code ? ` ${code}` : ""}.`,
     );
   }
 

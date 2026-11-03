@@ -470,12 +470,15 @@ await policyCache.start();
 // An upgraded deployment's policy, copied from the local tables once (policy/upgrade.ts).
 await copyLocalPolicyToIntelligence(database, policyCache);
 // A Bot deleted for good takes its Shared app approvals with it, here and for any purged while down.
+const botStillGone = async (botId: string) =>
+  (await botDirectory.registry.get(botId)) === null;
 botDirectory.onPurged(async (botId) => {
-  await removeBotPolicy(policyCache, [botId]);
+  await removeBotPolicy(policyCache, [botId], botStillGone);
 });
 await sweepPurgedBotPolicy(
   policyCache,
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+  botStillGone,
 );
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
@@ -1119,6 +1122,8 @@ const pluginStore = createPluginStore({
   policy: () => policyStore.get(),
   approvalGate: approvalService.gate,
   sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
+  removeSharedApprovals: (serverId) =>
+    sharedUseStore.deleteApprovalsAt([serverId]),
   // A connector send to other people asks the owner first. See plugins/share-target.ts.
   privateShareCheck: createPrivateShareCheck({
     approvals: approvalService.store,

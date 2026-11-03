@@ -16,7 +16,7 @@ import { approvalRequests } from "../db/schema/approvals";
 import { intelligenceChannelMappings } from "../db/schema/core";
 import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
-import { PolicyAlreadyExistsError } from "../policy/client";
+import { PolicyAlreadyExistsError, policyFailure } from "../policy/client";
 import { policy } from "../policy/cache";
 import type { ApprovalRuleRecord } from "../policy/types";
 import {
@@ -391,7 +391,7 @@ export function createApprovalStore(database: Database): ApprovalStore {
           approvalId,
           ruleId: rule.id,
           note: "The decision failed after its rule was saved; the rule stays until the person revokes it.",
-          error: error instanceof Error ? error.message : String(error),
+          error: policyFailure(error),
         }),
       );
     }

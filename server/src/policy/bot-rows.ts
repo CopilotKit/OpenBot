@@ -11,23 +11,38 @@
  * glob, and they never went with a Bot; they still do not.
  */
 import type { PolicyCache } from "./cache";
+import { PolicyVersionConflictError } from "./client";
 
-/** Remove every Shared app approval these Bots hold. Read from Intelligence, not memory: none may be missed. */
+/**
+ * Remove every Shared app approval these Bots hold. Read from Intelligence, not memory: none may be
+ * missed.
+ *
+ * A BOT MADE AGAIN UNDER THE SAME ID KEEPS WHAT IT IS GIVEN. A purge is announced to every server,
+ * and an announcement can arrive after the id was made again and given a new approval. So each
+ * approval is removed only while `stillGone` says Intelligence has no such Bot, and only at the
+ * version read: one stored over it in the meantime is the new Bot's, and stays.
+ */
 export async function removeBotPolicy(
   cache: PolicyCache,
   botIds: readonly string[],
+  stillGone: (botId: string) => Promise<boolean> = async () => true,
 ): Promise<number> {
   let removed = 0;
   for (const agentId of botIds) {
     const { items } = await cache.client.connectionApprovals({ agentId });
     for (const approval of items) {
-      if (
-        await cache.deleteConnectionApproval({
-          agentId,
-          connectionId: approval.connectionId,
-        })
-      )
-        removed += 1;
+      if (!(await stillGone(agentId))) return removed;
+      try {
+        if (
+          await cache.deleteConnectionApproval(
+            { agentId, connectionId: approval.connectionId },
+            { ifMatch: approval.version },
+          )
+        )
+          removed += 1;
+      } catch (error) {
+        if (!(error instanceof PolicyVersionConflictError)) throw error;
+      }
     }
   }
   return removed;
@@ -41,6 +56,7 @@ export async function removeBotPolicy(
 export async function sweepPurgedBotPolicy(
   cache: PolicyCache,
   listAll: () => Promise<Iterable<{ id: string }>>,
+  stillGone?: (botId: string) => Promise<boolean>,
 ): Promise<string[]> {
   const { items } = await cache.client.connectionApprovals();
   const named = new Set(items.map((approval) => approval.agentId));
@@ -49,7 +65,7 @@ export async function sweepPurgedBotPolicy(
   for (const bot of await listAll()) known.add(bot.id);
   const gone = [...named].filter((id) => !known.has(id));
   if (gone.length > 0) {
-    await removeBotPolicy(cache, gone);
+    await removeBotPolicy(cache, gone, stillGone);
     console.warn(
       JSON.stringify({
         type: "bot-policy-swept",
