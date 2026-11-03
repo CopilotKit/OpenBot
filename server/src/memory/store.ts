@@ -684,6 +684,39 @@ export function createMemoryStore(
       cache.forget();
     },
     /**
+     * At boot: the memory of every Bot purged while no instance was running to hear it. A Bot is found by
+     * the sources bound to it, read BEFORE the Bots are listed (as `sweepPurgedBotRows` reads its rows
+     * first), so a Bot made between the two reads is never taken for a purged one.
+     */
+    async sweepPurgedBots(
+      listAll: () => Promise<Iterable<{ id: string }>>,
+    ): Promise<string[]> {
+      const named = new Set(
+        (await intelligence.sources({}))
+          .map((source) => source.agentId)
+          .filter((id): id is string => !!id),
+      );
+      if (named.size === 0) return [];
+      const known = new Set<string>();
+      for (const bot of await listAll()) known.add(bot.id);
+      const gone = [...named].filter((id) => !known.has(id));
+      for (const botId of gone) {
+        await intelligence.purgeSources({ agentId: botId });
+        await intelligence.purgeAgent(botId);
+      }
+      if (gone.length > 0) {
+        cache.forget();
+        console.warn(
+          JSON.stringify({
+            type: "bot-memory-swept",
+            note: "Memory sources named Bots that Intelligence no longer has; they and those Bots' memories were removed.",
+            bots: gone,
+          }),
+        );
+      }
+      return gone;
+    },
+    /**
      * What resetting one Bot for one person removes of their memory: its sources (with the memories they
      * imported) and the memories it formed itself. Read from Intelligence, not this instance's copy.
      */

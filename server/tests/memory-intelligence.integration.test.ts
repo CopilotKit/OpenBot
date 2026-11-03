@@ -365,3 +365,34 @@ test("removing a person takes every memory and source of theirs, and no one else
   );
   await store.remove(ada, stays.id);
 });
+
+test("at boot, the memory of a Bot purged while nothing was running goes too; a living Bot's stays", async () => {
+  const purged = `${prefix}-purged-while-down`;
+  const living = `${prefix}-living`;
+  for (const agentId of [purged, living])
+    await store.createSource(ada, {
+      agentId,
+      toolRef: "docs/search",
+      title: "Docs",
+      args: {},
+    });
+  await store.formMemory(ada, {
+    agentId: purged,
+    content: "Formed by the Bot purged while down",
+    sourceApp: "Docs",
+  });
+  const swept = await store.sweepPurgedBots(async () => [
+    ...(await intelligence.sources({}))
+      .map((source) => ({ id: source.agentId ?? "" }))
+      .filter((bot) => bot.id !== purged),
+  ]);
+  expect(swept).toEqual([purged]);
+  expect(await intelligence.sources({ agentId: purged })).toEqual([]);
+  expect(await intelligence.sources({ agentId: living })).toHaveLength(1);
+  expect(
+    (await intelligence.allMemories(ada, { includeInvalidated: true })).map(
+      (memory) => memory.content,
+    ),
+  ).not.toContain("Formed by the Bot purged while down");
+  await intelligence.purgeSources({ agentId: living });
+});

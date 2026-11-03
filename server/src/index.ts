@@ -1494,6 +1494,10 @@ const personalMemoryStore = createMemoryStore(database, {
 // A Bot deleted for good takes the memory sources bound to it and the memories it formed, as the old
 // foreign keys did.
 botDirectory.onPurged((botId) => personalMemoryStore.forgetBot(botId));
+// And of a Bot purged while no instance was running to hear it.
+await personalMemoryStore.sweepPurgedBots(
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
 const recorderExtension = createRecorderExtension({
   config,
   database,
