@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import { eq } from "drizzle-orm";
 import { PERSON_QUESTION_WAITING } from "../approvals/question-resume";
 import type { ApprovalService } from "../approvals/service";
 import { currentApprovalContext } from "../approvals/types";
@@ -12,8 +11,8 @@ import {
 import { groupSourceForRun } from "../channels/group";
 import type { ChannelStore } from "../channels/routes";
 import type { DeploymentConfig } from "../config";
+import { conversations } from "../conversations/directory";
 import type { Database } from "../db/client";
-import { channelMemberships } from "../db/schema";
 import type { DeliveryScope } from "../delivery/types";
 import type { PeopleStore } from "../people/store";
 import type { PluginStore } from "../plugins/store";
@@ -113,15 +112,13 @@ export function wireCoordination(deps: {
       // handoff to another person. Only the owner reading it is the ordinary, unheld case.
       questionAudience: async (from) => {
         const channel = await channelSourceForRun(from);
-        const group = channel ? null : await groupSourceForRun(database, from);
+        const group = channel ? null : await groupSourceForRun(from);
         const source = channel ?? group;
         if (!source) return null;
-        const members = (
-          await database
-            .select({ userId: channelMemberships.userId })
-            .from(channelMemberships)
-            .where(eq(channelMemberships.channelId, source.channelId))
-        ).map((row) => row.userId);
+        const members =
+          (await conversations().get(source.channelId))?.members.map(
+            (member) => member.userId,
+          ) ?? [];
         if (members.every((userId) => userId === from.actorId)) return null;
         return {
           audience: {

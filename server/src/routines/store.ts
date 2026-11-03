@@ -35,15 +35,10 @@ import {
   ne,
   sql,
 } from "drizzle-orm";
+import { conversations } from "../conversations/directory";
+import { isMember } from "../conversations/types";
 import type { Database } from "../db/client";
-import {
-  channelAgents,
-  channelMemberships,
-  channels,
-  routineRuns,
-  routineSweeps,
-  routines,
-} from "../db/schema";
+import { routineRuns, routineSweeps, routines } from "../db/schema";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -362,58 +357,31 @@ export function createRoutineStore(database: Database): RoutineStore {
     ownerUserId: string,
     agentId: string,
     channelId?: string,
-    handle: Database | Transaction = database,
   ): Promise<string> {
+    // Conversations live in Intelligence, so this is read before any transaction opens: a
+    // transaction here must not wait on Intelligence.
     if (channelId !== undefined) {
-      // One query for all four conditions: the channel exists, it is not deleted, the owner is a
-      // member, and this agent is in it. Any miss is the same refusal, because telling them apart
-      // would tell a caller which channel ids exist.
-      const rows = await handle
-        .select({ id: channels.id })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, ownerUserId),
-          ),
-        )
-        .innerJoin(
-          channelAgents,
-          and(
-            eq(channelAgents.channelId, channels.id),
-            eq(channelAgents.agentId, agentId),
-          ),
-        )
-        .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-        .limit(1);
-      const found = rows[0];
-      if (!found) throw new RoutineRefusedError(NO_SHARED_CHANNEL);
+      // All four conditions: the channel exists, it is not deleted, the owner is a member, and this
+      // agent is in it. Any miss is the same refusal, because telling them apart would tell a caller
+      // which channel ids exist.
+      const found = await conversations().get(channelId);
+      if (
+        !found ||
+        found.deletedAt !== null ||
+        !isMember(found, ownerUserId) ||
+        !found.agents.some((agent) => agent.agentId === agentId)
+      )
+        throw new RoutineRefusedError(NO_SHARED_CHANNEL);
       return found.id;
     }
 
-    // Six rows is enough to answer the question: one resolves, more than one refuses, and the
-    // sentence names at most five before it says "and others".
-    const candidates = await handle
-      .select({ id: channels.id, name: channels.name })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        and(
-          eq(channelMemberships.channelId, channels.id),
-          eq(channelMemberships.userId, ownerUserId),
-        ),
-      )
-      .innerJoin(
-        channelAgents,
-        and(
-          eq(channelAgents.channelId, channels.id),
-          eq(channelAgents.agentId, agentId),
-        ),
-      )
-      .where(isNull(channels.deletedAt))
-      .orderBy(desc(channels.createdAt), desc(channels.id))
-      .limit(MAX_NAMED_CHANNELS + 1);
+    // Six are enough to answer the question: one resolves, more than one refuses, and the sentence
+    // names at most five before it says "and others".
+    const { conversations: candidates } = await conversations().client.page(
+      { memberUserId: ownerUserId, agentId, order: "newest" },
+      null,
+      MAX_NAMED_CHANNELS + 1,
+    );
 
     const only = candidates[0];
     if (!only) throw new RoutineRefusedError(NO_CHANNEL_AT_ALL);
@@ -490,6 +458,17 @@ export function createRoutineStore(database: Database): RoutineStore {
     id: string,
     patch: RoutinePatch,
   ): Promise<Routine> {
+    // The channel is checked before the lock is taken: it is read from Intelligence, which no
+    // transaction here waits on. A routine's Bot never changes, so the row read under the lock below
+    // names the same one.
+    const resolvedChannel =
+      patch.channelId !== undefined
+        ? await resolveChannel(
+            ownerUserId,
+            (await loadOwned(ownerUserId, id)).agentId,
+            patch.channelId,
+          )
+        : undefined;
     const [row] = await withEnabledCapLock(ownerUserId, async (transaction) => {
       // A waiting update must derive its transition and schedule from the row that now holds the lock.
       const existing = await loadOwned(ownerUserId, id, transaction);
@@ -500,14 +479,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (patch.instruction !== undefined) {
         values.instruction = validInstruction(patch.instruction);
       }
-      if (patch.channelId !== undefined) {
-        values.channelId = await resolveChannel(
-          ownerUserId,
-          existing.agentId,
-          patch.channelId,
-          transaction,
-        );
-      }
+      if (resolvedChannel !== undefined) values.channelId = resolvedChannel;
       if (patch.enabled !== undefined) values.enabled = patch.enabled;
 
       const enabling = patch.enabled === true && !existing.enabled;
@@ -604,20 +576,26 @@ export function createRoutineStore(database: Database): RoutineStore {
        * recent, in a single index scan of `routine_runs_by_routine_idx`. Reading the runs in a
        * separate statement rather than a lateral keeps the main query one flat join.
        */
-      const rows = await database
-        .select({
-          routine: routines,
-          channelName: channels.name,
-          channelDeletedAt: channels.deletedAt,
-          // A left join, and the id is selected to tell "no channel row at all" (a hard delete
-          // somewhere else) from "soft-deleted": both mean the target is unusable, and neither is
-          // allowed to hide the routine, which is why `channel_id` is not a foreign key.
-          channelExists: channels.id,
-        })
+      const routineRows = await database
+        .select()
         .from(routines)
-        .leftJoin(channels, eq(channels.id, routines.channelId))
         .where(eq(routines.ownerUserId, ownerUserId))
         .orderBy(desc(routines.createdAt), desc(routines.id));
+      // The channel each one fires into, from Intelligence. A channel that is not there at all (a
+      // purge somewhere else) and one deleted both mean the target is unusable, and neither is
+      // allowed to hide the routine, which is why `channel_id` is not a foreign key.
+      const targets = await conversations().getMany(
+        routineRows.map((routine) => routine.channelId),
+      );
+      const rows = routineRows.map((routine) => {
+        const target = targets.get(routine.channelId);
+        return {
+          routine,
+          channelName: target?.name ?? null,
+          channelDeletedAt: target?.deletedAt ?? null,
+          channelExists: target ? target.id : null,
+        };
+      });
 
       const routineIds = rows.map((row) => row.routine.id);
       const lastRuns = new Map<

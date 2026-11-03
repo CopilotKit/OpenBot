@@ -74,20 +74,12 @@ const turnSchema = z.object({
   runs: z.number().int().positive().optional(),
 });
 
-/** Another Start of the same item opened its task first; this one's conversation is rolled back. */
-class ItemAlreadyOpened extends Error {
-  constructor() {
-    super("This item already opened a task.");
-    this.name = "ItemAlreadyOpened";
-  }
-}
-
 export type TaskRunner = ReturnType<typeof createTaskRunner>;
 
 export function createTaskRunner(deps: {
-  database: Pick<Database, "transaction" | "select">;
+  database: Pick<Database, "select">;
   store: TaskStore;
-  channels: Pick<ChannelStore, "create">;
+  channels: Pick<ChannelStore, "draft">;
   actorFor: (ownerUserId: string) => Promise<AgentActor>;
   queue: WorkQueue;
   /** Who claims, for the queue: `workOwner("tasks")`. */
@@ -115,40 +107,24 @@ export function createTaskRunner(deps: {
     const found = await deps.store.byItem(ownerUserId, item.id);
     if (found) return found;
     const actor = await deps.actorFor(ownerUserId);
-    try {
-      return await deps.database.transaction(async (transaction) => {
-        const channel = await deps.channels.create(
-          actor,
-          [item.agentId],
-          transaction,
-        );
-        const task = await deps.store.create(
-          {
-            ownerUserId,
-            agentId: item.agentId,
-            channelId: channel.id,
-            title: item.title,
-            why: whyOf(item.detail),
-            origin: "check_in",
-            suggestionId: item.id,
-            sourceApp: item.sourceApp,
-            sourceLink: item.sourceLink,
-          },
-          transaction,
-        );
-        /*
-         * Two Starts of one item at once: the second waits on the first's row under the unique
-         * index, then finds it there. Thrown, so its own conversation is rolled back with it.
-         */
-        if (!task) throw new ItemAlreadyOpened();
-        return task;
-      });
-    } catch (error) {
-      if (!(error instanceof ItemAlreadyOpened)) throw error;
-      const winner = await deps.store.byItem(ownerUserId, item.id);
-      if (!winner) throw error;
-      return winner;
-    }
+    const conversation = await deps.channels.draft(actor, [item.agentId]);
+    /*
+     * The task and its conversation are one write in Intelligence. Two Starts of one item at once:
+     * the second finds the first's task under the item and makes nothing.
+     */
+    return deps.store.create(
+      {
+        ownerUserId,
+        agentId: item.agentId,
+        title: item.title,
+        why: whyOf(item.detail),
+        origin: "check_in",
+        suggestionId: item.id,
+        sourceApp: item.sourceApp,
+        sourceLink: item.sourceLink,
+      },
+      conversation,
+    );
   }
 
   /** Queue a task's turn, once per key, and start it now. */

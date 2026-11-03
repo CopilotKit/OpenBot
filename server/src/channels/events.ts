@@ -4,6 +4,13 @@ import type { ChannelWorkWire } from "./working";
 /**
  * Live channel activity, from whoever ran an agent to everybody else in the channel.
  *
+ * TWO SOURCES FEED THE HUB. What is stored about a conversation (the last thing said, its summary, a
+ * member's pin, its deletion) lives in Intelligence, which announces each change to every replica;
+ * `live.ts` turns those announcements into the events below. What is only a moment (a turn started
+ * or ended, what a thread is waiting on) is read from this deployment's own work queue and
+ * announced on this deployment's own Postgres channel, as the queue's wake-ups are: there is no
+ * stored change in Intelligence to announce it by.
+ *
  * The person who ran it already has the reply and reports it over HTTP; this is the other direction,
  * telling the channel's other members that something was said. It is an optimisation and never a
  * source of truth: the roster query stays authoritative, and a client that misses events while
@@ -80,6 +87,8 @@ export type ChannelEventHub = {
   /** Tell every connection to refetch. Everybody, because the lost events named their own members. */
   resyncAll(): void;
   connectionCount(userId: string): number;
+  /** Whether anybody at all is connected to this instance. */
+  hasConnections(): boolean;
 };
 
 export function createChannelEventHub(): ChannelEventHub {
@@ -128,6 +137,10 @@ export function createChannelEventHub(): ChannelEventHub {
 
     connectionCount(userId) {
       return connections.get(userId)?.size ?? 0;
+    },
+
+    hasConnections() {
+      return connections.size > 0;
     },
   };
 }

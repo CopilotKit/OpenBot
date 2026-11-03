@@ -5,27 +5,14 @@ import {
   MAX_IMAGE_BYTES,
   namesNoFormat,
 } from "@openbot/shared/attachments";
-import {
-  and,
-  eq,
-  exists,
-  inArray,
-  isNotNull,
-  isNull,
-  notExists,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
+import { channelOfThread, conversations } from "../conversations/directory";
+import { isMember } from "../conversations/types";
 import type { Database } from "../db/client";
-import {
-  attachments,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-} from "../db/schema";
+import { attachments } from "../db/schema";
 import { sniffMimeType } from "./attachment-mime";
 import type { StoredAttachment } from "./attachment-parts";
 
@@ -95,16 +82,48 @@ function isUuidShaped(value: string): boolean {
  * IS mapped, so the degrade branch does not apply, the subquery yields B, and A ≠ B refuses. The
  * branch only opens for a thread nobody is shown.
  */
-function inTheTurnsChannel(database: Database, threadId: string) {
-  const channelOfThisThread = () =>
-    database
-      .select({ channelId: intelligenceChannelMappings.channelId })
-      .from(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.threadId, threadId));
-  return or(
-    inArray(attachments.channelId, channelOfThisThread()),
-    notExists(channelOfThisThread()),
+async function inTheTurnsChannel(_database: Database, threadId: string) {
+  // The conversation this thread is a person's own thread in, read from the conversation directory
+  // (held in memory, read through on a miss). None: a thread nobody is shown, and no narrowing.
+  const channelOfThisThread = await channelOfThread(threadId);
+  return channelOfThisThread
+    ? eq(attachments.channelId, channelOfThisThread)
+    : undefined;
+}
+
+/**
+ * Whether this person is a member of this live channel, from the conversation directory. A channel
+ * that is deleted counts as no channel: the conversation and every membership outlive a soft delete,
+ * so asking only "is this actor a member" would answer yes for ever afterwards.
+ */
+export async function memberOfLiveChannel(
+  channelId: string,
+  actorId: string,
+): Promise<boolean> {
+  const conversation = await conversations().get(channelId);
+  return (
+    conversation !== null &&
+    conversation.deletedAt === null &&
+    isMember(conversation, actorId)
   );
+}
+
+/** The channel an attachment is in, when this person may see into it: a member of it, live. */
+async function liveChannelOfAttachment(
+  database: Database,
+  actorId: string,
+  id: string,
+): Promise<string | null> {
+  if (!isUuidShaped(id)) return null;
+  const [row] = await database
+    .select({ channelId: attachments.channelId })
+    .from(attachments)
+    .where(eq(attachments.id, id))
+    .limit(1);
+  if (!row) return null;
+  return (await memberOfLiveChannel(row.channelId, actorId))
+    ? row.channelId
+    : null;
 }
 
 /**
@@ -184,30 +203,19 @@ export async function loadAttachmentForTurn(
    * without the channel term somebody in a deleted channel could name an id out of their own local
    * transcript on a message they compose themselves and have the file read back to them.
    */
-  const [row] = await database
+  const [found] = await database
     .select({
       mimeType: attachments.mimeType,
       name: attachments.name,
       bytes: attachments.bytes,
+      channelId: attachments.channelId,
     })
     .from(attachments)
-    .innerJoin(
-      channels,
-      and(eq(channels.id, attachments.channelId), isNull(channels.deletedAt)),
-    )
-    .innerJoin(
-      channelMemberships,
-      and(
-        eq(channelMemberships.channelId, attachments.channelId),
-        eq(channelMemberships.userId, turn.actorId),
-      ),
-    )
     .where(
       and(
         eq(attachments.id, id),
-        // The conversation this turn is running in, as a term in the same statement rather than as
-        // a fact a caller looked up and passed. See {@link inTheTurnsChannel}.
-        inTheTurnsChannel(database, turn.threadId),
+        // The conversation this turn is running in. See {@link inTheTurnsChannel}.
+        await inTheTurnsChannel(database, turn.threadId),
         /*
          * Sent, or this actor's own. In the same statement as the membership join rather than read
          * and then decided on, so a send committing alongside cannot be missed by a check that
@@ -223,7 +231,12 @@ export async function loadAttachmentForTurn(
         ),
       ),
     );
-  return row ?? null;
+  if (!found) return null;
+  // The live channel and the actor's membership of it: the conversation is in Intelligence, held in
+  // this instance's memory, so it is checked beside the read rather than joined into it.
+  if (!(await memberOfLiveChannel(found.channelId, turn.actorId))) return null;
+  const { channelId: _channelId, ...row } = found;
+  return row;
 }
 
 /**
@@ -381,6 +394,8 @@ export async function markAttachmentsSent(
   const known = ids.filter(isUuidShaped);
   if (known.length === 0) return;
 
+  // Read before the transaction opens: it may ask Intelligence, which no transaction waits on.
+  const turnsChannel = await inTheTurnsChannel(database, turn.threadId);
   const unrecorded = await database
     .transaction(async (transaction) => {
       await transaction
@@ -391,7 +406,7 @@ export async function markAttachmentsSent(
             inArray(attachments.id, known),
             eq(attachments.uploadedBy, turn.actorId),
             // The channel this send actually happened in. See {@link inTheTurnsChannel}.
-            inTheTurnsChannel(database, turn.threadId),
+            turnsChannel,
             isNull(attachments.attachedAt),
           ),
         );
@@ -402,7 +417,7 @@ export async function markAttachmentsSent(
         .where(
           and(
             inArray(attachments.id, known),
-            inTheTurnsChannel(database, turn.threadId),
+            turnsChannel,
             isNotNull(attachments.attachedAt),
           ),
         );
@@ -746,20 +761,11 @@ export function createChannelAttachmentRoutes(
      * read off the wire. The insert below carries the same join itself, because a check up here and
      * an insert down there are two statements with the whole of the upload between them.
      */
-    const membership = await database
-      .select({ id: channels.id })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        and(
-          eq(channelMemberships.channelId, channels.id),
-          eq(channelMemberships.userId, actor.id),
-        ),
-      )
-      .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-      // Guarded like every other database call on these routes, and this is the one that runs
-      // FIRST: without it a database that cannot answer takes the door out before the body is even
-      // read, as a plain-text 500 the composer can only report as "could not upload".
+    const membership = await memberOfLiveChannel(channelId, actor.id)
+      // Guarded like every other call on these routes, and this is the one that runs FIRST: without
+      // it an Intelligence that cannot answer takes the door out before the body is even read, as a
+      // plain-text 500 the composer can only report as "could not upload".
+      .then((member) => (member ? [{ id: channelId }] : []))
       .catch((error: unknown) => {
         console.error(
           `Could not check ${actor.id}'s membership of ${channelId} for an upload.`,
@@ -893,14 +899,24 @@ export function createChannelAttachmentRoutes(
      * handler checks membership at the top and used to insert on the strength of what it had read —
      * with `await file.arrayBuffer()`, the sniff and the classification in between, so the window is
      * as wide as reading an upload off the wire, not as wide as a scheduler tick. A removal landing
-     * in it put a file into a channel its uploader had just been taken out of. Selecting the row to
-     * insert FROM the channel-and-membership join closes that: the values are only produced if the
-     * join still produces a row when the insert runs, so there is no moment at which a non-member's
-     * file can land.
+     * in it put a file into a channel its uploader had just been taken out of. The membership lives
+     * in Intelligence now, which no transaction here waits on, so it is read again from Intelligence
+     * (not this instance's memory) once the file is off the wire and just before the insert, and the
+     * insert selects its row FROM that answer: the window is the length of one write, not of an
+     * upload.
      *
      * Zero rows back is now the refusal for either reason — the cap, or no live channel this actor
      * is in — so the branch below has to ask which before it can name one.
      */
+    const stillMember = await conversations()
+      .refresh(channelId)
+      .then(
+        (conversation) =>
+          conversation !== null &&
+          conversation.deletedAt === null &&
+          isMember(conversation, actor.id),
+      )
+      .catch(() => false);
     const outcome = await database
       .transaction(async (transaction) => {
         await transaction.execute(
@@ -931,13 +947,8 @@ export function createChannelAttachmentRoutes(
          */
         const [attempt] = (await transaction.execute(sql`
         with membership as (
-          select channels.id
-          from channels
-          join channel_memberships
-            on channel_memberships.channel_id = channels.id
-            and channel_memberships.user_id = ${actor.id}::text
-          where channels.id = ${channelId}::text
-            and channels.deleted_at is null
+          select ${channelId}::text as id
+          where ${stillMember}::boolean
         ),
         staged as (
           select count(*)::int as waiting
@@ -1374,22 +1385,14 @@ function couldNotReadAttachment(context: AttachmentContext) {
  * reason this is reusable — and it cannot multiply the attachment row if a membership is ever
  * recorded twice, which a join silently would.
  */
-function visibleToActor(database: Database, actorId: string, id: string) {
+async function visibleToActor(database: Database, actorId: string, id: string) {
+  // The live channel and the actor's membership of it, from the conversation directory: the
+  // conversation is in Intelligence, so it is read beside the query rather than joined into it.
+  const channelId = await liveChannelOfAttachment(database, actorId, id);
+  if (!channelId) return sql`false`;
   return and(
     eq(attachments.id, id),
-    exists(
-      database
-        .select({ member: sql`1` })
-        .from(channelMemberships)
-        .innerJoin(channels, eq(channels.id, channelMemberships.channelId))
-        .where(
-          and(
-            eq(channelMemberships.channelId, attachments.channelId),
-            eq(channelMemberships.userId, actorId),
-            isNull(channels.deletedAt),
-          ),
-        ),
-    ),
+    eq(attachments.channelId, channelId),
     or(isNotNull(attachments.attachedAt), eq(attachments.uploadedBy, actorId)),
   );
 }
@@ -1493,7 +1496,7 @@ export function createAttachmentRoutes(
         database
           .select({ id: attachments.id })
           .from(attachments)
-          .where(visibleToActor(database, actor.id, id)),
+          .where(await visibleToActor(database, actor.id, id)),
         actor.id,
         id,
       );
@@ -1543,7 +1546,7 @@ export function createAttachmentRoutes(
             sizeBytes: attachments.sizeBytes,
           })
           .from(attachments)
-          .where(visibleToActor(database, actor.id, id)),
+          .where(await visibleToActor(database, actor.id, id)),
         actor.id,
         id,
       );
@@ -1576,7 +1579,7 @@ export function createAttachmentRoutes(
           bytes: attachments.bytes,
         })
         .from(attachments)
-        .where(visibleToActor(database, actor.id, id)),
+        .where(await visibleToActor(database, actor.id, id)),
       actor.id,
       id,
     );
@@ -1671,6 +1674,18 @@ export function createAttachmentRoutes(
      * open. Same scope as the fetch route above and as the upload route, which is what makes "the
      * same join" true rather than merely claimed.
      */
+    // The live channel and membership, read beside the delete: see {@link visibleToActor}.
+    const liveChannel = await liveChannelOfAttachment(
+      database,
+      actor.id,
+      id,
+    ).catch(() => undefined);
+    if (liveChannel === undefined) {
+      return context.json(
+        { error: "Couldn't remove that attachment. Try again." },
+        503,
+      );
+    }
     const removed = await database
       .delete(attachments)
       .where(
@@ -1678,22 +1693,7 @@ export function createAttachmentRoutes(
           eq(attachments.id, id),
           eq(attachments.uploadedBy, actor.id),
           isNull(attachments.attachedAt),
-          exists(
-            database
-              .select({ member: sql`1` })
-              .from(channelMemberships)
-              .innerJoin(
-                channels,
-                eq(channels.id, channelMemberships.channelId),
-              )
-              .where(
-                and(
-                  eq(channelMemberships.channelId, attachments.channelId),
-                  eq(channelMemberships.userId, actor.id),
-                  isNull(channels.deletedAt),
-                ),
-              ),
-          ),
+          liveChannel ? eq(attachments.channelId, liveChannel) : sql`false`,
         ),
       )
       .returning({ id: attachments.id })
@@ -1750,18 +1750,13 @@ export function createAttachmentRoutes(
     const rows = await database
       .select({ id: attachments.id })
       .from(attachments)
-      .innerJoin(
-        channels,
-        and(eq(channels.id, attachments.channelId), isNull(channels.deletedAt)),
-      )
-      .innerJoin(
-        channelMemberships,
+      .where(
         and(
-          eq(channelMemberships.channelId, attachments.channelId),
-          eq(channelMemberships.userId, actor.id),
+          eq(attachments.id, id),
+          eq(attachments.uploadedBy, actor.id),
+          liveChannel ? eq(attachments.channelId, liveChannel) : sql`false`,
         ),
       )
-      .where(and(eq(attachments.id, id), eq(attachments.uploadedBy, actor.id)))
       // Only the explanation is left to find, but a failure to find it is still not a 404: the
       // delete above already declined to withdraw anything, and answering "no such attachment"
       // because the second query failed would tell the composer to drop a row that is still there.

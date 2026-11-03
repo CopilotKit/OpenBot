@@ -6,12 +6,9 @@ import type { AgentActor } from "../agents/profile-types";
 import { PERSON_INITIATOR } from "../audit";
 import type { GroupConversations } from "../channels/group";
 import type { ChannelStore } from "../channels/routes";
+import { channelOfThread } from "../conversations/directory";
 import type { Database } from "../db/client";
-import {
-  intelligenceChannelMappings,
-  responsibilityRuns,
-  routineRuns,
-} from "../db/schema";
+import { responsibilityRuns, routineRuns } from "../db/schema";
 import type { DeliveryScope } from "../delivery/types";
 import type { ResponsibilityStore } from "../responsibilities/types";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
@@ -125,16 +122,11 @@ export function createApprovalResumeTick(deps: {
                   continuation: { snapshot, result, messageId },
                 }),
             );
-            const [source] = await database
-              .select({ channelId: intelligenceChannelMappings.channelId })
-              .from(intelligenceChannelMappings)
-              .where(
-                and(
-                  eq(intelligenceChannelMappings.userId, input.ownerUserId),
-                  eq(intelligenceChannelMappings.threadId, snapshot.threadId),
-                ),
-              )
-              .limit(1);
+            const channelId = await channelOfThread(
+              snapshot.threadId,
+              input.ownerUserId,
+            );
+            const source = channelId ? { channelId } : undefined;
             if (source && outcome.replyText)
               await channelStore.recordActivity(
                 await actorFor(input.ownerUserId),

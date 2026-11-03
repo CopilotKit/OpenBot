@@ -3,8 +3,9 @@ import {
   type ApprovalContinuation,
   parseApprovalContinuation,
 } from "../approvals/types";
+import { channelOfThread } from "../conversations/directory";
 import type { Database } from "../db/client";
-import { intelligenceChannelMappings, routineRuns } from "../db/schema";
+import { routineRuns } from "../db/schema";
 import { responsibilityRuns } from "../db/schema/responsibilities";
 import type { DeliveryScope } from "../delivery/types";
 import { signInToolResult } from "./service";
@@ -104,21 +105,11 @@ export function createSignInResumer(deps: {
 }
 
 async function channelFor(
-  database: Database,
+  _database: Database,
   ownerUserId: string,
   threadId: string,
 ) {
-  const [source] = await database
-    .select({ channelId: intelligenceChannelMappings.channelId })
-    .from(intelligenceChannelMappings)
-    .where(
-      and(
-        eq(intelligenceChannelMappings.userId, ownerUserId),
-        eq(intelligenceChannelMappings.threadId, threadId),
-      ),
-    )
-    .limit(1);
-  return source?.channelId;
+  return (await channelOfThread(threadId, ownerUserId)) ?? undefined;
 }
 
 /**

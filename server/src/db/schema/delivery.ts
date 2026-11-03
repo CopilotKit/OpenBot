@@ -12,20 +12,29 @@ import type {
   DeliveryScope,
   DeliveryState,
 } from "../../delivery/types";
-import { channels, users } from "./core";
+import { users } from "./core";
 
 const at = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
+/**
+ * Who and which conversation a delivery row is about. The conversation is in Intelligence now
+ * (conversations/), so `channel_id` names it by id with no foreign key; a deleted conversation keeps
+ * its id, and the queues below are settled or swept long before a purge would matter.
+ */
 const scope = () => ({
   ownerUserId: text("owner_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  channelId: text("channel_id")
-    .notNull()
-    .references(() => channels.id, { onDelete: "cascade" }),
+  channelId: text("channel_id").notNull(),
   agentId: text("agent_id").notNull(),
   threadId: text("thread_id").notNull(),
 });
+/**
+ * A person's binding of a conversation to Slack, Teams or SMS. MOVED TO INTELLIGENCE: bindings are
+ * created, read and changed through its delivery bindings capability (delivery/directory.ts). Kept
+ * for one release, receiving no writes, so a deployment that upgrades still has the rows to copy
+ * (delivery/upgrade.ts); then dropped.
+ */
 export const deliveryBindings = pgTable(
   "delivery_bindings",
   {
@@ -53,6 +62,7 @@ export const deliveryBindings = pgTable(
     index("delivery_bindings_owner_idx").on(t.ownerUserId),
   ],
 );
+/** Pairing codes in flight: operational, ten minutes long, and kept here. */
 export const deliveryChallenges = pgTable("delivery_challenges", {
   id: text("id").primaryKey(),
   ...scope(),
@@ -62,6 +72,10 @@ export const deliveryChallenges = pgTable("delivery_challenges", {
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
   createdAt: at(),
 });
+/**
+ * A person's push devices. MOVED TO INTELLIGENCE with the bindings (delivery/directory.ts); kept for
+ * one release with no writes, for the upgrade copy, then dropped.
+ */
 export const pushDevices = pgTable(
   "push_devices",
   {
@@ -77,6 +91,10 @@ export const pushDevices = pgTable(
   },
   (t) => [index("push_devices_owner_idx").on(t.ownerUserId)],
 );
+/**
+ * Inbound messages, deduped and queued to a Bot. Operational: a queue entry beside the work item
+ * that runs it, whose message is already in the conversation's thread in Intelligence. Kept here.
+ */
 export const deliveryInbox = pgTable(
   "delivery_inbox",
   {
@@ -100,6 +118,10 @@ export const deliveryInbox = pgTable(
     index("delivery_inbox_owner_idx").on(t.ownerUserId, t.createdAt),
   ],
 );
+/**
+ * Outbound messages and pushes, deduped, with the provider's id for its status callbacks.
+ * Operational, like the inbox: kept here, beside the work queue.
+ */
 export const deliveryOutbox = pgTable(
   "delivery_outbox",
   {

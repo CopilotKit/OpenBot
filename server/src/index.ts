@@ -7,7 +7,7 @@ import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -24,6 +24,16 @@ import {
   CoworkerUnavailableError,
   createActorAgentResolver,
 } from "./agents/agent-resolver";
+import { createAgentRegistryClient } from "./agents/bot-registry/client";
+import {
+  createBotDirectory,
+  installBotDirectory,
+} from "./agents/bot-registry/directory";
+import {
+  removeBotLocalRows,
+  sweepPurgedBotRows,
+} from "./agents/bot-registry/local-rows";
+import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import {
   mintRunAssertion,
   type RunAssertion,
@@ -42,16 +52,6 @@ import {
   createBotLifecycleStore,
 } from "./agents/lifecycle";
 import { createBotReset } from "./agents/lifecycle-reset";
-import { createAgentRegistryClient } from "./agents/bot-registry/client";
-import {
-  createBotDirectory,
-  installBotDirectory,
-} from "./agents/bot-registry/directory";
-import {
-  removeBotLocalRows,
-  sweepPurgedBotRows,
-} from "./agents/bot-registry/local-rows";
-import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -115,6 +115,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
+import { deliverConversationChanges } from "./channels/live";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -149,6 +150,13 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
+import { createConversationClient } from "./conversations/client";
+import {
+  createConversationDirectory,
+  installConversationDirectory,
+} from "./conversations/directory";
+import { writeKey } from "./conversations/http";
+import { copyLocalConversationsToIntelligence } from "./conversations/upgrade";
 import {
   chooseOpenAIApi,
   mountCopilotRuntime,
@@ -162,14 +170,12 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { brokeredConnections, users } from "./db/schema";
 import {
-  brokeredConnections,
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "./db/schema";
+  createDeliveryBindingsClient,
+  createDeliveryDirectory,
+  installDeliveryDirectory,
+} from "./delivery/directory";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
 import {
   configuredDeliveryProviders,
@@ -178,6 +184,7 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { copyLocalDeliveryToIntelligence } from "./delivery/upgrade";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -447,6 +454,73 @@ await sweepPurgedBotRows(
   database,
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
 );
+/*
+ * Conversations, with their members, Bots, threads, group transcripts, voice sessions and tasks, in
+ * Intelligence's conversations capability; and where people are reached outside OpenBot (delivery
+ * bindings and push devices) in its delivery bindings capability. Each instance holds the
+ * conversations it reads lately and every binding and device, kept fresh by Intelligence's change
+ * announcements (conversations/directory.ts, delivery/directory.ts).
+ */
+const intelligenceApi = {
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+};
+const conversationDirectory = installConversationDirectory(
+  createConversationDirectory({
+    client: createConversationClient(intelligenceApi),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await conversationDirectory.start();
+const deliveryDirectory = installDeliveryDirectory(
+  createDeliveryDirectory({
+    client: createDeliveryBindingsClient(intelligenceApi),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await deliveryDirectory.start();
+// An upgraded deployment's conversations and delivery bindings, copied from the local tables once.
+await copyLocalConversationsToIntelligence(
+  database,
+  conversationDirectory.client,
+);
+await copyLocalDeliveryToIntelligence(database, deliveryDirectory);
+// A Bot deleted for good is forgotten in the conversations and bindings that named it, as the old
+// foreign keys removed its `channel_agents`, `bot_tasks` and `delivery_bindings` rows.
+botDirectory.onPurged(async (botId) => {
+  await conversationDirectory.client.purgeAgent(
+    botId,
+    writeKey("conversations.purge-agent"),
+  );
+  await deliveryDirectory.purgeAgent(botId);
+});
+// And any purged while no instance was running to hear it.
+{
+  const known = new Set(
+    (await botDirectory.registry.all({ includeDeleted: true })).bots.map(
+      (bot) => bot.id,
+    ),
+  );
+  const named = new Set([
+    ...(await conversationDirectory.client.agentReferences()),
+    ...deliveryDirectory.bindings().map((binding) => binding.agentId),
+  ]);
+  for (const botId of named) {
+    if (known.has(botId)) continue;
+    await conversationDirectory.client.purgeAgent(
+      botId,
+      writeKey("conversations.purge-agent"),
+    );
+    await deliveryDirectory.purgeAgent(botId);
+    console.warn(
+      JSON.stringify({
+        type: "conversation-bot-references-swept",
+        botId,
+        note: "Conversations and bindings named a Bot Intelligence no longer has; it was removed from them as the old cascade would have.",
+      }),
+    );
+  }
+}
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -485,6 +559,8 @@ const channelStore: ChannelStore = {
   },
 };
 const channelEvents = createChannelEventHub();
+// What Intelligence announces about conversations, to the browsers connected here (channels/live.ts).
+deliverConversationChanges(conversationDirectory, channelEvents);
 /**
  * Which components each Bot may answer with.
  *
@@ -717,25 +793,20 @@ const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
 };
 const channelSourceForRun = async (run: RunAssertion) => {
   if (!run.threadId) return null;
-  const sources = await database
-    .select({ channelId: channels.id, botId: channelAgents.agentId })
-    .from(intelligenceChannelMappings)
-    .innerJoin(channels, eq(channels.id, intelligenceChannelMappings.channelId))
-    .innerJoin(
-      channelMemberships,
-      and(
-        eq(channelMemberships.channelId, channels.id),
-        eq(channelMemberships.userId, run.actorId),
-      ),
-    )
-    .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-    .where(
-      and(
-        eq(intelligenceChannelMappings.threadId, run.threadId),
-        eq(intelligenceChannelMappings.userId, run.actorId),
-        isNull(channels.deletedAt),
-      ),
-    );
+  // From this instance's memory (read through on a miss): asked on every coordination tool call.
+  const found = await conversationDirectory.byThread(run.threadId);
+  if (
+    !found ||
+    found.thread.agentId !== null ||
+    found.thread.userId !== run.actorId ||
+    found.conversation.deletedAt !== null ||
+    !found.conversation.members.some((member) => member.userId === run.actorId)
+  )
+    return null;
+  const sources = found.conversation.agents.map((agent) => ({
+    channelId: found.conversation.id,
+    botId: agent.agentId,
+  }));
   return (
     sources.find((source) => source.botId === run.botId) ??
     (run.handoff ? (sources[0] ?? null) : null)
@@ -747,7 +818,7 @@ const channelSourceForRun = async (run: RunAssertion) => {
  * The group lookup applies the same live-membership and own-Bot checks. See channels/group.ts.
  */
 const sourceForCoordinationRun = async (run: RunAssertion) =>
-  (await channelSourceForRun(run)) ?? groupSourceForRun(database, run);
+  (await channelSourceForRun(run)) ?? groupSourceForRun(run);
 
 const authoriseQuestion = async (question: PersonQuestion) => {
   const source = await sourceForCoordinationRun({
@@ -2783,7 +2854,7 @@ const app = createApp(
     : undefined,
   createUserPreferencesStore(database),
   {
-    store: createVoiceSessionStore(database, channelStore),
+    store: createVoiceSessionStore(channelStore),
     summarize: createVoiceSummarizer({
       model: runtimeModel,
       resolveApiKey: resolveRuntimeModelApiKey,
@@ -2960,6 +3031,8 @@ if (config.singleUser) {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     botDirectory.stop();
+    conversationDirectory.stop();
+    deliveryDirectory.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();

@@ -11,6 +11,11 @@ import {
 import { channels, users } from "./core";
 import { jsonb } from "./json";
 
+/**
+ * MOVED TO INTELLIGENCE: a Bot's thread in a group is a thread pointer of the conversation, and the
+ * shared transcript is its conversation messages (channels/group.ts). Both tables are kept for one
+ * release, receiving no writes, for the upgrade copy (conversations/upgrade.ts); then dropped.
+ */
 export const groupBotThreads = pgTable(
   "group_bot_threads",
   {

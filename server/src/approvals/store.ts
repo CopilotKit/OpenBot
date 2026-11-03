@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../audit";
+import { conversations } from "../conversations/directory";
 import type { Database } from "../db/client";
 import {
   approvalPreferences,
@@ -8,9 +9,8 @@ import {
   approvalTeamRules,
   approvalTeamSettings,
 } from "../db/schema/approvals";
-import { intelligenceChannelMappings } from "../db/schema/core";
-import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
+import { taskOrigin } from "../tasks/origin";
 import {
   type ApprovalAction,
   ApprovalNotFoundError,
@@ -262,25 +262,18 @@ export function createApprovalStore(database: Database): ApprovalStore {
      * but a read of their own connected app (see `gate` in approvals/service.ts).
      */
     async asksEveryChange(owner, threadId) {
-      const [row] = await database
-        .select({ id: botTasks.id })
-        .from(botTasks)
-        .innerJoin(
-          intelligenceChannelMappings,
-          and(
-            eq(intelligenceChannelMappings.channelId, botTasks.channelId),
-            eq(intelligenceChannelMappings.userId, owner),
-          ),
-        )
-        .where(
-          and(
-            eq(botTasks.ownerUserId, owner),
-            eq(botTasks.origin, "check_in"),
-            eq(intelligenceChannelMappings.threadId, threadId),
-          ),
-        )
-        .limit(1);
-      return Boolean(row);
+      // Read on every gated tool call: the thread's conversation and the task that owns it come from
+      // this instance's memory (conversations/directory.ts, tasks/origin.ts), not a round trip.
+      const found = await conversations().byThread(threadId);
+      if (
+        !found ||
+        found.thread.agentId !== null ||
+        found.thread.userId !== owner ||
+        !found.conversation.taskId
+      )
+        return false;
+      const task = await taskOrigin(found.conversation.taskId);
+      return task?.userId === owner && task.origin === "check_in";
     },
     async revoke(owner, id) {
       const rows = await database
