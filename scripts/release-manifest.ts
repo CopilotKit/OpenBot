@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, resolve } from "node:path";
 import {
   parseReleaseManifest,
   type ReleaseManifest,
@@ -20,6 +26,7 @@ export interface ReleaseBuildOptions {
   compatibility: ReleaseManifest["compatibility"];
   upgrade: ReleaseManifest["upgrade"];
   images: ReleaseManifest["artifacts"]["images"];
+  chart?: { path: string; version: string };
 }
 function git(root: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -80,6 +87,22 @@ function manifest(
       "rev-parse",
       `${options.upstreamCommit}^{tree}`,
     );
+  let chart: ReleaseManifest["artifacts"]["chart"];
+  if (options.chart) {
+    const { path, version } = options.chart;
+    if (
+      !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version) ||
+      basename(path) !== `openbot-${version}.tgz`
+    )
+      throw new Error(
+        "Chart artifact filename must match its exact openbot chart version",
+      );
+    chart = {
+      version,
+      url: `https://github.com/${options.repository}/releases/download/${options.version}/${basename(path)}`,
+      sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+    };
+  }
   return parseReleaseManifest({
     schemaVersion: 1,
     distribution: {
@@ -100,6 +123,7 @@ function manifest(
         sha256,
       },
       images: options.images,
+      ...(chart ? { chart } : {}),
     },
     compatibility: options.compatibility,
     upgrade: options.upgrade,
@@ -126,6 +150,14 @@ export function createReleaseArtifacts(
     options,
     createHash("sha256").update(readFileSync(archive)).digest("hex"),
   );
+  if (options.chart) {
+    const destination = resolve(
+      options.outputDirectory,
+      basename(options.chart.path),
+    );
+    if (resolve(options.chart.path) !== destination)
+      copyFileSync(options.chart.path, destination);
+  }
   writeFileSync(
     resolve(options.outputDirectory, "release-manifest.json"),
     `${JSON.stringify(release, null, 2)}\n`,
@@ -200,6 +232,14 @@ export function readReleaseConfiguration(
     commit: env.GITHUB_SHA,
     upstreamRepository,
     upstreamCommit,
+    ...(env.OPENBOT_CHART_PATH || env.OPENBOT_CHART_VERSION
+      ? {
+          chart: {
+            path: resolve(repositoryRoot, env.OPENBOT_CHART_PATH || ""),
+            version: env.OPENBOT_CHART_VERSION || "",
+          },
+        }
+      : {}),
   };
   validateSource(options);
   const validated = parseReleaseManifest({

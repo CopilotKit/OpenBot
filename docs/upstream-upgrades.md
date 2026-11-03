@@ -54,6 +54,10 @@ bun scripts/release-manifest.ts --validate-policy
 
 The release PR/version/changelog gates remain in place. The additional compatibility setup is intentional: an existing publisher must declare it before its next release rather than silently make a rollback promise. The pipeline archives the exact source commit with `git archive`, computes SHA-256 locally, and attests the source archive, both manifest formats, and image digests using the publishing workflow's OIDC identity. No release is published by these local commands.
 
+Each release also packages the checked-out Helm chart, including locked dependencies. Its exact chart version, release-specific GitHub asset URL, and SHA-256 appear in `artifacts.chart`; the `.tgz` is uploaded and attested with the source. Local artifact generation accepts `OPENBOT_CHART_PATH` and `OPENBOT_CHART_VERSION` together. The filename must be `openbot-<chart-version>.tgz`. Existing release assets are compared and retained on reruns; different bytes require a new release version.
+
+Published server and monolithic images bake public `OPENBOT_BUILD_VERSION`, `OPENBOT_BUILD_COMMIT`, `OPENBOT_BUILD_DISTRIBUTION_ID`, `OPENBOT_BUILD_REPOSITORY`, and `OPENBOT_BUILD_CHANNEL` at build time. Host adapters pass these from the authenticated candidate. `GET /release` returns `{version,commit,distributionId,repository,channel}` from the startup build environment with `Cache-Control: no-store`, or 503 when identity is incomplete. It never reads the accepted installation sidecar while verifying a candidate. `/health` remains liveness. The base Compose file forwards build arguments to all uses of the server image and deliberately does not set empty runtime identity overrides. Always verify source/image digests as well as the endpoint; environment metadata alone is not artifact authentication.
+
 ## Authenticate before planning
 
 Installation policy must be configured independently of downloaded metadata. Pin distribution ID, repository and channel. Never accept a candidate's own repository as the trust configuration. Verify downloaded metadata first, then check its artifact SHA-256 and immutable image references:

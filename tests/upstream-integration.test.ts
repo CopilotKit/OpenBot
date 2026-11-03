@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -186,6 +187,29 @@ function releaseOptions(repo: ReturnType<typeof repository>) {
   };
 }
 describe("release source artifacts", () => {
+  test("publishes an exact chart artifact beside the source with a release-specific URL", () => {
+    const repo = repository();
+    const options = releaseOptions(repo);
+    mkdirSync(join(repo.root, "openbot"));
+    writeFileSync(
+      join(repo.root, "openbot", "Chart.yaml"),
+      "apiVersion: v2\nname: openbot\nversion: 0.1.4\n",
+    );
+    const chart = join(repo.root, "openbot-0.1.4.tgz");
+    execFileSync("tar", ["-czf", chart, "-C", repo.root, "openbot"]);
+    const release = createReleaseArtifacts({
+      ...options,
+      chart: { path: chart, version: "0.1.4" },
+    });
+    expect(release.artifacts.chart).toEqual({
+      version: "0.1.4",
+      url: "https://github.com/acme/openbot/releases/download/v0.3.0/openbot-0.1.4.tgz",
+      sha256: createHash("sha256").update(readFileSync(chart)).digest("hex"),
+    });
+    expect(
+      readFileSync(join(options.outputDirectory, "openbot-0.1.4.tgz")),
+    ).toEqual(readFileSync(chart));
+  });
   test("the publication CLI emits the fork's exact source and manifest without dependencies", () => {
     const repo = repository();
     const options = releaseOptions(repo);

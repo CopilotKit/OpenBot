@@ -166,6 +166,12 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
+            OPENBOT_BUILD_COMMIT=${{ github.sha }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
           # The version, the commit, and a moving latest. The version tag is the one to deploy; the
           # commit tag is how you find out what a running image actually contains.
           tags: |
@@ -246,6 +252,12 @@ jobs:
           context: .
           file: ${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
+            OPENBOT_BUILD_COMMIT=${{ github.sha }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
           # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
           # described by. It is buildx's default for this exporter and is stated rather than
           # assumed, since the push fails without it and the reason would not be obvious.
@@ -435,6 +447,19 @@ jobs:
               } + $components),
             }' > container-images.json
           cat container-images.json
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+      - name: Package this release's chart
+        run: |
+          set -euo pipefail
+          helm dependency build charts/openbot
+          mkdir -p release-assets
+          helm package charts/openbot --destination release-assets
+          chart_version="$(helm show chart charts/openbot | sed -n 's/^version: //p')"
+          test -f "release-assets/openbot-$chart_version.tgz"
+          echo "OPENBOT_CHART_PATH=release-assets/openbot-$chart_version.tgz" >> "$GITHUB_ENV"
+          echo "OPENBOT_CHART_VERSION=$chart_version" >> "$GITHUB_ENV"
       - name: Archive exact source and write release manifest
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -446,6 +471,7 @@ jobs:
           subject-path: |
             release-assets/release-manifest.json
             release-assets/openbot-source.tar.gz
+            release-assets/openbot-*.tgz
             container-images.json
       - name: Save portable provenance bundle
         env:
@@ -461,16 +487,38 @@ jobs:
           awk -v v="## ${VERSION#v}" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
           test -s notes.md
 
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" >/dev/null 2>&1; then
-            echo "$VERSION is already tagged; only refreshing the release."
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" > tag.json 2>/dev/null; then
+            test "$(jq -r .object.sha tag.json)" = "$GITHUB_SHA" || {
+              echo "::error::$VERSION already identifies another source commit."
+              exit 1
+            }
           else
             gh api "repos/$GITHUB_REPOSITORY/git/refs" \
               -f "ref=refs/tags/$VERSION" -f "sha=$GITHUB_SHA" >/dev/null
           fi
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
+            # Release-specific source/chart URLs are immutable after first publication. A rerun
+            # may fill in a missing asset, but must never replace accepted bytes with a rebuild.
+            gh release view "$VERSION" --json assets > existing-assets.json
+            verification_dir="$(mktemp -d)"
+            for artifact in container-images.json release-assets/*; do
+              name="$(basename "$artifact")"
+              if jq -e --arg name "$name" '.assets | any(.name == $name)' existing-assets.json >/dev/null; then
+                gh release download "$VERSION" --pattern "$name" --dir "$verification_dir"
+                cmp "$artifact" "$verification_dir/$name" || {
+                  echo "::error::Published asset $name differs; publish a new release version."
+                  exit 1
+                }
+              fi
+            done
             gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md
-            gh release upload "$VERSION" container-images.json release-assets/* --clobber
+            for artifact in container-images.json release-assets/*; do
+              name="$(basename "$artifact")"
+              if ! jq -e --arg name "$name" '.assets | any(.name == $name)' existing-assets.json >/dev/null; then
+                gh release upload "$VERSION" "$artifact"
+              fi
+            done
           else
             gh release create "$VERSION" container-images.json release-assets/* \
               --title "$VERSION" --notes-file notes.md
