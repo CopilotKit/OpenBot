@@ -122,8 +122,7 @@ export function TeamFeaturesDialog() {
                 OpenBot for Business
               </DialogTitle>
               <DialogDescription>
-                Everything you have here, for a whole team, with the controls a
-                company needs.
+                Everything you have here, on prem and for a whole team.
               </DialogDescription>
             </DialogHeader>
             {TEAM_FEATURE_GROUPS.map((group) => (
