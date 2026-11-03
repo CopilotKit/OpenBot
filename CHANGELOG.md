@@ -99,6 +99,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### Latch skin, email for Bots, online or offline AI, and Needle
+
+- A Latch skin: small rounded cards, caps labels, one blue accent, solid Bot faces, and on phones a
+  three-icon bottom bar with a slide-up menu and quick tools.
+- Bots can read, search and send email from a person's own mailbox (IMAP and SMTP, app password).
+  Migration `0075_mail_accounts` adds `mail_accounts`, one per person. Sending asks first.
+- Admin, AI: online or offline finds Ollama or LM Studio on this computer. `bun run ai offline` and
+  `bun run ai online` switch the model, keeping the online settings to put back.
+- Subagents take a role (plan, build, check), and every Bot's prompt says how to work through a job:
+  plan as a checklist, one step at a time, plain answers, ask before what cannot be undone.
+- Optional Needle helper (`bun run ai needle on`): a tiny local model picks each message's skills
+  before the big model is asked. Off, unsure or down, selection runs exactly as before.
+- Phone app: offline voice typing, charts and choices drawn natively, and a Phone Bot that sets
+  reminders, keeps notes and queues messages for Bots with no PC or signal (Needle on the phone).
+- `.claude/skills` gains Expo's official skills.
+
 ### Bots can install packages on their computers
 
 Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
