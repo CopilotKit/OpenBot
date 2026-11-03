@@ -20,16 +20,20 @@ const runIds = [`${suite}-one`, `${suite}-two`];
 const actor = `${suite}-actor`;
 const env = { OPENBOT_PRODUCT_TELEMETRY: "1", NODE_ENV: "test" };
 afterAll(async () => {
-  const run = await store.run(runIds[0]);
-  if (run)
+  try {
+    const run = await store.run(runIds[0]);
+    if (run)
+      await database
+        .delete(productTelemetryEvents)
+        .where(
+          sql`${productTelemetryEvents.properties}->>'user_id' = ${run.context.user_id}`,
+        );
     await database
-      .delete(productTelemetryEvents)
-      .where(
-        sql`${productTelemetryEvents.properties}->>'user_id' = ${run.context.user_id}`,
-      );
-  await database
-    .delete(productTelemetryRuns)
-    .where(inArray(productTelemetryRuns.runId, runIds));
+      .delete(productTelemetryRuns)
+      .where(inArray(productTelemetryRuns.runId, runIds));
+  } finally {
+    await database.$client.close();
+  }
 });
 
 test("database identity is stable across adapters and concurrent initialization", async () => {
