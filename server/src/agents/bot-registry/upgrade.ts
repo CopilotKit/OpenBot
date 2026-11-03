@@ -8,8 +8,8 @@
  * records the copy as done, so it never runs again: a Bot later deleted for good in Intelligence must
  * not come back from the local row this release keeps.
  *
- * SAFE TO RUN ANY NUMBER OF TIMES, FROM ANY NUMBER OF REPLICAS AT ONCE. Each Bot is created under the
- * idempotency key `openbot-upgrade:bots:<id>` with a body made only from the local rows, so two
+ * SAFE TO RUN ANY NUMBER OF TIMES, FROM ANY NUMBER OF REPLICAS AT ONCE. Each Bot is created under an
+ * idempotency key made from its id, with a body made only from the local rows, so two
  * replicas copying the same Bot send the same request and Intelligence answers the second with the
  * first's result. A Bot Intelligence already has is left alone.
  *
@@ -17,6 +17,7 @@
  * the ids named. Running on with some Bots copied and some not would show people a roster with Bots
  * missing and nothing saying why.
  */
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Database } from "../../db/client";
 import { agentProfiles, agents, intelligenceCopies } from "../../db/schema";
@@ -25,6 +26,14 @@ import type { BotDirectory } from "./directory";
 import type { BotDraft } from "./types";
 
 export const BOT_COPY_NAME = "bots";
+
+/**
+ * The same key for the same Bot from every replica, so their copies are one write. Hashed, because
+ * Intelligence refuses an Idempotency-Key over 128 characters and a Bot id may be up to 200.
+ */
+function upgradeKey(botId: string): string {
+  return `openbot-upgrade:bots:${createHash("sha256").update(botId).digest("hex")}`;
+}
 
 export type BotCopyOutcome =
   | { kind: "done-before" }
@@ -113,7 +122,7 @@ export async function copyLocalBotsToIntelligence(
       deletedAt: row.deletedAt,
     };
     try {
-      await directory.create(draft, `openbot-upgrade:bots:${row.id}`);
+      await directory.create(draft, upgradeKey(row.id));
       created += 1;
     } catch (error) {
       // Another replica copied it between the listing and here.

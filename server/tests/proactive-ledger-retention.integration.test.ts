@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { startRetentionSweeps } from "../src/audit-retention";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import {
   proactivePings,
   proactiveRuns,
@@ -18,6 +18,7 @@ import {
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
 import { createProactiveStore } from "../src/proactive/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -40,12 +41,7 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values({
-    id: bot,
-    name: "Ledger Bot",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: bot, name: "Ledger Bot", type: "built_in" });
   await database.insert(proactiveSettings).values({
     id: settingId,
     ownerUserId: owner,
@@ -68,7 +64,7 @@ beforeEach(async () => {
 });
 afterAll(async () => {
   await database.delete(users).where(eq(users.id, owner));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database.$client.close();
 });
 

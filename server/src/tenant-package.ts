@@ -841,6 +841,23 @@ export async function synchronizeTenantPackage(
     tenantPackage,
     existingPackage?.id ?? null,
   );
+  // And its channels, for the same reason: a channel of a declared id that this package does not
+  // own is refused below, and refusing it here, before any Bot is written, leaves nothing behind.
+  const declaredChannels = tenantPackage.channels.map((channel) => channel.id);
+  if (declaredChannels.length > 0) {
+    const taken = await database
+      .select({ id: channelTable.id, packageId: channelTable.packageId })
+      .from(channelTable)
+      .where(inArray(channelTable.id, declaredChannels));
+    const foreign = taken.find(
+      (channel) => !existingPackage || channel.packageId !== existingPackage.id,
+    );
+    if (foreign) {
+      throw new Error(
+        `Tenant package channel "${foreign.id}" collides with a channel this package does not own`,
+      );
+    }
+  }
 
   const [deploymentPackage] = await database
     .insert(deploymentPackages)
@@ -1116,8 +1133,13 @@ async function synchronizePackageBots(
   packageId: string,
   current: Map<string, Bot | null>,
 ) {
+  // Hashed, because Intelligence refuses an Idempotency-Key longer than 128 characters and the
+  // checksum alone is 64: a package Bot with a long id would otherwise stop the deployment booting.
+  // The same parts still make the same key, so replicas booting together still send one write.
   const key = (botId: string, operation: string, version: number) =>
-    `openbot-package:${tenantPackage.checksum}:${botId}:${operation}:${version}`;
+    `openbot-package:${createHash("sha256")
+      .update(`${tenantPackage.checksum}:${botId}:${operation}:${version}`)
+      .digest("hex")}`;
 
   // Disable only explicitly unconfigured agents still owned by this package. Keep the Bot and its
   // conversation memberships: runtime tombstones preserve their readable history. Seeding below

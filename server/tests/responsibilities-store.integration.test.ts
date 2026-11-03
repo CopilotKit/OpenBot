@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import {
   responsibilityEvents,
   responsibilityRuns,
@@ -13,6 +13,7 @@ import {
   ResponsibilityNotFoundError,
   ResponsibilityRefusedError,
 } from "../src/responsibilities/types";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -39,11 +40,10 @@ beforeAll(async () => {
     { id: ownerId, email: `${ownerId}@example.test` },
     { id: strangerId, email: `${strangerId}@example.test` },
   ]);
-  await database.insert(agents).values({
+  await seedBot({
     id: botId,
     name: "Responsibility test Bot",
     type: "built_in",
-    configuration: {},
   });
 });
 afterAll(async () => {
@@ -57,7 +57,7 @@ afterAll(async () => {
         ),
       );
   await database.delete(users).where(inArray(users.id, [ownerId, strangerId]));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
   await database.$client.close();
 });
 async function goal() {

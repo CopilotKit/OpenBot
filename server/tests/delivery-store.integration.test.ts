@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, channels, users } from "../src/db/schema/core";
+import { channels, users } from "../src/db/schema/core";
 import {
   deliveryChallenges,
   deliveryInbox,
@@ -10,6 +10,7 @@ import {
 } from "../src/db/schema/delivery";
 import { workItems } from "../src/db/schema/work";
 import { createDeliveryStore } from "../src/delivery/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const db = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -31,11 +32,11 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test` },
     { id: stranger, email: `${stranger}@example.test` },
   ]);
-  await db.insert(agents).values({
+  await seedBot({
     id: bot,
     name: "Delivery test Bot",
     type: "built_in",
-    configuration: {},
+    avatarSeed: `${prefix}-avatar`,
   });
   await db
     .insert(channels)
@@ -53,7 +54,7 @@ afterAll(async () => {
       );
   await db.delete(users).where(inArray(users.id, [owner, stranger]));
   await db.delete(channels).where(eq(channels.id, channel));
-  await db.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await db.$client.end({ timeout: 5 });
 });
 test("verified provider identity cannot transfer between actors and disabled source stops matching", async () => {
@@ -201,9 +202,12 @@ test("a paired chat turn is recorded once, running, and never queued", async () 
         ),
       ),
   ).toHaveLength(0);
+  // Every Bot has a profile in Intelligence, so the identity a chat surface posts under carries its
+  // picture as well as its name.
   expect(await store.botIdentity(bot)).toEqual({
     agentId: bot,
     name: "Delivery test Bot",
+    avatarSeed: `${prefix}-avatar`,
   });
 });
 test("SMS STOP keeps the binding connected but marked; START clears it", async () => {

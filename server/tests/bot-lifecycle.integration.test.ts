@@ -23,13 +23,12 @@ import {
 import { createDatabase } from "../src/db/client";
 import { approvalRequests, approvalRules } from "../src/db/schema/approvals";
 import {
-  agents,
   channelAgents,
   channelMemberships,
   channels,
   users,
 } from "../src/db/schema/core";
-import { agentProfiles, routines } from "../src/db/schema/coworker";
+import { routines } from "../src/db/schema/coworker";
 import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources, personalMemories } from "../src/db/schema/memory";
 import {
@@ -39,6 +38,7 @@ import {
 import { responsibilities } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -64,20 +64,19 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values([
-    { id: bot, name: "Lifecycle Bot", type: "built_in", configuration: {} },
-    { id: helper, name: "Helper Bot", type: "built_in", configuration: {} },
-  ]);
-  await database.insert(agentProfiles).values(
-    [bot, helper].map((agentId) => ({
-      agentId,
+  for (const [id, name] of [
+    [bot, "Lifecycle Bot"],
+    [helper, "Helper Bot"],
+  ] as const)
+    await seedBot({
+      id,
+      name,
+      type: "built_in",
       ownerUserId: owner,
-      title: agentId,
+      title: id,
       roleDescription: "Test",
-      avatarSeed: agentId,
-      visibility: "public" as const,
-    })),
-  );
+      visibility: "public",
+    });
   await database.insert(channels).values(
     [direct, shared, othersDirect].map((id) => ({
       id,
@@ -225,7 +224,7 @@ afterAll(async () => {
   await database
     .delete(channels)
     .where(inArray(channels.id, [direct, shared, othersDirect]));
-  await database.delete(agents).where(inArray(agents.id, [bot, helper]));
+  await removeBots([bot, helper]);
   await database
     .delete(users)
     .where(inArray(users.id, [owner, other, `${prefix}-chooser`]));

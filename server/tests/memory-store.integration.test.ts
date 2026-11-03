@@ -6,14 +6,14 @@ import { createBotReset } from "../src/agents/lifecycle-reset";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { agentProfiles } from "../src/db/schema/coworker";
+import { users } from "../src/db/schema/core";
 import { memorySources, personalMemories } from "../src/db/schema/memory";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
 import { MemoryNotFoundError, MemoryRefusedError } from "../src/memory/types";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -50,33 +50,22 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values([
-    { id: bot, name: "Memory Bot", type: "built_in", configuration: {} },
-    {
-      id: otherBot,
-      name: "Other memory Bot",
-      type: "remote_ag_ui",
-      configuration: {},
-    },
-  ]);
-  await database.insert(agentProfiles).values([
-    {
-      agentId: bot,
-      ownerUserId: owner,
-      title: "Memory Bot",
-      roleDescription: "Assist",
-      avatarSeed: bot,
-      visibility: "private",
-    },
-    {
-      agentId: otherBot,
-      ownerUserId: other,
-      title: "Other Bot",
-      roleDescription: "Assist",
-      avatarSeed: otherBot,
-      visibility: "private",
-    },
-  ]);
+  await seedBot({
+    id: bot,
+    name: "Memory Bot",
+    type: "built_in",
+    ownerUserId: owner,
+    title: "Memory Bot",
+    roleDescription: "Assist",
+  });
+  await seedBot({
+    id: otherBot,
+    name: "Other memory Bot",
+    type: "remote_ag_ui",
+    ownerUserId: other,
+    title: "Other Bot",
+    roleDescription: "Assist",
+  });
   await database.insert(mcpServers).values({
     id: server,
     title: "Memory connector",
@@ -105,7 +94,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, otherBot]));
+  await removeBots([bot, otherBot]);
   await database.delete(mcpServers).where(eq(mcpServers.id, server));
   await database.$client.close();
 });

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { capabilityRefusal } from "../src/admin/capabilities";
 import {
@@ -21,13 +21,12 @@ import {
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   auditEvents,
   capabilitySettings,
   deploymentPackages,
   users,
 } from "../src/db/schema";
+import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -75,6 +74,7 @@ async function cleanSwitch() {
 }
 
 beforeAll(async () => {
+  await useTestBots();
   await cleanSwitch();
   await database.insert(users).values([
     { id: admin.id, email: admin.email, name: "Admin" },
@@ -92,21 +92,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await controls?.stop();
   await cleanSwitch();
-  const made = await database
-    .select({ id: agentProfiles.agentId })
-    .from(agentProfiles)
-    .where(
-      inArray(agentProfiles.ownerUserId, [admin.id, owner.id, colleague.id]),
-    );
-  if (made.length) {
-    await database.delete(agents).where(
-      inArray(
-        agents.id,
-        made.map((row) => row.id),
-      ),
-    );
-  }
-  await database.delete(agents).where(like(agents.id, `iso-pkg-${suite}%`));
+  // Every Bot this file made, through the routes or by hand, deleted ones included.
+  const people: (string | null)[] = [admin.id, owner.id, colleague.id];
+  const made = (await useTestBots())
+    .cached()
+    .filter((bot) => people.includes(bot.ownerUserId))
+    .map((bot) => bot.id);
+  await removeBots([...made, `iso-pkg-${suite}`]);
   if (packageId) {
     await database
       .delete(deploymentPackages)
@@ -194,12 +186,9 @@ async function createBot(
   };
 }
 
+/** Whether the Bot is isolated as Intelligence holds it, past this process's memory. */
 async function storedIsolated(agentId: string) {
-  const [row] = await database
-    .select({ isolated: agentProfiles.isolated })
-    .from(agentProfiles)
-    .where(eq(agentProfiles.agentId, agentId));
-  return row?.isolated;
+  return (await (await useTestBots()).registry.get(agentId))?.isolated;
 }
 
 async function refusals(actorId: string) {
@@ -254,9 +243,11 @@ describe("making an isolated Bot", () => {
         error: capabilityRefusal("isolatedComputers"),
         capability: "isolatedComputers",
       });
-      expect(
-        await database.select().from(agents).where(eq(agents.name, name)),
-      ).toEqual([]);
+      const { bots: owned } = await (await useTestBots()).registry.all({
+        ownerUserId: owner.id,
+        includeDeleted: true,
+      });
+      expect(owned.filter((made) => made.name === name)).toEqual([]);
       const [row] = await refusals(owner.id);
       expect(row?.targetId).toBeNull();
       expect(row?.payload).toMatchObject({
@@ -411,19 +402,15 @@ describe("changing it later", () => {
       .returning();
     packageId = deploymentPackage?.id;
     const agentId = `iso-pkg-${suite}`;
-    await database.insert(agents).values({
+    await seedBot({
       id: agentId,
       name: "General Assistant",
       type: "built_in",
       configuration: { systemPrompt: "Help." },
       packageId,
-    });
-    await database.insert(agentProfiles).values({
-      agentId,
       ownerUserId: null,
       title: "Assistant",
       roleDescription: "Helps.",
-      avatarSeed: agentId,
       visibility: "public",
     });
 

@@ -8,13 +8,14 @@ import { createHmac, randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agents, credentials, users } from "../src/db/schema/core";
+import { credentials, users } from "../src/db/schema/core";
 import { responsibilityRuns } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createResponsibilityStore } from "../src/responsibilities/store";
 import { createTriggerIngressRoutes } from "../src/responsibilities/trigger-routes";
 import { createTriggerStore } from "../src/responsibilities/triggers";
 import { ResponsibilityNotFoundError } from "../src/responsibilities/types";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -46,12 +47,7 @@ beforeAll(async () => {
     { id: ownerId, email: `${ownerId}@example.test` },
     { id: strangerId, email: `${strangerId}@example.test` },
   ]);
-  await database.insert(agents).values({
-    id: botId,
-    name: "Trigger test Bot",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: botId, name: "Trigger test Bot", type: "built_in" });
 });
 afterAll(async () => {
   if (runIds.length)
@@ -64,7 +60,7 @@ afterAll(async () => {
         ),
       );
   await database.delete(users).where(inArray(users.id, [ownerId, strangerId]));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeBots([botId]);
   await database.$client.close();
 });
 

@@ -4,8 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { agentProfiles } from "../src/db/schema/coworker";
+import { users } from "../src/db/schema/core";
 import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources } from "../src/db/schema/memory";
 import {
@@ -23,6 +22,7 @@ import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import { createProactiveStore } from "../src/proactive/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -110,24 +110,15 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values(
-    [bot, secondBot].map((id) => ({
+  for (const id of [bot, secondBot])
+    await seedBot({
       id,
       name: id,
-      type: "built_in" as const,
-      configuration: {},
-    })),
-  );
-  await database.insert(agentProfiles).values(
-    [bot, secondBot].map((agentId) => ({
-      agentId,
+      type: "built_in",
       ownerUserId: owner,
-      title: agentId,
+      title: id,
       roleDescription: "Assist",
-      avatarSeed: agentId,
-      visibility: "private" as const,
-    })),
-  );
+    });
   await database.insert(mcpServers).values([
     {
       id: app,
@@ -206,7 +197,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, secondBot]));
+  await removeBots([bot, secondBot]);
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [app, unconnected]));

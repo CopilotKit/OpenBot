@@ -1,5 +1,12 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +16,6 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   channelAgents,
   channelMemberships,
   channels,
@@ -29,6 +34,14 @@ import {
   validateTenantPackage,
   validateThemeCss,
 } from "../src/tenant-package";
+import {
+  changeBot,
+  deleteBot,
+  removeBots,
+  seedBot,
+  storedBot,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -42,9 +55,7 @@ afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
     await database.delete(channels).where(eq(channels.id, channelId));
   }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await removeBots(createdAgentIds.splice(0));
   for (const packageId of createdPackageIds.splice(0)) {
     await database
       .delete(deploymentPackages)
@@ -126,6 +137,19 @@ async function createPackage(tenantId: string) {
   if (!deploymentPackage) throw new Error("Expected deployment package.");
   createdPackageIds.push(deploymentPackage.id);
   return deploymentPackage;
+}
+
+/** The Bot as Intelligence holds it, or null when it has none: what a refused sync must not have made. */
+async function botInIntelligence(id: string) {
+  return (await useTestBots()).registry.get(id);
+}
+
+/** This tenant's package rows. A sync refused before writing leaves none for a tenant seen first. */
+function packageRowsOf(tenantId: string) {
+  return database
+    .select()
+    .from(deploymentPackages)
+    .where(eq(deploymentPackages.tenantId, tenantId));
 }
 
 describe("tenant theme validation", () => {
@@ -592,6 +616,10 @@ describe("tenant YAML validation", () => {
 });
 
 describe("tenant package agent profile synchronization", () => {
+  beforeAll(async () => {
+    await useTestBots();
+  });
+
   test("creates a public ownerless profile for a canonical package agent", async () => {
     const agent = packageAgent();
     const tenantPackage = loadedPackage(agent);
@@ -603,22 +631,14 @@ describe("tenant package agent profile synchronization", () => {
     createdAgentIds.push(agent.id);
     createdPackageIds.push(deploymentPackage.id);
 
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, agent.id));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, agent.id));
+    const bot = await storedBot(agent.id);
 
-    expect(canonical).toMatchObject({
+    expect(bot).toMatchObject({
       id: agent.id,
       name: agent.name,
       packageId: deploymentPackage.id,
     });
-    expect(profile).toMatchObject({
-      agentId: agent.id,
+    expect(bot).toMatchObject({
       ownerUserId: null,
       title: agent.title,
       roleDescription: agent.roleDescription,
@@ -629,45 +649,47 @@ describe("tenant package agent profile synchronization", () => {
   });
 
   /*
-   * The row a corrected package leaves behind.
+   * The Bot a corrected package leaves behind.
    *
    * Refusing the id in the YAML closes the way a Bot gets that name, not a Bot that already has it:
-   * nothing here deletes a canonical agent when a package stops declaring it, so a deployment that
-   * once shipped `policy` keeps the row after the operator renames it, and the computer router goes
-   * on stepping aside for that path. So the table is checked as well as the file, and a deployment
-   * holding one refuses to start rather than serving it to everybody who can sign in.
+   * nothing here deletes a Bot when a package stops declaring it, so a deployment that once shipped
+   * `policy` keeps the Bot after the operator renames it, and the computer router goes on stepping
+   * aside for that path. So the Bots are checked as well as the file, and a deployment holding one
+   * refuses to start rather than serving it to everybody who can sign in.
+   *
+   * The id is fixed, in an Intelligence other runs share, and every package sync refuses while it
+   * exists, so it is removed the moment the refusal is seen rather than after the test.
    */
   test("refuses to synchronize while a Bot named after a deployment route exists", async () => {
-    await database.insert(agents).values({
+    await seedBot({
       id: "policy",
       name: "Left behind by an older package",
       type: "built_in",
-      configuration: {},
     });
-    createdAgentIds.push("policy");
+    try {
+      const agent = packageAgent();
+      const tenantPackage = loadedPackage(agent);
+      await expect(
+        synchronizeTenantPackage(database, tenantPackage),
+      ).rejects.toThrow(/reserved for a deployment route/i);
 
-    const agent = packageAgent();
-    await expect(
-      synchronizeTenantPackage(database, loadedPackage(agent)),
-    ).rejects.toThrow(/reserved for a deployment route/i);
-
-    // The refusal is the whole answer: nothing of the package is half-applied behind it.
-    const [applied] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, agent.id));
-    expect(applied).toBeUndefined();
+      // The refusal is the whole answer: nothing of the package is half-applied behind it.
+      expect(await botInIntelligence(agent.id)).toBeNull();
+      expect(await packageRowsOf(tenantPackage.tenantId)).toHaveLength(0);
+    } finally {
+      await removeBots(["policy"]);
+    }
   });
 
   test("synchronizes normally when no such Bot exists", async () => {
     // The permissive half, so the check above is proved to be about the reserved id and not about
-    // any pre-existing row.
-    await database.insert(agents).values({
+    // any pre-existing Bot.
+    const ordinary = await seedBot({
       id: `policy-desk-${randomUUID()}`,
       name: "An ordinary Bot",
       type: "built_in",
-      configuration: {},
     });
+    createdAgentIds.push(ordinary.id);
     const agent = packageAgent();
     const deploymentPackage = await synchronizeTenantPackage(
       database,
@@ -675,11 +697,7 @@ describe("tenant package agent profile synchronization", () => {
     );
     createdAgentIds.push(agent.id);
     createdPackageIds.push(deploymentPackage.id);
-    const [applied] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, agent.id));
-    expect(applied).toBeDefined();
+    expect(await botInIntelligence(agent.id)).not.toBeNull();
   });
 
   test("resynchronizes and undeletes an existing package profile", async () => {
@@ -691,15 +709,10 @@ describe("tenant package agent profile synchronization", () => {
     );
     createdAgentIds.push(agent.id);
     createdPackageIds.push(deploymentPackage.id);
-    const oldUpdatedAt = new Date("2000-01-01T00:00:00.000Z");
-    await database
-      .update(agentProfiles)
-      .set({
-        visibility: "private",
-        deletedAt: new Date("2001-01-01T00:00:00.000Z"),
-        updatedAt: oldUpdatedAt,
-      })
-      .where(eq(agentProfiles.agentId, agent.id));
+    // Since then somebody made it private, and it was deleted.
+    await changeBot(agent.id, { visibility: "private" });
+    const deleted = await deleteBot(agent.id);
+    expect(deleted.deletedAt).toBeInstanceOf(Date);
 
     const updatedAgent = {
       ...agent,
@@ -714,16 +727,9 @@ describe("tenant package agent profile synchronization", () => {
       checksum: randomUUID(),
     });
 
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, agent.id));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, agent.id));
-    expect(canonical?.name).toBe(updatedAgent.name);
-    expect(profile).toMatchObject({
+    const bot = await storedBot(agent.id);
+    expect(bot.name).toBe(updatedAgent.name);
+    expect(bot).toMatchObject({
       ownerUserId: null,
       title: updatedAgent.title,
       roleDescription: updatedAgent.roleDescription,
@@ -731,8 +737,8 @@ describe("tenant package agent profile synchronization", () => {
       visibility: "public",
       deletedAt: null,
     });
-    expect(profile?.updatedAt.getTime()).toBeGreaterThan(
-      oldUpdatedAt.getTime(),
+    expect(bot.updatedAt.getTime()).toBeGreaterThan(
+      deleted.updatedAt.getTime(),
     );
   });
 
@@ -740,15 +746,12 @@ describe("tenant package agent profile synchronization", () => {
     const ownerUserId = await createUser();
     const agent = packageAgent();
     const tenantPackage = loadedPackage(agent);
-    await database.insert(agents).values({
+    createdAgentIds.push(agent.id);
+    await seedBot({
       id: agent.id,
       name: "User Agent",
       type: "built_in",
       configuration: { systemPrompt: "User-owned prompt." },
-    });
-    createdAgentIds.push(agent.id);
-    await database.insert(agentProfiles).values({
-      agentId: agent.id,
       ownerUserId,
       title: "User Title",
       roleDescription: "User role.",
@@ -760,48 +763,35 @@ describe("tenant package agent profile synchronization", () => {
       synchronizeTenantPackage(database, tenantPackage),
     ).rejects.toThrow("user-created agent");
 
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, agent.id));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, agent.id));
-    expect(canonical).toMatchObject({
+    const bot = await storedBot(agent.id);
+    expect(bot).toMatchObject({
       name: "User Agent",
       packageId: null,
       configuration: { systemPrompt: "User-owned prompt." },
     });
-    expect(profile).toMatchObject({
+    expect(bot).toMatchObject({
       ownerUserId,
       title: "User Title",
       roleDescription: "User role.",
       avatarSeed: "user-avatar",
       visibility: "private",
     });
-    const synchronizedPackages = await database
-      .select()
-      .from(deploymentPackages)
-      .where(eq(deploymentPackages.tenantId, tenantPackage.tenantId));
-    expect(synchronizedPackages).toHaveLength(0);
+    expect(await packageRowsOf(tenantPackage.tenantId)).toHaveLength(0);
   });
 
-  test("rejects a user-owned profile collision and rolls back canonical changes", async () => {
+  // Refused before anything is written, so the Bot and the package row are as they were.
+  test("rejects a user-owned profile collision without changing anything", async () => {
     const ownerUserId = await createUser();
     const agent = packageAgent();
     const tenantPackage = loadedPackage(agent);
     const deploymentPackage = await createPackage(tenantPackage.tenantId);
-    await database.insert(agents).values({
+    createdAgentIds.push(agent.id);
+    await seedBot({
       id: agent.id,
       name: "Original Package Agent",
       type: "built_in",
       configuration: { systemPrompt: "Original package prompt." },
       packageId: deploymentPackage.id,
-    });
-    createdAgentIds.push(agent.id);
-    await database.insert(agentProfiles).values({
-      agentId: agent.id,
       ownerUserId,
       title: "User Title",
       roleDescription: "User role.",
@@ -813,24 +803,17 @@ describe("tenant package agent profile synchronization", () => {
       synchronizeTenantPackage(database, tenantPackage),
     ).rejects.toThrow("user-owned profile");
 
-    const [canonical] = await database
-      .select()
-      .from(agents)
-      .where(eq(agents.id, agent.id));
-    const [profile] = await database
-      .select()
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, agent.id));
+    const bot = await storedBot(agent.id);
     const [unchangedPackage] = await database
       .select()
       .from(deploymentPackages)
       .where(eq(deploymentPackages.id, deploymentPackage.id));
-    expect(canonical).toMatchObject({
+    expect(bot).toMatchObject({
       name: "Original Package Agent",
       configuration: { systemPrompt: "Original package prompt." },
       packageId: deploymentPackage.id,
     });
-    expect(profile).toMatchObject({
+    expect(bot).toMatchObject({
       ownerUserId,
       title: "User Title",
       roleDescription: "User role.",
@@ -903,6 +886,10 @@ describe("tenant package agent profile synchronization", () => {
       `Tenant package channel "${channelId}" collides with a channel this package does not own`,
     );
     expect(await snapshot()).toEqual(beforePackageB);
+    // Refused before anything was written: package B's Bot never reached Intelligence.
+    expect(
+      await (await useTestBots()).registry.get(packageBAgent.id),
+    ).toBeNull();
 
     await database
       .delete(channelAgents)
@@ -986,7 +973,8 @@ describe("tenant package agent profile synchronization", () => {
     expect(permittedAgents).toEqual([secondAgent.id]);
   });
 
-  test("rejects a cross-package agent collision and rolls back both packages", async () => {
+  // Refused before anything is written, so both packages and the Bot are exactly as they were.
+  test("rejects a cross-package agent collision and changes neither package", async () => {
     const packageAAgent = packageAgent({
       name: "Package A Agent",
       title: "Package A Title",
@@ -1009,14 +997,7 @@ describe("tenant package agent profile synchronization", () => {
     const packageBRow = await createPackage(packageB.tenantId);
 
     const snapshot = async () => {
-      const [canonical] = await database
-        .select()
-        .from(agents)
-        .where(eq(agents.id, packageAAgent.id));
-      const [profile] = await database
-        .select()
-        .from(agentProfiles)
-        .where(eq(agentProfiles.agentId, packageAAgent.id));
+      const bot = await storedBot(packageAAgent.id);
       const [persistedPackageA] = await database
         .select()
         .from(deploymentPackages)
@@ -1026,8 +1007,7 @@ describe("tenant package agent profile synchronization", () => {
         .from(deploymentPackages)
         .where(eq(deploymentPackages.id, packageBRow.id));
       return {
-        canonical,
-        profile,
+        bot,
         packageA: persistedPackageA,
         packageB: persistedPackageB,
       };
@@ -1048,6 +1028,82 @@ describe("tenant package agent profile synchronization", () => {
       message: `Tenant package agent "${packageAAgent.id}" collides with a user-created agent`,
     });
     expect(after).toEqual(before);
+  });
+
+  /*
+   * A package names its Bots, and a name can be long. Intelligence refuses an Idempotency-Key over 128
+   * characters, and the sync's keys are made from the package checksum (64 characters) and the id, so
+   * a long id once stopped the deployment booting. Made and then changed, to cover both writes.
+   */
+  test("synchronizes a package Bot whose id is long", async () => {
+    const agent = packageAgent({
+      id: `customer-support-escalation-specialist-${randomUUID()}`,
+    });
+    const tenantPackage = {
+      ...loadedPackage(agent),
+      checksum: createHash("sha256").update(randomUUID()).digest("hex"),
+    };
+    createdAgentIds.push(agent.id);
+    const deploymentPackage = await synchronizeTenantPackage(
+      database,
+      tenantPackage,
+    );
+    createdPackageIds.push(deploymentPackage.id);
+
+    await synchronizeTenantPackage(database, {
+      ...tenantPackage,
+      checksum: createHash("sha256").update(randomUUID()).digest("hex"),
+      agents: [{ ...agent, title: "Escalations" }],
+    });
+
+    expect(await storedBot(agent.id)).toMatchObject({
+      packageId: deploymentPackage.id,
+      title: "Escalations",
+      deletedAt: null,
+    });
+  });
+
+  /*
+   * Intelligence keeps a Bot's type for its lifetime, so a package that changes one is refused, and
+   * refused before any of its Bots is written: the new Bot listed ahead of the changed one is not made.
+   */
+  test("refuses a package that changes a Bot's type, before writing anything", async () => {
+    const agent = packageAgent();
+    const tenantPackage = loadedPackage(agent);
+    const deploymentPackage = await synchronizeTenantPackage(
+      database,
+      tenantPackage,
+    );
+    createdAgentIds.push(agent.id);
+    createdPackageIds.push(deploymentPackage.id);
+    const before = await storedBot(agent.id);
+    const [packageBefore] = await packageRowsOf(tenantPackage.tenantId);
+
+    const newcomer = packageAgent({ name: "Newcomer" });
+    createdAgentIds.push(newcomer.id);
+    await expect(
+      synchronizeTenantPackage(database, {
+        ...tenantPackage,
+        checksum: randomUUID(),
+        agents: [
+          newcomer,
+          {
+            ...agent,
+            name: "Now Remote",
+            type: "remote_ag_ui",
+            configuration: { endpoint: "https://agent.example.test/ag-ui" },
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      `Tenant package agent "${agent.id}" was a built_in Bot and the package now makes it remote_ag_ui`,
+    );
+
+    expect(await storedBot(agent.id)).toEqual(before);
+    expect(await botInIntelligence(newcomer.id)).toBeNull();
+    expect(await packageRowsOf(tenantPackage.tenantId)).toEqual([
+      packageBefore,
+    ]);
   });
 });
 
@@ -1296,6 +1352,10 @@ describe("skills a package ships", () => {
 describe("seeding the skills a package ships", () => {
   const createdSkillIds: string[] = [];
 
+  beforeAll(async () => {
+    await useTestBots();
+  });
+
   afterEach(async () => {
     for (const id of createdSkillIds.splice(0)) {
       await database.delete(skillTools).where(eq(skillTools.skillId, id));
@@ -1439,6 +1499,10 @@ describe("seeding the skills a package ships", () => {
  */
 describe("pairing a package's coworkers with its skills", () => {
   const createdSkillIds: string[] = [];
+
+  beforeAll(async () => {
+    await useTestBots();
+  });
 
   afterEach(async () => {
     for (const id of createdSkillIds.splice(0)) {
@@ -1649,6 +1713,7 @@ test("blank package endpoint disables only its owned agent and restores it when 
   let otherPackageId: string | undefined;
   const ownedIds: string[] = [];
   const historyId = `history-${suffix}`;
+  await useTestBots();
   try {
     process.env.MANAGED_AGENT_AG_UI_URL = "http://127.0.0.1:4201/ag-ui";
     process.env.PICKED_HARNESS_URL = "http://127.0.0.1:4206/ag-ui";
@@ -1712,18 +1777,14 @@ test("blank package endpoint disables only its owned agent and restores it when 
     ];
     for (const control of controls) {
       ownedIds.push(control.id);
-      await database.insert(agents).values({
+      await seedBot({
         id: control.id,
         name: control.id,
         type: "remote_ag_ui",
         configuration: { endpoint: "https://example.test/agent" },
         packageId: control.packageId,
-      });
-      await database.insert(agentProfiles).values({
-        agentId: control.id,
         title: "Control",
         roleDescription: "Preserve ownership",
-        avatarSeed: control.id,
         visibility: "public",
         ownerUserId: control.ownerUserId,
       });
@@ -1751,10 +1812,8 @@ test("blank package endpoint disables only its owned agent and restores it when 
           .where(eq(channelAgents.channelId, historyId))
       ).length,
     ).toBe(1);
-    expect(
-      (await database.select().from(agents).where(eq(agents.id, target)))
-        .length,
-    ).toBe(1);
+    // Deleted, not removed: the Bot stays in Intelligence so its conversation stays readable.
+    expect((await storedBot(target)).deletedAt).toBeInstanceOf(Date);
     expect((await profiles.get(actor, picked))?.deletedAt).toBeNull();
     for (const control of controls)
       expect((await profiles.get(actor, control.id))?.deletedAt).toBeNull();
@@ -1769,8 +1828,7 @@ test("blank package endpoint disables only its owned agent and restores it when 
     if (originalPicked === undefined) delete process.env.PICKED_HARNESS_URL;
     else process.env.PICKED_HARNESS_URL = originalPicked;
     await database.delete(channels).where(eq(channels.id, historyId));
-    for (const id of ownedIds)
-      await database.delete(agents).where(eq(agents.id, id));
+    await removeBots(ownedIds);
     if (packageId)
       await database
         .delete(deploymentPackages)

@@ -19,7 +19,7 @@ import {
   createBotLifecycleRoutes,
 } from "../src/agents/lifecycle-routes";
 import { createDatabase } from "../src/db/client";
-import { agents, channels, users } from "../src/db/schema/core";
+import { channels, users } from "../src/db/schema/core";
 import {
   deliveryBindings,
   deliveryInbox,
@@ -49,6 +49,7 @@ import { createProactiveStore } from "../src/proactive/store";
 import type { ProactiveSetting } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
 import { notificationDestination } from "../../mobile/src/links";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -171,21 +172,12 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values([
-    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
-    {
-      id: calendarBot,
-      name: "Calendar Bot",
-      type: "built_in",
-      configuration: {},
-    },
-    {
-      id: researchBot,
-      name: "Research Bot",
-      type: "built_in",
-      configuration: {},
-    },
-  ]);
+  for (const [id, name] of [
+    [inboxBot, "Inbox Bot"],
+    [calendarBot, "Calendar Bot"],
+    [researchBot, "Research Bot"],
+  ] as const)
+    await seedBot({ id, name, type: "built_in" });
   await database
     .insert(channels)
     .values(CHANNELS.map((id) => ({ id, name: id, description: "" })));
@@ -293,7 +285,7 @@ afterAll(async () => {
   await reset();
   resetBotLifecycleForTests();
   await database.delete(users).where(eq(users.id, owner));
-  await database.delete(agents).where(inArray(agents.id, BOTS));
+  await removeBots(BOTS);
   await database.delete(channels).where(inArray(channels.id, CHANNELS));
   await database.$client.end({ timeout: 5 });
 });

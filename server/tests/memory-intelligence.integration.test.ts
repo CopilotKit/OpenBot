@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { personalMemories } from "../src/db/schema/memory";
 import {
   createIntelligenceMemory,
@@ -14,6 +14,7 @@ import {
   MemoryRefusedError,
   MemoryUnavailableError,
 } from "../src/memory/types";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -203,10 +204,8 @@ beforeAll(async () => {
     { id: ada, email: `${ada}@example.test` },
     { id: grace, email: `${grace}@example.test` },
   ]);
-  await database.insert(agents).values([
-    { id: bot, name: "Bot", type: "built_in", configuration: {} },
-    { id: otherBot, name: "Other", type: "built_in", configuration: {} },
-  ]);
+  await seedBot({ id: bot, name: "Bot", type: "built_in" });
+  await seedBot({ id: otherBot, name: "Other", type: "built_in" });
 });
 beforeEach(async () => {
   await database
@@ -226,7 +225,7 @@ afterAll(async () => {
   await database
     .delete(personalMemories)
     .where(inArray(personalMemories.ownerUserId, [ada, grace]));
-  await database.delete(agents).where(inArray(agents.id, [bot, otherBot]));
+  await removeBots([bot, otherBot]);
   await database.delete(users).where(inArray(users.id, [ada, grace]));
   await database.$client.end();
 });

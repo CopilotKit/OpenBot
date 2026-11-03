@@ -33,8 +33,6 @@ import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
   auditEvents,
   botLifecycle,
   capabilitySettings,
@@ -66,6 +64,7 @@ import type {
   SuggestionStatus,
 } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -119,23 +118,17 @@ beforeAll(async () => {
     { ...member, name: "Member" },
   ]);
   await database.insert(userRoles).values({ userId: admin.id, role: "admin" });
-  await database.insert(agents).values([
-    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
-    {
-      id: calendarBot,
-      name: "Calendar Bot",
-      type: "built_in",
-      configuration: {},
-    },
-  ]);
-  await database.insert(agentProfiles).values({
-    agentId: inboxBot,
+  await seedBot({
+    id: inboxBot,
+    name: "Inbox Bot",
+    type: "built_in",
     ownerUserId: admin.id,
     title: "Inbox",
     roleDescription: "Reads mail",
     avatarSeed: `inbox-seed-${suite}`,
-    visibility: "private",
   });
+  // Made without a picture of its own: a Bot's picture is then drawn from its id.
+  await seedBot({ id: calendarBot, name: "Calendar Bot", type: "built_in" });
   for (const person of people)
     for (const bot of [inboxBot, calendarBot])
       settings.set(
@@ -214,9 +207,7 @@ afterAll(async () => {
   await database
     .delete(proactiveSettings)
     .where(inArray(proactiveSettings.id, settingIds()));
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [inboxBot, calendarBot]));
+  await removeBots([inboxBot, calendarBot]);
   await database.delete(users).where(like(users.email, `%${suite}%`));
   await database.$client.close();
 });
@@ -756,7 +747,7 @@ describe("the numbers", () => {
       pinged: 3,
     });
     // Nobody decided anything the calendar Bot raised yet, so there is no acceptance to show. A Bot
-    // with no picture of its own is drawn from its id, as everywhere else.
+    // made with no picture of its own is drawn from its id, as everywhere else.
     expect(botIn(week, calendarBot)).toMatchObject({
       name: "Calendar Bot",
       avatarSeed: calendarBot,

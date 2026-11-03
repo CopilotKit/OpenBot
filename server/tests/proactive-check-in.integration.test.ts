@@ -25,7 +25,7 @@ import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { modelUsage } from "../src/db/schema/admin";
-import { agents, channels, users } from "../src/db/schema/core";
+import { channels, users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
 import { botLifecycle } from "../src/db/schema/lifecycle";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
@@ -61,6 +61,7 @@ import {
 } from "../src/proactive/types";
 import { CHECK_IN_OPENING } from "../src/proactive/window";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -127,15 +128,8 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values([
-    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
-    {
-      id: calendarBot,
-      name: "Calendar Bot",
-      type: "built_in",
-      configuration: {},
-    },
-  ]);
+  await seedBot({ id: inboxBot, name: "Inbox Bot", type: "built_in" });
+  await seedBot({ id: calendarBot, name: "Calendar Bot", type: "built_in" });
   await database.insert(channels).values(
     [inboxChannel, calendarChannel, taskChannel].map((id) => ({
       id,
@@ -260,9 +254,7 @@ beforeEach(reset);
 afterAll(async () => {
   await reset();
   await database.delete(users).where(eq(users.id, owner));
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [inboxBot, calendarBot]));
+  await removeBots([inboxBot, calendarBot]);
   await database
     .delete(channels)
     .where(inArray(channels.id, [inboxChannel, calendarChannel, taskChannel]));
@@ -1941,12 +1933,7 @@ describe("changing a Bot's check-ins", () => {
 
   test("turning check-ins on for a Bot schedules its first check-in an interval out", async () => {
     const third = `check-in-third-${suite}`;
-    await database.insert(agents).values({
-      id: third,
-      name: "Third Bot",
-      type: "built_in",
-      configuration: {},
-    });
+    await seedBot({ id: third, name: "Third Bot", type: "built_in" });
     try {
       const created = await app().request("http://t/api/proactive/settings", {
         method: "POST",
@@ -1966,7 +1953,7 @@ describe("changing a Bot's check-ins", () => {
       expect(out).toBeGreaterThan(239);
       expect(out).toBeLessThanOrEqual(240);
     } finally {
-      await database.delete(agents).where(eq(agents.id, third));
+      await removeBots([third]);
     }
   });
 });

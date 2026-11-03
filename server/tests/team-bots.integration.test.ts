@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { computerAccessCheck } from "../src/agents/computer-access";
@@ -22,7 +29,7 @@ import {
   TEAM_BOT_CONSENT_MARKER,
   TeamBotRefusedError,
 } from "../src/team-bots/team-bots";
-import { changeBot, removeBots } from "./support/bots";
+import { changeBot, removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -60,6 +67,9 @@ afterEach(async () => {
   for (const id of createdUsers.splice(0))
     await database.delete(users).where(eq(users.id, id));
   connected.clear();
+});
+beforeAll(async () => {
+  await useTestBots();
 });
 afterAll(async () => {
   await database.$client.close();

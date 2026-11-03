@@ -4,8 +4,7 @@ import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { agentProfiles } from "../src/db/schema/coworker";
+import { users } from "../src/db/schema/core";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import { proactiveSettings } from "../src/db/schema/proactive";
 import { createMemoryIngestion } from "../src/memory/ingestion";
@@ -18,6 +17,7 @@ import {
   ProactiveNotFoundError,
   ProactiveRefusedError,
 } from "../src/proactive/types";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -47,20 +47,18 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values([
-    { id: bot, name: "Research Bot", type: "built_in", configuration: {} },
-    { id: secondBot, name: "Second Bot", type: "built_in", configuration: {} },
-  ]);
-  await database.insert(agentProfiles).values(
-    [bot, secondBot].map((agentId) => ({
-      agentId,
+  for (const [id, name] of [
+    [bot, "Research Bot"],
+    [secondBot, "Second Bot"],
+  ] as const)
+    await seedBot({
+      id,
+      name,
+      type: "built_in",
       ownerUserId: owner,
-      title: agentId,
+      title: id,
       roleDescription: "Assist",
-      avatarSeed: agentId,
-      visibility: "private" as const,
-    })),
-  );
+    });
   await database.insert(mcpServers).values({
     id: server,
     title: "Issue tracker",
@@ -79,7 +77,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, secondBot]));
+  await removeBots([bot, secondBot]);
   await database.delete(mcpServers).where(eq(mcpServers.id, server));
   await database.$client.close();
 });

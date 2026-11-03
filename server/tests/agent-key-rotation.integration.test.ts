@@ -5,7 +5,8 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agentProfiles, agents, credentials, users } from "../src/db/schema";
+import { credentials, users } from "../src/db/schema";
+import { removeBots, useTestBots } from "./support/bots";
 import { testDatabaseUrl } from "./support/database";
 
 /**
@@ -16,12 +17,14 @@ import { testDatabaseUrl } from "./support/database";
  * proving the call can be made at all: every failure this file exists to catch is a lock taken by
  * one connection and waited for by another, and a fake has neither.
  *
- * The pool is pinned to one connection deliberately. A second vault write on its own connection is
- * a second session competing with the transaction the edit is already inside, and at `max: 1` it
- * cannot even be handed a connection until that transaction ends — which it never will, because the
- * transaction is awaiting the call. The edit hangs until something times it out. At the driver's
- * default pool the same shape survives as a row-lock wait instead, slower to hit and identical in
- * effect, so one connection is the honest setting for the question being asked.
+ * The pool is pinned to one connection deliberately. A vault write on its own connection, made while
+ * the edit holds a transaction open, is a second session competing with that transaction, and at
+ * `max: 1` it cannot even be handed a connection until that transaction ends, which it never will,
+ * because the transaction is awaiting the call. The edit hangs until something times it out. At the
+ * driver's default pool the same shape survives as a row-lock wait instead, slower to hit and
+ * identical in effect, so one connection is the honest setting for the question being asked. The Bot
+ * itself is written to Intelligence, so an edit has no reason to hold a transaction across either
+ * write; this file is what says so if one ever does again.
  */
 
 const database = createDatabase(testDatabaseUrl(), { max: 1 });
@@ -74,6 +77,7 @@ async function liveKeysFor(agentId: string) {
 }
 
 beforeAll(async () => {
+  await useTestBots();
   await database.insert(users).values({
     id: actor.id,
     email: `${actor.id}@openbot.test`,
@@ -94,10 +98,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (created.length) {
-    await database
-      .delete(agentProfiles)
-      .where(inArray(agentProfiles.agentId, created));
-    await database.delete(agents).where(inArray(agents.id, created));
+    await removeBots(created);
     await database
       .delete(credentials)
       .where(inArray(credentials.keyId, created));

@@ -559,67 +559,73 @@ export function createAgentProfileStore(
        */
       let auth: AgentAuth | undefined;
       try {
-        const updated = await edit(actor, id, async (bot, profile) => {
-          /*
-           * Before the manage check, so a tenant package's Bot is refused for what was asked of it
-           * rather than with the general "built in and can't be changed", and the trail can say so.
-           */
-          if (
-            input.isolated === true &&
-            (profile.systemOwned || profile.ownerUserId === null)
-          ) {
-            throw new IsolationRefusedError("unowned");
-          }
-          requireManageable(actor, profile);
-          if (input.auth && vault && !auth) {
-            // An agent that already has a live key is being edited, not first-created, so the vault
-            // rotates rather than inserting a second live row for the same agent id.
-            auth = await storeAgentAuth({
-              store: vault.store,
-              encryptionKey: vault.encryptionKey,
-              agentId: id,
-              header: input.auth.header,
-              value: input.auth.value,
-              previousCredentialId: authFromConfiguration(bot.configuration)
-                ?.credentialId,
-            });
-          }
-          /**
-           * The endpoint and the key change here too, not only at creation.
-           *
-           * The form sends both and the route validates both, so an edit that dropped them looked
-           * like it had worked: the screen reported success and the Bot kept answering at the old
-           * address, which is the worst way to move an endpoint. A key is replaced only when one is
-           * supplied, because the form cannot show what is stored and sending nothing means "leave
-           * it alone" rather than "remove it".
-           *
-           * A coworker that runs here runs on its role description, so editing one has to move both:
-           * `create` writes it into `configuration.systemPrompt` for a coworker with no address, and
-           * that prompt is the ONLY instruction such a coworker ever gets. Only for `built_in`: a
-           * remote Bot's instruction travels as the standing role message instead, and the tenant
-           * package's Bots, whose `system_prompt` is deliberately not their `role_description`,
-           * cannot reach this code at all: `requireManageable` refuses anything the package owns.
-           */
-          const configuration = {
-            ...bot.configuration,
-            ...(bot.type === "built_in"
-              ? { systemPrompt: input.roleDescription }
-              : {}),
-            ...(input.endpoint ? { endpoint: input.endpoint } : {}),
-            ...(auth ? { auth } : {}),
-          };
-          return {
-            name: input.name,
-            title: input.title,
-            roleDescription: input.roleDescription,
-            visibility: input.visibility,
-            configuration,
-            // Absent leaves it alone; see `CreateAgentInput.isolated`.
-            ...(input.isolated === undefined
-              ? {}
-              : { isolated: input.isolated }),
-          };
-        });
+        // `manage: false` because this change makes the manage check itself, after the refusal below.
+        const updated = await edit(
+          actor,
+          id,
+          async (bot, profile) => {
+            /*
+             * Before the manage check, so a tenant package's Bot is refused for what was asked of it
+             * rather than with the general "built in and can't be changed", and the trail can say so.
+             */
+            if (
+              input.isolated === true &&
+              (profile.systemOwned || profile.ownerUserId === null)
+            ) {
+              throw new IsolationRefusedError("unowned");
+            }
+            requireManageable(actor, profile);
+            if (input.auth && vault && !auth) {
+              // An agent that already has a live key is being edited, not first-created, so the vault
+              // rotates rather than inserting a second live row for the same agent id.
+              auth = await storeAgentAuth({
+                store: vault.store,
+                encryptionKey: vault.encryptionKey,
+                agentId: id,
+                header: input.auth.header,
+                value: input.auth.value,
+                previousCredentialId: authFromConfiguration(bot.configuration)
+                  ?.credentialId,
+              });
+            }
+            /**
+             * The endpoint and the key change here too, not only at creation.
+             *
+             * The form sends both and the route validates both, so an edit that dropped them looked
+             * like it had worked: the screen reported success and the Bot kept answering at the old
+             * address, which is the worst way to move an endpoint. A key is replaced only when one is
+             * supplied, because the form cannot show what is stored and sending nothing means "leave
+             * it alone" rather than "remove it".
+             *
+             * A coworker that runs here runs on its role description, so editing one has to move both:
+             * `create` writes it into `configuration.systemPrompt` for a coworker with no address, and
+             * that prompt is the ONLY instruction such a coworker ever gets. Only for `built_in`: a
+             * remote Bot's instruction travels as the standing role message instead, and the tenant
+             * package's Bots, whose `system_prompt` is deliberately not their `role_description`,
+             * cannot reach this code at all: `requireManageable` refuses anything the package owns.
+             */
+            const configuration = {
+              ...bot.configuration,
+              ...(bot.type === "built_in"
+                ? { systemPrompt: input.roleDescription }
+                : {}),
+              ...(input.endpoint ? { endpoint: input.endpoint } : {}),
+              ...(auth ? { auth } : {}),
+            };
+            return {
+              name: input.name,
+              title: input.title,
+              roleDescription: input.roleDescription,
+              visibility: input.visibility,
+              configuration,
+              // Absent leaves it alone; see `CreateAgentInput.isolated`.
+              ...(input.isolated === undefined
+                ? {}
+                : { isolated: input.isolated }),
+            };
+          },
+          { manage: false },
+        );
         return profileAfterWrite(actor, updated);
       } catch (error) {
         if (auth) {

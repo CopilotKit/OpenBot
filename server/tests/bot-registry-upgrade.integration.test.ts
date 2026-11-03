@@ -252,6 +252,32 @@ describe("copying an existing deployment's Bots into Intelligence", () => {
       expect(listed.filter((bot) => bot.id === id)).toHaveLength(1);
   });
 
+  test("a Bot with an id as long as the registry allows crosses too", async () => {
+    // Intelligence keeps idempotency keys to 128 characters; a key built from a 200-character id
+    // would be refused and stop the boot.
+    const database = await freshDeployment();
+    const longId = `copy-long-${"x".repeat(180)}`.slice(0, 200);
+    await database.insert(agents).values({
+      id: longId,
+      name: "Long",
+      type: "built_in",
+      configuration: { systemPrompt: "Has a long id." },
+    });
+    await database.insert(agentProfiles).values({
+      agentId: longId,
+      title: "",
+      roleDescription: "",
+      avatarSeed: longId,
+      visibility: "public",
+    });
+    copiedIds.push(longId);
+
+    expect(
+      await copyLocalBotsToIntelligence(database, replica()),
+    ).toMatchObject({ kind: "copied", local: 1, created: 1 });
+    expect((await replica().registry.get(longId))?.id).toBe(longId);
+  });
+
   test("a Bot Intelligence refuses stops the boot, names the Bot, and records nothing", async () => {
     const database = await freshDeployment();
     const legacy = await legacyBots(database);

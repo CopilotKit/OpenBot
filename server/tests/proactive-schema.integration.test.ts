@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, channels, users } from "../src/db/schema/core";
+import { channels, users } from "../src/db/schema/core";
 import {
   proactivePeople,
   proactivePings,
@@ -11,6 +11,7 @@ import {
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
 import { botTasks } from "../src/db/schema/tasks";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -53,17 +54,12 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values({
-    id: bot,
-    name: "Inbox Bot",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: bot, name: "Inbox Bot", type: "built_in" });
   settingId = await setting();
 });
 
 afterAll(async () => {
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database.delete(users).where(eq(users.id, owner));
   await database.$client.close();
 });

@@ -25,8 +25,6 @@ import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
   actionRecords,
-  agentProfiles,
-  agents,
   auditEvents,
   capabilitySettings,
   enterpriseSettings,
@@ -40,6 +38,7 @@ import {
   users,
 } from "../src/db/schema";
 import { createTeamBots } from "../src/team-bots/team-bots";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -108,19 +107,14 @@ beforeAll(async () => {
     { ...admin, name: "Admin" },
     { ...member, name: "Member", groups: ["sales"] },
   ]);
-  await database.insert(agents).values({
+  await seedBot({
     id: bot,
     name: "Enterprise test Bot",
     type: "built_in",
-    configuration: {},
-  });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
     ownerUserId: member.id,
     title: "Test",
     roleDescription: "Test",
     avatarSeed: "x",
-    visibility: "private",
   });
   controls = await installEnterpriseControls({
     database,
@@ -139,7 +133,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await controls?.stop();
   await clean();
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeBots([bot]);
   await database
     .delete(revokedAccess)
     .where(like(revokedAccess.email, `%${suite}%`));

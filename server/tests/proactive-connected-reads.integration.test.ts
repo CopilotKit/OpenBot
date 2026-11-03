@@ -25,7 +25,7 @@ import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { auditEvents } from "../src/db/schema";
-import { agents, channels, credentials, users } from "../src/db/schema/core";
+import { channels, credentials, users } from "../src/db/schema/core";
 import {
   brokeredConnections,
   mcpServers,
@@ -59,6 +59,7 @@ import { createProactiveStore } from "../src/proactive/store";
 import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -210,22 +211,15 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values([
-    { id: desk, name: "Desk Bot", type: "built_in", configuration: {} },
-    {
-      id: harness,
-      name: "Harness Bot",
-      type: "remote_ag_ui",
-      configuration: {},
-    },
-    {
-      id: unconnected,
-      name: "Lookout Bot",
-      type: "built_in",
-      configuration: {},
-    },
-    { id: tasker, name: "Task Bot", type: "built_in", configuration: {} },
-  ]);
+  await seedBot({ id: desk, name: "Desk Bot", type: "built_in" });
+  await seedBot({
+    id: harness,
+    name: "Harness Bot",
+    type: "remote_ag_ui",
+    configuration: { endpoint: "http://127.0.0.1:7495/ag-ui" },
+  });
+  await seedBot({ id: unconnected, name: "Lookout Bot", type: "built_in" });
+  await seedBot({ id: tasker, name: "Task Bot", type: "built_in" });
   await database
     .insert(channels)
     .values(
@@ -283,7 +277,7 @@ afterAll(async () => {
     );
   await fixtures.remove();
   await database.delete(users).where(eq(users.id, owner));
-  await database.delete(agents).where(inArray(agents.id, botIds));
+  await removeBots(botIds);
   await database
     .delete(channels)
     .where(inArray(channels.id, botIds.map(channelOf)));
