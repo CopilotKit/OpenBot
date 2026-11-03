@@ -10,6 +10,7 @@ import {
   type LoadToolsForBot,
   type MarkAttachmentsSent,
   onOpenBotRunner,
+  type RecordToolLimitRefusal,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
@@ -81,6 +82,11 @@ export type ActorAgentResolverDependencies = {
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
   acquireLearnedSkills?: AcquireLearnedSkills;
   loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory;
+  /** Writes the row for a run refused for sending more tools than its model accepts. */
+  recordToolLimitRefusalForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => RecordToolLimitRefusal;
 };
 
 /**
@@ -146,6 +152,7 @@ export function createActorAgentResolver(
       deps.markAttachmentsSentForActor?.(actor.id),
       acquireForActor,
       deps.loadPersonalMemoryForActor?.(actor.id),
+      deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {
