@@ -682,11 +682,11 @@ async fn apply_runtime_update(
         let secrets=openbot_desktop_lib::vault::already_given_no_ui(&target,&target.join(".env"),&openbot_env::MINTED[..])?;
         *shell.containers.lock().unwrap()=Some(ContainerDeployment{root:target.clone(),address:engine.clone()});
         if let Err(error)=stack::backup_runtime_database(&engine,&target,&secrets,&updates::database_backup_path(&journal),&database_identity) {
-            let stopped=down_owned_containers(&shell,&target);
+            let stopped=down_containers_with(&shell,&target,|root|down_owned_containers(&shell,root));
             return Err(Problem::with("The database backup failed. OpenBot remains stopped; the update journal and previous source are retained.",format!("{error}; database stop: {stopped:?}")));
         }
         // Retire only the installation's own temporary backup database service, with no volumes.
-        down_owned_containers(&shell,&target)?;
+        down_containers_with(&shell,&target,|root|down_owned_containers(&shell,root))?;
         if let Err(error)=updates::install_candidate(&target,&mut journal) {
             let rollback=updates::rollback_preparation(&target,&mut journal);
             return Err(Problem::with("Candidate installation failed. Previous vendor restoration was attempted; inspect the update journal before continuing.",format!("{error}; restore: {rollback:?}")));
@@ -4961,6 +4961,35 @@ fn main() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod runtime_update_tests {
+    use super::*;
+    #[test]
+    fn runtime_update_backup_down_clears_temporary_ownership_before_preparation() {
+        let shell = Shell::default();
+        let root = PathBuf::from("/fixture/customer-installation");
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: root.clone(),
+            address: engine::Address::new(engine::Engine::Docker, None),
+        });
+        down_containers_with(&shell, &root, |_| Ok(())).unwrap();
+        assert!(shell.containers.lock().unwrap().is_none());
+        assert_eq!(
+            shell.stopped_container_root.lock().unwrap().as_ref(),
+            Some(&root)
+        );
+    }
+    #[test]
+    fn runtime_update_user_stop_prevents_a_later_new_start_attempt() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let shell = Shell::default();
+        shell.updating.store(true, SeqCst);
+        shell.update_cancelled.store(true, SeqCst);
+        assert!(StartAttempt::begin(&shell).is_err());
+        assert!(!shell.starting.load(SeqCst));
+    }
 }
 
 #[cfg(test)]

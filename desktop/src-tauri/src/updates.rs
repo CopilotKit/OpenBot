@@ -1238,6 +1238,97 @@ mod tests {
         assert!(!i.root.join(RELEASE).exists());
     }
     #[test]
+    fn updates_selected_engine_backup_and_actual_database_and_image_identity() {
+        if crate::test_support::isolated_process(
+            "updates::tests::updates_selected_engine_backup_and_actual_database_and_image_identity",
+        ) {
+            return;
+        }
+        let i = installation();
+        let tools = i.root.join("fixture-tools");
+        std::fs::create_dir(&tools).unwrap();
+        let binary = tools.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+        crate::test_support::compile_fixture(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("test-fixtures/updates-engine.rs"),
+            &binary,
+        );
+        std::env::set_var("PATH", &tools);
+        std::env::set_var("OPENBOT_UPDATE_ENGINE_FIXTURE", &i.root);
+        let address = crate::engine::Address::new(crate::engine::Engine::Docker, None);
+        let secrets = crate::stack::Secrets::new();
+        write_json(&i.root.join("fixture-config.json"),&json!({"name":"customer-project","volumes":{"pgdata":{"name":"customer-project_pgdata"}},"services":{"postgres":{"volumes":[{"source":"pgdata","target":"/var/lib/postgresql/data"}]},"supervisor":{"environment":{"COMPUTER_NAMESPACE":"customer-namespace"}}}})).unwrap();
+        write_json(
+            &i.root.join("fixture-journal.json"),
+            &json!([{"hash":digest(b"select 1;"),"createdAt":1}]),
+        )
+        .unwrap();
+        let identity = crate::stack::runtime_update_identity(&address, &i.root, &secrets).unwrap();
+        assert_eq!(identity["project"], "customer-project");
+        assert_eq!(identity["namespace"], "customer-namespace");
+        let dump = i.root.join("fixture.dump");
+        crate::stack::backup_runtime_database(&address, &i.root, &secrets, &dump, "openbot-db-1")
+            .unwrap();
+        assert_eq!(std::fs::read(&dump).unwrap(), b"PGDMP-fixture-backup");
+        let commands = std::fs::read_to_string(i.root.join("fixture-commands.log")).unwrap();
+        assert!(commands
+            .contains("--no-deps --no-build --pull never --wait --wait-timeout 60 postgres"));
+        assert!(!commands.contains("--volumes"));
+        assert!(!commands.contains("up -d server"));
+        write_json(
+            &i.root.join("fixture-journal.json"),
+            &json!([{"hash":"different","createdAt":1}]),
+        )
+        .unwrap();
+        let refused = i.root.join("refused.dump");
+        assert!(crate::stack::backup_runtime_database(
+            &address,
+            &i.root,
+            &secrets,
+            &refused,
+            "openbot-db-1"
+        )
+        .is_err());
+        assert!(!refused.exists());
+        write_json(
+            &i.root.join("fixture-journal.json"),
+            &json!([{"hash":digest(b"select 1;"),"createdAt":1}]),
+        )
+        .unwrap();
+        write(&i.root, "fixture-dump-failure", b"1");
+        assert!(crate::stack::backup_runtime_database(
+            &address,
+            &i.root,
+            &secrets,
+            &i.root.join("failed.dump"),
+            "openbot-db-1"
+        )
+        .is_err());
+        let containers = json!([{"Config":{"Image":i.candidate["artifacts"]["images"]["supervisor"]["reference"],"Labels":{"com.docker.compose.service":"supervisor"}},"State":{"Running":true}},{"Config":{"Image":i.candidate["artifacts"]["images"]["agent-computer"]["reference"],"Labels":{"com.docker.compose.service":"agent-computer"}},"State":{"Running":true}}]);
+        write_json(&i.root.join("fixture-inspect.json"), &containers).unwrap();
+        crate::stack::verify_runtime_update_images(&address, &i.root, &i.candidate).unwrap();
+        let mut previous = containers;
+        previous[0]["Config"]["Image"] = json!("old-image:latest");
+        write_json(&i.root.join("fixture-inspect.json"), &previous).unwrap();
+        assert!(
+            crate::stack::verify_runtime_update_images(&address, &i.root, &i.candidate).is_err()
+        );
+    }
+    #[test]
+    fn updates_partial_vendor_copy_restores_previous_accepted_source() {
+        let i = installation();
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let mut journal = prepare_apply(&i.root).unwrap();
+        std::fs::remove_file(stage_path(&i.root).unwrap().join("worker/src/main.ts")).unwrap();
+        assert!(install_candidate(&i.root, &mut journal).is_err());
+        rollback_preparation(&i.root, &mut journal).unwrap();
+        assert_eq!(
+            std::fs::read(i.root.join("server/src/main.ts")).unwrap(),
+            b"previous"
+        );
+        assert_eq!(current(&i.root).unwrap()["version"], "v0.2.0");
+        require_no_interruption(&i.root).unwrap();
+    }
+    #[test]
     fn updates_missing_baseline_and_partial_stage_refuse() {
         let i = installation();
         stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
