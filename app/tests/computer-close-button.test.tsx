@@ -155,4 +155,8 @@ test("with the wheel in the person's hands, the close button still takes them ba
   await waitFor(() =>
     expect(view.queryByRole("dialog", { name: "The Bot's screen" })).toBeNull(),
   );
+  // Closing never hands the wheel back, so the Bot is still waiting on them, and the small view says so.
+  expect(
+    view.getByText(/The Bot waits until you hand it back\./),
+  ).toBeDefined();
 });

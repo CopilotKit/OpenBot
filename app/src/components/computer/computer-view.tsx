@@ -812,19 +812,33 @@ export function ComputerView({
           </form>
         ) : null}
 
+        {/*
+          Holding the wheel stops the Bot until the person hands it back, and closing the full-size
+          view never hands it back. So while they hold it, this line says so as plainly as "The Bot
+          needs you" does: someone who closes the big view and moves on is not left with a Bot
+          quietly waiting on them.
+        */}
         {!settled ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
-            <span className="text-xs text-muted-foreground">
-              {!control
-                ? "Checking who has control…"
-                : control.transitioning
-                  ? "Finishing the current action…"
-                  : driving
-                    ? "You have control. Open the screen to click and type."
+          <div
+            className={`flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${driving && !control?.transitioning ? "bg-amber-500/10" : ""}`}
+          >
+            {driving && !control?.transitioning ? (
+              <span className="text-sm">
+                <strong className="font-medium">You have control.</strong> The
+                Bot waits until you hand it back. Open the screen to click and
+                type.
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {!control
+                  ? "Checking who has control…"
+                  : control.transitioning
+                    ? "Finishing the current action…"
                     : someoneElse
                       ? "Someone else has control."
                       : "The Bot has control."}
-            </span>
+              </span>
+            )}
             <ComputerControlButton
               computerId={computerId}
               onTakeControl={() => setExpanded(true)}
