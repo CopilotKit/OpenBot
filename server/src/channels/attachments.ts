@@ -902,8 +902,9 @@ export function createChannelAttachmentRoutes(
      * in it put a file into a channel its uploader had just been taken out of. The membership lives
      * in Intelligence now, which no transaction here waits on, so it is read again from Intelligence
      * (not this instance's memory) once the file is off the wire and just before the insert, and the
-     * insert selects its row FROM that answer: the window is the length of one write, not of an
-     * upload.
+     * insert selects its row FROM that answer. Uploads from one person queue on the lock below,
+     * so a removal can still land while this one waits: it is asked once more after the commit,
+     * and the file is taken back if the answer changed (below).
      *
      * Zero rows back is now the refusal for either reason — the cap, or no live channel this actor
      * is in — so the branch below has to ask which before it can name one.
@@ -1058,6 +1059,45 @@ export function createChannelAttachmentRoutes(
     // the uploader's side it is the same refusal — it just became true later than that check ran.
     if ("forbidden" in outcome) {
       return context.json({ error: "You're not in this conversation." }, 403);
+    }
+
+    /*
+     * ASKED AGAIN ONCE THE ROW IS IN, AND TAKEN BACK IF THE ANSWER CHANGED.
+     *
+     * The membership lives in Intelligence, so it cannot be held inside the transaction above, and
+     * uploads from one person queue on that transaction's lock: a removal could land while this one
+     * waited. So the membership is read again after the commit. Still a member: the file stands,
+     * and a removal after this point is a removal after the upload. Not any more: the staged row is
+     * deleted again before anybody could have been shown it, and the answer is the same refusal.
+     */
+    if ("inserted" in outcome && outcome.inserted) {
+      const inserted = outcome.inserted;
+      const stillAfter = await conversations()
+        .refresh(channelId)
+        .then(
+          (conversation) =>
+            conversation !== null &&
+            conversation.deletedAt === null &&
+            isMember(conversation, actor.id),
+        )
+        .catch(() => null);
+      if (stillAfter === false) {
+        await database
+          .delete(attachments)
+          .where(
+            and(
+              eq(attachments.id, inserted.id),
+              isNull(attachments.attachedAt),
+            ),
+          )
+          .catch((error: unknown) =>
+            console.error(
+              `Could not take back attachment ${inserted.id} after ${actor.id} left ${channelId}.`,
+              error,
+            ),
+          );
+        return context.json({ error: "You're not in this conversation." }, 403);
+      }
     }
 
     /*
@@ -1493,10 +1533,13 @@ export function createAttachmentRoutes(
       // row comes back, never for anything in it. A `select` naming no field at all is not a
       // statement Postgres would take, so "nothing" has to be spelled as the cheapest something.
       const visible = await readOrNull(
-        database
-          .select({ id: attachments.id })
-          .from(attachments)
-          .where(await visibleToActor(database, actor.id, id)),
+        // Built inside the guard: which channel the file is in, and whether this person may see it,
+        // is a read too, and a store that cannot answer it is the same 503 as one that cannot answer this.
+        (async () =>
+          database
+            .select({ id: attachments.id })
+            .from(attachments)
+            .where(await visibleToActor(database, actor.id, id)))(),
         actor.id,
         id,
       );
@@ -1539,14 +1582,17 @@ export function createAttachmentRoutes(
      */
     if (context.req.method === "HEAD") {
       const probed = await readOrNull(
-        database
-          .select({
-            name: attachments.name,
-            mimeType: attachments.mimeType,
-            sizeBytes: attachments.sizeBytes,
-          })
-          .from(attachments)
-          .where(await visibleToActor(database, actor.id, id)),
+        // Built inside the guard: which channel the file is in, and whether this person may see it,
+        // is a read too, and a store that cannot answer it is the same 503 as one that cannot answer this.
+        (async () =>
+          database
+            .select({
+              name: attachments.name,
+              mimeType: attachments.mimeType,
+              sizeBytes: attachments.sizeBytes,
+            })
+            .from(attachments)
+            .where(await visibleToActor(database, actor.id, id)))(),
         actor.id,
         id,
       );
@@ -1572,14 +1618,17 @@ export function createAttachmentRoutes(
      * keeps it out is that only the answer carrying a body may ask for it.
      */
     const rows = await readOrNull(
-      database
-        .select({
-          name: attachments.name,
-          mimeType: attachments.mimeType,
-          bytes: attachments.bytes,
-        })
-        .from(attachments)
-        .where(await visibleToActor(database, actor.id, id)),
+      // Built inside the guard: which channel the file is in, and whether this person may see it,
+      // is a read too, and a store that cannot answer it is the same 503 as one that cannot answer this.
+      (async () =>
+        database
+          .select({
+            name: attachments.name,
+            mimeType: attachments.mimeType,
+            bytes: attachments.bytes,
+          })
+          .from(attachments)
+          .where(await visibleToActor(database, actor.id, id)))(),
       actor.id,
       id,
     );
