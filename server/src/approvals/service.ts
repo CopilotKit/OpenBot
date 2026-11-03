@@ -278,9 +278,9 @@ export function createApprovalService(
       const policy = store.policy;
       const continuation = candidate.continuation ?? currentApprovalContext();
       /*
-       * A TASK STARTED FROM A CHECK-IN ASKS BEFORE EVERYTHING BUT A TRUSTED READ, whatever the
-       * person's own switch or rules would allow: the work came from something a Bot noticed, not
-       * something the person wrote out, so they see each step before it happens. The one thing it
+       * A TASK ASKS BEFORE EVERYTHING BUT A TRUSTED READ, whatever the person's own switch or rules
+       * would allow: the work came from something a Bot noticed, or from its restatement of what the
+       * person asked, and runs with nobody watching, so they see each step before it happens. The one thing it
        * does unasked is read an app the person connected with their own account, with a tool a
        * reviewed read list names (`ownConnectionRead`). A tool only labelled a read, by its server or
        * a broker, asks; so does a read chat would run freely (a page, a search on the deployment's

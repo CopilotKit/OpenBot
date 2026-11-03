@@ -73,8 +73,10 @@ describe("actor-scoped agent resolver", () => {
     });
     const actor = { id: "u1", role: "user" as const };
     await resolver.resolveAgentForActor(actor, "risk", { task: true });
+    // A subagent hands nothing on either.
+    await resolver.resolveAgentForActor(actor, "risk", { subagent: true });
     await resolver.resolveAgentForActor(actor, "risk");
-    expect(turns).toEqual([{ task: true }, undefined]);
+    expect(turns).toEqual([{ task: true }, { task: true }, undefined]);
   });
 
   test("propagates construction failures instead of reporting an unavailable coworker", async () => {
