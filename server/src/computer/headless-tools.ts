@@ -239,7 +239,7 @@ export function createHeadlessComputerTools(options: {
     ),
     tool(
       "computer_run_command",
-      "Run a bash shell command in your workspace. Pipes and && work; long output is truncated and long commands are stopped. For package installation use sudo apt-get; if refused say so rather than retrying.",
+      "Run a bash shell command in your workspace. Pipes and && work; long output is truncated and long commands are stopped. For package installation check id -u first: as root (0), use apt-get directly; otherwise use sudo apt-get. If installation is refused, say so rather than retrying.",
       z.strictObject({ command: text }),
       async (input, { signal }) => ({
         ok: true,
