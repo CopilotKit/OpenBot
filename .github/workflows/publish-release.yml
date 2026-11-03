@@ -182,12 +182,34 @@ jobs:
       id-token: write
       attestations: write
 
+  # The macOS and Windows installers, built from the commit that passed the checks, with the CLI
+  # bundled. A candidate or beta pins the images built above, so whoever tests it runs exactly what
+  # the final will ship. A stable release is what customers install, and it is not pinned. These are
+  # ad-hoc signed and not notarized, the same as every CI build today: signing is still to come, and
+  # needs certificates this workflow does not hold.
+  desktop:
+    name: desktop
+    needs: [metadata, verify, checks, images]
+    if: needs.metadata.outputs.is_release == 'true'
+    uses: $/.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ github.sha }}
+      channel: release
+      bundle_cli: true
+      manifest_artifact: ${{ needs.metadata.outputs.prerelease == 'true' && needs.images.outputs.manifest-artifact || '' }}
+      retention_days: 30
+      platforms: '["macos","windows"]'
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+    permissions:
+      contents: read
+
   # The tag and the release, last, so nothing is announced that was not built. The manifest is the
   # useful artefact: it pins the digest, so a deploy or a rollback names an exact image rather than a
   # tag somebody could move.
   github-release:
     name: tag and release
-    needs: [metadata, verify, checks, images]
+    needs: [metadata, verify, checks, images, desktop]
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -204,11 +226,18 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.images.outputs.manifest-artifact }}
+      # The installers the desktop job built, one folder per platform under `installers/`, where the
+      # step below attaches them to the release. They are ad-hoc and unsigned, like every CI build.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: openbot-desktop-*
+          path: installers
       - name: Tag and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
           PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+          FINAL_FROM_CANDIDATE: ${{ needs.metadata.outputs.final_from_candidate }}
         run: |
           set -euo pipefail
           # The notes are the section a person wrote, not a list of commits. A candidate or beta
@@ -248,6 +277,47 @@ jobs:
             gh release create "$VERSION" container-images.json \
               --title "$VERSION" --notes-file notes.md "${flags[@]}"
           fi
+
+          # Every installer the desktop job built. A release without them is not the release that
+          # was asked for, so none at all is a failure. `--clobber` lets a re-run replace them.
+          installers=()
+          while IFS= read -r installer; do
+            installers+=("$installer")
+          done < <(find installers -type f \( -name '*.dmg' -o -name '*.exe' \) | sort)
+          if [ "${#installers[@]}" -eq 0 ]; then
+            echo "::error::No .dmg or .exe was downloaded into installers/, so there is nothing to attach."
+            exit 1
+          fi
+          gh release upload "$VERSION" "${installers[@]}" --clobber
+
+          # Say which CLI the installers carry. Every platform bundles the same one, so the first
+          # build-version.json that names a CLI is the answer.
+          cli="no CLI bundled"
+          node=""
+          while IFS= read -r build; do
+            if jq -e '.cli' "$build" >/dev/null; then
+              cli="$(jq -r '.cli.name + "@" + .cli.version' "$build")"
+              node="$(jq -r '.node.version // empty' "$build")"
+              break
+            fi
+          done < <(find installers -type f -name build-version.json | sort)
+          {
+            echo "### Installers for $VERSION"
+            echo ""
+            for installer in "${installers[@]}"; do
+              echo "- \`$(basename "$installer")\`"
+            done
+            echo ""
+            echo "- CLI: $cli"
+            if [ -n "$node" ]; then
+              echo "- Node: $node"
+            fi
+            # A final cut from a candidate is checked against that candidate, which includes the
+            # CLI pin, so the CLI here is the one the candidate was tested with.
+            if [ "$FINAL_FROM_CANDIDATE" = true ]; then
+              echo "- This is the CLI the candidate pinned."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # A final cut from a candidate is published from `release/X.Y`, so main has not seen it: the
   # version bump, the changelog section and any fix made while the candidates were tested are all
