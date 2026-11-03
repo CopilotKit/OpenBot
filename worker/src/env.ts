@@ -14,6 +14,12 @@ export type WorkerEnv = {
   serverInternalUrl: string;
   databaseUrl: string;
   owner: string;
+  /**
+   * Where the routines themselves are: Intelligence's agent schedules, under the deployment's
+   * project key. The gateway address is optional: without it the worker's copy of the routines is
+   * refreshed on a timer rather than by announcements, and firing stays exactly once either way.
+   */
+  intelligence: { apiUrl: string; apiKey: string; gatewayWsUrl?: string };
 };
 
 /**
@@ -66,7 +72,27 @@ export function loadWorkerEnv(
 
   const owner = workOwner("routines", environment);
 
-  return { workerSharedSecret, serverInternalUrl, databaseUrl, owner };
+  const apiUrl = environment.INTELLIGENCE_API_URL?.trim();
+  if (!apiUrl) {
+    throw new Error(
+      "INTELLIGENCE_API_URL is not set, so this worker cannot read the routines it is meant to fire: they live in Intelligence.",
+    );
+  }
+  const apiKey = environment.INTELLIGENCE_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error(
+      "INTELLIGENCE_API_KEY is not set, so this worker cannot read the routines it is meant to fire: they live in Intelligence.",
+    );
+  }
+  const gatewayWsUrl = environment.INTELLIGENCE_GATEWAY_WS_URL?.trim();
+
+  return {
+    workerSharedSecret,
+    serverInternalUrl,
+    databaseUrl,
+    owner,
+    intelligence: { apiUrl, apiKey, ...(gatewayWsUrl ? { gatewayWsUrl } : {}) },
+  };
 }
 
 /** Where a claimed run is handed to the server. Built on the normalised base URL. */

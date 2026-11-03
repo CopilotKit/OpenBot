@@ -8,7 +8,6 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
-  routines,
   users,
 } from "../src/db/schema";
 import {
@@ -17,6 +16,7 @@ import {
   RoutineRefusedError,
 } from "../src/routines/store";
 import { removeBots, seedBot } from "./support/bots";
+import { purgeRoutinesOwnedBy } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -36,7 +36,7 @@ afterEach(async () => {
   // cleared first so a failure part-way through cleanup leaves nothing pointing at rows this file
   // is about to delete.
   for (const userId of createdUserIds) {
-    await database.delete(routines).where(eq(routines.ownerUserId, userId));
+    await purgeRoutinesOwnedBy(userId);
   }
   for (const channelId of createdChannelIds.splice(0)) {
     await database

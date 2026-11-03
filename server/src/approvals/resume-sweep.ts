@@ -1,3 +1,4 @@
+import { finishRoutineRunsWaitingOn } from "../routines/store";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -7,11 +8,7 @@ import { PERSON_INITIATOR } from "../audit";
 import type { GroupConversations } from "../channels/group";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
-import {
-  intelligenceChannelMappings,
-  responsibilityRuns,
-  routineRuns,
-} from "../db/schema";
+import { intelligenceChannelMappings, responsibilityRuns } from "../db/schema";
 import type { DeliveryScope } from "../delivery/types";
 import type { ResponsibilityStore } from "../responsibilities/types";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
@@ -157,20 +154,7 @@ export function createApprovalResumeTick(deps: {
                 },
                 { id: messageId, text: outcome.replyText, kind: "reply" },
               );
-            await database
-              .update(routineRuns)
-              .set({
-                status: "succeeded",
-                finishedAt: new Date(),
-                error: null,
-                waiting: null,
-              })
-              .where(
-                and(
-                  eq(routineRuns.status, "waiting"),
-                  sql`${routineRuns.waiting}->>'approvalId' = ${approvalId}`,
-                ),
-              );
+            await finishRoutineRunsWaitingOn("approvalId", approvalId);
           },
         };
         abandon = (reason) =>

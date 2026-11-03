@@ -17,6 +17,11 @@ import { workOwner } from "@openbot/shared/work-owner";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { createRoutineStore } from "../src/routines/store";
+import { createScheduleClient } from "../src/schedules/client";
+import {
+  createScheduleDirectory,
+  installScheduleDirectory,
+} from "../src/schedules/directory";
 import {
   dispatchClaimedRoutines,
   offerDueRoutines,
@@ -58,6 +63,21 @@ if (!serverInternalUrl) {
 
 const database = createDatabase(config.databaseUrl);
 const queue = createWorkQueue(database);
+/*
+ * The routines themselves live in Intelligence. This sweep reads the due ones from a schedule
+ * directory of its own, loaded once from Intelligence at start: a one-shot process gets nothing from
+ * announcements, so it does not subscribe to them. Exactly-once firing never depended on the copy
+ * being fresh: the `routine.fire` key and Intelligence's compare-and-set on the clock decide it.
+ */
+const scheduleDirectory = installScheduleDirectory(
+  createScheduleDirectory({
+    client: createScheduleClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+  }),
+);
+await scheduleDirectory.start();
 const routineStore = createRoutineStore(database);
 
 // A name for the lease, so a stuck claim can be traced back to the pod that took it.
@@ -129,5 +149,6 @@ try {
     }),
   );
 } finally {
+  scheduleDirectory.stop();
   await database.$client.end({ timeout: 5 });
 }
