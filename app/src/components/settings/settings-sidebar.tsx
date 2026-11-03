@@ -8,7 +8,6 @@ import {
   IconHistory,
   IconKey,
   IconLayoutGrid,
-  IconLock,
   IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
@@ -90,19 +89,14 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 
 /**
  * What the personal edition keeps of Admin. There is no Admin there, and the one person still writes
- * skills for every Bot, stores credentials, resets the computer and reads the trail. Apps are not
- * here: adding one and connecting it are the same step, on Connections.
+ * skills for every Bot, resets the computer and reads the trail. Apps, keys and saved logins are not
+ * here: every way a Bot signs in to something is on Connections.
  */
 const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   {
     title: "Skills for every Bot",
     icon: IconBook,
     linkOptions: { to: "/settings/skills" },
-  },
-  {
-    title: "Credentials",
-    icon: IconLock,
-    linkOptions: { to: "/settings/credentials" },
   },
   {
     title: "Computer",
@@ -120,9 +114,12 @@ export function settingsSidebarItems(
   edition: "team" | "personal",
 ): SettingsSidebarItem[] {
   // Learning is who else's Bots use your Skills, and the personal edition has nobody else.
+  // Passwords is on Connections there, with the apps and keys.
   return edition === "personal"
     ? [
-        ...SETTINGS_SIDEBAR_ITEMS.filter((item) => item.title !== "Learning"),
+        ...SETTINGS_SIDEBAR_ITEMS.filter(
+          (item) => item.title !== "Learning" && item.title !== "Passwords",
+        ),
         ...PERSONAL_SETTINGS_SIDEBAR_ITEMS,
       ]
     : SETTINGS_SIDEBAR_ITEMS;

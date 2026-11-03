@@ -19,10 +19,14 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { revokeCredentialMutationOptions } from "@/lib/credentials/mutations";
 import { credentialListQueryOptions } from "@/lib/credentials/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 
 export function CredentialsPage() {
   const paths = useManagePaths();
+  // Under Connections in the personal edition, beside the apps that use these keys.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const queryClient = useQueryClient();
   const credentials = useQuery(credentialListQueryOptions());
   const revokeCredential = useMutation(
@@ -42,8 +46,17 @@ export function CredentialsPage() {
           Add credential
         </Button>
       }
-      description="Manage this deployment’s keys and tokens. Saved secrets cannot be viewed again."
-      title="Credentials"
+      backButton={
+        personal
+          ? { label: "Connections", linkProps: paths.plugins() }
+          : undefined
+      }
+      description={
+        personal
+          ? "API keys and tokens your apps and models use. A saved key can't be viewed again."
+          : "Manage this deployment’s keys and tokens. Saved secrets cannot be viewed again."
+      }
+      title={paths.credentialsLabel}
     >
       <PageSection title="Saved credentials">
         {credentials.isPending ? null : credentials.error ? (

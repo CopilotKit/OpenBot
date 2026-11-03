@@ -33,8 +33,10 @@ export function managePaths(edition: "team" | "personal") {
           ? linkOptions({ to: "/connections/browse/composio" })
           : linkOptions({ to: "/connections/browse/arcade" }),
       skills: () => linkOptions({ to: "/settings/skills" }),
-      credentials: () => linkOptions({ to: "/settings/credentials" }),
-      newCredential: () => linkOptions({ to: "/settings/credentials/new" }),
+      // Beside the apps that use them, so every sign-in and key is on Connections.
+      credentialsLabel: "Keys",
+      credentials: () => linkOptions({ to: "/connections/keys" }),
+      newCredential: () => linkOptions({ to: "/connections/keys/new" }),
       computers: () => linkOptions({ to: "/settings/computer" }),
       audit: () => linkOptions({ to: "/settings/activity" }),
     };
@@ -59,6 +61,7 @@ export function managePaths(edition: "team" | "personal") {
         ? linkOptions({ to: "/admin/plugins/composio" })
         : linkOptions({ to: "/admin/plugins/arcade" }),
     skills: () => linkOptions({ to: "/admin/skills" }),
+    credentialsLabel: "Credentials",
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),
     computers: () => linkOptions({ to: "/admin/computers" }),
@@ -79,10 +82,10 @@ export function personalAppsAddress(rest: string): string {
   return path ? `/connections/${path}` : "/connections";
 }
 
-/** Each other Admin page the personal edition keeps, and where it is under Settings. */
+/** Each other Admin page the personal edition keeps, and where it is now. */
 const MOVED: readonly (readonly [admin: string, settings: string])[] = [
   ["/admin/skills", "/settings/skills"],
-  ["/admin/credentials", "/settings/credentials"],
+  ["/admin/credentials", "/connections/keys"],
   ["/admin/computers", "/settings/computer"],
   ["/admin/audit", "/settings/activity"],
 ];

@@ -43,7 +43,10 @@ const KIND_LABEL = { model: "Model", connector: "Connector" } as const;
  */
 export function NewCredentialPage() {
   const paths = useManagePaths();
-  const back = { label: "Credentials", linkProps: paths.credentials() };
+  const back = {
+    label: paths.credentialsLabel,
+    linkProps: paths.credentials(),
+  };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const credentials = useQuery(credentialListQueryOptions());

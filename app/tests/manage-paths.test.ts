@@ -50,8 +50,8 @@ describe("where the pages a person manages live", () => {
     expect(paths.pluginsLabel).toBe("Connections");
     expect(managePaths("team").pluginsLabel).toBe("Plugins");
     expect(href(paths.skills())).toBe("/settings/skills");
-    expect(href(paths.credentials())).toBe("/settings/credentials");
-    expect(href(paths.newCredential())).toBe("/settings/credentials/new");
+    expect(href(paths.credentials())).toBe("/connections/keys");
+    expect(href(paths.newCredential())).toBe("/connections/keys/new");
     expect(href(paths.computers())).toBe("/settings/computer");
     expect(href(paths.audit())).toBe("/settings/activity");
   });

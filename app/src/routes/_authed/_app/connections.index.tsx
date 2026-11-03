@@ -3,6 +3,9 @@ import {
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconCheck,
+  IconChevronRight,
+  IconKey,
+  IconLock,
   IconPlug,
   IconSearch,
 } from "@tabler/icons-react";
@@ -11,6 +14,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import * as React from "react";
 import {
   PageEmpty,
+  PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
@@ -32,8 +36,10 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -521,6 +527,45 @@ function RouteComponent() {
           </p>
         ) : null}
       </PageSection>
+      {/*
+       * The rest of what a Bot signs in with, here rather than under Settings, so every sign-in and
+       * key is on one page in the personal edition.
+       */}
+      {personal ? (
+        <PageSection title="Sign-ins and keys">
+          <PageRows>
+            <Item render={<Link to="/connections/logins" />} size="sm">
+              <ItemMedia variant="icon">
+                <IconLock />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Saved logins</ItemTitle>
+                <ItemDescription>
+                  Website logins you saved when signing a Bot in.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+            <Separator />
+            <Item render={<Link {...paths.credentials()} />} size="sm">
+              <ItemMedia variant="icon">
+                <IconKey />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Keys</ItemTitle>
+                <ItemDescription>
+                  API keys and tokens your apps and models use.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+          </PageRows>
+        </PageSection>
+      ) : null}
     </PageShell>
   );
 }

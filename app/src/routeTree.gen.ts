@@ -57,6 +57,8 @@ import { Route as AuthedAppChannelChannelIdRouteImport } from './routes/_authed/
 import { Route as AuthedAppChannelNewRouteImport } from './routes/_authed/_app/channel/new'
 import { Route as AuthedAppConnectionsIndexRouteImport } from './routes/_authed/_app/connections.index'
 import { Route as AuthedAppConnectionsKeyRouteImport } from './routes/_authed/_app/connections.$key'
+import { Route as AuthedAppConnectionsKeysRouteImport } from './routes/_authed/_app/connections.keys'
+import { Route as AuthedAppConnectionsLoginsRouteImport } from './routes/_authed/_app/connections.logins'
 import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_app/group/$channelId'
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
@@ -89,6 +91,7 @@ import { Route as AuthedAppBotsAgentIdSetupRouteImport } from './routes/_authed/
 import { Route as AuthedAppBotsAgentIdSharingRouteImport } from './routes/_authed/_app/bots.$agentId.sharing'
 import { Route as AuthedAppConnectionsBrowseArcadeRouteImport } from './routes/_authed/_app/connections.browse.arcade'
 import { Route as AuthedAppConnectionsBrowseComposioRouteImport } from './routes/_authed/_app/connections.browse.composio'
+import { Route as AuthedAppConnectionsKeysNewRouteImport } from './routes/_authed/_app/connections.keys_.new'
 import { Route as AuthedSettingsPersonalCredentialsNewRouteImport } from './routes/_authed/settings/_personal/credentials_.new'
 import { Route as AuthedSettingsPersonalPluginsSplatRouteImport } from './routes/_authed/settings/_personal/plugins.$'
 import { Route as AuthedAppConnectionsKeyBotsAgentIdRouteImport } from './routes/_authed/_app/connections.$key_.bots.$agentId'
@@ -341,6 +344,18 @@ const AuthedAppConnectionsKeyRoute = AuthedAppConnectionsKeyRouteImport.update({
   path: '/connections/$key',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAppConnectionsKeysRoute =
+  AuthedAppConnectionsKeysRouteImport.update({
+    id: '/connections/keys',
+    path: '/connections/keys',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
+const AuthedAppConnectionsLoginsRoute =
+  AuthedAppConnectionsLoginsRouteImport.update({
+    id: '/connections/logins',
+    path: '/connections/logins',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAppGroupChannelIdRoute = AuthedAppGroupChannelIdRouteImport.update({
   id: '/group/$channelId',
   path: '/group/$channelId',
@@ -528,6 +543,12 @@ const AuthedAppConnectionsBrowseComposioRoute =
     path: '/connections/browse/composio',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppConnectionsKeysNewRoute =
+  AuthedAppConnectionsKeysNewRouteImport.update({
+    id: '/connections/keys_/new',
+    path: '/connections/keys/new',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedSettingsPersonalCredentialsNewRoute =
   AuthedSettingsPersonalCredentialsNewRouteImport.update({
     id: '/credentials_/new',
@@ -607,6 +628,8 @@ export interface FileRoutesByFullPath {
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/connections/$key': typeof AuthedAppConnectionsKeyRoute
+  '/connections/keys': typeof AuthedAppConnectionsKeysRoute
+  '/connections/logins': typeof AuthedAppConnectionsLoginsRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
@@ -642,6 +665,7 @@ export interface FileRoutesByFullPath {
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
   '/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
+  '/connections/keys/new': typeof AuthedAppConnectionsKeysNewRoute
   '/settings/credentials/new': typeof AuthedSettingsPersonalCredentialsNewRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
@@ -689,6 +713,8 @@ export interface FileRoutesByTo {
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/connections/$key': typeof AuthedAppConnectionsKeyRoute
+  '/connections/keys': typeof AuthedAppConnectionsKeysRoute
+  '/connections/logins': typeof AuthedAppConnectionsLoginsRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
@@ -724,6 +750,7 @@ export interface FileRoutesByTo {
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
   '/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
+  '/connections/keys/new': typeof AuthedAppConnectionsKeysNewRoute
   '/settings/credentials/new': typeof AuthedSettingsPersonalCredentialsNewRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/bots/$agentId': typeof AuthedAppBotsAgentIdIndexRoute
@@ -778,6 +805,8 @@ export interface FileRoutesById {
   '/_authed/_app/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/_authed/_app/channel/new': typeof AuthedAppChannelNewRoute
   '/_authed/_app/connections/$key': typeof AuthedAppConnectionsKeyRoute
+  '/_authed/_app/connections/keys': typeof AuthedAppConnectionsKeysRoute
+  '/_authed/_app/connections/logins': typeof AuthedAppConnectionsLoginsRoute
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
@@ -813,6 +842,7 @@ export interface FileRoutesById {
   '/_authed/_app/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
   '/_authed/_app/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/_authed/_app/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
+  '/_authed/_app/connections/keys_/new': typeof AuthedAppConnectionsKeysNewRoute
   '/_authed/settings/_personal/credentials_/new': typeof AuthedSettingsPersonalCredentialsNewRoute
   '/_authed/settings/_personal/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/_authed/_app/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
@@ -865,6 +895,8 @@ export interface FileRouteTypes {
     | '/channel/$channelId'
     | '/channel/new'
     | '/connections/$key'
+    | '/connections/keys'
+    | '/connections/logins'
     | '/group/$channelId'
     | '/group/new'
     | '/s/$screen'
@@ -900,6 +932,7 @@ export interface FileRouteTypes {
     | '/bots/$agentId/sharing'
     | '/connections/browse/arcade'
     | '/connections/browse/composio'
+    | '/connections/keys/new'
     | '/settings/credentials/new'
     | '/settings/plugins/$'
     | '/bots/$agentId/'
@@ -947,6 +980,8 @@ export interface FileRouteTypes {
     | '/channel/$channelId'
     | '/channel/new'
     | '/connections/$key'
+    | '/connections/keys'
+    | '/connections/logins'
     | '/group/$channelId'
     | '/group/new'
     | '/s/$screen'
@@ -982,6 +1017,7 @@ export interface FileRouteTypes {
     | '/bots/$agentId/sharing'
     | '/connections/browse/arcade'
     | '/connections/browse/composio'
+    | '/connections/keys/new'
     | '/settings/credentials/new'
     | '/settings/plugins/$'
     | '/bots/$agentId'
@@ -1035,6 +1071,8 @@ export interface FileRouteTypes {
     | '/_authed/_app/channel/$channelId'
     | '/_authed/_app/channel/new'
     | '/_authed/_app/connections/$key'
+    | '/_authed/_app/connections/keys'
+    | '/_authed/_app/connections/logins'
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
     | '/_authed/_app/s/$screen'
@@ -1070,6 +1108,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/$agentId/sharing'
     | '/_authed/_app/connections/browse/arcade'
     | '/_authed/_app/connections/browse/composio'
+    | '/_authed/_app/connections/keys_/new'
     | '/_authed/settings/_personal/credentials_/new'
     | '/_authed/settings/_personal/plugins/$'
     | '/_authed/_app/bots/$agentId/'
@@ -1422,6 +1461,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppConnectionsKeyRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/connections/keys': {
+      id: '/_authed/_app/connections/keys'
+      path: '/connections/keys'
+      fullPath: '/connections/keys'
+      preLoaderRoute: typeof AuthedAppConnectionsKeysRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/connections/logins': {
+      id: '/_authed/_app/connections/logins'
+      path: '/connections/logins'
+      fullPath: '/connections/logins'
+      preLoaderRoute: typeof AuthedAppConnectionsLoginsRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/_app/group/$channelId': {
       id: '/_authed/_app/group/$channelId'
       path: '/group/$channelId'
@@ -1646,6 +1699,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppConnectionsBrowseComposioRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/connections/keys_/new': {
+      id: '/_authed/_app/connections/keys_/new'
+      path: '/connections/keys/new'
+      fullPath: '/connections/keys/new'
+      preLoaderRoute: typeof AuthedAppConnectionsKeysNewRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/settings/_personal/credentials_/new': {
       id: '/_authed/settings/_personal/credentials_/new'
       path: '/credentials/new'
@@ -1844,6 +1904,8 @@ interface AuthedAppRouteChildren {
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
   AuthedAppChannelNewRoute: typeof AuthedAppChannelNewRoute
   AuthedAppConnectionsKeyRoute: typeof AuthedAppConnectionsKeyRoute
+  AuthedAppConnectionsKeysRoute: typeof AuthedAppConnectionsKeysRoute
+  AuthedAppConnectionsLoginsRoute: typeof AuthedAppConnectionsLoginsRoute
   AuthedAppGroupChannelIdRoute: typeof AuthedAppGroupChannelIdRoute
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
   AuthedAppSScreenRoute: typeof AuthedAppSScreenRoute
@@ -1861,6 +1923,7 @@ interface AuthedAppRouteChildren {
   AuthedAppBotsAgentIdSharingRoute: typeof AuthedAppBotsAgentIdSharingRoute
   AuthedAppConnectionsBrowseArcadeRoute: typeof AuthedAppConnectionsBrowseArcadeRoute
   AuthedAppConnectionsBrowseComposioRoute: typeof AuthedAppConnectionsBrowseComposioRoute
+  AuthedAppConnectionsKeysNewRoute: typeof AuthedAppConnectionsKeysNewRoute
   AuthedAppBotsAgentIdIndexRoute: typeof AuthedAppBotsAgentIdIndexRoute
   AuthedAppConnectionsKeyBotsAgentIdRoute: typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   AuthedAppConnectionsKeyToolsToolRoute: typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -1881,6 +1944,8 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,
   AuthedAppChannelNewRoute: AuthedAppChannelNewRoute,
   AuthedAppConnectionsKeyRoute: AuthedAppConnectionsKeyRoute,
+  AuthedAppConnectionsKeysRoute: AuthedAppConnectionsKeysRoute,
+  AuthedAppConnectionsLoginsRoute: AuthedAppConnectionsLoginsRoute,
   AuthedAppGroupChannelIdRoute: AuthedAppGroupChannelIdRoute,
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
   AuthedAppSScreenRoute: AuthedAppSScreenRoute,
@@ -1900,6 +1965,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppConnectionsBrowseArcadeRoute: AuthedAppConnectionsBrowseArcadeRoute,
   AuthedAppConnectionsBrowseComposioRoute:
     AuthedAppConnectionsBrowseComposioRoute,
+  AuthedAppConnectionsKeysNewRoute: AuthedAppConnectionsKeysNewRoute,
   AuthedAppBotsAgentIdIndexRoute: AuthedAppBotsAgentIdIndexRoute,
   AuthedAppConnectionsKeyBotsAgentIdRoute:
     AuthedAppConnectionsKeyBotsAgentIdRoute,

@@ -1,6 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { CredentialsPage } from "@/components/manage/credentials-page";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/** Where Credentials was in the personal edition. Keys now sit beside the apps, on Connections. */
 export const Route = createFileRoute("/_authed/settings/_personal/credentials")(
-  { component: CredentialsPage },
+  {
+    beforeLoad: () => {
+      throw redirect({ to: "/connections/keys" });
+    },
+  },
 );

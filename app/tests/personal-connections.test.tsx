@@ -223,6 +223,17 @@ describe("Connections in the personal edition", () => {
     expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
   });
 
+  test("holds saved logins and keys too, so every sign-in is on one page", async () => {
+    const { view } = draw("personal");
+    await view.findByTestId("account-notion");
+    expect(
+      view.getByRole("link", { name: /Saved logins/ }).getAttribute("href"),
+    ).toBe("/connections/logins");
+    expect(view.getByRole("link", { name: /^Keys/ }).getAttribute("href")).toBe(
+      "/connections/keys",
+    );
+  });
+
   test("apps that need something typed first wait behind one button, or a search", async () => {
     const { view, user } = draw("personal");
     await view.findByTestId("account-notion");
@@ -327,6 +338,7 @@ describe("an app under Connections in the personal edition", () => {
 test("the team edition's Connections still lists only what an admin turned on, as your accounts", async () => {
   const { view } = draw("team");
   expect(await view.findByTestId("account-notion")).toBeTruthy();
+  expect(view.queryByText("Sign-ins and keys")).toBeNull();
   expect(view.queryByTestId("account-google-drive")).toBeNull();
   expect(view.queryByTestId("account-exa")).toBeNull();
 });
