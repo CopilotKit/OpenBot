@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   configureBotLifecycle,
@@ -29,11 +29,6 @@ import {
   botLifecycle,
   updateRoutingPreferences,
 } from "../src/db/schema/lifecycle";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
 import { workItems } from "../src/db/schema/work";
 import { createExpoPushTransport } from "../src/delivery/push";
 import { createDeliveryRouter } from "../src/delivery/router";
@@ -50,7 +45,14 @@ import type { ProactiveSetting } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
 import { notificationDestination } from "../../mobile/src/links";
 import { removeBots, seedBot } from "./support/bots";
+import {
+  freeSlot,
+  itemsOf,
+  purgeCheckInHistoryOf,
+  purgeSchedulesOf,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestSchedules } from "./support/schedules";
 
 /*
  * A ping's delivery through the real path: real Postgres, the real proactive store writing the ping
@@ -168,6 +170,7 @@ let sms: DeliveryBinding;
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000);
 
 beforeAll(async () => {
+  await useTestSchedules();
   configureBotLifecycle({ database });
   await database
     .insert(users)
@@ -247,15 +250,7 @@ async function reset() {
   await database
     .delete(deliveryInbox)
     .where(eq(deliveryInbox.ownerUserId, owner));
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner));
-  await database
-    .delete(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner));
-  await database
-    .delete(proactivePeople)
-    .where(eq(proactivePeople.ownerUserId, owner));
+  await purgeCheckInHistoryOf(owner);
   await database
     .delete(botLifecycle)
     .where(eq(botLifecycle.ownerUserId, owner));
@@ -283,6 +278,7 @@ beforeEach(reset);
 
 afterAll(async () => {
   await reset();
+  await purgeSchedulesOf([owner]);
   resetBotLifecycleForTests();
   await database.delete(users).where(eq(users.id, owner));
   await removeBots(BOTS);
@@ -325,10 +321,7 @@ const raise = (setting: ProactiveSetting, title: string, why: string) =>
 
 /** The ping the person's free slot lets through, as the ping pass writes it. */
 async function ping(): Promise<AttentionPing> {
-  await database
-    .update(proactivePeople)
-    .set({ lastPingedAt: null })
-    .where(eq(proactivePeople.ownerUserId, owner));
+  await freeSlot(owner);
   const written = await proactive.pings.take(owner);
   if (!written) throw new Error("Expected a ping.");
   return written;
@@ -716,15 +709,7 @@ describe("a conversation the person lost", () => {
     await router.notifyAttention(await twoBotPing());
     expect(await outboxOf()).toEqual([]);
     expect(
-      await database
-        .select({ id: proactiveSuggestions.id })
-        .from(proactiveSuggestions)
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            sql`${proactiveSuggestions.pingId} is not null`,
-          ),
-        ),
+      (await itemsOf(owner)).filter((item) => item.pingId !== null),
     ).toHaveLength(2);
   });
 });

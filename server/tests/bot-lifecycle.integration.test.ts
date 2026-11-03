@@ -31,15 +31,13 @@ import {
 import { routines } from "../src/db/schema/coworker";
 import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources, personalMemories } from "../src/db/schema/memory";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
 import { responsibilities } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
 import { removeBots, seedBot } from "./support/bots";
+import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
 /**
  * Pause, reset, Activity, attention, follow-ups and update routing against a real PostgreSQL.
@@ -58,7 +56,29 @@ const direct = `${prefix}-direct`;
 const shared = `${prefix}-shared`;
 const othersDirect = `${prefix}-others-direct`;
 
+/** A check-in setting as a person turning check-ins on makes one, in Intelligence. */
+async function checkInSetting(input: {
+  id: string;
+  ownerUserId: string;
+  channelId: string;
+  threadId: string;
+  enabled?: boolean;
+}) {
+  return (await useTestSchedules()).create("check-in-settings", {
+    agentId: bot,
+    focus: "",
+    enabled: true,
+    intervalMinutes: 60,
+    nextRunAt: new Date(Date.now() + 3_600_000),
+    lastRunAt: null,
+    lastStatus: "idle",
+    lastError: null,
+    ...input,
+  });
+}
+
 beforeAll(async () => {
+  await useTestSchedules();
   configureBotLifecycle({ database });
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
@@ -553,14 +573,13 @@ describe("reset", () => {
         formedBy: "bot",
         formedByAgentId: bot,
       });
-      await database.insert(proactiveSettings).values({
+      await checkInSetting({
         id: `${prefix}-research-${person}`,
         ownerUserId: person,
-        agentId: bot,
         channelId: person === owner ? direct : othersDirect,
         threadId: `${prefix}-research-thread-${person}`,
       });
-      await database.insert(proactiveSuggestions).values({
+      await testScheduleClient().create("check-in-suggestions", {
         id: `${prefix}-suggestion-${person}`,
         ownerUserId: person,
         agentId: bot,
@@ -568,6 +587,14 @@ describe("reset", () => {
         runId: "run-1",
         title: "Review the PR",
         detail: "It waits on you",
+        sourceApp: null,
+        sourceRef: null,
+        sourceLink: null,
+        status: "open",
+        dedupeKey: null,
+        pingId: null,
+        deliveredAt: null,
+        resolvedAt: null,
       });
       await database.insert(approvalRules).values([
         {
@@ -615,10 +642,7 @@ describe("reset", () => {
             .from(personalMemories)
             .where(eq(personalMemories.id, `${prefix}-formed-${person}`))
         : table === "research"
-          ? database
-              .select({ id: proactiveSuggestions.id })
-              .from(proactiveSuggestions)
-              .where(eq(proactiveSuggestions.ownerUserId, person))
+          ? itemsOf(person)
           : database
               .select({ id: approvalRules.id })
               .from(approvalRules)
@@ -668,10 +692,9 @@ describe("reset", () => {
         title: "Calendar",
       },
     ]);
-    await database.insert(proactiveSettings).values({
+    await checkInSetting({
       id: `${prefix}-off-research`,
       ownerUserId: person,
-      agentId: bot,
       channelId: direct,
       threadId: `${prefix}-off-research-thread`,
       enabled: false,
@@ -707,5 +730,6 @@ describe("reset", () => {
 });
 
 afterAll(async () => {
+  await purgeSchedulesOf([owner, other, `${prefix}-chooser`]);
   await database.$client.close();
 });

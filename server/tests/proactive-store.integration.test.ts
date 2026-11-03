@@ -6,7 +6,6 @@ import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
-import { proactiveSettings } from "../src/db/schema/proactive";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
 import { MemoryRefusedError } from "../src/memory/types";
@@ -17,8 +16,11 @@ import {
   ProactiveNotFoundError,
   ProactiveRefusedError,
 } from "../src/proactive/types";
+import { ScheduleError } from "../src/schedules/client";
 import { removeBots, seedBot } from "./support/bots";
+import { makeDue, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `proactive-${randomUUID()}`;
@@ -43,6 +45,7 @@ const memory = createMemoryStore(database);
 const ingestion = createMemoryIngestion({ store: memory, plugins });
 
 beforeAll(async () => {
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
@@ -76,6 +79,7 @@ beforeAll(async () => {
   await plugins.grant("mcp", ref, bot, owner);
 });
 afterAll(async () => {
+  await purgeSchedulesOf([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, secondBot]);
   await database.delete(mcpServers).where(eq(mcpServers.id, server));
@@ -105,24 +109,28 @@ test("settings are owner scoped, one per Bot, and bounded in frequency", async (
       `${prefix}-t3`,
     ),
   ).rejects.toBeInstanceOf(ProactiveRefusedError);
-  // The database refuses what the schema refuses, even past the parser.
-  const refusal = await database
-    .insert(proactiveSettings)
-    .values({
+  // Intelligence refuses what the schema refuses, even past the parser.
+  const refusal = await testScheduleClient()
+    .create("check-in-settings", {
       id: randomUUID(),
       ownerUserId: owner,
       agentId: secondBot,
       channelId: "c",
       threadId: "t",
+      focus: "",
+      enabled: true,
       intervalMinutes: 5,
+      nextRunAt: new Date(),
+      lastRunAt: null,
+      lastStatus: "idle",
+      lastError: null,
     })
     .then(
       () => null,
       (error: unknown) => error,
     );
-  expect(
-    (refusal as { cause?: { constraint?: string } } | null)?.cause?.constraint,
-  ).toBe("proactive_settings_interval_check");
+  expect(refusal).toBeInstanceOf(ScheduleError);
+  expect((refusal as ScheduleError).status).toBe(400);
   expect((await proactive.list(other)).length).toBe(0);
   await expect(proactive.get(other, setting.id)).rejects.toBeInstanceOf(
     ProactiveNotFoundError,
@@ -141,10 +149,7 @@ test("settings are owner scoped, one per Bot, and bounded in frequency", async (
 test("a due setting is claimed once and its next run moves forward by its interval", async () => {
   const [setting] = await proactive.list(owner);
   if (!setting) throw new Error("setting missing");
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   const [first, second] = await Promise.all([
     proactive.claimDue(10),
     proactive.claimDue(10),
@@ -164,10 +169,7 @@ test("a due setting is claimed once and its next run moves forward by its interv
   expect(after.lastError).toHaveLength(500);
   // A disabled setting is never claimed.
   await proactive.update(owner, setting.id, { enabled: false });
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   expect(
     (await proactive.claimDue(10)).some((row) => row.id === setting.id),
   ).toBe(false);

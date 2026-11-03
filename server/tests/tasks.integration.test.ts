@@ -33,8 +33,6 @@ import {
   channelAgents,
   channelMemberships,
   channels,
-  proactiveSettings,
-  proactiveSuggestions,
   users,
   workItems,
 } from "../src/db/schema";
@@ -48,7 +46,9 @@ import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
+import { purgeSchedulesOf, settingWithItem } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestSchedules } from "./support/schedules";
 
 /**
  * Tasks through the paths a person's Start takes: the real stores, the real work queue, the real
@@ -378,32 +378,20 @@ async function seed(
   });
   bots.push(bot.id);
   const own = await channelStore.direct(owner, bot.id);
-  const settingId = randomUUID();
-  await database.insert(proactiveSettings).values({
-    id: settingId,
+  const { item: raised } = await settingWithItem({
     ownerUserId: owner.id,
     agentId: bot.id,
     channelId: own.id,
     threadId: `${prefix}-check-ins-${randomUUID()}`,
+    runId: `${prefix}-run`,
+    title: item.title ?? "Reply to Sam about the spec",
+    detail:
+      item.detail ??
+      "Sam asked for the spec by Friday.\n\nA short reply with the date would do.",
+    sourceApp: "Gmail",
+    sourceRef: "gmail/search",
+    sourceLink: item.sourceLink ?? "https://mail.example.test/m/1",
   });
-  const [raised] = await database
-    .insert(proactiveSuggestions)
-    .values({
-      id: randomUUID(),
-      ownerUserId: owner.id,
-      agentId: bot.id,
-      settingId,
-      runId: `${prefix}-run`,
-      title: item.title ?? "Reply to Sam about the spec",
-      detail:
-        item.detail ??
-        "Sam asked for the spec by Friday.\n\nA short reply with the date would do.",
-      sourceApp: "Gmail",
-      sourceRef: "gmail/search",
-      sourceLink: item.sourceLink ?? "https://mail.example.test/m/1",
-    })
-    .returning();
-  if (!raised) throw new Error("No item.");
   return { owner, botId: bot.id, own, item: raised };
 }
 
@@ -423,10 +411,12 @@ async function conversation(channelId: string) {
 
 beforeAll(async () => {
   await useTestBots();
+  await useTestSchedules();
 });
 
 afterAll(async () => {
   await tasks.idle();
+  await purgeSchedulesOf(people);
   const theirs = await database
     .select({ id: channelMemberships.channelId })
     .from(channelMemberships)

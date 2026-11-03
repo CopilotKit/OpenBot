@@ -15,6 +15,7 @@ import { MemoryNotFoundError, MemoryRefusedError } from "../src/memory/types";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestSchedules } from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `memory-${randomUUID()}`;
@@ -46,6 +47,8 @@ const plugins = createPluginStore({
 const store = createMemoryStore(database);
 const ingestion = createMemoryIngestion({ store, plugins });
 beforeAll(async () => {
+  // A Bot reset reaches the person's check-ins, which live in Intelligence.
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },

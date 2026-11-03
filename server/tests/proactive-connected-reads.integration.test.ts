@@ -33,13 +33,6 @@ import {
   mcpUserCredentials,
   pluginGrants,
 } from "../src/db/schema/plugins";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
 import { workItems } from "../src/db/schema/work";
 import { createMemoryStore } from "../src/memory/store";
 import {
@@ -60,7 +53,15 @@ import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, seedBot } from "./support/bots";
+import {
+  changeCheckIn,
+  makeDue,
+  purgeCheckInHistoryOf,
+  purgeSchedulesOf,
+  settingsOf,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
 /*
  * A check-in reads what the person connected with their own account, through the tools that say
@@ -174,6 +175,7 @@ const textOf = (content: unknown) =>
 let environmentBefore: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
+  await useTestSchedules();
   environmentBefore = {
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -234,22 +236,13 @@ beforeEach(async () => {
   vendorCalls.length = 0;
   gateAsked.length = 0;
   endpointDials.length = 0;
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner));
-  await database
-    .delete(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner));
-  await database
-    .delete(proactivePeople)
-    .where(eq(proactivePeople.ownerUserId, owner));
-  await database
-    .delete(proactiveRuns)
-    .where(eq(proactiveRuns.ownerUserId, owner));
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: FAR, lastRunAt: null, lastStatus: "idle" })
-    .where(eq(proactiveSettings.ownerUserId, owner));
+  await purgeCheckInHistoryOf(owner);
+  for (const setting of await settingsOf(owner))
+    await changeCheckIn(setting.id, {
+      nextRunAt: FAR,
+      lastRunAt: null,
+      lastStatus: "idle",
+    });
 });
 
 afterAll(async () => {
@@ -261,10 +254,7 @@ afterAll(async () => {
       else process.env[name] = value;
     }
   }
-  const settings = await database
-    .select({ id: proactiveSettings.id })
-    .from(proactiveSettings)
-    .where(eq(proactiveSettings.ownerUserId, owner));
+  const settings = await settingsOf(owner);
   if (settings.length)
     await database.delete(workItems).where(
       and(
@@ -276,6 +266,7 @@ afterAll(async () => {
       ),
     );
   await fixtures.remove();
+  await purgeSchedulesOf([owner]);
   await database.delete(users).where(eq(users.id, owner));
   await removeBots(botIds);
   await database
@@ -662,23 +653,17 @@ async function checkIn(
   at: ReturnType<typeof deployment> = composio,
 ) {
   const setting = await settingFor(bot);
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1_000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   await at.engine.sweep();
   return setting;
 }
-const itemsOf = (bot: string) =>
-  database
-    .select()
-    .from(proactiveSuggestions)
-    .where(
-      and(
-        eq(proactiveSuggestions.ownerUserId, owner),
-        eq(proactiveSuggestions.agentId, bot),
-      ),
-    );
+const itemsOf = async (bot: string) =>
+  (
+    await testScheduleClient().all("check-in-suggestions", {
+      ownerUserId: owner,
+      agentId: bot,
+    })
+  ).items;
 /** The check-in's message as the model received it. */
 const instructionIn = (request: ChatCompletionRequest | undefined) =>
   (request?.messages ?? [])

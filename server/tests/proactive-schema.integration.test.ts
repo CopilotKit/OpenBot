@@ -3,29 +3,48 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { channels, users } from "../src/db/schema/core";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
 import { botTasks } from "../src/db/schema/tasks";
+import { createProactiveStore } from "../src/proactive/store";
+import {
+  ScheduleAlreadyExistsError,
+  ScheduleConflictError,
+  ScheduleError,
+} from "../src/schedules/client";
+import type {
+  CheckInRunRecord,
+  CheckInSuggestionRecord,
+  ScheduleDraft,
+} from "../src/schedules/types";
 import { removeBots, seedBot } from "./support/bots";
+import { changeHistory, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
 /*
- * The database half of check-ins: the backstops that hold when two replicas race, which no code
- * path can promise on its own. Each test drives the real tables through real SQL.
+ * The backstops of check-ins: the rules that hold when two replicas race, which no code path can
+ * promise on its own. They are Intelligence's now (its agent schedules hold the records), so each
+ * test drives the real Intelligence through the same client the server uses.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+const client = testScheduleClient();
 const prefix = `proactive-schema-${randomUUID()}`;
 const owner = `${prefix}-owner`;
 const bot = `${prefix}-bot`;
 let counter = 0;
 const next = () => `${prefix}-${counter++}`;
 
+/** The rule that refused it, as an error class and status. */
+async function refusal(promise: Promise<unknown>): Promise<ScheduleError> {
+  const error = await promise.then(
+    () => null,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(ScheduleError);
+  return error as ScheduleError;
+}
+
+/** A local table's own rule refused it, named in the driver's error. */
 async function rejects(promise: Promise<unknown>, pattern: RegExp) {
   let message = "";
   try {
@@ -37,36 +56,32 @@ async function rejects(promise: Promise<unknown>, pattern: RegExp) {
   expect(message).toMatch(pattern);
 }
 
-async function setting() {
-  const id = next();
-  await database.insert(proactiveSettings).values({
-    id,
-    ownerUserId: owner,
-    agentId: bot,
-    channelId: next(),
-    threadId: next(),
-  });
-  return id;
-}
-
 let settingId = "";
 beforeAll(async () => {
+  await useTestSchedules();
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
   await seedBot({ id: bot, name: "Inbox Bot", type: "built_in" });
-  settingId = await setting();
+  settingId = (
+    await createProactiveStore(database).create(
+      owner,
+      { agentId: bot, channelId: next() },
+      next(),
+    )
+  ).id;
 });
 
 afterAll(async () => {
+  await purgeSchedulesOf([owner]);
   await removeBots([bot]);
   await database.delete(users).where(eq(users.id, owner));
   await database.$client.close();
 });
 
 function item(
-  overrides: Partial<typeof proactiveSuggestions.$inferInsert> = {},
-) {
+  overrides: Partial<ScheduleDraft<"check-in-suggestions">> = {},
+): ScheduleDraft<"check-in-suggestions"> {
   return {
     id: next(),
     ownerUserId: owner,
@@ -77,133 +92,165 @@ function item(
     detail: "Dana asked whether Friday still works.",
     sourceApp: "Gmail",
     sourceRef: "gmail.read",
+    sourceLink: null,
+    status: "open",
+    dedupeKey: null,
+    pingId: null,
+    deliveredAt: null,
+    resolvedAt: null,
     ...overrides,
   };
 }
 
 test("a new setting checks in hourly unless the person chooses otherwise", async () => {
-  const [row] = await database
-    .select({ interval: proactiveSettings.intervalMinutes })
-    .from(proactiveSettings)
-    .where(eq(proactiveSettings.id, settingId));
-  expect(row?.interval).toBe(60);
+  expect(
+    (await client.get("check-in-settings", settingId))?.intervalMinutes,
+  ).toBe(60);
 });
 
 test("two open items with one normalized title cannot both stand for a person and Bot", async () => {
-  // The race two check-ins can lose: both pass the repeat check, and only one insert may land.
+  // The race two check-ins can lose: both pass the repeat check, and only one create may land.
   const dedupeKey = `reply to dana about friday ${next()}`;
-  const first = item({ dedupeKey });
-  await database.insert(proactiveSuggestions).values(first);
-  await rejects(
-    database.insert(proactiveSuggestions).values(item({ dedupeKey })),
-    /proactive_suggestions_open_dedupe_idx/,
+  const first = await client.create(
+    "check-in-suggestions",
+    item({ dedupeKey }),
   );
-  // Once the person hid the first, the index no longer holds it; the 30-day rule is the engine's.
-  await database
-    .update(proactiveSuggestions)
-    .set({ status: "dismissed", resolvedAt: new Date() })
-    .where(eq(proactiveSuggestions.id, first.id));
-  await database.insert(proactiveSuggestions).values(item({ dedupeKey }));
+  expect(
+    await refusal(client.create("check-in-suggestions", item({ dedupeKey }))),
+  ).toBeInstanceOf(ScheduleConflictError);
+  // Once the person hid the first, the rule no longer holds it; the 30-day rule is the engine's.
+  await changeHistory("check-in-suggestions", first.id, {
+    status: "dismissed",
+    resolvedAt: new Date(),
+  });
+  await client.create("check-in-suggestions", item({ dedupeKey }));
   // Items from before the key existed are never refused by it.
-  await database.insert(proactiveSuggestions).values([item(), item()]);
+  await client.create("check-in-suggestions", item());
+  await client.create("check-in-suggestions", item());
 });
 
 test("one check-in runs at a time per setting, and only a skipped one carries a reason", async () => {
-  const own = settingId;
-  const run = (overrides: Partial<typeof proactiveRuns.$inferInsert> = {}) => ({
+  const run = (
+    overrides: Partial<ScheduleDraft<"check-in-runs">> = {},
+  ): ScheduleDraft<"check-in-runs"> => ({
     id: next(),
-    settingId: own,
+    settingId,
     ownerUserId: owner,
     agentId: bot,
-    trigger: "schedule" as const,
+    threadId: null,
+    trigger: "schedule",
+    outcome: "running",
+    skipReason: null,
+    itemsRaised: 0,
+    reads: 0,
+    error: null,
+    startedAt: new Date(),
+    finishedAt: null,
     ...overrides,
   });
-  const running = run({ threadId: next() });
-  await database.insert(proactiveRuns).values(running);
-  // A second replica, or Run now, finds the first still running.
-  await rejects(
-    database.insert(proactiveRuns).values(run({ trigger: "run_now" })),
-    /proactive_runs_one_running_idx/,
+  const running: CheckInRunRecord = await client.create(
+    "check-in-runs",
+    run({ threadId: next() }),
   );
-  await database
-    .update(proactiveRuns)
-    .set({ outcome: "quiet", finishedAt: new Date() })
-    .where(eq(proactiveRuns.id, running.id));
-  await database.insert(proactiveRuns).values(run());
+  // A second replica, or Run now, finds the first still running.
+  expect(
+    await refusal(client.create("check-in-runs", run({ trigger: "run_now" }))),
+  ).toBeInstanceOf(ScheduleConflictError);
+  await changeHistory("check-in-runs", running.id, {
+    outcome: "quiet",
+    finishedAt: new Date(),
+  });
+  await client.create("check-in-runs", run());
 
   const finished = new Date();
-  await database
-    .insert(proactiveRuns)
-    .values(
-      run({ outcome: "skipped", skipReason: "capped", finishedAt: finished }),
-    );
-  await rejects(
-    database
-      .insert(proactiveRuns)
-      .values(run({ outcome: "skipped", finishedAt: finished })),
-    /proactive_runs_skip_reason_check/,
+  await client.create(
+    "check-in-runs",
+    run({ outcome: "skipped", skipReason: "capped", finishedAt: finished }),
   );
-  await rejects(
-    database
-      .insert(proactiveRuns)
-      .values(
-        run({ outcome: "failed", skipReason: "busy", finishedAt: finished }),
-      ),
-    /proactive_runs_skip_reason_check/,
-  );
+  expect(
+    (
+      await refusal(
+        client.create(
+          "check-in-runs",
+          run({ outcome: "skipped", finishedAt: finished }),
+        ),
+      )
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await refusal(
+        client.create(
+          "check-in-runs",
+          run({ outcome: "failed", skipReason: "busy", finishedAt: finished }),
+        ),
+      )
+    ).status,
+  ).toBe(400);
   // A finished outcome has a finish time; a running one does not.
-  await rejects(
-    database.insert(proactiveRuns).values(run({ outcome: "raised" })),
-    /proactive_runs_finished_check/,
-  );
+  expect(
+    (await refusal(client.create("check-in-runs", run({ outcome: "raised" }))))
+      .status,
+  ).toBe(400);
 });
 
-test("a ping is the person's, and its items outlive it", async () => {
-  const ping = {
-    id: next(),
-    ownerUserId: owner,
-    text: "1 thing needs you",
-    pushBody: "One thing needs you",
-  };
-  await rejects(
-    database.insert(proactivePings).values({ ...ping, itemCount: 0 }),
-    /proactive_pings_item_count_check/,
+test("a ping is the person's, carries at least one item, and its items outlive it", async () => {
+  // A ping is only ever taken for something waiting.
+  expect(
+    (
+      await refusal(
+        client.takePing({
+          id: randomUUID(),
+          ownerUserId: owner,
+          gapMinutes: 60,
+          suggestionIds: [],
+          text: "Nothing",
+          pushBody: "Nothing",
+        }),
+      )
+    ).status,
+  ).toBe(400);
+  const carried: CheckInSuggestionRecord = await client.create(
+    "check-in-suggestions",
+    item(),
   );
-  await database.insert(proactivePings).values({ ...ping, itemCount: 1 });
-  const carried = item({ pingId: ping.id, deliveredAt: new Date() });
-  await database.insert(proactiveSuggestions).values(carried);
-  await database.delete(proactivePings).where(eq(proactivePings.id, ping.id));
-  const [row] = await database
-    .select({
-      pingId: proactiveSuggestions.pingId,
-      status: proactiveSuggestions.status,
-    })
-    .from(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.id, carried.id));
-  expect(row).toEqual({ pingId: null, status: "open" });
+  const ping = await client.takePing({
+    id: randomUUID(),
+    ownerUserId: owner,
+    gapMinutes: 60,
+    suggestionIds: [carried.id],
+    text: "One thing needs you",
+    pushBody: "Inbox Bot: Reply to Dana",
+  });
+  expect(ping.itemCount).toBe(1);
+  expect(await client.get("check-in-suggestions", carried.id)).toMatchObject({
+    pingId: ping.id,
+    deliveredAt: expect.any(Date),
+    status: "open",
+  });
+  await client.purge("check-in-pings", ping.id);
+  expect(await client.get("check-in-suggestions", carried.id)).toMatchObject({
+    pingId: null,
+    status: "open",
+  });
 
   // One hourly slot per person, gone with them.
   const person = next();
-  await database
-    .insert(users)
-    .values({ id: person, email: `${person}@example.test` });
-  await database.insert(proactivePeople).values({ ownerUserId: person });
-  await rejects(
-    database.insert(proactivePeople).values({ ownerUserId: person }),
-    /proactive_people_pkey/,
-  );
-  await database.delete(users).where(eq(users.id, person));
+  await client.create("check-in-people", { id: person, lastPingedAt: null });
   expect(
-    await database
-      .select()
-      .from(proactivePeople)
-      .where(eq(proactivePeople.ownerUserId, person)),
-  ).toEqual([]);
+    await refusal(
+      client.create("check-in-people", { id: person, lastPingedAt: null }),
+    ),
+  ).toBeInstanceOf(ScheduleAlreadyExistsError);
+  await client.purgeOwner(person);
+  expect(await client.get("check-in-people", person)).toBeNull();
 });
 
 test("starting an item opens one task, in a conversation of its own", async () => {
-  const started = item({ status: "started", resolvedAt: new Date() });
-  await database.insert(proactiveSuggestions).values(started);
+  const started = await client.create(
+    "check-in-suggestions",
+    item({ status: "started", resolvedAt: new Date() }),
+  );
   const [first, second] = [next(), next()];
   await database.insert(channels).values(
     [first, second].map((id) => ({
@@ -238,14 +285,12 @@ test("starting an item opens one task, in a conversation of its own", async () =
       .values({ ...task(second, null), origin: "asked" as never }),
     /bot_tasks_origin_check/,
   );
-  // The item going away leaves its task, unlinked.
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.id, started.id));
+  // The item going away for good, in Intelligence, leaves its task.
+  await client.purge("check-in-suggestions", started.id);
   const [row] = await database
-    .select({ suggestionId: botTasks.suggestionId })
+    .select({ title: botTasks.title })
     .from(botTasks)
     .where(eq(botTasks.channelId, first));
-  expect(row).toEqual({ suggestionId: null });
+  expect(row).toEqual({ title: started.title });
   await database.delete(channels).where(inArray(channels.id, [first, second]));
 });

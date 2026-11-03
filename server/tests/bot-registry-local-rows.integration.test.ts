@@ -63,6 +63,16 @@ const OUTLIVES_ITS_BOT = new Set([
   "agent_profiles.agent_id",
 ]);
 
+/**
+ * Legacy tables whose data moved to Intelligence, kept unwritten for one release and read only by
+ * the upgrade copy. Intelligence purges the moved records with their agent, so nothing here does.
+ */
+const MOVED_TO_INTELLIGENCE = new Set([
+  "proactive_runs.agent_id",
+  "proactive_settings.agent_id",
+  "proactive_suggestions.agent_id",
+]);
+
 describe("which rows go with a Bot", () => {
   test("every column naming a Bot is cleaned up with it or listed as outliving it", () => {
     const covered = new Set(
@@ -80,12 +90,15 @@ describe("which rows go with a Bot", () => {
       }
     }
     const undecided = named.filter(
-      (name) => !covered.has(name) && !OUTLIVES_ITS_BOT.has(name),
+      (name) =>
+        !covered.has(name) &&
+        !OUTLIVES_ITS_BOT.has(name) &&
+        !MOVED_TO_INTELLIGENCE.has(name),
     );
     // A new table naming a Bot: add it to BOT_CHILD_TABLES, or here with the reason it outlives one.
     expect(undecided).toEqual([]);
-    // The 26 tables that cascaded and the one column that was set to null, all still covered.
-    expect(BOT_CHILD_TABLES.length).toBe(26);
+    // The tables that cascaded and still live here, and the one column that was set to null.
+    expect(BOT_CHILD_TABLES.length).toBe(26 - MOVED_TO_INTELLIGENCE.size);
     expect([...covered]).toContain("channels.last_message_agent_id");
   });
 
