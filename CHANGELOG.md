@@ -108,9 +108,10 @@ through the grant, the approval rules and the audit trail. A Bot holding 279 too
 Shopify, which stopped answering, now answers. A question that needs an app's tool makes one more
 model call than before. Bots at or under 50 tools are sent exactly what they were.
 
-Where the model is called on Chat Completions, which refuses more than 128 tools, a run whose own
-tools still pass 128 is refused before the call. The person is told why, and the audit log records
-it under Blocked as "Too many tools for its model".
+A run that would still send more than 128 tools at once, counting the room it keeps for a search's
+answer, is refused before the model is called. Chat Completions refuses more than 128 itself, and
+search never sends more. The person is told why, and the audit log records it under Blocked as "Too
+many tools for its model".
 
 ### Bots can install packages on their computers
 
