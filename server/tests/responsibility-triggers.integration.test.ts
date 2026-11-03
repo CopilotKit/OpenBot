@@ -400,3 +400,41 @@ test("Slack listeners for a workspace come from this instance's memory, with the
   ]);
   expect(await triggers.directory.slackTriggers("T0ELSEWHERE")).toEqual([]);
 });
+
+test("a trigger changed on another replica reaches this one by its announcement, without a full read", async () => {
+  const directory = await useTestSchedules();
+  const deadline = Date.now() + 10_000;
+  while (!directory.subscribed() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(directory.subscribed()).toBe(true);
+  const responsibility = await goal();
+  const created = await triggers.create(ownerId, responsibility.id, {
+    config: { kind: "webhook" },
+  });
+  const elsewhere = testScheduleClient();
+  const current = await elsewhere.get(
+    "responsibility-triggers",
+    created.trigger.id,
+  );
+  const paused = await elsewhere.update(
+    "responsibility-triggers",
+    created.trigger.id,
+    current?.version ?? 0,
+    { enabled: false },
+  );
+  // Memory only: nothing here reads Intelligence, so only the announcement can bring the change.
+  while (
+    (directory.peek("responsibility-triggers", created.trigger.id)?.version ??
+      0) < paused.version &&
+    Date.now() < deadline + 10_000
+  )
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(
+    directory.peek("responsibility-triggers", created.trigger.id)?.enabled,
+  ).toBe(false);
+  const auth = {
+    authorization: `Bearer ${created.secret}`,
+    "idempotency-key": "k-announced",
+  };
+  expect((await post(created.trigger.id, "{}", auth)).status).toBe(409);
+});

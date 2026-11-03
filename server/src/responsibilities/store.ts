@@ -70,6 +70,13 @@ const INGEST_MAX_ATTEMPTS = 10;
 const STRANDED_AFTER_MS = 2 * 60_000;
 /** How often the work loop looks for queued runs without an item. It reads Intelligence. */
 const RECONCILE_EVERY_MS = 60_000;
+/**
+ * How long a finished ingest item is kept. Its key is the event's own id, so a later offer never
+ * collides with it; it is kept only to be read when a delivery is asked about.
+ */
+const INGEST_FINISHED_KEPT_MS = 24 * 60 * 60_000;
+/** How long an ingest that gave up stays readable, with its last error, before it is cleared. */
+const INGEST_GAVE_UP_KEPT_MS = 30 * 24 * 60 * 60_000;
 /** How often a write is redone after Intelligence says the record changed under it. */
 const VERSION_RETRIES = 5;
 
@@ -826,6 +833,13 @@ export function createResponsibilityStore(
       if (Date.now() - reconciledAt >= RECONCILE_EVERY_MS) {
         reconciledAt = Date.now();
         requeued = await requeueStrandedRuns();
+        // One row per accepted delivery: cleared once done with, so the outbox stays small.
+        await queue.purge({
+          kind: RESPONSIBILITY_INGEST_KIND,
+          olderThanMs: INGEST_GAVE_UP_KEPT_MS,
+          finishedOlderThanMs: INGEST_FINISHED_KEPT_MS,
+          maxAttempts: INGEST_MAX_ATTEMPTS,
+        });
       }
       return { ingests, requeued };
     },
