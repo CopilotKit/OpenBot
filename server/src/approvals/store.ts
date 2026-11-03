@@ -11,6 +11,7 @@ import {
 import { intelligenceChannelMappings } from "../db/schema/core";
 import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
+import { currentEdition } from "../edition";
 import {
   type ApprovalAction,
   ApprovalNotFoundError,
@@ -28,6 +29,14 @@ const DEFAULT_PREFERENCES: ApprovalPreferences = {
   enabled: false,
   autoReview: false,
   hostCommands: "ask",
+};
+/**
+ * One person with no admin watching: a Bot asks before it acts until they say otherwise, and the
+ * card's always-allow is how that trust is given, one action at a time.
+ */
+const PERSONAL_PREFERENCES: ApprovalPreferences = {
+  ...DEFAULT_PREFERENCES,
+  enabled: true,
 };
 const DEFAULT_TEAM: ApprovalTeamSettings = {
   enforceAutoReview: false,
@@ -313,7 +322,9 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
           autoReview: row.autoReview,
           hostCommands: row.hostCommands,
         }
-      : { ...DEFAULT_PREFERENCES };
+      : currentEdition() === "personal"
+        ? { ...PERSONAL_PREFERENCES }
+        : { ...DEFAULT_PREFERENCES };
   };
   const teamSettings = async (): Promise<ApprovalTeamSettings> => {
     const [row] = await database
