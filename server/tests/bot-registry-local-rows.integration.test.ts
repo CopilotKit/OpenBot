@@ -26,7 +26,6 @@ import {
   channelAgents,
   channels,
   pluginGrants,
-  routines,
   teamBotPublications,
   users,
 } from "../src/db/schema";
@@ -37,6 +36,7 @@ import {
   testIntelligence,
   useTestBots,
 } from "./support/bots";
+import { seedRoutine, testScheduleClient } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -71,6 +71,7 @@ const MOVED_TO_INTELLIGENCE = new Set([
   "proactive_runs.agent_id",
   "proactive_settings.agent_id",
   "proactive_suggestions.agent_id",
+  "routines.agent_id",
 ]);
 
 describe("which rows go with a Bot", () => {
@@ -131,10 +132,13 @@ async function rowsFor(botId: string, channelId: string) {
     .select()
     .from(pluginGrants)
     .where(eq(pluginGrants.agentId, botId));
-  const [routine] = await database
-    .select()
-    .from(routines)
-    .where(eq(routines.agentId, botId));
+  // Routines live in Intelligence, which purges an agent's schedules with the agent.
+  const [routine] = (
+    await testScheduleClient().all("routines", {
+      agentId: botId,
+      includeDeleted: true,
+    })
+  ).items;
   const [publication] = await database
     .select()
     .from(teamBotPublications)
@@ -170,14 +174,11 @@ async function botWithRows() {
   await database
     .insert(pluginGrants)
     .values({ kind: "skill", ref: `skill-${randomUUID()}`, agentId: bot.id });
-  await database.insert(routines).values({
-    id: `routine_${randomUUID()}`,
+  await seedRoutine({
     ownerUserId: owner,
     agentId: bot.id,
     channelId,
     instruction: "Check in.",
-    cron: "0 9 * * *",
-    nextRunAt: new Date(Date.now() + 86_400_000),
   });
   await database
     .insert(teamBotPublications)

@@ -36,7 +36,8 @@ import { alias } from "drizzle-orm/pg-core";
 import { HANDOFF_KIND } from "../agents/handoff";
 import type { Database } from "../db/client";
 import { bots } from "../agents/bot-registry/directory";
-import { routineRuns, routines, workItems } from "../db/schema";
+import { workItems } from "../db/schema";
+import { createRoutineStore } from "../routines/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
 /** Something a conversation is waiting on. */
@@ -212,30 +213,12 @@ export async function workIn(
     });
   }
 
-  const runs = await database
-    .select({
-      runId: routineRuns.id,
-      routineId: routines.id,
-      channelId: routines.channelId,
-      ownerUserId: routines.ownerUserId,
-      botId: routines.agentId,
-      startedAt: routineRuns.startedAt,
-    })
-    .from(routineRuns)
-    .innerJoin(routines, eq(routines.id, routineRuns.routineId))
-    .where(
-      and(
-        isNull(routineRuns.status),
-        inArray(
-          routines.channelId,
-          channels.map((channel) => channel.id),
-        ),
-        gt(
-          routineRuns.startedAt,
-          sql`now() - make_interval(secs => ${ROUTINE_IN_FLIGHT_MS / 1000})`,
-        ),
-      ),
-    );
+  // The routines live in Intelligence: which of them post here comes from this instance's memory,
+  // and only when some do is Intelligence asked which of their runs are open.
+  const runs = await createRoutineStore(database).openRunsIn(
+    channels.map((channel) => channel.id),
+    ROUTINE_IN_FLIGHT_MS,
+  );
   for (const run of runs) {
     // Somebody else's routine, firing into their own thread in a channel this person shares.
     if (ownerByChannel.get(run.channelId) !== run.ownerUserId) continue;

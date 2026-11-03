@@ -28,7 +28,6 @@ import {
   channels,
   users,
 } from "../src/db/schema/core";
-import { routines } from "../src/db/schema/coworker";
 import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources, personalMemories } from "../src/db/schema/memory";
 import { responsibilities } from "../src/db/schema/responsibilities";
@@ -37,7 +36,11 @@ import { createRoutineRunner } from "../src/routines/runner";
 import { removeBots, seedBot } from "./support/bots";
 import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { testScheduleClient, useTestSchedules } from "./support/schedules";
+import {
+  seedRoutine,
+  testScheduleClient,
+  useTestSchedules,
+} from "./support/schedules";
 
 /**
  * Pause, reset, Activity, attention, follow-ups and update routing against a real PostgreSQL.
@@ -119,13 +122,12 @@ beforeAll(async () => {
     { channelId: othersDirect, agentId: bot },
   ]);
   for (const person of [owner, other]) {
-    await database.insert(routines).values({
+    await seedRoutine({
       id: `${prefix}-routine-${person}`,
       ownerUserId: person,
       agentId: bot,
       channelId: person === owner ? direct : othersDirect,
       instruction: "Summarise the day",
-      cron: "0 9 * * *",
       nextRunAt: new Date(Date.now() + 3_600_000),
     });
     await database.insert(responsibilities).values({

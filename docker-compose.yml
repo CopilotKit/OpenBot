@@ -211,12 +211,16 @@ services:
     image: ${SERVER_IMAGE:-openbot-server:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
     command: ["bun", "../worker/src/index.ts"]
-    # Its three settings and nothing else. It is handed no `.env`: it does not read the deployment's
-    # configuration, and the less this process holds, the less a mistake in it can spend.
+    # Its own settings and nothing else. It is handed no `.env`: it does not read the deployment's
+    # configuration, and the less this process holds, the less a mistake in it can spend. The routines
+    # live in Intelligence, so it holds the same Intelligence address and project key as the server.
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
       SERVER_INTERNAL_URL: http://server:3001
       WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:-openbot-dev-worker-secret}
+      INTELLIGENCE_API_URL: ${INTELLIGENCE_CONTAINER_API_URL:-${INTELLIGENCE_API_URL:-}}
+      INTELLIGENCE_GATEWAY_WS_URL: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:-${INTELLIGENCE_GATEWAY_WS_URL:-}}
+      INTELLIGENCE_API_KEY: ${INTELLIGENCE_API_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

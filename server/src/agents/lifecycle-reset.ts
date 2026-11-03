@@ -25,6 +25,7 @@
  * research they had turned off is recorded as turned down (`memory/defaults.ts`), so starting fresh
  * never switches back on what they switched off. What they left on comes back on by default.
  */
+import { purgeRoutinesOf, routinesOf } from "../routines/store";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
@@ -35,7 +36,6 @@ import {
   memorySources,
   personalMemories,
   responsibilities,
-  routines,
   workItems,
 } from "../db/schema";
 import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
@@ -171,17 +171,7 @@ export function createBotReset(options: {
                   ),
                 ),
             ),
-      routines: await count(
-        database
-          .select({ total })
-          .from(routines)
-          .where(
-            and(
-              eq(routines.ownerUserId, ownerUserId),
-              eq(routines.agentId, agentId),
-            ),
-          ),
-      ),
+      routines: (await routinesOf(ownerUserId, agentId)).length,
       responsibilities: await count(
         database
           .select({ total })
@@ -224,8 +214,10 @@ export function createBotReset(options: {
       const found = await conversations(ownerUserId, agentId);
       for (const channelId of found.mine)
         await softDeleteChannel(actor, channelId);
-      // Check-ins live in Intelligence, so they go before the transaction rather than inside it: no
-      // OpenBot transaction waits on Intelligence. Removed for good, their runs and items with them.
+      // Routines and check-ins live in Intelligence, so they go before the transaction rather than
+      // inside it: no OpenBot transaction waits on Intelligence. Removed for good, their runs (and a
+      // check-in's items) with them, as the reset always removed them.
+      const deletedRoutines = await purgeRoutinesOf(ownerUserId, agentId);
       const research = await resetCheckInsOf(database, ownerUserId, agentId);
 
       return database.transaction(async (transaction) => {
@@ -277,15 +269,6 @@ export function createBotReset(options: {
               eq(memorySources.agentId, agentId),
             ),
           );
-        const deletedRoutines = await transaction
-          .delete(routines)
-          .where(
-            and(
-              eq(routines.ownerUserId, ownerUserId),
-              eq(routines.agentId, agentId),
-            ),
-          )
-          .returning({ id: routines.id });
         const deletedGoals = await transaction
           .delete(responsibilities)
           .where(
@@ -320,7 +303,7 @@ export function createBotReset(options: {
           sharedConversationsKept: found.kept,
           memorySources: sources.length,
           memories: memories.length,
-          routines: deletedRoutines.length,
+          routines: deletedRoutines,
           responsibilities: deletedGoals.length,
           followUps: followUps.length,
           formedMemories: formed.length,

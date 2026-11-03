@@ -53,6 +53,7 @@ import {
 } from "./agents/bot-registry/local-rows";
 import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import { checkInCopySteps } from "./proactive/upgrade";
+import { routineCopySteps } from "./routines/upgrade";
 import { createScheduleClient } from "./schedules/client";
 import {
   createScheduleDirectory,
@@ -478,7 +479,7 @@ await scheduleDirectory.start();
 const copiedSchedules = await copyLocalSchedulesToIntelligence(
   database,
   scheduleDirectory.client,
-  [...checkInCopySteps(database)],
+  [...routineCopySteps(database), ...checkInCopySteps(database)],
 );
 if (copiedSchedules.some((step) => step.kind === "copied"))
   await scheduleDirectory.resync();
