@@ -17,7 +17,8 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    `package.json`.
 4. Merge it. That is the publish.
 
-Merging is the trigger, so a release is always a reviewed commit on `main`.
+Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
+and on `release/X.Y` for a candidate, beta or final.
 
 `kind` chooses what the run releases: `stable` (the default), `rc`, `beta` or `final`. A plain
 `patch`, `minor` or `major` from `main` is a `stable` release and works as described above. The
@@ -192,9 +193,9 @@ anything, and fails if anything else changed. The allowed difference is:
 A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CLI the candidate
 pinned.
 
-The final is a normal release: it becomes Latest, its images are tagged `latest`, and its
-installers are attached. It becomes Latest only when no newer release already is. A patch from
-`main` can be released while a newer final is out, and that does not move Latest back.
+The final is a normal release: its installers are attached, and it becomes Latest, with its images
+tagged `latest`, only when no newer release already is. A patch from `main` can be released while a
+newer final is out, and that does not move Latest back.
 
 The smoke journey is still required before a final. See
 [The one thing CI cannot do](#the-one-thing-ci-cannot-do). The PR body asks for the result, as it
@@ -213,17 +214,19 @@ commit, and requires that the head branch matches `release/publish/vX.Y.Z`, with
 `-beta.N` suffix for a candidate or beta, that the branch is in this repository, and that the pull
 request carries the `release` label. A fork can name a branch anything; it cannot add a label.
 
-A stable release merges into `main` or `release/X.Y`. A candidate or beta merges only into the
-`release/X.Y` its version names. A labelled release PR merged anywhere else fails the run. A plain
-`patch`, `minor` or `major` from `main` works as it always has.
+A version without a suffix merges into `main`, as a `stable` release, or into `release/X.Y`, as a
+final. A candidate or beta merges only into the `release/X.Y` its version names. A labelled release
+PR merged anywhere else fails the run. Cutting a plain `patch`, `minor` or `major` from `main` is
+unchanged. What it publishes now also includes the installers and the `sha-<commit>` image tag, as
+listed below.
 
 Then, in order:
 
 - the version in the tree is checked against the branch that is publishing it, and the changelog is
   checked for a section with that number
 - one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the
-  commit as `sha-<commit>` and, for a stable release, `latest`. A candidate or beta is never tagged
-  `latest`
+  commit as `sha-<commit>` and `latest` only when the release becomes Latest (a stable release with
+  no newer release already out). A candidate or beta is never tagged `latest`
 - the services `docker-compose.yml` can build are published too, one image each, at
   `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them
@@ -231,8 +234,9 @@ Then, in order:
   stops matching the Dockerfiles in the tree
 - a build provenance attestation is signed with the workflow's OIDC identity and pushed alongside
   every one of them
-- the macOS and Windows installers are built from the commit, with the CLI bundled. A candidate or
-  beta pins the images above. A stable release does not
+- the macOS and Windows installers are built from the commit, with the CLI bundled when the tree has
+  `desktop/src-tauri/tauri.bundled-cli.conf.json`. A candidate or beta pins the images above; a
+  stable release does not
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json` and the
   installers as assets. A candidate or beta is marked as a prerelease and never Latest. A stable
@@ -240,8 +244,8 @@ Then, in order:
 - for a final cut from `release/X.Y`, the merge-back PR opens as described under
   [Finishing a candidate](#finishing-a-candidate)
 
-The installers are ad-hoc signed on Mac and unsigned on Windows, on every release, as they are in
-every CI build. Signing is still to come.
+The installers attached to a release are ad-hoc signed on Mac and unsigned on Windows, like every
+ordinary CI build. Releases do not go through [Windows signing](windows-signing.md) yet.
 
 ## Deploying a release
 
@@ -314,8 +318,10 @@ These checks run again, against the release commit, when the release PR is merge
 publish rather than the proposal, which is why the release PR arriving without its own checks does
 not matter: a pull request opened by a workflow does not trigger them.
 
-**No secrets are required to release.** CI and both release workflows use only the built-in
-`GITHUB_TOKEN`. The desktop build workflows also read `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET`.
+**No secrets are required to release.** CI and **Create release PR** use only the built-in
+`GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass
+`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` to the installer build when it is set, and build without
+it when it is not.
 
 ## The one thing CI cannot do
 
