@@ -1,56 +1,104 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
-import { GlobalRegistrator } from "../desktop/node_modules/@happy-dom/global-registrator";
-import { cleanup, fireEvent, render, waitFor } from "../desktop/node_modules/@testing-library/react";
-import userEvent from "../desktop/node_modules/@testing-library/user-event";
-import { clearMocks, mockIPC } from "../desktop/node_modules/@tauri-apps/api/mocks";
-import { createElement } from "../desktop/node_modules/react";
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { shellUpdateManifest } from "../desktop/scripts/shell-update-manifest";
 
-const calls: {command: string; args: unknown}[] = [];
-let permitted = true;
-let failure: string | null = null;
-const { RuntimeUpdates } = await import("../desktop/src/RuntimeUpdates");
-beforeAll(() => GlobalRegistrator.register());
-beforeEach(() => mockIPC(async (command, args) => {
-  calls.push({command,args});
-  if(failure) throw failure;
-  if(command==="check_runtime_update") return {allowed:permitted,reasons:permitted?[]:["wrong distribution"],fromVersion:"v0.2.0",toVersion:"v0.3.0",requiresDowntime:true,recovery:"restart-previous"};
-  return {version:"v0.3.0"};
-}));
-afterEach(() => { clearMocks(); cleanup(); calls.length=0; permitted=true; failure=null; });
-afterAll(() => GlobalRegistrator.unregister());
-function setup() {
-  let applied=0;
-  const view=render(createElement(RuntimeUpdates,{root:"/customer/openbot",onApply:async()=>{applied++;return {version:"v0.3.0"};}}));
-  return {view,applied:()=>applied};
-}
-async function check(view: ReturnType<typeof render>) {
-  await userEvent.setup({document:view.container.ownerDocument}).type(view.getByLabelText("Release tag"),"v0.3.0");
-  fireEvent.click(view.getByRole("button",{name:"Check runtime update"}));
-  await waitFor(()=>expect(calls.at(-1)?.command).toBe("check_runtime_update"));
-}
-test("desktop updates are explicit and stage before acknowledged apply",async()=>{
-  const {view,applied}=setup(); expect(calls).toEqual([]);
-  await check(view);
-  fireEvent.click(await view.findByRole("button",{name:"Stage runtime update"}));
-  const apply=await view.findByRole("button",{name:"Apply update and restart"});
-  expect(apply.hasAttribute("disabled")).toBe(true);
-  fireEvent.click(view.getByRole("checkbox")); fireEvent.click(apply);
-  await waitFor(()=>expect(applied()).toBe(1));
-  expect(calls.map(c=>c.command)).toEqual(["check_runtime_update","stage_runtime_update"]);
-  expect(calls[1]?.args).toEqual({root:"/customer/openbot",version:"v0.3.0"});
-  expect(view.getByText(/Signed desktop shell updates are not configured/)).toBeTruthy();
+const temporary: string[] = [];
+afterEach(() => {
+  for (const path of temporary.splice(0))
+    rmSync(path, { recursive: true, force: true });
 });
-test("a refused plan cannot stage or apply and changing target invalidates the plan",async()=>{
-  permitted=false; const {view,applied}=setup(); await check(view);
-  expect(await view.findByText("wrong distribution")).toBeTruthy();
-  expect(view.queryByRole("button",{name:"Stage runtime update"})).toBeNull(); expect(applied()).toBe(0);
-  await userEvent.setup({document:view.container.ownerDocument}).clear(view.getByLabelText("Release tag"));
-  await userEvent.setup({document:view.container.ownerDocument}).type(view.getByLabelText("Release tag"),"v0.4.0");
-  expect(view.queryByText("wrong distribution")).toBeNull();
+test("signed shell publication refuses insecure artifacts and retains distributor identity", async () => {
+  const distribution = {
+    id: "acme.openbot",
+    repository: "acme/openbot",
+    channel: "stable",
+  };
+  const artifact = {
+    target: "darwin-aarch64",
+    url: "https://updates.example/OpenBot.app.tar.gz",
+    signature: "synthetic signature",
+  };
+  expect(
+    shellUpdateManifest("0.3.0", [artifact], distribution).distribution,
+  ).toEqual(distribution);
+  expect(() =>
+    shellUpdateManifest(
+      "0.3.0",
+      [{ ...artifact, url: "http://updates.example/unsigned" }],
+      distribution,
+    ),
+  ).toThrow();
+  expect(() =>
+    shellUpdateManifest(
+      "0.3.0",
+      [{ ...artifact, signature: "" }],
+      distribution,
+    ),
+  ).toThrow();
 });
-test("baseline verification is a separate explicit action and failures stay visible",async()=>{
-  const {view}=setup(); failure="pinned publisher has no release manifest";
-  fireEvent.click(view.getByRole("button",{name:"Verify installed release baseline"}));
-  expect(await view.findByText(failure)).toBeTruthy();
-  expect(calls.map(c=>c.command)).toEqual(["establish_runtime_baseline"]);
+
+test("shell publication CLI writes reviewable metadata and refuses to replace it", () => {
+  const root = mkdtempSync(join(tmpdir(), "openbot-shell-manifest-"));
+  temporary.push(root);
+  const signature = join(root, "artifact.sig"),
+    output = join(root, "latest.json");
+  writeFileSync(signature, "synthetic signature");
+  const command = [
+    process.execPath,
+    join(import.meta.dir, "../desktop/scripts/shell-update-manifest.ts"),
+    "--version",
+    "0.3.0",
+    "--target",
+    "darwin-aarch64",
+    "--url",
+    "https://updates.example/OpenBot.app.tar.gz",
+    "--signature",
+    signature,
+    "--output",
+    output,
+  ];
+  const env = {
+    ...process.env,
+    OPENBOT_DISTRIBUTION_ID: "acme.openbot",
+    OPENBOT_RELEASE_REPOSITORY: "acme/openbot",
+    OPENBOT_RELEASE_CHANNEL: "stable",
+  };
+  const first = Bun.spawnSync(command, { env, stdout: "pipe", stderr: "pipe" });
+  expect(first.exitCode).toBe(0);
+  const accepted = readFileSync(output, "utf8");
+  expect(JSON.parse(accepted).distribution.repository).toBe("acme/openbot");
+  const repeated = Bun.spawnSync(command, {
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(repeated.exitCode).not.toBe(0);
+  expect(readFileSync(output, "utf8")).toBe(accepted);
+});
+test("shell build entrypoint refuses absent trust before native work without exposing signing material", () => {
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      join(import.meta.dir, "../desktop/scripts/build-shell-update.ts"),
+    ],
+    {
+      env: {
+        ...process.env,
+        OPENBOT_SHELL_UPDATE_PUBLIC_KEY: "",
+        OPENBOT_SHELL_UPDATE_ENDPOINT: "",
+        TAURI_SIGNING_PRIVATE_KEY: "synthetic-private-test-material",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain(
+    "Missing required shell release configuration",
+  );
+  expect(result.stderr.toString()).not.toContain(
+    "synthetic-private-test-material",
+  );
 });

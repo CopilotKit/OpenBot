@@ -527,6 +527,7 @@ fn establish_baseline_bytes(
     let result = (|| {
         unpack_safe(&scratch, archive)?;
         let preserved = preserved_paths(root)?;
+        source_database_identity(&scratch, manifest)?;
         let files = inventory(&scratch, &preserved)?;
         if files != inventory(root, &preserved)? {
             return Err("Installed managed source differs from the published pinned archive. Integrate the fork; no baseline was accepted.".into());
@@ -668,7 +669,7 @@ fn stage_bytes(
         )?;
         write_json(&staged.join(STAGED), candidate)?;
         Ok(
-            json!({"version":candidate["version"],"stagePath":staged,"plan":planned,"shellUpdate":"Signed desktop shell update delivery is not configured."}),
+            json!({"version":candidate["version"],"stagePath":staged,"plan":planned,"shellUpdate":crate::shell_updates::delivery_status()}),
         )
     })();
     if result.is_err() {
@@ -959,7 +960,7 @@ pub fn accept(root: &Path, journal: &mut Journal) -> Result<Value, String> {
     checkpoint(root, journal, "accepted")?;
     std::fs::remove_file(root.join(JOURNAL)).map_err(io)?;
     Ok(
-        json!({"version":journal.to_version,"root":root,"backupPath":journal.backup,"shellUpdate":"Signed desktop shell update delivery is not configured."}),
+        json!({"version":journal.to_version,"root":root,"backupPath":journal.backup,"shellUpdate":crate::shell_updates::delivery_status()}),
     )
 }
 

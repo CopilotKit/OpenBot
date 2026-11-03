@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useId, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
+import { ShellUpdates } from "./ShellUpdates";
 
 type UpdatePlan = {
   allowed: boolean;
@@ -15,9 +16,11 @@ type UpdatePlan = {
 export function RuntimeUpdates({
   root,
   onApply,
+  onShellApply,
 }: {
   root: string;
   onApply: () => Promise<unknown>;
+  onShellApply?: (version: string) => Promise<unknown>;
 }) {
   const id = useId();
   const [version, setVersion] = useState("");
@@ -46,9 +49,9 @@ export function RuntimeUpdates({
     <details className="runtime-updates">
       <summary>Runtime updates</summary>
       <p>
-        Choose a release from this installation’s configured distributor. Checking
-        and staging leave the running installation in place. Applying stops it,
-        backs up its database, and restarts it after migration.
+        Choose a release from this installation’s configured distributor.
+        Checking and staging leave the running installation in place. Applying
+        stops it, backs up its database, and restarts it after migration.
       </p>
       <div className="field">
         <label htmlFor={`${id}-version`}>Release tag</label>
@@ -119,13 +122,14 @@ export function RuntimeUpdates({
                   disabled={busy}
                   onChange={(event) => setAcknowledged(event.target.checked)}
                 />{" "}
-                I understand this stops OpenBot and retains a database backup for
-                recovery.
+                I understand this stops OpenBot and retains a database backup
+                for recovery.
               </label>
               {plan.recovery === "restore-backup" && (
                 <p>
-                  This release requires restoring the database backup if migration
-                  fails. Restoring source files alone cannot undo SQL changes.
+                  This release requires restoring the database backup if
+                  migration fails. Restoring source files alone cannot undo SQL
+                  changes.
                 </p>
               )}
               <button
@@ -151,7 +155,8 @@ export function RuntimeUpdates({
         <p>
           Older installations need their pinned release’s published manifest and
           checksum to be verified before updating. This compares managed source
-          with that release and preserves customer configuration and tenant files.
+          with that release and preserves customer configuration and tenant
+          files.
         </p>
         <button
           type="button"
@@ -170,10 +175,17 @@ export function RuntimeUpdates({
       {busy && <p role="status">Preparing the runtime update…</p>}
       {notice && <p role="status">{notice}</p>}
       {failure && <Failure problem={failure} />}
-      <p className="hint">
-        Signed desktop shell updates are not configured. These controls update the
-        OpenBot runtime; the native application is distributed separately.
-      </p>
+      <ShellUpdates
+        onApply={
+          onShellApply ??
+          ((version) =>
+            invoke("apply_shell_update", {
+              root,
+              version,
+              restartAcknowledged: true,
+            }))
+        }
+      />
     </details>
   );
 }

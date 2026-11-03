@@ -37,7 +37,15 @@ The dump is a backup primitive, not a verified restore rehearsal. PostgreSQL glo
 
 ## Native application delivery
 
-Signed desktop shell auto-update delivery is not configured in the default build. Runtime controls report this explicitly. OS installer signing and runtime manifest checksums are distinct from Tauri updater artifact signing. Distributors must provide their own trusted update endpoints and public key, publish signed platform artifacts, and retain the existing cross-platform desktop CI. No signing key or endpoint is invented by this updater.
+Default builds report signed shell delivery as unconfigured. Distributors can opt into the `shell-updater` Cargo feature without upgrading the existing Tauri dependency: the updater is pinned to compatible `2.10.1`. Rust-only IPC performs explicit check, signed download verification, owned runtime shutdown, installation and native restart; no updater JavaScript plugin permissions are exposed.
+
+Compile the distributor's `OPENBOT_SHELL_UPDATE_PUBLIC_KEY` and credential-free HTTPS `OPENBOT_SHELL_UPDATE_ENDPOINT` into that build. Both are required; downloaded runtime metadata and mutable `.openbot-distribution.json` cannot choose the shell's trust key or endpoint. Shell update metadata must also carry the compiled distributor's `{id, repository, channel}`. The plugin verifies signed artifact bytes before the existing owned runtime is stopped. A changed offered version requires a fresh check; installation requires an explicit restart acknowledgement in the UI.
+
+Use `bun desktop/scripts/build-shell-update.ts --bundles <app|nsis|appimage>` with those public settings and `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when applicable). The script uses `tauri.updater.conf.json` to generate updater bundles and `.sig` files, refuses missing signing configuration, and never prints the private key. `collect-shell-update.ts` collects exactly one artifact/signature and a platform manifest fragment. `shell-update-manifest.ts` combines explicitly supplied platform URLs/signature files into the static JSON served at the configured endpoint; it refuses insecure URLs, duplicate platforms and absent signatures. Signature authenticity is checked by Tauri when downloading; the JSON generator does not replace that cryptographic check.
+
+The protected, manually dispatched [signed artifact workflow](../.github/workflows/desktop-shell-updates.yml) builds macOS, Windows and Linux updater bundles and uploads artifacts with manifest fragments for review. Configure the `desktop-shell-signing` protected environment, its publisher/public endpoint/asset destination variables and private signing key secrets. Restrict its source refs and approve only reviewed release commits. It has read-only repository permissions and does not publish releases or change the live endpoint. Review and combine fragments before a separate explicitly authorized publication. OS installer signing/notarization remains separate from the Tauri updater signature; use the existing OS signing pipeline where required.
+
+No signing key or endpoint is invented, no signed update is published by this task, and no actual application replacement has been exercised without distributor credentials and a disposable installed shell. Code, configuration, workflow, UI and feature compilation are implemented; signed delivery and a live install/relaunch remain unverified.
 
 ## Targeted validation
 
@@ -47,6 +55,7 @@ cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib updates
 cargo check --manifest-path desktop/src-tauri/Cargo.toml --bin openbot-desktop
 cd desktop
 bun test ../tests/desktop-updates.test.ts
+bun test src/RuntimeUpdates.test.tsx
 bun test src/App.test.tsx
 bun run typecheck
 ```

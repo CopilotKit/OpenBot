@@ -15,8 +15,8 @@ use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
     install, local_browser, preparation,
     problem::{LeftoverReset, Problem},
-    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    supervise, telemetry, tray, updates, windows as win,
+    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
+    shell_updates, stack, supervise, telemetry, tray, updates, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -668,6 +668,8 @@ async fn apply_runtime_update(
     tauri::async_runtime::spawn_blocking(move || stop_for_update(&handle, &target))
         .await
         .map_err(|e| Problem::from(e.to_string()))??;
+    app.emit("runtime:update-stopped", ())
+        .map_err(|e| Problem::from(e.to_string()))?;
     let stopped_generation = app
         .state::<Shell>()
         .start_generation
@@ -776,6 +778,89 @@ async fn apply_runtime_update(
         return Err(Problem::with("The verified runtime could not record final acceptance. It is stopped; retain the update journal and database backup for recovery.",format!("{error}; stop: {stopped:?}")));
     }
     accepted.map_err(Problem::from)
+}
+
+#[tauri::command]
+async fn check_shell_update(app: tauri::AppHandle) -> Result<shell_updates::Status, Problem> {
+    #[cfg(not(feature = "shell-updater"))]
+    {
+        let _ = app;
+        Ok(shell_updates::unavailable("Signed desktop shell updates are not configured. This build does not include the optional updater feature."))
+    }
+    #[cfg(feature = "shell-updater")]
+    {
+        if shell_updates::compiled_trust()?.is_none() {
+            return Ok(shell_updates::unavailable("Signed desktop shell updates are not configured. Distributor public key and HTTPS endpoint are missing."));
+        }
+        let update = shell_updates::candidate(&app).await?;
+        Ok(shell_updates::Status {
+            configured: true,
+            available: update.is_some(),
+            version: update.map(|u| u.version),
+            detail:
+                "The shell update uses this build's configured distributor and signed artifacts."
+                    .into(),
+        })
+    }
+}
+#[tauri::command]
+async fn apply_shell_update(
+    app: tauri::AppHandle,
+    root: String,
+    version: String,
+    restart_acknowledged: bool,
+) -> Result<(), Problem> {
+    #[cfg(not(feature = "shell-updater"))]
+    {
+        let _ = (app, root, version, restart_acknowledged);
+        Err(Problem::plain(
+            "Signed desktop shell updates are not configured in this build.",
+        ))
+    }
+    #[cfg(feature = "shell-updater")]
+    {
+        if !restart_acknowledged {
+            return Err(Problem::plain("Acknowledge stopping OpenBot and restarting the native application before installation."));
+        }
+        let _update = RuntimeUpdateGuard::begin(&app)?;
+        let root = stack::root_from(&root);
+        require_update_root(&app.state::<Shell>(), &root)?;
+        updates::require_no_interruption(&root)?;
+        let update = shell_updates::candidate(&app)
+            .await?
+            .ok_or("No native shell update is available.")?;
+        if update.version != version {
+            return Err(Problem::plain(
+                "The available shell release changed. Check and review it again before installing.",
+            ));
+        }
+        // Download verifies the artifact signature before any owned runtime is stopped.
+        let bytes = update
+            .download(|_, _| {}, || {})
+            .await
+            .map_err(|e| Problem::from(e.to_string()))?;
+        if app
+            .state::<Shell>()
+            .update_cancelled
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(Problem::plain(
+                "Shell update was cancelled by Stop before installation.",
+            ));
+        }
+        let handle = app.clone();
+        let target = root.clone();
+        tauri::async_runtime::spawn_blocking(move || stop_for_update(&handle, &target))
+            .await
+            .map_err(|e| Problem::from(e.to_string()))??;
+        app.emit("runtime:update-stopped", ())
+            .map_err(|e| Problem::from(e.to_string()))?;
+        tauri::async_runtime::spawn_blocking(move || update.install(bytes))
+            .await
+            .map_err(|e| Problem::from(e.to_string()))?
+            .map_err(|e| Problem::from(e.to_string()))?;
+        app.restart();
+    }
 }
 
 #[tauri::command]
@@ -4755,6 +4840,8 @@ fn main() {
             prepare_engine,
             prepare_installation,
             check_runtime_update,
+            check_shell_update,
+            apply_shell_update,
             stage_runtime_update,
             establish_runtime_baseline,
             apply_runtime_update,
@@ -4810,6 +4897,9 @@ fn main() {
             }
         })
         .setup(|app| {
+            #[cfg(feature = "shell-updater")]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
                 .path()

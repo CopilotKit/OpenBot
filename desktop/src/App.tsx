@@ -2,8 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
-import { StartFresh } from "./StartFresh";
-import { RuntimeUpdates } from "./RuntimeUpdates";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
@@ -18,6 +16,8 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
+import { RuntimeUpdates } from "./RuntimeUpdates";
+import { StartFresh } from "./StartFresh";
 import {
   harnessChoiceEvent,
   modelChoiceEvent,
@@ -518,9 +518,13 @@ export function App() {
         return next;
       });
     });
+    const updateStopped = listen<void>("runtime:update-stopped", () => {
+      if (active) setRunning(false);
+    });
     return () => {
       active = false;
       stop.then((unlisten) => unlisten());
+      updateStopped.then((unlisten) => unlisten());
     };
   }, [loadConfiguredRoot, recoverFromStart]);
 
@@ -631,14 +635,36 @@ export function App() {
       setRecoveryFailure(null);
       return result;
     } catch (error) {
-      setRunning(false);
       recoverFromStart(error);
       throw error;
     } finally {
       setBusy(false);
     }
   }
-  const runtimeUpdates = <RuntimeUpdates key={root} root={root} onApply={applyRuntimeUpdate} />;
+  async function applyShellUpdate(version: string) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      return await invoke("apply_shell_update", {
+        root: root.trim(),
+        version,
+        restartAcknowledged: true,
+      });
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const runtimeUpdates = (
+    <RuntimeUpdates
+      key={root}
+      root={root}
+      onApply={applyRuntimeUpdate}
+      onShellApply={applyShellUpdate}
+    />
+  );
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
