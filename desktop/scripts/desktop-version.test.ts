@@ -35,6 +35,12 @@ function fixture() {
     join(import.meta.dir, "desktop-version.ts"),
     join(root, "desktop/scripts/desktop-version.ts"),
   );
+  // desktop-version.ts imports this file relatively.
+  mkdirSync(join(root, "scripts"));
+  copyFileSync(
+    join(import.meta.dir, "../../scripts/release-version.ts"),
+    join(root, "scripts/release-version.ts"),
+  );
   const run = (command: string) => {
     const result = Bun.spawnSync(
       [
@@ -116,7 +122,8 @@ test.each([
   '{"version":10}',
   '{"version":"0.0.0"}',
   '{"version":"01.2.3"}',
-  '{"version":"0.0.10-beta.1"}',
+  '{"version":"0.0.0-rc.1"}',
+  '{"version":"0.0.10-alpha.1"}',
   "{",
 ])("rejects invalid root release metadata: %s", (json) => {
   const f = fixture();
@@ -216,3 +223,46 @@ test.each(["internal", "release"])(
     expect(f.read("desktop/src-tauri/Cargo.lock")).toBe(lock);
   },
 );
+
+test("a release candidate syncs whole and keeps macOS metadata numeric", () => {
+  const f = fixture();
+  f.write("package.json", '{"version":"0.3.0-rc.1"}');
+  expect(f.run("sync").code).toBe(0);
+  expect(f.read("desktop/src-tauri/Cargo.toml")).toContain(
+    'version = "0.3.0-rc.1"',
+  );
+  expect(f.read("desktop/src-tauri/Cargo.lock")).toContain(
+    'name = "openbot-desktop"\nversion = "0.3.0-rc.1"',
+  );
+  const git = (...args: string[]) => {
+    const result = Bun.spawnSync(["git", "-C", f.root, ...args]);
+    expect(result.exitCode).toBe(0);
+    return result.stdout.toString().trim();
+  };
+  git("init", "--quiet");
+  git(
+    "-c",
+    "user.name=Version test",
+    "-c",
+    "user.email=version@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--allow-empty",
+    "--quiet",
+    "-m",
+    "fixture",
+  );
+  const sourceSha = git("rev-parse", "HEAD");
+  expect(f.run("internal").code).toBe(0);
+  expect(JSON.parse(f.read("desktop/build-version.json"))).toEqual({
+    version: `0.3.0-rc.1-internal.g${sourceSha.slice(0, 12)}`,
+    releaseVersion: "0.3.0-rc.1",
+    sourceSha,
+    channel: "internal",
+  });
+  const plist = f.read("desktop/src-tauri/build-version.plist");
+  for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
+    expect(plist).toContain(`<key>${key}</key><string>0.3.0</string>`);
+  }
+});
