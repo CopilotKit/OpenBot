@@ -6,6 +6,8 @@ fn main() {
     writeln!(log,"{}",args.join(" ")).unwrap();
     let command=args.join(" ");
     if command=="compose config --format json" { print!("{}",std::fs::read_to_string(root.join("fixture-config.json")).unwrap()); }
+    else if command=="compose config --environment" { print!("{}",std::fs::read_to_string(root.join("fixture-compose-environment")).unwrap()); }
+    else if command.starts_with("compose --project-directory ") && command.ends_with(" config --format json") { print!("{}",std::fs::read_to_string(root.join("fixture-candidate-config.json")).unwrap()); }
     else if command.starts_with("compose up ") { assert!(command.ends_with(" postgres")); }
     else if command.starts_with("compose exec -T postgres sh -c exec psql ") { print!("{}",std::fs::read_to_string(root.join("fixture-journal.json")).unwrap()); }
     else if command.starts_with("compose exec -T postgres sh -c exec pg_dump ") {

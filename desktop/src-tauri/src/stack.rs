@@ -9641,6 +9641,10 @@ pub fn runtime_update_identity(
 ) -> Result<serde_json::Value, String> {
     let bytes = postgres_configuration(engine, root, secrets).map_err(|p| p.said)?;
     let config: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    runtime_update_identity_config(&config)
+}
+
+fn runtime_update_identity_config(config: &serde_json::Value) -> Result<serde_json::Value, String> {
     let volumes = config["volumes"]
         .as_object()
         .ok_or("Compose configuration has no persistent volume identity")?;
@@ -9652,9 +9656,99 @@ pub fn runtime_update_identity(
         .as_str()
         .filter(|s| !s.is_empty())
         .ok_or("Compose project identity is missing")?;
+    let services = config["services"]
+        .as_object()
+        .ok_or("Compose service configuration is missing")?;
+    let mut mounts = std::collections::BTreeMap::new();
+    for (service, value) in services {
+        let Some(volumes) = value.get("volumes") else {
+            continue;
+        };
+        let volumes = volumes
+            .as_array()
+            .ok_or("Compose service mounts are unreadable")?;
+        let mut destinations = std::collections::BTreeMap::new();
+        for mount in volumes {
+            let kind = mount["type"]
+                .as_str()
+                .ok_or("Compose mount type is missing")?;
+            if !matches!(kind, "volume" | "bind") {
+                continue;
+            }
+            let source = mount["source"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .ok_or("Persistent mount source cannot be verified")?;
+            let target = mount["target"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .ok_or("Persistent mount target cannot be verified")?;
+            if destinations
+                .insert(
+                    target,
+                    serde_json::json!({"type":kind,"source":source,"target":target}),
+                )
+                .is_some()
+            {
+                return Err("Compose service has duplicate persistent mount targets".into());
+            }
+        }
+        if !destinations.is_empty() {
+            mounts.insert(service, destinations);
+        }
+    }
     Ok(
-        serde_json::json!({"project":project,"volumes":names,"namespace":config["services"]["supervisor"]["environment"]["COMPUTER_NAMESPACE"],"databaseMounts":config["services"]["postgres"]["volumes"]}),
+        serde_json::json!({"project":project,"volumes":names,"namespace":config["services"]["supervisor"]["environment"]["COMPUTER_NAMESPACE"],"mounts":mounts}),
     )
+}
+
+/// Resolve candidate Compose against the active project directory and customer-selected override
+/// files. Only the vendor base file comes from staging; config is read-only and no Stop/up occurs.
+pub fn verify_staged_runtime_identity(
+    engine: &Address,
+    root: &Path,
+    staged: &Path,
+    secrets: &Secrets,
+    expected: &serde_json::Value,
+) -> Result<(), String> {
+    let environment = compose_command(engine, root, secrets)
+        .args(["config", "--environment"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !environment.status.success() {
+        return Err("could not resolve active Compose file selection before update".into());
+    }
+    let environment = String::from_utf8(environment.stdout).map_err(|e| e.to_string())?;
+    let files = compose_files(root, &environment).map_err(|p| p.said)?;
+    let active = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let staged = std::fs::canonicalize(staged).map_err(|e| e.to_string())?;
+    let mut command = compose_command(engine, root, secrets);
+    command.arg("--project-directory").arg(&active);
+    for file in files {
+        let original = std::fs::canonicalize(root.join(file)).map_err(|e| e.to_string())?;
+        let selected =
+            if original.strip_prefix(&active).ok() == Some(Path::new("docker-compose.yml")) {
+                staged.join("docker-compose.yml")
+            } else {
+                original
+            };
+        command.arg("-f").arg(selected);
+    }
+    let output = command
+        .args(["config", "--format", "json"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(
+            "candidate Compose configuration could not be verified; no runtime was stopped".into(),
+        );
+    }
+    let config: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    if &runtime_update_identity_config(&config)? != expected {
+        return Err("The candidate changes a persistent service mount, Compose project, volume or namespace. No runtime was stopped or modified.".into());
+    }
+    Ok(())
 }
 
 /// Called after all owned application writers stop. Bring up only the existing project's

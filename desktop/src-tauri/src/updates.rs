@@ -1257,7 +1257,7 @@ mod tests {
         std::env::set_var("OPENBOT_UPDATE_ENGINE_FIXTURE", &i.root);
         let address = crate::engine::Address::new(crate::engine::Engine::Docker, None);
         let secrets = crate::stack::Secrets::new();
-        write_json(&i.root.join("fixture-config.json"),&json!({"name":"customer-project","volumes":{"pgdata":{"name":"customer-project_pgdata"}},"services":{"postgres":{"volumes":[{"source":"pgdata","target":"/var/lib/postgresql/data"}]},"supervisor":{"environment":{"COMPUTER_NAMESPACE":"customer-namespace"}}}})).unwrap();
+        write_json(&i.root.join("fixture-config.json"),&json!({"name":"customer-project","volumes":{"pgdata":{"name":"customer-project_pgdata"}},"services":{"postgres":{"volumes":[{"type":"volume","source":"pgdata","target":"/var/lib/postgresql/data"}]},"supervisor":{"environment":{"COMPUTER_NAMESPACE":"customer-namespace"}}}})).unwrap();
         write_json(
             &i.root.join("fixture-journal.json"),
             &json!([{"hash":digest(b"select 1;"),"createdAt":1}]),
@@ -1314,6 +1314,108 @@ mod tests {
             crate::stack::verify_runtime_update_images(&address, &i.root, &i.candidate).is_err()
         );
     }
+    #[test]
+    fn updates_candidate_mount_swaps_refuse_before_stop_or_source_mutation() {
+        if crate::test_support::isolated_process(
+            "updates::tests::updates_candidate_mount_swaps_refuse_before_stop_or_source_mutation",
+        ) {
+            return;
+        }
+        let i = installation();
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let tools = i.root.join("fixture-tools");
+        std::fs::create_dir(&tools).unwrap();
+        let binary = tools.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+        crate::test_support::compile_fixture(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("test-fixtures/updates-engine.rs"),
+            &binary,
+        );
+        std::env::set_var("PATH", &tools);
+        std::env::set_var("OPENBOT_UPDATE_ENGINE_FIXTURE", &i.root);
+        let address = crate::engine::Address::new(crate::engine::Engine::Docker, None);
+        let secrets = crate::stack::Secrets::new();
+        let config = json!({"name":"customer-project","volumes":{"pgdata":{"name":"customer-project_pgdata"},"workspace":{"name":"customer-project_workspace"},"profiles":{"name":"customer-project_profiles"}},"services":{"postgres":{"volumes":[{"type":"volume","source":"pgdata","target":"/var/lib/postgresql/data"}]},"supervisor":{"environment":{"COMPUTER_NAMESPACE":"customer-namespace"}},"agent-computer":{"volumes":[{"type":"volume","source":"workspace","target":"/workspace"},{"type":"volume","source":"profiles","target":"/profiles"}]},"server":{"volumes":[{"type":"bind","source":"/customer/tenant","target":"/tenant"}]}}});
+        write_json(&i.root.join("fixture-config.json"), &config).unwrap();
+        write(
+            &i.root,
+            "docker-compose.override.yml",
+            b"services: {}
+",
+        );
+        write(
+            &i.root,
+            "fixture-compose-environment",
+            b"COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml
+COMPOSE_PATH_SEPARATOR=:
+",
+        );
+        let identity = crate::stack::runtime_update_identity(&address, &i.root, &secrets).unwrap();
+        write_json(&i.root.join("fixture-candidate-config.json"), &config).unwrap();
+        crate::stack::verify_staged_runtime_identity(
+            &address,
+            &i.root,
+            &stage_path(&i.root).unwrap(),
+            &secrets,
+            &identity,
+        )
+        .unwrap();
+        for change in ["swap", "remove", "bind-source", "mount-type"] {
+            let mut candidate = config.clone();
+            match change {
+                "swap" => {
+                    candidate["services"]["agent-computer"]["volumes"][0]["source"] =
+                        json!("profiles");
+                    candidate["services"]["agent-computer"]["volumes"][1]["source"] =
+                        json!("workspace");
+                }
+                "remove" => {
+                    candidate["services"]["agent-computer"]["volumes"]
+                        .as_array_mut()
+                        .unwrap()
+                        .pop();
+                }
+                "bind-source" => {
+                    candidate["services"]["server"]["volumes"][0]["source"] =
+                        json!("/different/tenant")
+                }
+                _ => candidate["services"]["agent-computer"]["volumes"][0]["type"] = json!("bind"),
+            }
+            write_json(&i.root.join("fixture-candidate-config.json"), &candidate).unwrap();
+            assert!(
+                crate::stack::verify_staged_runtime_identity(
+                    &address,
+                    &i.root,
+                    &stage_path(&i.root).unwrap(),
+                    &secrets,
+                    &identity
+                )
+                .is_err(),
+                "{change}"
+            );
+        }
+        let commands = std::fs::read_to_string(i.root.join("fixture-commands.log")).unwrap();
+        assert!(
+            !commands.contains("compose down")
+                && !commands.contains("compose up")
+                && !commands.contains("pg_dump")
+        );
+        assert!(commands.contains("--project-directory"));
+        assert!(commands.contains("docker-compose.override.yml"));
+        assert!(commands.contains(
+            &stage_path(&i.root)
+                .unwrap()
+                .join("docker-compose.yml")
+                .to_string_lossy()
+                .to_string()
+        ));
+        assert_eq!(
+            std::fs::read(i.root.join("server/src/main.ts")).unwrap(),
+            b"previous"
+        );
+        assert_eq!(current(&i.root).unwrap()["version"], "v0.2.0");
+        assert!(!i.root.join(JOURNAL).exists());
+    }
+
     #[test]
     fn updates_partial_vendor_copy_restores_previous_accepted_source() {
         let i = installation();

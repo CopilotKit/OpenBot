@@ -658,6 +658,13 @@ async fn apply_runtime_update(
                 &openbot_env::MINTED[..],
             )?;
             let identity = stack::runtime_update_identity(&address, &target, &secrets)?;
+            stack::verify_staged_runtime_identity(
+                &address,
+                &target,
+                &updates::stage_path(&target)?,
+                &secrets,
+                &identity,
+            )?;
             let database_identity = updates::accepted_database_identity(&target)?;
             Ok::<_, Problem>((journal, address, identity, database_identity))
         })
