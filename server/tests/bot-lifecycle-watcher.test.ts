@@ -4,43 +4,49 @@ import {
   checkRunningTurnsForTests,
   configureBotLifecycle,
   guardBotTurn,
+  type PauseReader,
   resetBotLifecycleForTests,
 } from "../src/agents/lifecycle";
-import type { Database } from "../src/db/client";
 
 /**
- * The pause watcher against a database that can fail on demand. A turn must not start while the
+ * The pause watcher against pauses that can be unreadable on demand. A turn must not start while the
  * pause cannot be read, but one failed read in the five-second poll must not stop every turn a
- * replica is running for every person: only a pause, or a database that stays unreadable, does.
+ * replica is running for every person: only a pause, or pauses that stay unreadable, do.
+ *
+ * Unreadable both ways the real reader can be: it throws, or it cannot say yet (`undefined`, before
+ * this instance has read people's preferences from Intelligence).
  */
-function flakyDatabase() {
+function flakyPauses(failure: "throws" | "unknown" = "throws") {
   const state = { fail: false, pausedAt: null as Date | null };
-  const query = {
-    from: () => query,
-    where: () => query,
-    limit: async () => {
-      if (state.fail) throw new Error("connection terminated unexpectedly");
-      return [{ pausedAt: state.pausedAt }];
+  const pauses: PauseReader = {
+    pausedAt() {
+      if (state.fail) {
+        if (failure === "throws")
+          throw new Error("the preferences could not be read");
+        return undefined;
+      }
+      return state.pausedAt;
     },
   };
-  const database = { select: () => query } as unknown as Database;
-  return { database, state };
+  return { pauses, state };
 }
 
 afterEach(() => resetBotLifecycleForTests());
 
 test("a turn does not start while the pause cannot be read", async () => {
-  const { database, state } = flakyDatabase();
-  configureBotLifecycle({ database });
-  state.fail = true;
-  await expect(
-    guardBotTurn({ ownerUserId: "ada", agentId: "bot" }),
-  ).rejects.toBeInstanceOf(BotPausedError);
+  for (const failure of ["throws", "unknown"] as const) {
+    const { pauses, state } = flakyPauses(failure);
+    configureBotLifecycle({ pauses });
+    state.fail = true;
+    await expect(
+      guardBotTurn({ ownerUserId: "ada", agentId: "bot" }),
+    ).rejects.toBeInstanceOf(BotPausedError);
+  }
 });
 
 test("one failed read in the watcher leaves running turns alone", async () => {
-  const { database, state } = flakyDatabase();
-  configureBotLifecycle({ database });
+  const { pauses, state } = flakyPauses();
+  configureBotLifecycle({ pauses });
   const ada = await guardBotTurn({ ownerUserId: "ada", agentId: "bot" });
   const grace = await guardBotTurn({ ownerUserId: "grace", agentId: "other" });
 
@@ -58,9 +64,9 @@ test("one failed read in the watcher leaves running turns alone", async () => {
   expect(ada.aborted).toBe(false);
 });
 
-test("a database that stays unreadable stops the turns, and a pause stops them at once", async () => {
-  const { database, state } = flakyDatabase();
-  configureBotLifecycle({ database });
+test("pauses that stay unreadable stop the turns, and a pause stops them at once", async () => {
+  const { pauses, state } = flakyPauses();
+  configureBotLifecycle({ pauses });
   const signal = await guardBotTurn({ ownerUserId: "ada", agentId: "bot" });
   state.fail = true;
   for (let check = 0; check < 3; check += 1) await checkRunningTurnsForTests();

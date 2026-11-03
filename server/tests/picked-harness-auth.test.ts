@@ -11,6 +11,13 @@ import {
   installBotDirectory,
 } from "../src/agents/bot-registry/directory";
 import { createAgentProfileStore } from "../src/agents/profile-store";
+import { createConfigurationClient } from "../src/configuration/client";
+import {
+  type BotConfiguration,
+  botConfiguration,
+  createBotConfiguration,
+  installBotConfiguration,
+} from "../src/configuration/directory";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
@@ -60,6 +67,15 @@ function wireAgent(
 function installedDirectory(): BotDirectory | undefined {
   try {
     return bots();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The Bot configuration installed before this fixture replaced it, put back after. */
+function installedConfiguration(): BotConfiguration | undefined {
+  try {
+    return botConfiguration();
   } catch {
     return undefined;
   }
@@ -224,6 +240,27 @@ async function runPicked(options: {
   });
   const previousDirectory = installedDirectory();
   installBotDirectory(directory);
+  // The Bot configuration, through the real client with only its transport replaced: every listing
+  // is empty, so no Bot holds anything and no Team Bot is published.
+  const configuration = createBotConfiguration({
+    client: createConfigurationClient({
+      apiUrl: "http://127.0.0.1:1",
+      apiKey: "synthetic-project-key",
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if ((init?.method ?? "GET") !== "GET")
+          throw new Error("Unexpected write at the configuration boundary");
+        void input;
+        return Response.json({ items: [], nextCursor: null });
+      }) as typeof fetch,
+    }),
+    registry: {
+      subscribe: async () => {
+        throw new Error("This fixture hears no announcements.");
+      },
+    },
+  });
+  const previousConfiguration = installedConfiguration();
+  installBotConfiguration(configuration);
   const database = createDatabase(config.databaseUrl);
   let sqlCalls = 0;
   const refuseDatabase = spyOn(database.$client, "unsafe").mockImplementation(
@@ -245,17 +282,15 @@ async function runPicked(options: {
       return realExecute.apply(this, args);
     const { sql } = this.getQuery();
     sqlCalls++;
-    // The one query the roster still makes here: which Team Bots reach the actor. None do.
-    if (
-      sql.startsWith("select ") &&
-      sql.endsWith('from "team_bot_publications"')
-    )
-      return [];
+    // The one query the roster still makes here: the actor's groups, which decide which Team Bots
+    // reach them. The publications themselves are in the (empty) Bot configuration.
+    if (sql.startsWith('select "groups" from "users"')) return [];
     throw new Error("Unexpected SQL at the controlled roster boundary");
   });
   let credentialReads = 0;
   let failed = false;
   try {
+    await configuration.start();
     await directory.start();
     expect(registryRequests).toEqual([
       "GET /api/agents?limit=100&includeDeleted=true",
@@ -353,7 +388,9 @@ async function runPicked(options: {
     execute.mockRestore();
     refuseDatabase.mockRestore();
     directory.stop();
+    configuration.stop();
     if (previousDirectory) installBotDirectory(previousDirectory);
+    if (previousConfiguration) installBotConfiguration(previousConfiguration);
     await database.$client.close();
     await server.stop(true);
   }
