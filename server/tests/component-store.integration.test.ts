@@ -64,11 +64,22 @@ describe("component data functions against the trail in Intelligence", () => {
    * nothing can be cleaned and nothing can be isolated by a temporary table any more. Each case makes
    * its own Bots and places its rows so the assertion is exact all the same: activity rows outnumber
    * the busiest Bot already in the window, so they are the top of the ranking whatever else is
-   * there, and refusal rows are dated just ahead of now, so they are the newest refusals.
+   * there, and refusal rows are dated ahead of every refusal already there, so they are the newest.
    */
   useTestAuditTrail();
   const reports = createComponentStore(database);
   const day = 86_400_000;
+  /**
+   * A moment to date a case's refusals back from, `spanMs` deep, so every one of them is newer than
+   * any refusal already in the trail: earlier cases and earlier runs dated theirs ahead of now too.
+   */
+  async function aheadOfEveryRefusal(spanMs: number): Promise<number> {
+    const { rows } = (await reports.callFunction("recentRefusals", {
+      limit: 1,
+    })) as { rows: { at: string }[] };
+    const newest = rows[0] ? Date.parse(rows[0].at) : 0;
+    return Math.max(Date.now() + 60 * 60_000, newest + spanMs + 60_000);
+  }
 
   function event(
     overrides: Partial<SeedAuditEvent> & { at: number },
@@ -160,7 +171,7 @@ describe("component data functions against the trail in Intelligence", () => {
 
   test("recent refusals filters event types, orders newest first and reads both reason formats", async () => {
     const run = randomUUID().slice(0, 8);
-    const ahead = Date.now() + 60 * 60_000;
+    const ahead = await aheadOfEveryRefusal(5_000);
     const fixtures = [
       {
         eventType: "computer.action_refused",
@@ -223,7 +234,7 @@ describe("component data functions against the trail in Intelligence", () => {
 
   test("recent refusals defaults to 10 and clamps the requested limit to 1 through 50", async () => {
     const run = randomUUID().slice(0, 8);
-    const ahead = Date.now() + 2 * 60 * 60_000;
+    const ahead = await aheadOfEveryRefusal(51_000);
     const fixtures = Array.from({ length: 51 }, (_, index) =>
       event({
         eventType: "bot.declined",
@@ -264,6 +275,7 @@ afterAll(async () => {
     .where(inArray(componentExclusions.componentName, names));
   await database.delete(components).where(inArray(components.name, names));
   await removeBots([...fixtureAgentIds]);
+  await database.$client.close();
 });
 
 describe("deciding whether a Bot may use a component", () => {
