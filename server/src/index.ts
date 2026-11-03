@@ -1939,6 +1939,15 @@ const actorAgentResolver = createActorAgentResolver({
     return copilotRuntime.learning?.acquire;
   },
   loadPersonalMemoryForActor,
+  recordToolLimitRefusalForActor: (actorId, initiator) => (botId, refused) =>
+    recordAuditEvent(bootAuditStore, {
+      eventType: "agent.tool_limit_refused",
+      targetType: "agent",
+      targetId: botId,
+      actorUserId: actorId,
+      ...(initiator ? { initiator } : {}),
+      payload: { bot: botId, ...refused },
+    }),
 });
 
 const copilotRuntime = mountCopilotRuntime(
