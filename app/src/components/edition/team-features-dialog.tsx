@@ -102,8 +102,8 @@ export function TeamFeaturesDialog() {
   useEffect(() => () => setOpen(false), []);
   return (
     <Dialog onOpenChange={setOpen} open={isOpen}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-4xl">
-        <div className="grid min-h-0 sm:grid-cols-2">
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-5xl">
+        <div className="grid min-h-0 sm:grid-cols-[2fr_3fr]">
           {/*
            * OpenBot's mark over the orb and its field, which fill the panel. Only where there is room
            * beside the list.

@@ -246,13 +246,13 @@
 }
 
 /*
- * The OpenBot for Business illustration (components/edition/business-orb.tsx). The field of small
- * orbs drifts up by exactly one tile per loop, so it never jumps; the big orb floats, its colours
- * turn slowly under a fixed highlight, and its glow breathes.
+ * The field behind the OpenBot for Business orb (components/edition/business-orb.tsx). It drifts
+ * up by exactly one tile per loop, so it never jumps. The orb in front is a Bot's live orb, which
+ * animates itself.
  */
 .business-orb-field {
-  --business-orb-tile: 144px;
-  background-size: 72px var(--business-orb-tile);
+  --business-orb-tile: 288px;
+  background-size: 288px var(--business-orb-tile);
   opacity: 0.3;
   filter: blur(3px);
   mask-image: linear-gradient(
@@ -262,7 +262,7 @@
     black 80%,
     transparent
   );
-  animation: business-orb-drift 9s linear infinite;
+  animation: business-orb-drift 18s linear infinite;
 }
 
 @keyframes business-orb-drift {
@@ -271,62 +271,8 @@
   }
 }
 
-.business-orb-float {
-  animation: business-orb-float 6s ease-in-out infinite;
-}
-
-@keyframes business-orb-float {
-  50% {
-    transform: translateY(-10px);
-  }
-}
-
-.business-orb-swirl {
-  background: conic-gradient(
-    from 0deg,
-    #f9a8d4,
-    #c084fc,
-    #93c5fd,
-    #c084fc,
-    #f9a8d4
-  );
-  filter: blur(12px);
-  animation: business-orb-spin 14s linear infinite;
-}
-
-@keyframes business-orb-spin {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-.business-orb-shine {
-  background: radial-gradient(
-    circle at 32% 28%,
-    rgb(255 255 255 / 0.7),
-    transparent 50%
-  );
-}
-
-.business-orb-glow {
-  background: #c084fc;
-  filter: blur(40px);
-  opacity: 0.45;
-  animation: business-orb-breathe 6s ease-in-out infinite;
-}
-
-@keyframes business-orb-breathe {
-  50% {
-    opacity: 0.65;
-    transform: scale(1.1);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .business-orb-field,
-  .business-orb-float,
-  .business-orb-swirl,
-  .business-orb-glow {
+  .business-orb-field {
     animation: none;
   }
 }
