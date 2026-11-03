@@ -46,6 +46,18 @@ export type ThreadRunner = {
 };
 
 export function createHandoffDelivery(options: {
+  prepareRunInput?: (
+    input: {
+      threadId: string;
+      runId: string;
+      messages: unknown[];
+      tools: never[];
+      context: never[];
+      state: object;
+      forwardedProps: { openbotRun: string };
+    },
+    work: import("./handoff-runner").HandoffWork,
+  ) => Promise<unknown>;
   /**
    * The addressed Bot, built for the person whose conversation this is.
    *
@@ -385,24 +397,29 @@ export function createHandoffDelivery(options: {
                * What makes this run legitimate is the lock itself: the gateway compares the run id on
                * every event to the one the lock holds. Taking the lock is the whole of the ceremony.
                */
-              input: {
-                threadId: where.threadId,
-                runId,
-                /*
-                 * The same conversation the agent was given, so the run's own record of what it was
-                 * asked agrees with what it read.
-                 */
-                messages: asked,
-                tools: [],
-                context: [],
-                state: {},
-                /*
-                 * The deployment's own statement of what this run is, carrying how deep the chain has
-                 * gone. It is what stops the addressed Bot handing the work on for ever, and it is
-                 * signed, so the Bot cannot edit its own depth on the way past.
-                 */
-                forwardedProps: { openbotRun: assertion },
-              },
+              input: await (
+                options.prepareRunInput ?? (async (input) => input)
+              )(
+                {
+                  threadId: where.threadId,
+                  runId,
+                  /*
+                   * The same conversation the agent was given, so the run's own record of what it was
+                   * asked agrees with what it read.
+                   */
+                  messages: asked,
+                  tools: [],
+                  context: [],
+                  state: {},
+                  /*
+                   * The deployment's own statement of what this run is, carrying how deep the chain has
+                   * gone. It is what stops the addressed Bot handing the work on for ever, and it is
+                   * signed, so the Bot cannot edit its own depth on the way past.
+                   */
+                  forwardedProps: { openbotRun: assertion },
+                },
+                work,
+              ),
             }),
             deadlineMs,
             AbortSignal.any([paused, lockLost.signal]),

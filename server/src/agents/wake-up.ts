@@ -389,6 +389,9 @@ export function wakeUpInstruction(payload: WakeUpPayload): string {
 }
 
 export type WakeUpTurn = (input: {
+  telemetry?: Parameters<
+    import("@openbot/toolkit/run-turn").TurnRunner
+  >[0]["telemetry"];
   ownerUserId: string;
   routineId: string;
   agentId: string;
@@ -477,6 +480,11 @@ export function createWakeUpRunner(options: {
             const { replyText } = await runTurn({
               ownerUserId: payload.ownerUserId,
               routineId: `follow-up:${item.key}`,
+              telemetry: {
+                trigger: "followup",
+                rootTaskId: `follow-up:${item.key}`,
+                attempt: item.attempts,
+              },
               agentId: payload.agentId,
               threadId: channel.threadId,
               instruction: wakeUpInstruction(payload),

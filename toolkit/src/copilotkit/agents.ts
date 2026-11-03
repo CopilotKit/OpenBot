@@ -3,6 +3,8 @@ import {
   type BaseEvent,
   EventType,
   type Message,
+  type Middleware,
+  type MiddlewareFunction,
   type RunAgentInput,
 } from "@ag-ui/client";
 import {
@@ -111,6 +113,14 @@ export function toolNamesSent(
 export class CloningRemoteAgent extends AbstractAgent {
   headers?: AgentHeaders;
   private readonly remote: HeaderBearingAgent;
+  private extraMiddleware: (Middleware | MiddlewareFunction)[] = [];
+  private captureExtraMiddleware = false;
+
+  override use(...middleware: (Middleware | MiddlewareFunction)[]): this {
+    super.use(...middleware);
+    if (this.captureExtraMiddleware) this.extraMiddleware.push(...middleware);
+    return this;
+  }
 
   constructor(
     remote: AbstractAgent,
@@ -129,6 +139,7 @@ export class CloningRemoteAgent extends AbstractAgent {
       this.headers = { ...this.remote.headers };
     }
     this.attachOpenBotMiddleware(this);
+    this.captureExtraMiddleware = true;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -153,6 +164,7 @@ export class CloningRemoteAgent extends AbstractAgent {
       clonedRemote,
       this.attachOpenBotMiddleware,
     );
+    clone.use(...this.extraMiddleware);
     if (this.headers) {
       clone.headers = { ...this.headers };
     }

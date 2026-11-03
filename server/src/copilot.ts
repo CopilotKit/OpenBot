@@ -73,6 +73,8 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
+import type { ProductTelemetry } from "./telemetry/product";
+import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
@@ -1981,6 +1983,7 @@ export function mountCopilotRuntime(
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
   options: {
+    productTelemetry?: ProductTelemetry;
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
@@ -2100,6 +2103,8 @@ export function mountCopilotRuntime(
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
     telemetryProperties: {
+      app_id: "openbot",
+      ...options.productTelemetry?.deploymentProperties(),
       ...(config.accessibility ? { accessibility_title: "OpenBot" } : {}),
       ...desktopTelemetryProperties(),
     },
@@ -2130,9 +2135,18 @@ export function mountCopilotRuntime(
     handler: createCopilotHonoHandler({
       runtime,
       basePath,
-      ...(trajectoryCapture
-        ? { hooks: { onBeforeHandler: trajectoryCapture.gate } }
-        : {}),
+      hooks: {
+        onBeforeHandler: async (context) => {
+          const gated = await trajectoryCapture?.gate(context);
+          if (!options.productTelemetry) return gated;
+          return (
+            (await productRuntimeHook(
+              options.productTelemetry,
+              identifyActor,
+            )({ ...context, request: gated ?? context.request })) ?? gated
+          );
+        },
+      },
     }),
     learning,
     /**

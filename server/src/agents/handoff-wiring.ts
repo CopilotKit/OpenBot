@@ -1,3 +1,5 @@
+import { productHandoffInput } from "../telemetry/product-boundaries";
+import type { ProductTelemetry } from "../telemetry/product";
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
 import { workOwner } from "@openbot/shared/work-owner";
@@ -31,6 +33,7 @@ import { serverTurnAdmission } from "./turn-admission";
  * shutdown can give the connection back. Called only where handing work between Bots is on.
  */
 export async function startHandoffDelivery(deps: {
+  productTelemetry?: ProductTelemetry;
   config: DeploymentConfig;
   database: Database;
   bootAuditStore: AuditStore;
@@ -50,6 +53,7 @@ export async function startHandoffDelivery(deps: {
     groupConversations,
     channelStore,
   } = deps;
+  const productTelemetry = deps.productTelemetry;
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
     owner: workOwner("handoff"),
@@ -63,6 +67,17 @@ export async function startHandoffDelivery(deps: {
     // The asking conversation, told what it is waiting on once the queue has moved for a hop.
     onSettled: (work) => channelStore.signalWork(work.threadId),
     delivery: createHandoffDelivery({
+      ...(productTelemetry
+        ? {
+            prepareRunInput: (input, work) =>
+              productHandoffInput(
+                productTelemetry,
+                input,
+                work.actorId,
+                work.runId,
+              ),
+          }
+        : {}),
       admission: serverTurnAdmission,
       /*
        * Built as the person, WITH THEIR ROLE. The desk resolved it to decide the hop was allowed; a

@@ -1,3 +1,4 @@
+import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -249,6 +250,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
           {threadId ? (
             <CopilotChat
               agentId={agentId}
+              messageView={{ assistantMessage: TelemetryAssistantMessage }}
               key={`${agentId}:${threadId}`}
               threadId={threadId}
             />
