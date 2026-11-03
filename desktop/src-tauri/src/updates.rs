@@ -380,17 +380,35 @@ fn sibling(root: &Path, suffix: &str) -> Result<PathBuf, String> {
 pub fn stage_path(root: &Path) -> Result<PathBuf, String> {
     sibling(root, "stage")
 }
-fn relative(path: &Path) -> Result<String, String> {
-    if path.as_os_str().is_empty()
-        || path
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
-        || path.to_string_lossy().contains(['\\', ':'])
-    {
+/// Serialize already parsed native relative components without using the host path separator.
+/// A Windows PathBuf displays backslashes; inventory/journal keys must always use `/`.
+fn filesystem_relative_key(path: &Path) -> Result<String, String> {
+    let mut names = Vec::new();
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            return Err("unsafe vendor path".into());
+        };
+        let name = name.to_str().ok_or("vendor path is not valid UTF-8")?;
+        if name.is_empty() || name.contains(['\\', '/', ':']) {
+            return Err("unsafe vendor path".into());
+        }
+        names.push(name);
+    }
+    if names.is_empty() {
         return Err("unsafe vendor path".into());
     }
-    Ok(path.to_string_lossy().replace('\\', "/"))
+    Ok(names.join("/"))
 }
+
+/// Serialized baseline/archive spelling is untrusted: backslashes are never normalized into
+/// separators here, even on Windows. Native filesystem paths use the component helper above.
+fn relative(path: &Path) -> Result<String, String> {
+    if path.to_string_lossy().contains(['\\', ':']) {
+        return Err("unsafe vendor path".into());
+    }
+    filesystem_relative_key(path)
+}
+
 fn managed(path: &Path, preserved: &[PathBuf]) -> bool {
     if preserved.iter().any(|p| path.starts_with(p)) {
         return false;
@@ -454,7 +472,7 @@ fn inventory(root: &Path, preserved: &[PathBuf]) -> Result<BTreeMap<String, Stri
                 walk(root, &path, preserved, files)?;
             } else if kind.is_file() {
                 files.insert(
-                    relative(&path)?,
+                    filesystem_relative_key(&path)?,
                     digest(&std::fs::read(root.join(path)).map_err(io)?),
                 );
             } else {
@@ -588,6 +606,15 @@ fn unpack_safe(destination: &Path, body: &[u8]) -> Result<(), String> {
     let mut seen = BTreeSet::new();
     for entry in archive.entries().map_err(io)? {
         let entry = entry.map_err(io)?;
+        // Validate the archive spelling before PathBuf reconstruction introduces native Windows
+        // separators. Entry::path_bytes also includes GNU/PAX long-path records.
+        if entry
+            .path_bytes()
+            .iter()
+            .any(|byte| matches!(byte, b'\\' | b':'))
+        {
+            return Err("unsafe archive path spelling".into());
+        }
         let path = entry.path().map_err(io)?.into_owned();
         let mut parts = path.components();
         if !matches!(parts.next(), Some(Component::Normal(_))) {
@@ -597,7 +624,7 @@ fn unpack_safe(destination: &Path, body: &[u8]) -> Result<(), String> {
         if relative_path.as_os_str().is_empty() {
             continue;
         }
-        relative(&relative_path)?;
+        filesystem_relative_key(&relative_path)?;
         let kind = entry.header().entry_type();
         if !kind.is_file() && !kind.is_dir() {
             return Err("archive links and special files are refused".into());
@@ -990,6 +1017,59 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn updates_native_inventory_keys_are_portable_and_round_trip() {
+        let root = temp_root("updates-portable-keys");
+        let native = PathBuf::from("server").join("src").join("main.ts");
+        write(&root, &native.to_string_lossy(), b"managed source");
+        let files = inventory(&root, &[]).unwrap();
+        assert_eq!(
+            files.keys().cloned().collect::<Vec<_>>(),
+            vec!["server/src/main.ts"]
+        );
+        assert_eq!(
+            filesystem_relative_key(&native).unwrap(),
+            "server/src/main.ts"
+        );
+        let stored = serde_json::to_vec(&files).unwrap();
+        let restored: BTreeMap<String, String> = serde_json::from_slice(&stored).unwrap();
+        for (key, hash) in restored {
+            assert_eq!(
+                digest(&std::fs::read(root.join(relative(Path::new(&key)).unwrap())).unwrap()),
+                hash
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn updates_archive_spelling_stays_strict_across_platforms() {
+        for spelling in [
+            r"release/server\src\main.ts",
+            "release/../escape",
+            "/release/server/main.ts",
+            "C:/release/server/main.ts",
+        ] {
+            let root = temp_root("updates-unsafe-spelling");
+            std::fs::create_dir_all(&root).unwrap();
+            let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            let mut archive = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(0);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            header.as_mut_bytes()[..spelling.len()].copy_from_slice(spelling.as_bytes());
+            header.set_cksum();
+            archive.append(&header, std::io::empty()).unwrap();
+            let bytes = archive.into_inner().unwrap().finish().unwrap();
+            assert!(unpack_safe(&root, &bytes).is_err(), "{spelling}");
+            assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+        for spelling in [r"server\src\main.ts", "../escape", "/absolute", "C:/drive"] {
+            assert!(relative(Path::new(spelling)).is_err(), "{spelling}");
+        }
+    }
+
     #[test]
     fn updates_native_distribution_defaults_conform_to_publisher() {
         let vectors: Vec<Value> = serde_json::from_slice(include_bytes!(
