@@ -333,7 +333,19 @@ export function createPeopleStore(
     },
 
     async isRevoked(email) {
-      return (await people().removals.find(normalize(email))) !== null;
+      const directory = people();
+      if ((await directory.removals.find(normalize(email))) !== null)
+        return true;
+      /*
+       * Deleted from the organization's directory by another of its applications: kept there, so
+       * their history stays readable, and not let back in here either.
+       */
+      const { people: held } = await directory.client.pagePeople(
+        { email: normalize(email), includeDeleted: true },
+        null,
+        1,
+      );
+      return held.some((person) => person.deletedAt !== null);
     },
   };
 }

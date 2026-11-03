@@ -493,6 +493,16 @@ export function createDirectoryClient(settings: DirectorySettings) {
       return personFromWire((await response.json()) as WirePerson);
     },
 
+    /** Soft delete: the person stays, readable, with `deletedAt` set. */
+    async deletePerson(id: string, key: string): Promise<Person> {
+      const response = await request("DELETE", personPath(id), {
+        idempotencyKey: key,
+      });
+      if (response.status !== 200)
+        return refusal(response, `person ${id}`, "delete");
+      return personFromWire((await response.json()) as WirePerson);
+    },
+
     /** Delete for good, with every link of theirs. True when this call removed them. */
     async purgePerson(id: string, key: string): Promise<boolean> {
       const response = await request("DELETE", `${personPath(id)}?purge=true`, {

@@ -121,6 +121,19 @@ describe("what OpenBot decides about a person", () => {
     expect((await store.find(ada.id))?.revoked).toBe(false);
   });
 
+  test("somebody another application deleted from the directory cannot sign in again", async () => {
+    const ada = await person();
+    const store = createPeopleStore(database, []);
+    expect(await store.isRevoked(ada.email)).toBe(false);
+
+    // Soft-deleted straight in Intelligence: kept there, with their history, but gone.
+    await directory.client.deletePerson(ada.id, idempotencyKey("test-delete"));
+
+    expect(await store.isRevoked(ada.email)).toBe(true);
+    // Their row here stays, as their history does.
+    expect(await row(ada.id)).toBeDefined();
+  });
+
   test("preferences merge over Intelligence's copy, so two saves to different settings both stand", async () => {
     const ada = await person();
     const preferences = createUserPreferencesStore(database);
