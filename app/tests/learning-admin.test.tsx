@@ -174,11 +174,11 @@ test.each([
  */
 test.each([
   [
-    [{ containerId: "fernhill-shared", problem: "missing" }],
-    'This Intelligence project has no "fernhill-shared" Learning container.',
+    [{ containerId: "team-shared", problem: "missing" }],
+    'This Intelligence project has no "team-shared" Learning container.',
   ],
   [
-    [{ containerId: "fernhill-shared", problem: "learning_off" }],
+    [{ containerId: "team-shared", problem: "learning_off" }],
     "Learning isn't on for this Intelligence project",
   ],
 ] as const)(
@@ -187,7 +187,7 @@ test.each([
     serve({
       settings: {
         enabled: true,
-        defaultTarget: { containerId: "fernhill-shared" },
+        defaultTarget: { containerId: "team-shared" },
         agents: {},
       },
       automatic: { state: "saved" },

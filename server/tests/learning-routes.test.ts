@@ -209,11 +209,11 @@ test("the settings page lists the saved containers Intelligence won't use, and o
       await next();
     };
   const problems = async () => [
-    { containerId: "fernhill-shared", problem: "missing" as const },
+    { containerId: "team-shared", problem: "missing" as const },
   ];
   const admin = createLearningRoutes({ store, problems }, actor("admin"));
   expect(await (await admin.request("/settings")).json()).toMatchObject({
-    problems: [{ containerId: "fernhill-shared", problem: "missing" }],
+    problems: [{ containerId: "team-shared", problem: "missing" }],
   });
   const member = createLearningRoutes({ store, problems }, actor("user"));
   expect((await member.request("/settings")).status).toBe(403);
