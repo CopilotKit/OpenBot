@@ -9482,7 +9482,7 @@ fn main() {
         let docker = Address::new(crate::engine::Engine::Docker, None);
         let (root, record) = project_choice_root(&path, "legacy-own");
         // Made by an earlier app: a stamp, and no project record.
-        crate::deployment::record(&root, "v0.2.0").unwrap();
+        crate::deployment::record(&root, "v0.2.0", false).unwrap();
         // Compose labels the folder as given, which need not be its canonical spelling.
         let spelled = root.join("..").join("OpenBot");
         std::fs::write(
@@ -9516,7 +9516,7 @@ fn main() {
         let path = PathFixture::with_fake_engine("postgres-volume");
         let docker = Address::new(crate::engine::Engine::Docker, None);
         let (root, record) = project_choice_root(&path, "legacy-collision");
-        crate::deployment::record(&root, "v0.2.0").unwrap();
+        crate::deployment::record(&root, "v0.2.0", false).unwrap();
         // A developer's source checkout called `openbot`, running as Compose project `openbot`.
         let checkout = path.bin.join("src").join("openbot");
         std::fs::create_dir_all(&checkout).unwrap();
