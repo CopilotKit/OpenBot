@@ -238,6 +238,9 @@ for (const [row, target] of [
       expect(
         again.activityFor(ADMIN_BOT).map((entry) => entry.subject),
       ).toEqual(["pwd"]);
-      expect(again.activityFor(ADMIN_BOT)[0]?.at).toBeUndefined();
+      // Read off the entry itself, so a missing entry fails here instead of passing as no time.
+      const [entry] = again.activityFor(ADMIN_BOT);
+      if (!entry) throw new Error("The command after the wipe was not listed.");
+      expect(entry.at).toBeUndefined();
     }
   });
