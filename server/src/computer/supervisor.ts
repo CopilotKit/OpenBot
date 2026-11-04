@@ -21,6 +21,7 @@ import {
   type ComputerSeat,
   computerKeyText,
 } from "./computer-key";
+import { ownComputerToken } from "./computer-token";
 import type {
   ComputerLocation,
   ComputerProvider,
@@ -261,6 +262,12 @@ export function createDockerSupervisorProvider(
   return {
     name: "Docker supervisor",
     isolation: "per-person",
+
+    /**
+     * The token the supervisor gave this computer: its own, derived from whose computer it is and the
+     * deployment's token (supervisor/src/environment.ts), never the deployment's token itself.
+     */
+    tokenFor: (key, deploymentToken) => ownComputerToken(deploymentToken, key),
 
     async sessionOf(seat: ComputerSeat): Promise<string | undefined> {
       const id = computerKeyText(seat.key);

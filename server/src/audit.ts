@@ -1,3 +1,4 @@
+import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   and,
@@ -112,6 +113,17 @@ export const auditEventTypes = [
    * endpoint that dies mid-answer from one that never answers at all.
    */
   "agent.stream_stalled",
+  /**
+   * A built-in Bot's run refused before its model call, because it would have sent more tools than
+   * the model accepts in one request (Chat Completions: 128).
+   *
+   * The person is told in the run; this is for the admin, who is the one who can fix it and the one
+   * who would otherwise never hear of it. Rare since tool search: an app's tools wait behind a
+   * search and are not counted, so this fires only when what a Bot needs on every step is itself
+   * past the limit. Payload: `bot`, `tools` (what the run would have sent, including the runtime's
+   * and the client's own), `limit`, `provider`.
+   */
+  "agent.tool_limit_refused",
   /*
    * Which of a Bot's tools were put in front of the model for one run, and why those.
    *
@@ -179,6 +191,8 @@ export const auditEventTypes = [
    * was current when it was made. The client id, never the secret.
    */
   "mcp.oauth_client_registered",
+  /** A Connect attempt could not read the deployment's client. No credential or raw fault is recorded. */
+  "mcp.oauth_client_read_failed",
   /*
    * One person's brokered account was exercised with a real call, to see whether it is really there.
    *
@@ -839,6 +853,12 @@ function initiatorColumns(initiator: AuditInitiator | undefined) {
 
 /** One row as written, handed to anything that streams the trail elsewhere. */
 export type AuditTapEvent = {
+  /** Persisted row identity, stable across analytics delivery attempts. */
+  id?: string;
+  createdAt?: Date;
+  /** Trusted native/headless action scope; never read from an analytics client. */
+  runId?: string;
+  threadId?: string;
   eventType: string;
   targetType: string;
   targetId?: string;
@@ -871,10 +891,18 @@ export function createAuditStore(database: Database): AuditStore {
         ...initiatorColumns(initiator),
         payload: redactAuditPayload(event.payload) as Record<string, unknown>,
       };
-      await database.insert(auditEvents).values(row);
+      const [persisted] = await database
+        .insert(auditEvents)
+        .values(row)
+        .returning({ id: auditEvents.id, createdAt: auditEvents.createdAt });
       for (const tap of auditTaps) {
         try {
-          tap(row);
+          const run = currentApprovalContext();
+          tap({
+            ...row,
+            ...persisted,
+            ...(run ? { runId: run.runId, threadId: run.threadId } : {}),
+          });
         } catch (error) {
           console.error(
             JSON.stringify({

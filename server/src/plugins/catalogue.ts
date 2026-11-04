@@ -350,6 +350,18 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
      * into something the policy engine has never heard of.
      */
     writeTools: Object.freeze(["create_file", "copy_file"]),
+    /*
+     * Every tool the REST adapter offers (`TOOLS` in google-drive-rest.ts), each of which only reads.
+     * Named so a read is a reviewed one, which is what a task started from a check-in runs without
+     * asking (`reviewedRead`), and so a tool added to the adapter later is a write until it is
+     * listed here. Chat's answer for these four is the read it already was.
+     */
+    readTools: Object.freeze([
+      "search_files",
+      "list_recent_files",
+      "get_file_metadata",
+      "read_file_content",
+    ]),
     docsUrl:
       "https://developers.google.com/workspace/guides/configure-mcp-servers",
   },
@@ -382,14 +394,9 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       registrationUrl: "https://mcp.notion.com/register",
     },
     /*
-     * The writing tools as the hosted server advertises them today. The hosted server advertises
-     * its tools, so a name here that does not match an advertised tool is not the risk — an
-     * advertised tool that is missing from this list is: {@link classifyTool} reads an unlisted
-     * but advertised name as a read, never as a write. Notion's MCP listing carries no per-action
-     * effect, so this list is the only thing that can say otherwise and nothing backstops it. That
-     * makes under-inclusion the failure mode, so this list has to lean over-inclusive rather than
-     * minimal, and reconciling it against the live tool list on the first Refresh tools is
-     * required, not cosmetic.
+     * The writing tools as the hosted server advertised them when this entry was reviewed. Kept
+     * beside the read list below because a name here is a write whatever the server's own labels
+     * say about it, in chat and in a check-in alike.
      */
     writeTools: Object.freeze([
       "notion-convert-page-to-skill",
@@ -406,6 +413,61 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       "notion-update-folder",
       "notion-update-page",
       "notion-update-view",
+    ]),
+    /*
+     * THE READS, NAMED, so a tool Notion adds later is a write until somebody reads it and lists it
+     * here.
+     *
+     * The write list above used to stand alone, and {@link classifyTool} reads an advertised name
+     * that list omits as a read. Notion has no read-only scope behind it, and its hosted server
+     * grows: by 2026-10-30 it advertised deletes, comment edits, calendar events and agent sessions,
+     * none of them on the write list, so every one was offered to a Bot as a read. Naming the reads
+     * turns that around, the same way Firecrawl's entry does: an unlisted name is a write.
+     *
+     * Copied from Notion's published tool reference
+     * (https://developers.notion.com/docs/mcp-supported-tools, read 2026-10-30): the tools it
+     * describes as searching, fetching, listing, querying or reading, and nothing that creates,
+     * changes, moves, deletes, sends or starts anything.
+     */
+    readTools: Object.freeze([
+      "notion-search",
+      "notion-connector-search",
+      "notion-memory-search",
+      "notion-get-tool-access",
+      "notion-get-self",
+      "notion-download-skill",
+      "notion-get-enabled-skills",
+      "notion-fetch",
+      "notion-get-file-download-urls",
+      "notion-list-private-pages",
+      "notion-list-shared-pages",
+      "notion-list-favorite-pages",
+      "notion-list-recent-pages",
+      "notion-list-page-backlinks",
+      "notion-view-version",
+      "notion-get-version-changes",
+      "notion-download-attachment",
+      "notion-get-comments",
+      "notion-get-suggested-edit",
+      "notion-get-teams",
+      "notion-get-groups",
+      "notion-get-users",
+      "notion-get-async-task",
+      "notion-query-data-sources",
+      "notion-query-multiple-data-sources",
+      "notion-query-meeting-notes",
+      "notion-search-agents",
+      "notion-query-sessions",
+      "notion-search-sessions",
+      "notion-get-session-status",
+      "notion-wait-session",
+      "notion-list-session-events",
+      "notion-read-session-event",
+      "notion-calendar-list-calendars",
+      "notion-calendar-list-events",
+      "notion-calendar-list-coworkers-events",
+      "notion-calendar-list-calendar-resources",
+      "notion-calendar-list-contacts",
     ]),
     docsUrl: "https://developers.notion.com/guides/mcp/build-mcp-client",
   },
@@ -581,6 +643,69 @@ export function classifyTool(
   // Advertised, not on the reviewed write list, and nothing recorded. Two sources had the chance to
   // call it a write and neither did.
   return "read";
+}
+
+/**
+ * Whether an advertised tool says it only reads: the question a check-in asks, and only a check-in.
+ *
+ * A CHECK-IN IS NOBODY'S TURN. It runs in the background and acts on nothing, so the one thing it
+ * needs to know about a tool is whether calling it can change anything. Chat asks a different
+ * question, which is whether to ask the person first, and {@link classifyTool} answers that one. The
+ * two are kept apart on purpose: a check-in only ever reaches an app the person connected with their
+ * own account (see `ServerAccess.ownCredential`), and for those the tool's own label is trusted here
+ * while chat goes on answering exactly as it did.
+ *
+ * WHICH LABELS COUNT, in the order they are read:
+ * - The server said it destroys something (`destructiveHint`, a broker's destructive flag): never.
+ *   This wins over everything, including a read-only label beside it.
+ * - A reviewed write list names it: never. A person read that list; a label is the vendor's.
+ * - {@link classifyTool} calls it a read: a broker's own read label (Composio, Arcade), or a
+ *   reviewed list that names it a read or declined to call it a write.
+ * - The server marked it `readOnlyHint` (`declaredRead`, recorded at refresh and believed only here).
+ *
+ * Anything else has no read-only label, and a check-in is not offered it: it raises what it would
+ * need done as an item for the person instead.
+ */
+export function labelledRead(
+  entry: CatalogueEntry | null,
+  toolName: string,
+  tool: {
+    /** What the vendor recorded for it, as `classifyTool` reads it. */
+    effect: string | null;
+    destructive: boolean;
+    /** The server's own `readOnlyHint`, as the listing recorded it. */
+    declaredRead: boolean;
+  },
+): boolean {
+  if (tool.destructive) return false;
+  if (entry?.writeTools.includes(toolName)) return false;
+  if (classifyTool(entry, toolName, true, tool.effect) === "read") return true;
+  return tool.declaredRead;
+}
+
+/**
+ * Whether a person reviewed this tool as a read: the one kind of call a task started from a
+ * check-in makes without asking.
+ *
+ * A TASK ASKS BEFORE EVERY CHANGE, so what it runs unasked has to be a read by construction, not by
+ * anybody's description of it. That leaves only the reviewed `readTools` list. Every other source
+ * {@link labelledRead} accepts is a label: a server's `readOnlyHint` is the server describing itself,
+ * and the MCP specification says a client must treat annotations as untrusted unless the server is
+ * trusted; a broker's read tag is assigned best-effort from the action's description (Composio's
+ * tool-tags page says so); and a name missing from a write list is an omission, which is how a tool
+ * a vendor adds later would pass. Each of those is still a read for a check-in, which only reads.
+ * In a task they ask, like any change.
+ *
+ * A destructive label or a reviewed write still wins over the read list.
+ */
+export function reviewedRead(
+  entry: CatalogueEntry | null,
+  toolName: string,
+  tool: { destructive: boolean },
+): boolean {
+  if (tool.destructive || !entry?.readTools) return false;
+  if (entry.writeTools.includes(toolName)) return false;
+  return entry.readTools.includes(toolName);
 }
 
 /**

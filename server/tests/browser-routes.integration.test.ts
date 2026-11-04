@@ -447,7 +447,7 @@ function build(
     auth?: typeof better | ReturnType<typeof createOrganizationAuth>;
     organizationAuth?: ReturnType<typeof createOrganizationAuth>;
     computers?: false;
-    /** The token the browser routes call the computer with, in place of the right one. */
+    /** The deployment's computer token as this OpenBot was given it, in place of the right one. */
     token?: string;
     /** The Bots' computer provider, in place of the stand-in computer as a computer of each one's own. */
     provider?: ComputerProvider;
@@ -495,7 +495,7 @@ function build(
     provider,
     auditStore,
     policy: () => undefined,
-    token: COMPUTER_TOKEN,
+    token: options.token ?? COMPUTER_TOKEN,
   });
   const recorder = createRecorderExtension({
     config,
@@ -523,7 +523,6 @@ function build(
     recorder,
     browser: {
       ...(options.computers === false ? {} : place),
-      token: options.token ?? COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
       singleUser: config.singleUser,

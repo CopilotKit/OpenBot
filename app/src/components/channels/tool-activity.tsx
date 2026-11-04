@@ -6,6 +6,7 @@ import {
 import { researchRoleOfTool } from "@openbot/shared/research";
 import {
   IconFileText,
+  IconFolder,
   IconPlug,
   IconSearch,
   IconTool,
@@ -14,13 +15,14 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
-import { markdownComponents } from "@/lib/markdown";
+import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
   connectorName,
   humanise,
   ownToolLabel,
   readToolName,
-} from "@/lib/plugins/tool-name";
+} from "@openbot/shared/tool-name";
 import {
   asText,
   forDisplay,
@@ -29,6 +31,7 @@ import {
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
+import { codingOutcome, lookStep } from "./coding-tool-cards";
 import type { VisibleChatItem } from "./chat-messages";
 import { ToolLine } from "./tool-line";
 
@@ -50,7 +53,12 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  * tool the app has no component for, such as an external agent's `run_command`. A tool the app draws
  * itself, a chart or a request for help, stays where it is, and so does a refusal that asks the
  * person to connect their own account, because a question for the person must never sit behind a
- * disclosure. A single call on its own keeps its own line; one browser step is still a group, as it
+ * disclosure.
+ *
+ * A coding harness's reads and searches fold too, though the app draws them, because Claude Code
+ * folds them: a run of Read, Grep, Glob and plain `ls`, `cat` or `grep` commands is one line saying
+ * "Read 3 files and searched for 2 patterns" (its changelog, 2.1.0 to 2.1.89). Its edits, writes,
+ * other commands and plan keep their own rows, as they do there. A single call on its own keeps its own line; one browser step is still a group, as it
  * always was, so the row does not change shape when the second step arrives.
  *
  * `isDrawn` says which tools the app draws itself; the transcript reads it from `useDrawnTool`.
@@ -121,7 +129,15 @@ export function groupToolSteps(
 function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
   if (isBrowserStep(item)) return true;
   const name = item.toolCall.function.name;
-  if (!name.startsWith("mcp__") && isDrawn(name)) return false;
+  const args = item.toolCall.function.arguments;
+  if (codingLook(name, args) !== null) return true;
+  // Another harness's tool under one of Claude Code's names is not drawn as Claude Code's.
+  if (
+    !name.startsWith("mcp__") &&
+    isDrawn(name) &&
+    !foreignCodingCall(name, args)
+  )
+    return false;
   /*
    * The app-access card is drawn from a server tool's answer, so no renderer registers it and the
    * registry cannot say so. Never folded — not even while its answer is still on the way, or the
@@ -213,7 +229,16 @@ export function dropRepeatedAppCards(
   });
 }
 
-type StepKind = "search" | "fetch" | "browser" | "connector" | "tool";
+type StepKind =
+  | "search"
+  | "fetch"
+  | "browser"
+  | "connector"
+  | "tool"
+  // A coding harness's reads and searches, counted as Claude Code counts them.
+  | "file"
+  | "pattern"
+  | "directory";
 
 export type StepDetails = {
   id: string;
@@ -232,6 +257,8 @@ export type StepDetails = {
   connector?: string;
   inputs: [string, string][];
   output?: string;
+  /** The output is a file, a command's output or a search's matches: drawn as it came, not as markdown. */
+  verbatim?: boolean;
 };
 
 function objectOf(value: string | undefined): Record<string, unknown> {
@@ -302,6 +329,25 @@ export function stepDetails(step: ToolItem): StepDetails {
   }
 
   const name = step.toolCall.function.name;
+  const look = codingLook(name, step.toolCall.function.arguments);
+  if (look !== null) {
+    // Running whenever it has no result: whether the turn still is, the step's status says.
+    const outcome = codingOutcome(step.result, true);
+    const { label, detail } = lookStep(name, args, look, outcome);
+    const output = outcome.text.replace(/\s+$/, "");
+    return {
+      id: step.id,
+      kind: look,
+      label,
+      ...(detail ? { detail } : {}),
+      pending: step.result === undefined,
+      failed: outcome.state === "failed",
+      refused: false,
+      pages: 0,
+      inputs: [],
+      ...(output ? { output, verbatim: true } : {}),
+    };
+  }
   const answer = step.result === undefined ? undefined : asText(step.result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
@@ -389,6 +435,15 @@ function plural(count: number, one: string, many: string): string {
 export function summarise(steps: readonly StepDetails[]): string {
   const of = (kind: StepKind) => steps.filter((step) => step.kind === kind);
   const phrases: string[] = [];
+  // Claude Code's own words for a run of reads and searches.
+  const files = of("file").length;
+  if (files) phrases.push(`read ${plural(files, "file", "files")}`);
+  const patterns = of("pattern").length;
+  if (patterns)
+    phrases.push(`searched for ${plural(patterns, "pattern", "patterns")}`);
+  const directories = of("directory").length;
+  if (directories)
+    phrases.push(`listed ${plural(directories, "directory", "directories")}`);
   if (of("search").length) phrases.push("searched the web");
   const read = of("fetch").reduce((sum, step) => sum + step.pages, 0);
   if (read) phrases.push(`read ${plural(read, "page", "pages")}`);
@@ -416,6 +471,9 @@ const KIND_ICONS = {
   browser: IconWorld,
   connector: IconPlug,
   tool: IconTool,
+  file: IconFileText,
+  pattern: IconSearch,
+  directory: IconFolder,
 } as const;
 
 function StepIcon({
@@ -471,7 +529,14 @@ function StepStatus({ step, active }: { step: StepDetails; active: boolean }) {
   return null;
 }
 
-function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
+/** One step, as a folded line opens to it. Also how a subtask's card lists the steps it took. */
+export function StepRow({
+  step,
+  active,
+}: {
+  step: StepDetails;
+  active: boolean;
+}) {
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
@@ -529,9 +594,16 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
               ))}
             </dl>
           ) : null}
-          {step.output ? (
+          {step.output && step.verbatim ? (
+            <pre className="max-h-60 overflow-auto border-l pl-3 font-mono whitespace-pre-wrap break-words">
+              {step.output}
+            </pre>
+          ) : step.output ? (
             <div className="max-h-60 overflow-auto border-l pl-3 [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
-              <Streamdown components={markdownComponents}>
+              <Streamdown
+                components={markdownComponents}
+                plugins={markdownPlugins}
+              >
                 {forDisplay(step.output)}
               </Streamdown>
             </div>

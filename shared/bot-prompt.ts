@@ -11,6 +11,7 @@
  */
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { RESEARCH_APP_NAMES } from "./research";
+import { SUBAGENT_TOOL, SUBAGENTS_PER_ANSWER } from "./subagent";
 
 const OPENING_A_PAGE_LINES = [
   "You are a Bot with your own computer, a real web browser the person can watch you use.",
@@ -225,6 +226,68 @@ const PROVENANCE_GUIDANCE_LINES = [
 ];
 
 export const PROVENANCE_GUIDANCE = asParagraphs(PROVENANCE_GUIDANCE_LINES);
+
+/**
+ * When to answer with a component rather than prose.
+ *
+ * Every Bot is offered the gallery (charts, tables, record cards, checklists, choices), sandboxed UI
+ * in the browser, and the display half of the gallery on a background turn. Nothing said when to use
+ * any of it, so each tool's own description decided alone: a comparison of figures got a chart, but
+ * a first-week plan came back as headed lists and a landmark's key facts as bullets, from a Bot
+ * holding a checklist and a record card.
+ *
+ * It names kinds of answer and never a tool, because the tools on a turn differ: by Bot, by grant,
+ * and between a person's own turn and a background one, where nothing that waits on a person is
+ * offered. A list of names would promise a component somebody's turn does not hold.
+ *
+ * It goes straight after `PROVENANCE_GUIDANCE` in every prompt, which is what "the rules above" in
+ * its last line points at: a chart drawn because this said to is still a chart whose figures have to
+ * say where they came from.
+ */
+const COMPONENT_GUIDANCE_LINES = [
+  "When an answer has structure, answer with a component from your tools rather than in prose.",
+  "Numbers or a comparison: a chart or headline figures. Steps, a list or a plan: a checklist or a",
+  "table. The details of one thing, such as a person, an order or an account: a record card. A choice",
+  "the person has to make: a card they choose from. Use whichever of the tools you hold on this turn",
+  "fits, and put a sentence or two of text around it saying what it shows or what comes next, without",
+  "repeating what it already shows.",
+  "",
+  "Answer in plain text only for a short conversational reply, or when none of your tools fits the",
+  "answer. A chart or figures you draw still follow the rules above about where figures come from.",
+];
+
+export const COMPONENT_GUIDANCE = asParagraphs(COMPONENT_GUIDANCE_LINES);
+
+/**
+ * How a Bot shares out its own work: as an orchestrator, by default.
+ *
+ * Every Bot is offered `run_subagent`, a fresh run of itself with the same tools, as the same person,
+ * that sees none of the conversation and hands back only its answer. A Bot that does twenty lookups
+ * itself fills its own context with every page it read and answers worse for it; one that gives the
+ * reading to subagents keeps a clean context for the part only it can do. The pattern is the lead
+ * agent of Anthropic's research system, and the split is Cognition's: subagents read and work, while
+ * decisions and anything with a side effect stay with one agent.
+ *
+ * Conditional on holding the tool, because a subagent reads this prompt too and holds no such tool,
+ * and a check-in is offered none.
+ */
+const ORCHESTRATION_GUIDANCE_LINES = [
+  `When you hold ${SUBAGENT_TOOL}, work as an orchestrator. When a request needs more than two or three`,
+  "tool calls, or reading through a lot of results, do not make those calls yourself: give the work to",
+  `subagents with ${SUBAGENT_TOOL}. A subagent is a fresh copy of you, with your tools, acting for the`,
+  "same person, that sees none of this conversation. So give each one a self-contained task with",
+  "everything it needs to know, and say what answer you want back. Split work along its natural seams,",
+  "one subagent for each account, document or question, and start the independent parts together by",
+  `calling ${SUBAGENT_TOOL} several times in one step, up to ${SUBAGENTS_PER_ANSWER} for one answer.`,
+  "",
+  "Keep the planning, the decisions, anything that needs the person's approval, and the final answer",
+  "yourself. A subagent that reaches an action needing approval stops and hands it back to you: if it",
+  "still needs doing, do it yourself in this conversation, where the person is asked.",
+];
+
+export const ORCHESTRATION_GUIDANCE = asParagraphs(
+  ORCHESTRATION_GUIDANCE_LINES,
+);
 
 /**
  * What a tool call is given when its answer never came.

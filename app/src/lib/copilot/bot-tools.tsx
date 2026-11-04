@@ -20,9 +20,8 @@ import {
   proposedBotSchema,
 } from "@/lib/agents/proposal";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { useDeclaredBotId } from "@/lib/copilot/active-bot";
+import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { grantPlugin, invalidatePlugins } from "@/lib/plugins/mutations";
-import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -49,16 +48,20 @@ import { queryClient } from "@/query-client";
  * the Bot has to hold the `bot-creator` skill, granted the same way everything else is.
  */
 
+/**
+ * Offered to the run of a Bot holding the `bot-creator` skill, never by what the screen shows; see
+ * `bot-offer.ts`.
+ */
+const authoring: OfferRule = (bot) => bot.skills.has(BOT_CREATOR_SLUG);
+const OFFERED: Readonly<Record<string, OfferRule>> = {
+  list_bots: authoring,
+  read_bot: authoring,
+  list_bot_skills: authoring,
+  save_bot: authoring,
+};
+
 export function BotTools() {
-  // Grants are only fetched once a surface has declared its Bot; the placeholder is not one the
-  // server knows, and asking would 404 on every poll.
-  const declared = useDeclaredBotId();
-  // Empty rather than undefined: the factory's own `enabled: agentId.length > 0` is the guard for
-  // "no Bot declared yet", so the placeholder never reaches the server.
-  const { data: granted } = useQuery(agentPluginsQueryOptions(declared ?? ""));
-  const authoring = (granted?.skills ?? []).some(
-    (skill) => skill.slug === BOT_CREATOR_SLUG,
-  );
+  useOfferedTo(OFFERED);
 
   /*
    * Every answer is fetched at the moment it is asked for rather than read off a render. See
@@ -70,7 +73,6 @@ export function BotTools() {
     description:
       "The coworkers that already exist here, one line each, with whose each one is and where it runs. Read this before proposing a coworker: the most expensive mistake this job can make is rebuilding one somebody already maintains.",
     parameters: z.object({}),
-    available: authoring,
     handler: async () => answerListBots(queryClient),
   });
 
@@ -81,7 +83,6 @@ export function BotTools() {
     parameters: z.object({
       name: z.string().describe("The coworker's name, as list_bots spells it."),
     }),
-    available: authoring,
     handler: async ({ name }) => answerReadBot(queryClient, String(name)),
   });
 
@@ -90,7 +91,6 @@ export function BotTools() {
     description:
       "The skills that could be put on a new coworker, by slug. Putting a skill on a coworker is the only capability the card grants: a skill is an instruction, so one naming a tool the coworker was not granted simply loads nothing.",
     parameters: z.object({}),
-    available: authoring,
     handler: async () => answerListBotSkills(queryClient),
   });
 
@@ -99,7 +99,6 @@ export function BotTools() {
     description:
       "Put a finished coworker in front of the person to create. They see its name, its job, the whole of its standing instructions and the skills it will hold, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the coworker will be told to do — not to check your draft.",
     parameters: proposedBotSchema,
-    available: authoring,
     render: ProposedBotRender,
   });
 

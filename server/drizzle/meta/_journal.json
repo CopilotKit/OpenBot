@@ -491,6 +491,41 @@
       "when": 1793224884828,
       "tag": "0069_isolated_bots",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1793641867987,
+      "tag": "0070_memory_dedup_per_bot",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1793645097032,
+      "tag": "0071_proactive_check_ins",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1793645107629,
+      "tag": "0072_check_in_read_labels",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1793651538578,
+      "tag": "0073_entra_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793655657340,
+      "tag": "0074_single_user_identity",
+      "breakpoints": true
     }
   ]
 }

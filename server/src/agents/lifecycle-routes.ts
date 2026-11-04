@@ -13,6 +13,11 @@ import type { ActivityStore } from "../activity/activity";
 import type { AuditEventType, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import type {
+  AttentionResponse,
+  BotAttentionPayload,
+  TaskService,
+} from "../proactive/contracts";
 import {
   type BotLifecycleStore,
   type BotNotify,
@@ -38,6 +43,8 @@ export type BotLifecycleServices = {
   profiles: {
     get(actor: AgentActor, id: string): Promise<AgentProfile | null>;
   };
+  /** The person's tasks that need them, per Bot (`tasks/*`). Without it, every count is nought. */
+  tasks?: Pick<TaskService, "counts">;
   auditStore?: AuditStore;
 };
 
@@ -45,7 +52,7 @@ export function createBotLifecycleRoutes(
   services: BotLifecycleServices,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
 ) {
-  const { lifecycle, reset, activity, wakeUps, profiles, auditStore } =
+  const { lifecycle, reset, activity, wakeUps, profiles, tasks, auditStore } =
     services;
   const routes = new Hono<{ Variables: AppVariables }>();
   type C = Context<{ Variables: AppVariables }>;
@@ -96,22 +103,38 @@ export function createBotLifecycleRoutes(
       unknown
     >;
 
-  /** Every Bot that needs the caller, or has something unread, or is paused by them. */
+  /**
+   * Every Bot that needs the caller, or has something unread, or is paused by them: questions,
+   * approvals, stalled hand-offs, open items from check-ins and tasks that need them. With the
+   * person's newest ping, which the app notifies once for, however many items it carried.
+   */
   routes.get("/attention", requireUser, async (context) => {
     const ownerUserId = context.var.actor.id;
-    const [counts, paused] = await Promise.all([
+    const [counts, paused, taskCounts, lastPingId] = await Promise.all([
       activity.attention(ownerUserId),
       lifecycle.pausedFor(ownerUserId),
+      tasks?.counts(ownerUserId) ?? Promise.resolve([]),
+      activity.lastPing(ownerUserId),
     ]);
-    const ids = [...new Set([...counts.map((row) => row.agentId), ...paused])];
+    const ids = [
+      ...new Set([
+        ...counts.map((row) => row.agentId),
+        ...taskCounts
+          .filter((row) => row.needsInput + row.ready + row.failed > 0)
+          .map((row) => row.agentId),
+        ...paused,
+      ]),
+    ];
     const notify = await lifecycle.notifyFor(ownerUserId, ids);
     const byId = new Map(counts.map((row) => [row.agentId, row]));
+    const tasksById = new Map(taskCounts.map((row) => [row.agentId, row]));
     // Only Bots the caller can still reach: a count about a Bot they lost access to names it.
-    const bots = [];
+    const bots: BotAttentionPayload[] = [];
     for (const agentId of ids) {
       const agent = await profiles.get(context.var.actor, agentId);
       if (!agent) continue;
       const row = byId.get(agentId);
+      const task = tasksById.get(agentId);
       bots.push({
         agentId,
         name: agent.name,
@@ -121,9 +144,15 @@ export function createBotLifecycleRoutes(
         unread: row?.unread ?? 0,
         paused: paused.includes(agentId),
         notify: notify[agentId] ?? "all",
+        items: row?.items ?? 0,
+        tasks: {
+          needsInput: task?.needsInput ?? 0,
+          ready: task?.ready ?? 0,
+          failed: task?.failed ?? 0,
+        },
       });
     }
-    return context.json({ bots });
+    return context.json({ bots, lastPingId } satisfies AttentionResponse);
   });
 
   routes.get("/routing", requireUser, async (context) =>

@@ -40,6 +40,11 @@ export type CredentialSource =
   | "deployment-token"
   /** The asking person's own OAuth grant, exchanged per call. */
   | "person-oauth"
+  /**
+   * The asking person's own Microsoft sign-in, exchanged with Entra on their behalf for a token to
+   * the server's scope. Their own credential, as `person-oauth` is: it reaches only what they can.
+   */
+  | "person-entra"
   /** One key the deployment holds, with the broker keeping people apart by an id we send. */
   | "brokered"
   /** None at all, because the call never leaves this process. */
@@ -56,11 +61,28 @@ export type ServerAccess = {
    * where the deployment holds the key but the call runs in one person's mailbox, which is the whole
    * point of the connector and therefore the only useful thing the trail can say about it — or this
    * deployment's own tables read as them. `deployment` means the opposite: not any one person's
-   * account. That covers a shared token, a server an administrator added by URL, and a public
-   * endpoint reached with no credential at all, where every person's call sees the same data and
-   * naming the asker would assert an attribution that does not exist.
+   * account. That covers a shared token, a server an administrator added by URL on that token, and
+   * a public endpoint reached with no credential at all, where every person's call sees the same
+   * data and naming the asker would assert an attribution that does not exist. A person's own
+   * Microsoft sign-in, exchanged with Entra on their behalf, is `person` for the same reason their
+   * OAuth grant is.
    */
   reachedAs: "person" | "deployment";
+  /**
+   * Whether the call goes out on the asking person's OWN credential: a grant they gave at the
+   * vendor, or their own account behind a broker. This is what "something this person connected"
+   * means, and a check-in reads nothing else.
+   *
+   * NOT `reachedAs === "person"`, and the one place the two differ is the point. A built-in server
+   * runs against this deployment's own tables as the person whose turn it is, so the trail names
+   * them, but they connected nothing and hold no credential for it. Everything an admin's key
+   * reaches for everybody, a Shared app's team account, an app with no account at all and a public
+   * endpoint are not the person's either.
+   *
+   * Answered here, by every kind of server, so a kind added later cannot be read by a check-in until
+   * it says whose credential it runs on, and the check-in never has to know its name.
+   */
+  ownCredential: boolean;
   /**
    * Which app at the broker this row is, and null for a row that is not brokered at all.
    *
@@ -110,6 +132,20 @@ const REACHED_AS_BY_AUTH: Record<
   "user-oauth": "person",
   builtin: "person",
 };
+
+/**
+ * Whether each auth kind runs on the asking person's own credential. A third table rather than a
+ * reading of the two above, for their reason: `builtin` is reached as the person and holds no
+ * credential of theirs, and only a table keyed on the auth kind can say both, with the compiler
+ * asking the question again for any kind added later.
+ */
+const OWN_CREDENTIAL_BY_AUTH: Record<CatalogueEntry["auth"]["kind"], boolean> =
+  {
+    none: false,
+    "deployment-bearer": false,
+    "user-oauth": true,
+    builtin: false,
+  };
 
 /**
  * The shelf both refusals below sit on: this deployment cannot say how to reach a row, and will
@@ -351,6 +387,11 @@ export function accessFor(
      * brokered call lands in nobody's account in particular. See the `reachedAs` branch below.
      */
     accountMode?: string | null;
+    /**
+     * The Entra scope an admin marked a server added by URL to be reached with as the signed-in
+     * person, or null for one reached on the deployment's own credential. See the last branch below.
+     */
+    entraScope?: string | null;
   },
   entry: CatalogueEntry | null,
 ): ServerAccess {
@@ -371,6 +412,7 @@ export function accessFor(
       transport: entry.transport ?? "mcp",
       credential: CREDENTIAL_BY_AUTH[entry.auth.kind],
       reachedAs: REACHED_AS_BY_AUTH[entry.auth.kind],
+      ownCredential: OWN_CREDENTIAL_BY_AUTH[entry.auth.kind],
       toolkit: null,
     };
   }
@@ -409,14 +451,33 @@ export function accessFor(
      * provider's business, and those are the two fields below.
      */
     const provider = row.provenance;
+    const reachedAs =
+      schemeKind(row.authScheme) === "none" || row.accountMode === "shared"
+        ? "deployment"
+        : "person";
     return {
       transport: provider,
       credential: "brokered",
-      reachedAs:
-        schemeKind(row.authScheme) === "none" || row.accountMode === "shared"
-          ? "deployment"
-          : "person",
+      reachedAs,
+      // The person's own account at the app, and only that: a Shared app's account is the team's.
+      ownCredential: reachedAs === "person",
       toolkit: TOOLKIT_OF[provider](row.url),
+    };
+  }
+
+  /*
+   * A server added by URL that an admin marked as reached as the signed-in person: each call goes
+   * out on a token Entra issued for the person asking, so it lands in their account and nobody
+   * else's, and the trail names them. Their own credential, too: the token is exchanged from their
+   * own Microsoft sign-in, as a `user-oauth` call runs on their own grant.
+   */
+  if (row.entraScope) {
+    return {
+      transport: "mcp",
+      credential: "person-entra",
+      reachedAs: "person",
+      ownCredential: true,
+      toolkit: null,
     };
   }
 
@@ -424,6 +485,7 @@ export function accessFor(
     transport: "mcp",
     credential: "deployment-token",
     reachedAs: "deployment",
+    ownCredential: false,
     toolkit: null,
   };
 }

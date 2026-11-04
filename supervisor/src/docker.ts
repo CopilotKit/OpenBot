@@ -10,6 +10,7 @@ import {
   legacyNamesFor,
   NAMESPACE,
   NAMESPACE_LABEL,
+  networkHostFor,
   OWNER_LABEL,
   PERSON_LABEL,
 } from "./names";
@@ -37,6 +38,28 @@ const docker = new Docker(
 
 /** The port the computer listens on inside its own container. */
 const COMPUTER_PORT = "4100/tcp";
+
+/** APT drops to _apt and dpkg restores package ownership; neither needs host administration. */
+const PACKAGE_CAPABILITIES = [
+  "CHOWN",
+  "DAC_OVERRIDE",
+  "FOWNER",
+  "SETUID",
+  "SETGID",
+];
+
+function hasPackageCapabilities(config: Docker.HostConfig): boolean {
+  // Docker and Podman may return either spelling. These five are Docker defaults when no drop
+  // was specified; an explicit addition overrides a drop, including the supervisor's ALL.
+  const normalize = (capability: string) => capability.replace(/^CAP_/, "");
+  const added = new Set((config.CapAdd ?? []).map(normalize));
+  const dropped = new Set((config.CapDrop ?? []).map(normalize));
+  return PACKAGE_CAPABILITIES.every(
+    (capability) =>
+      added.has(capability) ||
+      (!dropped.has("ALL") && !dropped.has(capability)),
+  );
+}
 
 /**
  * Readiness, stated at create time rather than read off the image.
@@ -269,6 +292,8 @@ async function inspectOwned(names: ComputerNames): Promise<{
   image?: string;
   startedAt?: string;
   token?: string;
+  shortId?: string;
+  packageCapabilities: boolean;
 } | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
@@ -285,6 +310,9 @@ async function inspectOwned(names: ComputerNames): Promise<{
       // The token this container was born holding, which is the one it will check callers against
       // for the rest of its life. See `holdsCurrentToken`.
       token: tokenIn(info.Config?.Env),
+      packageCapabilities: hasPackageCapabilities(info.HostConfig),
+      // A second name for it on a shared network, for when its own is too long. See `networkHostFor`.
+      ...(info.Id ? { shortId: info.Id.slice(0, 12) } : {}),
       /*
        * When this run of the container began, which is what tells two runs apart.
        *
@@ -366,6 +394,12 @@ const TOKEN_NAME = "COMPUTER_TOKEN";
  * A deployment that sets no token is not a mismatch. That is a computer with no door on it, which is
  * a choice the environment makes, and replacing a working browser over it would be this function
  * inventing a policy of its own.
+ *
+ * It is also how every computer moved off the deployment's token. Each computer is now given a token
+ * of its own (environment.ts), so one created before that, holding the deployment's token, holds a
+ * token this supervisor no longer hands out and is replaced here like any other, keeping its profile
+ * and workspace volumes. Left running, it would refuse the server's every call and go on carrying the
+ * one secret that opens every other person's computer.
  */
 function holdsCurrentToken(
   existingToken: string | undefined,
@@ -463,8 +497,7 @@ export type EnsureOptions = {
  * Confinement applied to every computer.
  *
  * A container is a boundary only if it is configured as one. Each of these closes a specific route
- * off the host, and none of them costs a Bot anything it legitimately needs: a browser and a
- * filesystem under `/workspace`.
+ * off the host while permitting the browser, workspace and package installation inside it.
  */
 function hostConfig(names: ComputerNames, options: EnsureOptions) {
   return {
@@ -499,8 +532,10 @@ function hostConfig(names: ComputerNames, options: EnsureOptions) {
 
     // No path from inside to more privilege than it started with, whatever it manages to run.
     SecurityOpt: ["no-new-privileges:true"],
-    // Chromium needs none of these, and each is a documented container escape route.
+    // Drop everything, then allow only the ownership and user/group changes APT and dpkg need.
+    // Without these even uid 0 cannot install packages. No mount, device or network capabilities.
     CapDrop: ["ALL"],
+    CapAdd: PACKAGE_CAPABILITIES,
     // A runaway Bot is a resource problem for itself, not for every other Bot on the host.
     ...(options.memoryBytes ? { Memory: options.memoryBytes } : {}),
     PidsLimit: options.pidsLimit ?? 512,
@@ -524,7 +559,9 @@ export async function ensure(
     let existing = await inspectOwned(names);
 
     /*
-     * An upgrade reaches a computer that already exists, by replacing it.
+     * An upgrade reaches a computer that already exists, by replacing it. This includes the
+     * package permissions: changing HostConfig in the supervisor does not update a container
+     * created with CapDrop ALL and no additions, even when its image has not changed.
      *
      * Safe to do: the profile and the workspace are named volumes and are not removed here, so the
      * Bot keeps its logins and its files and comes back on the new image. That is the difference
@@ -538,7 +575,8 @@ export async function ensure(
     if (
       existing &&
       (!(await runsCurrentImage(existing.image, options.image)) ||
-        !holdsCurrentToken(existing.token, options.environment))
+        !holdsCurrentToken(existing.token, options.environment) ||
+        !existing.packageCapabilities)
     ) {
       try {
         await docker
@@ -656,7 +694,9 @@ export async function ensure(
       // How to reach it. A name on a shared network, a host port otherwise, the caller does not have
       // to know which arrangement it is in.
       ...(options.network
-        ? { url: `http://${names.container}:4100` }
+        ? {
+            url: `http://${networkHostFor(names.container, settled?.shortId)}:4100`,
+          }
         : settled?.port
           ? { url: `http://127.0.0.1:${settled.port}` }
           : {}),

@@ -166,6 +166,16 @@ export type ComputerTransportOptions = {
 };
 
 /**
+ * Which computer a request goes to, and the token that computer takes.
+ *
+ * The token belongs to the computer, not to the deployment: a computer made for one person holds a
+ * token of its own (computer-token.ts), so the gateway names it with the address on every call. A bare
+ * address is sent the transport's own `token`, which is how a caller with one computer (the shared
+ * one, a test) still calls it.
+ */
+export type ComputerEndpoint = string | { url: string; token?: string };
+
+/**
  * Which seat on the computer a request is for.
  *
  * The Bot alone on a computer of one person's own (or an isolated Bot's), where each Bot is a seat;
@@ -174,10 +184,25 @@ export type ComputerTransportOptions = {
  */
 export type SeatAddress = string | { botId: string; personId?: string };
 
+/**
+ * What a navigation carries besides its address.
+ *
+ * `signal` is the person's Stop: a navigation aborted before it is sent is never sent, and one aborted
+ * in flight is answered as stopped, as every other acting call is.
+ *
+ * `citation` is set when the navigation is a followed link: the ref and snapshot it was read from.
+ * The computer checks them against the live page exactly as `/click` would, and refuses the
+ * navigation as stale when the page has moved on, so an old snapshot cannot open its old links.
+ */
+export type NavigateOptions = {
+  signal?: AbortSignal;
+  citation?: { ref: string; snapshotId: number };
+};
+
 /** Internal HTTP interface used only by ComputerGateway. */
 export interface ComputerTransport {
   call<T>(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     init?: RequestInit,
@@ -186,7 +211,7 @@ export interface ComputerTransport {
     timeoutMs?: number,
   ): Promise<T>;
   post<T>(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     payload: unknown,
@@ -195,13 +220,14 @@ export interface ComputerTransport {
     timeoutMs?: number,
   ): Promise<T>;
   navigate(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     url: string,
     toolCallId?: string,
+    options?: NavigateOptions,
   ): Promise<NavigateResult>;
   download(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     caller?: AbortSignal,
@@ -232,7 +258,7 @@ export function createComputerTransport(
   const defaultTimeoutMs = options.timeoutMs ?? 45_000;
 
   async function request(
-    baseUrl: string,
+    computer: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     init?: RequestInit,
@@ -252,7 +278,11 @@ export function createComputerTransport(
      * this becomes the backstop rather than the limit.
      */
     const timeoutMs = timeoutMsOverride ?? defaultTimeoutMs;
-    const target = baseUrl.replace(/\/$/, "");
+    const { url, token } =
+      typeof computer === "string"
+        ? { url: computer, token: options.token }
+        : computer;
+    const target = url.replace(/\/$/, "");
     let response: Response;
     try {
       response = await doFetch(`${target}${path}`, {
@@ -260,9 +290,7 @@ export function createComputerTransport(
         headers: {
           ...(init?.headers as Record<string, string> | undefined),
           ...seatHeaders(botId),
-          ...(options.token
-            ? { "x-openbot-computer-token": options.token }
-            : {}),
+          ...(token ? { "x-openbot-computer-token": token } : {}),
         },
         signal: caller
           ? AbortSignal.any([caller, AbortSignal.timeout(timeoutMs)])
@@ -291,7 +319,7 @@ export function createComputerTransport(
   }
 
   async function call<T>(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     init?: RequestInit,
@@ -317,7 +345,7 @@ export function createComputerTransport(
   }
 
   async function download(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     caller?: AbortSignal,
@@ -355,7 +383,7 @@ export function createComputerTransport(
   }
 
   function post<T>(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     path: string,
     payload: unknown,
@@ -377,10 +405,11 @@ export function createComputerTransport(
   }
 
   async function navigate(
-    baseUrl: string,
+    baseUrl: ComputerEndpoint,
     botId: SeatAddress,
     url: string,
     toolCallId?: string,
+    navigateOptions?: NavigateOptions,
   ): Promise<NavigateResult> {
     const verdict = checkNavigationTarget(url, {
       allowPrivateHosts: options.allowPrivateHosts,
@@ -388,10 +417,20 @@ export function createComputerTransport(
     if (!verdict.allowed) {
       throw new NavigationRefusedError(verdict.reason);
     }
-    return post<NavigateResult>(baseUrl, botId, "/navigate", {
-      url: verdict.url,
-      ...(toolCallId ? { toolCallId } : {}),
-    });
+    const citation = navigateOptions?.citation;
+    return post<NavigateResult>(
+      baseUrl,
+      botId,
+      "/navigate",
+      {
+        url: verdict.url,
+        ...(toolCallId ? { toolCallId } : {}),
+        ...(citation
+          ? { ref: citation.ref, snapshotId: citation.snapshotId }
+          : {}),
+      },
+      navigateOptions?.signal,
+    );
   }
 
   return { call, post, navigate, download };

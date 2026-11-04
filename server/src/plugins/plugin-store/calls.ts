@@ -14,12 +14,19 @@ import {
   pluginGrants,
   vendorNameOf,
 } from "../../db/schema";
-import { classifyTool, tokenHeaderFor } from "../catalogue";
+import { isProactiveInitiator } from "../../proactive/initiator";
+import {
+  classifyTool,
+  labelledRead,
+  reviewedRead,
+  tokenHeaderFor,
+} from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
 import type { AccountMode } from "../shared-accounts";
 import { transportFor } from "../transport";
+import { withVendorDeadline } from "../vendor-deadline";
 import type { StoreContext } from "./context";
 import {
   effectiveUrl,
@@ -41,6 +48,7 @@ export function callMethods(context: StoreContext) {
     injectedVendor,
     connectionTokenFor,
     requireServer,
+    broker,
     brokerProvider,
   } = context;
   return {
@@ -144,6 +152,7 @@ export function callMethods(context: StoreContext) {
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
+          declaredRead: mcpTools.declaredRead,
           version: mcpTools.version,
         })
         .from(mcpTools)
@@ -152,12 +161,54 @@ export function callMethods(context: StoreContext) {
         )
         .limit(1);
 
-      const effect = classifyTool(
-        entry,
-        toolName,
-        advertised.length > 0,
-        advertised[0]?.effect,
-      );
+      /*
+       * A CHECK-IN ONLY READS, AND THAT IS DECIDED HERE TOO, not only where its tools are loaded.
+       *
+       * A check-in may call a tool only on an account the person connected themselves and only
+       * where the tool says it only reads (see `proactive/scope.ts`). The loader offers nothing else
+       * and checks again before each call; this is the same rule at the one door every call passes,
+       * so a check-in reaching a tool by any other route is refused before the policy, the vault or
+       * the vendor.
+       *
+       * And a call that passes is judged as the read it says it is. Its chat classification can
+       * still be a write (a server's `readOnlyHint` is trusted for a check-in and never for chat),
+       * and judged as one it would open an approval for a person who is not there to answer.
+       */
+      const checkIn = isProactiveInitiator(input.initiator);
+      if (
+        checkIn &&
+        !(
+          access.ownCredential &&
+          advertised[0] &&
+          labelledRead(entry, toolName, advertised[0])
+        )
+      ) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.call_rejected",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          ...(input.initiator ? { initiator: input.initiator } : {}),
+          payload: {
+            actor: auditActor,
+            bot: input.botId,
+            server: serverId,
+            tool: toolName,
+            refusal: "check_in_not_a_read",
+          },
+        });
+        throw new PluginRefusedError(
+          `${input.ref} is not available during a check-in, which can only read what the person connected.`,
+          null,
+        );
+      }
+      const effect = checkIn
+        ? "read"
+        : classifyTool(
+            entry,
+            toolName,
+            advertised.length > 0,
+            advertised[0]?.effect,
+          );
 
       const args = withoutEmptyOptionals(
         input.args,
@@ -359,6 +410,8 @@ export function callMethods(context: StoreContext) {
           audience: share.audience,
           content: share.content,
           origin: { kind: "unknown" },
+          // The approval gate below is asked about this same send, with its arguments.
+          ...(options.approvalGate ? { gatedNext: true as const } : {}),
         });
         if (shareVerdict.status !== "allowed") {
           await recordAuditEvent(auditStore, {
@@ -452,6 +505,17 @@ export function callMethods(context: StoreContext) {
         args: vendorArgs,
         target: { serverId, toolName, url: row.url, effect },
         continuation: currentApprovalContext(),
+        /*
+         * Whether this is a reviewed read of the person's own app: an app they connected with their
+         * own account, and a tool a reviewed read list names (`reviewedRead`). A label is not enough
+         * here, though a check-in trusts one: a task's conversation lets this, and only this, run
+         * unasked. Chat judges the call by `effect` alone, as before.
+         */
+        ...(access.ownCredential &&
+        advertised[0] &&
+        reviewedRead(entry, toolName, advertised[0])
+          ? { ownConnectionRead: true as const }
+          : {}),
       });
       if (approval && "replay" in approval)
         return approval.replay as { text: string; isError: boolean };
@@ -470,6 +534,10 @@ export function callMethods(context: StoreContext) {
        * itself failed has not completed the call, and a reader counting successes should not be told
        * it did.
        */
+      /** How the vendor refused the account, where it did: see below the catch. */
+      let refused: "account" | "action" = "account";
+      /** The vendor identity the call went out as, for the broker to be asked about below. */
+      let reachedVendorAs: string | undefined;
       try {
         const { token, vendorUserId } = await connectionTokenFor(
           row,
@@ -535,7 +603,9 @@ export function callMethods(context: StoreContext) {
          * The one answer that leaves this block without returning: see below the catch. Thrown
          * from in here, the catch would write a second `mcp.call_failed` row about the same call.
          */
-        if (!result.accountGone) return answer;
+        if (!result.accountGone && !result.actionNotAllowed) return answer;
+        refused = result.accountGone ? "account" : "action";
+        reachedVendorAs = vendorUserId;
       } catch (error) {
         /*
          * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is
@@ -572,6 +642,43 @@ export function callMethods(context: StoreContext) {
         throw error;
       }
       /*
+       * WHETHER THE ACCOUNT IS GONE, OR ONLY THIS ACTION, AND ONLY THE FIRST ENDS THE ROW.
+       *
+       * Composio says its account is gone in so many words (`accountGone`). Arcade refuses one action
+       * (`actionNotAllowed`) and the same answer covers a connection that is gone and one that holds
+       * the app's other actions and not this one, approved one at a time. Ending the row for the
+       * second would refuse every action the person did approve, so the broker is asked about the
+       * account itself, and the row ends only where it answers that nothing is held for the app.
+       * An answer that cannot be had keeps the row: a row cleared on a guess is a connection every
+       * screen then calls missing, and the next call that works says otherwise.
+       *
+       * AND IT IS ASKED UNDER THE VENDOR DEADLINE. This runs inside the Bot's tool call and only
+       * chooses which words the card says, so a broker that never answers the question must not
+       * hold the run: past {@link withVendorDeadline}'s bound the answer is one that cannot be had,
+       * the row stays and the card offers Reconnect.
+       */
+      const toolkit = access.toolkit;
+      const gone =
+        refused === "account" ||
+        (broker !== undefined &&
+          broker !== null &&
+          toolkit !== null &&
+          toolkit !== undefined &&
+          reachedVendorAs !== undefined &&
+          (await withVendorDeadline(() =>
+            broker.isConnected({
+              account:
+                gatedMode === "shared"
+                  ? { holder: "deployment", vendorUserId: reachedVendorAs }
+                  : {
+                      holder: "person",
+                      userId: input.credentialActorId ?? input.actorId,
+                      vendorUserId: reachedVendorAs,
+                    },
+              toolkit,
+            }),
+          ).catch(() => true)) === false);
+      /*
        * THE ACCOUNT IS GONE AT THE VENDOR, AND THE PERSON CAN PUT IT BACK FROM WHERE THEY ARE. The
        * only way here: every other answer returned inside the block and every throw left the catch.
        *
@@ -581,7 +688,8 @@ export function callMethods(context: StoreContext) {
        * the card is the one place the person is told, with Reconnect beside it. A Shared app's
        * account is the deployment's, so there the card says an administrator has to reconnect it.
        *
-       * AND THE ROW GOES, as it does when a confirm hears the same no from the vendor: the row is
+       * AND WHERE THE ACCOUNT IS GONE, THE ROW GOES, as it does when a confirm hears the same no
+       * from the vendor: the row is
        * only the vendor's last answer, and one that outlived the account would go on reading
        * `ready` on every screen — `show_app_access` telling the model to use the app straight after
        * this card — and would make the connect route refuse a fresh connection until somebody
@@ -589,7 +697,7 @@ export function callMethods(context: StoreContext) {
        * not connected for everybody, which is the truth and the state whose button fixes it. Like
        * the confirm's, the delete files no trail entry: nobody disconnected anything here.
        */
-      if (access.credential === "brokered" && access.toolkit)
+      if (gone && access.credential === "brokered" && access.toolkit)
         await database
           .delete(brokeredConnections)
           .where(
@@ -613,10 +721,18 @@ export function callMethods(context: StoreContext) {
         connectAppRefusal({
           serverId: row.id,
           title: row.title,
-          message:
-            gatedMode === "shared"
+          /*
+           * The same card either way, and the words say which. An account still connected that
+           * does not allow this action is put right by the same Reconnect, which asks for
+           * everything the app needs.
+           */
+          message: gone
+            ? gatedMode === "shared"
               ? `The shared ${row.title} account is no longer connected, so this wasn't done. Ask an admin to reconnect it.`
-              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`,
+              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`
+            : gatedMode === "shared"
+              ? `The shared ${row.title} account doesn't allow this yet, so this wasn't done. Ask an admin to reconnect it.`
+              : `Your ${row.title} account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.`,
           reason: gatedMode === "shared" ? "shared" : "reconnect",
           at: new Date().toISOString(),
         }),

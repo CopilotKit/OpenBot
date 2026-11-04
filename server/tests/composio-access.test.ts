@@ -33,6 +33,7 @@ describe("accessFor", () => {
       transport: "composio",
       credential: "brokered",
       reachedAs: "person",
+      ownCredential: true,
       toolkit: "gmail",
     });
   });
@@ -75,10 +76,34 @@ describe("accessFor", () => {
         transport: "composio",
         credential: "brokered",
         reachedAs,
+        // A no-auth app has no account, so it is nobody's own credential either.
+        ownCredential: reachedAs === "person",
         toolkit: "hackernews",
       });
     },
   );
+
+  test("a Shared app is the team's account: reached as the deployment, and nobody's own credential", () => {
+    // An admin connected it for everybody, so a person who connected nothing has nothing here of
+    // their own, and a check-in, which reads only what the person connected, never reads it.
+    expect(
+      accessFor(
+        {
+          provenance: "composio",
+          url: "composio://gmail",
+          authScheme: "OAUTH2",
+          accountMode: "shared",
+        },
+        null,
+      ),
+    ).toEqual({
+      transport: "composio",
+      credential: "brokered",
+      reachedAs: "deployment",
+      ownCredential: false,
+      toolkit: "gmail",
+    });
+  });
 
   test("a server somebody added by URL is MCP, on the deployment's own token", () => {
     expect(
@@ -94,6 +119,27 @@ describe("accessFor", () => {
       transport: "mcp",
       credential: "deployment-token",
       reachedAs: "deployment",
+      ownCredential: false,
+      toolkit: null,
+    });
+  });
+
+  test("a server added by URL and marked with an Entra scope is MCP, on the asking person's own Microsoft sign-in", () => {
+    expect(
+      accessFor(
+        {
+          provenance: "custom",
+          url: "https://hr.example.com/mcp",
+          authScheme: null,
+          entraScope: "api://hr-api/.default",
+        },
+        null,
+      ),
+    ).toEqual({
+      transport: "mcp",
+      credential: "person-entra",
+      reachedAs: "person",
+      ownCredential: true,
       toolkit: null,
     });
   });
@@ -112,6 +158,7 @@ describe("accessFor", () => {
       transport: "mcp",
       credential: "person-oauth",
       reachedAs: "person",
+      ownCredential: true,
       toolkit: null,
     });
   });
@@ -129,6 +176,7 @@ describe("accessFor", () => {
       transport: "google-drive-rest",
       credential: "person-oauth",
       reachedAs: "person",
+      ownCredential: true,
       toolkit: null,
     });
   });
@@ -152,6 +200,7 @@ describe("accessFor", () => {
       transport: "builtin-routines",
       credential: "none",
       reachedAs: "person",
+      ownCredential: false,
       toolkit: null,
     });
   });
@@ -187,6 +236,7 @@ describe("accessFor", () => {
       transport: "mcp",
       credential: "none",
       reachedAs: "deployment",
+      ownCredential: false,
       toolkit: null,
     });
   });
@@ -272,6 +322,7 @@ describe("accessFor", () => {
       transport: "composio",
       credential: "brokered",
       reachedAs: "person",
+      ownCredential: true,
       toolkit: "notion",
     });
   });

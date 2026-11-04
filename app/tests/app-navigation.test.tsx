@@ -90,6 +90,7 @@ function renderSidebar(role: "admin" | "user") {
     selfHostBannerDismissed: true,
     narration: null,
     skin: "openbot",
+    proactive: "on",
   });
   queryClient.setQueryData(agentKeys.list(false), []);
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {
@@ -97,18 +98,23 @@ function renderSidebar(role: "admin" | "user") {
     refetchInterval: false,
   });
   // One question waiting, so the Bots entry carries its badge.
-  queryClient.setQueryData(botLifecycleKeys.attention, [
-    {
-      agentId: "expenses",
-      name: "Expenses",
-      questions: 1,
-      approvals: 0,
-      handoffs: 0,
-      unread: 0,
-      paused: false,
-      notify: "all",
-    },
-  ]);
+  queryClient.setQueryData(botLifecycleKeys.attention, {
+    bots: [
+      {
+        agentId: "expenses",
+        name: "Expenses",
+        questions: 1,
+        approvals: 0,
+        handoffs: 0,
+        unread: 0,
+        paused: false,
+        notify: "all",
+        items: 0,
+        tasks: { needsInput: 0, ready: 0, failed: 0 },
+      },
+    ],
+    lastPingId: null,
+  });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [{ channels: [], nextCursor: null }],
     pageParams: [""],

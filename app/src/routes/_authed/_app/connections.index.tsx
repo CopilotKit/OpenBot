@@ -14,7 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
   linkedNotice,
@@ -152,6 +152,10 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
     "That app's account changed while the authorization was open, so nothing was recorded. Access given to the old account was removed. Start again from the app's page.",
   ],
   [
+    "name-changed",
+    "That authorization was started before an update changed how OpenBot signs you in to the app, so nothing was recorded. Press Connect on the app's page to start again.",
+  ],
+  [
     "not-permitted",
     "You can't connect that app's account anymore, so nothing was recorded. Your access or the app's setup changed while the authorization was open. Ask an admin if you expected to finish it.",
   ],
@@ -191,9 +195,8 @@ const MARKS: ReadonlyMap<
  * nothing a plain object would have inherited, so a catalogue key called `toString` draws the
  * fallback mark rather than handing React `Object.prototype.toString` to render as a component.
  * The read goes through `keyedLookup` so the rule has one home rather than one comment per page;
- * see `app/src/lib/lookup.ts`. The `?? IconPlug` stays here, because what a missing key draws is
- * this page's decision. */
-const markFor = (key: string) => keyedLookup(MARKS, key) ?? IconPlug;
+ * see `app/src/lib/lookup.ts`. A missing key draws the app's initial, in `ConnectionMark`. */
+const markFor = (key: string) => keyedLookup(MARKS, key);
 
 function RouteComponent() {
   const { connected: outcome, authorized, linked } = Route.useSearch();
@@ -428,16 +431,18 @@ function ConnectionItem({ row }: { row: ConnectionRow }) {
       variant="outline"
     >
       <RowMark className="size-9">
-        <ConnectionMark mark={row.mark} />
+        <ConnectionMark mark={row.mark} name={row.title} />
       </RowMark>
       <ItemContent className="min-w-0 gap-0.5">
         <ItemTitle className="block w-auto truncate">{row.title}</ItemTitle>
-        <ItemDescription
-          className="line-clamp-1 break-all text-xs"
-          title={row.summary}
-        >
-          {row.summary}
-        </ItemDescription>
+        {row.summary ? (
+          <ItemDescription
+            className="line-clamp-1 break-all text-xs"
+            title={row.summary}
+          >
+            {row.summary}
+          </ItemDescription>
+        ) : null}
       </ItemContent>
       <ItemActions className="shrink-0">
         <ConnectionStateLabel state={row.state} />
@@ -446,10 +451,17 @@ function ConnectionItem({ row }: { row: ConnectionRow }) {
   );
 }
 
-function ConnectionMark({ mark }: { mark: ConnectionRow["mark"] }) {
-  if (mark.kind === "logo") return <PluginLogo logo={mark.logo} />;
+function ConnectionMark({
+  mark,
+  name,
+}: {
+  mark: ConnectionRow["mark"];
+  name: string;
+}) {
+  if (mark.kind === "logo") return <PluginLogo logo={mark.logo} name={name} />;
   const Mark =
     mark.kind === "provider" ? providerIcon(mark.provider) : markFor(mark.key);
+  if (!Mark) return <AppInitial name={name} />;
   return <Mark className="size-4" />;
 }
 

@@ -69,7 +69,7 @@ describe("Settings for a Shared app", () => {
         verifiedAt: null,
         probe: null,
         checkable: false,
-        authorizesPerAction: false,
+        reconnectsInPlace: false,
         authScheme: "OAUTH2",
         returnTo: "settings",
         report: () => {},

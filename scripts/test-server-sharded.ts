@@ -3,14 +3,18 @@ export {};
 /**
  * `server/tests` in shards, because the whole directory in one process no longer runs.
  *
- * Around a hundred of those files open a module-scope connection pool. PostgreSQL's default
- * `max_connections` is 100, so a single `bun test server/tests` exhausts the server's connection
- * slots during the import phase and dies with `sorry, too many clients already` BEFORE it reports
- * anything. That is a harness ceiling, not a regression, and it is never a reason to change source.
+ * Around a hundred of those files open a module-scope connection pool, and a pool opens its
+ * connections on first use and holds them until it is closed. So the connection count is a
+ * function of how many files have RUN, not of how many have been imported, and PostgreSQL's
+ * default `max_connections` is 100. When files left their pools open, a single
+ * `bun test server/tests` died with `sorry, too many clients already` BEFORE it reported
+ * anything — a failure that landed on whoever added the next file, not on the file that leaked.
  *
- * Shards keep the pools-per-process count under the ceiling. The suite is split into fixed-size
- * groups of files and each group runs in its own `bun test` invocation, so each process opens its
- * own pools and gives them back when it exits.
+ * Every file now closes its own pool, and `server/tests/database-pool-closing.test.ts` refuses
+ * a new file that does not, so a single-process run tracks the file currently running rather
+ * than the whole suite. Sharding stays because it is faster, not because the ceiling demands it.
+ * The suite is split into fixed-size groups of files and each group runs in its own `bun test`
+ * invocation.
  *
  * Why this script exists at all, rather than a remembered shell incantation: a sharded sweep is the
  * only thing that has ever caught a test file that went red and stayed red. A targeted run passes,

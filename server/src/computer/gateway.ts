@@ -46,6 +46,7 @@ import {
   personSeat,
   seatText,
 } from "./computer-key";
+import { computerTokenOf } from "./computer-token";
 import { checkComputerAddress } from "./target";
 
 export {
@@ -141,7 +142,10 @@ export type ComputerGatewayOptions = {
   policy: () => ActionPolicy | undefined;
   /** True on a laptop, where browsing private network addresses is required. */
   allowPrivateHosts?: boolean;
-  /** The secret that agent-computer requires on each request. */
+  /**
+   * The deployment's `COMPUTER_TOKEN`. What a call carries is the token of the computer it goes to,
+   * which on a computer of one person's own is derived from this rather than this (computer-token.ts).
+   */
   token?: string;
   /** An injectable fetch implementation for focused gateway tests. */
   fetchImpl?: typeof fetch;
@@ -198,6 +202,12 @@ export interface ComputerGateway {
   seatFor(botId: string, personId: string): Promise<ComputerSeat>;
   /** What names this seat to the computer, for the live screen's socket. */
   addressOf(seat: ComputerSeat): { botId: string; personId?: string };
+  /**
+   * The token the computer this seat is on takes, for a call made to it outside the gateway (the live
+   * screen's socket, a browser's routes, a policy push). Never the deployment's own token where the
+   * computer holds one of its own.
+   */
+  tokenFor(seat: ComputerSeat): string | undefined;
   locate(seat: ComputerSeat): Promise<string>;
   status(seat: ComputerSeat): Promise<ComputerStatus>;
   screenshot(seat: ComputerSeat): Promise<ScreenshotResult>;
@@ -350,8 +360,11 @@ export function createComputerGateway(
   options: ComputerGatewayOptions,
 ): ComputerGateway {
   const { provider, auditStore } = options;
+  /*
+   * No token of its own: every call names its computer's (`at`), because a computer made for one
+   * person holds a token of its own and must never be sent the deployment's.
+   */
   const transport = createComputerTransport({
-    ...(options.token ? { token: options.token } : {}),
     ...(options.allowPrivateHosts !== undefined
       ? { allowPrivateHosts: options.allowPrivateHosts }
       : {}),
@@ -385,6 +398,20 @@ export function createComputerGateway(
     return provider.isolation === "shared" && seat.key.kind === "person"
       ? { botId: seat.botId, personId: seat.key.personId }
       : { botId: seat.botId };
+  }
+
+  /** The token of the computer this seat is on. See computer-token.ts. */
+  function tokenFor(seat: ComputerSeat): string | undefined {
+    return computerTokenOf(provider, seat.key, options.token);
+  }
+
+  /** The located computer at `url`, with the token it takes. */
+  function at(
+    seat: ComputerSeat,
+    url: string,
+  ): { url: string; token?: string } {
+    const token = tokenFor(seat);
+    return token ? { url, token } : { url };
   }
 
   /**
@@ -424,7 +451,7 @@ export function createComputerGateway(
     signal?: AbortSignal,
   ): Promise<T> {
     return transport.call<T>(
-      await locate(seat),
+      at(seat, await locate(seat)),
       addressOf(seat),
       path,
       undefined,
@@ -448,7 +475,7 @@ export function createComputerGateway(
     address?: string,
   ): Promise<T> {
     return transport.post<T>(
-      address ?? (await locate(seat)),
+      at(seat, address ?? (await locate(seat))),
       addressOf(seat),
       path,
       payload,
@@ -532,7 +559,7 @@ export function createComputerGateway(
      */
     const run = await sessionOf(seat);
     const result = await transport.call<SnapshotResult>(
-      base,
+      at(seat, base),
       addressOf(seat),
       "/snapshot",
       { method: "POST" },
@@ -615,6 +642,24 @@ export function createComputerGateway(
       return undefined;
     }
     return stored.elements.get(ref);
+  }
+
+  /**
+   * The link this click would follow, when it is one to open rather than click.
+   *
+   * Read from the snapshot this server holds, never from the caller. Only a lookup: whether the ref
+   * is still current for this run of the computer is `govern`'s to decide, and it refuses a stale one
+   * on the navigation exactly as it would on the click.
+   */
+  async function linkToFollow(
+    seat: ComputerSeat,
+    input: ClickInput,
+  ): Promise<{ url: string; element: SnapshotElement } | undefined> {
+    const stored = await snapshots.load(seatText(seat));
+    if (!stored || stored.snapshotId !== input.snapshotId) return undefined;
+    const element = stored.elements.get(input.ref);
+    const url = element ? followableLink(element, stored.url) : undefined;
+    return element && url ? { url, element } : undefined;
   }
 
   /**
@@ -925,6 +970,7 @@ export function createComputerGateway(
     seatFor: (botId: string, personId: string) =>
       seats.seatFor(botId, personId),
     addressOf,
+    tokenFor,
     locate,
     screenshot,
     snapshot,
@@ -1301,7 +1347,7 @@ export function createComputerGateway(
         { targetUrl: url },
         async () =>
           transport.navigate(
-            await locate(seat),
+            at(seat, await locate(seat)),
             addressOf(seat),
             url,
             toolCallId,
@@ -1309,12 +1355,65 @@ export function createComputerGateway(
       ).then((result) => withUntrustedNotice(result, "web page", PAGE_FIELDS));
     },
 
-    click(
+    async click(
       seat: ComputerSeat,
       actor: ActionActor,
       input: ClickInput,
       signal?: AbortSignal,
-    ) {
+    ): Promise<ActionResult> {
+      /*
+       * FOLLOWING A LINK IS OPENING ITS ADDRESS, SO IT IS DONE AS ONE.
+       *
+       * A click is a change: it can submit a form or run whatever the page attached to it, so it is
+       * judged as one, built-in safety requirements included. A link with an address to another page
+       * does what typing that address does, which is already a read. Judging the two differently
+       * meant a Bot reading an ordering system was handed back to the person for clicking "PO 102" on
+       * a page at `/purchase-orders/...`, while typing the same address went straight through.
+       *
+       * So the address is opened, not clicked: the same navigation, policy, approval and audit as
+       * `computer_navigate`, and the page's own scripts never see a click, so a link that only looks
+       * like one (`href="#"` with a handler, `javascript:`) is clicked and judged as a click instead.
+       * The ref and snapshot go with it, so the element is still resolved, still refused when stale,
+       * and still in front of every rule: a deny written about this link's name refuses this too.
+       */
+      const follow = await linkToFollow(seat, input);
+      if (follow) {
+        const opened = await govern(
+          "computer_navigate",
+          seat,
+          actor,
+          {
+            ref: input.ref,
+            snapshotId: input.snapshotId,
+            targetUrl: follow.url,
+            ...(signal ? { signal } : {}),
+          },
+          // The signal and the citation travel with it: Stop still lands (as it does on a click,
+          // including one pressed while the action waits for approval), and the computer checks the
+          // ref against the live page as `/click` does, so a link from a snapshot the browser has
+          // since left is refused as stale rather than opened.
+          async (address) =>
+            transport.navigate(
+              at(seat, address ?? (await locate(seat))),
+              addressOf(seat),
+              follow.url,
+              undefined,
+              {
+                ...(signal ? { signal } : {}),
+                citation: { ref: input.ref, snapshotId: input.snapshotId },
+              },
+            ),
+        );
+        return {
+          action: "click",
+          ref: input.ref,
+          element: { role: follow.element.role, name: follow.element.name },
+          opened: follow.url,
+          url: opened.url,
+          elapsedMs: opened.elapsedMs,
+          ...(opened.challenge ? { challenge: opened.challenge } : {}),
+        };
+      }
       return govern(
         "computer_click",
         seat,
@@ -1427,7 +1526,7 @@ export function createComputerGateway(
         { filePath: input.path, ...(signal ? { signal } : {}) },
         async () => {
           const download = await transport.download(
-            await locate(seat),
+            at(seat, await locate(seat)),
             addressOf(seat),
             `/files/download?path=${encodeURIComponent(input.path)}`,
             signal,
@@ -1540,8 +1639,40 @@ export function describeFile(path: string): {
  *
  * Enter and Space are activations. They press whatever has focus, so a rule about activation must
  * cover keypresses as well as clicks.
+ *
+ * `\n` and `\r` are Enter too. `key` is free text, and Playwright's keyboard layout names both as
+ * aliases of Enter, so a press of either submits the form exactly as Enter does.
  */
-const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
+const ACTIVATING_KEYS = new Set([
+  "Enter",
+  "NumpadEnter",
+  "\n",
+  "\r",
+  "Space",
+  " ",
+]);
+
+/**
+ * The key a press ends on, without the modifiers held for it.
+ *
+ * The computer hands the key straight to Playwright's `press`, which reads `Shift+Enter` as Enter with
+ * Shift held, and Chromium submits a form and clicks a focused button on Shift+Enter, Shift+NumpadEnter
+ * and Shift+Space exactly as it does on the bare key, and Control+Enter is how most web apps send a
+ * message. Matched as written, all of them were `type`, and a rule on `intent == "activate"` let them
+ * through. Split the way Playwright splits it: on `+`, except that a `+` with nothing before it is the
+ * plus key itself (`Shift++`).
+ */
+function mainKey(key: string): string {
+  let building = "";
+  let last = "";
+  for (const char of key) {
+    if (char === "+" && building) {
+      last = building;
+      building = "";
+    } else building += char;
+  }
+  return building || last;
+}
 
 /**
  * What a person's mouse and keyboard produce, and the whole of what `/human/<kind>` may name.
@@ -1563,7 +1694,7 @@ export function intentOf(
     // A type carrying `submit` ends in Enter, and the same reasoning applies to it: what the
     // keypress does is press whatever the form activates, whichever tool asked for it.
     case "computer_type":
-      return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
+      return key && ACTIVATING_KEYS.has(mainKey(key)) ? "activate" : "type";
     case "computer_navigate":
       return "navigate";
     case "computer_read":
@@ -1688,15 +1819,6 @@ async function write(
 }
 
 /**
- * The host a rule can match on, or empty.
- *
- * Empty means "no page", which is the accurate answer before a Bot has snapshotted anything, and it is
- * the only case that occurs in practice: the URL comes from Playwright's own `page.url()` by way of the
- * snapshot cache. Worth stating explicitly because a `page.host == "..."` deny rule would not match an
- * empty host, so a boundary that must not be evadable should also key on the tool, the element or the
- * file rather than on the host alone.
- */
-/**
  * One row for a handover.
  *
  * Separate from `write` because a handover has no element, no file and no policy decision, forcing it
@@ -1747,9 +1869,57 @@ const SNAPSHOT_FIELDS = ["title", "elements"] as const;
 /** A two-step login can take two page loads and a wait for a code field; this outlasts the computer's own waits. */
 const SIGN_IN_BACKSTOP_MS = 75_000;
 
+/**
+ * The address to open for a click on this element, or undefined to click it.
+ *
+ * A link, with an `http(s)` address, to a different document from the one it is on. Everything else
+ * is clicked: a button, a link with no address, `javascript:` and `mailto:`, and a link to a spot on
+ * this same page (`#`, `#details`), which loads nothing and is where a page's own script usually acts.
+ */
+export function followableLink(
+  element: Pick<SnapshotElement, "role" | "url">,
+  pageUrl: string,
+): string | undefined {
+  if (element.role !== "link" || !element.url) return undefined;
+  let destination: URL;
+  try {
+    destination = new URL(element.url);
+  } catch {
+    return undefined;
+  }
+  if (destination.protocol !== "http:" && destination.protocol !== "https:")
+    return undefined;
+  try {
+    const page = new URL(pageUrl);
+    page.hash = "";
+    const target = new URL(destination.href);
+    target.hash = "";
+    if (target.href === page.href) return undefined;
+  } catch {
+    // A page with no readable address: nothing to be the same document as.
+  }
+  return destination.href;
+}
+
+/**
+ * The host a rule can match on, or empty.
+ *
+ * Empty means "no page", which is the accurate answer before a Bot has snapshotted anything, and it is
+ * the only case that occurs in practice: the URL comes from Playwright's own `page.url()` by way of the
+ * snapshot cache. Worth stating explicitly because a `page.host == "..."` deny rule would not match an
+ * empty host, so a boundary that must not be evadable should also key on the tool, the element or the
+ * file rather than on the host alone.
+ *
+ * Without the root dot. `intranet.example.com.` is the same name to DNS, to Chromium and to the
+ * computer's own network filter (agent-computer's `normalizeHost`), and `new URL()` keeps the dot, so
+ * a navigation written with one used to slip past `page.host == "intranet.example.com"`. The port
+ * stays, as it always has: a rule may name one.
+ */
 export function hostOf(url: string): string {
   try {
-    return new URL(url).host;
+    const { hostname, port } = new URL(url);
+    const name = hostname.replace(/\.+$/, "");
+    return port ? `${name}:${port}` : name;
   } catch {
     return "";
   }

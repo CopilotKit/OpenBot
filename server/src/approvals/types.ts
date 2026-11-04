@@ -6,6 +6,7 @@ import {
   withApprovalContext,
 } from "@openbot/toolkit/continuation";
 import type { AuditInitiator } from "../audit";
+import { cutAtCodeUnits } from "../channels/text";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
 export type ApprovalDecision =
@@ -38,7 +39,13 @@ export type ApprovalPolicyOutcome = {
     | "auto_review"
     | "default"
     /** The person already declined this action, or an equivalent, earlier in this conversation. */
-    | "person_declined";
+    | "person_declined"
+    /**
+     * A task started from a check-in item: every change it makes asks first, whatever the person's
+     * "Ask before making changes" says (tasks/turn.ts). Kept apart from `default` so turning that
+     * switch off, or saving an allow rule, never withdraws what a task is waiting on.
+     */
+    | "task";
   reason: string;
   ruleId?: string;
   review?: {
@@ -65,6 +72,13 @@ export type ApprovalCandidate = {
   args: unknown;
   target?: unknown;
   continuation?: ApprovalContinuation;
+  /**
+   * A reviewed read of the person's own app: a tool on an app they connected with their own account,
+   * named on a reviewed read list (`reviewedRead` in plugins/catalogue.ts). Chat goes on judging a
+   * call by `effect`; in a task's conversation this is the one kind of call that runs without asking.
+   * Not part of what the person approves, so not in the action's digest.
+   */
+  ownConnectionRead?: true;
 };
 export type ApprovalAction = ApprovalCandidate & {
   runId: string;
@@ -171,11 +185,15 @@ export type ApprovalPolicyStore = {
   /**
    * Close this person's pending requests that `match` selects without executing them: the waiting
    * conversation is resumed with `reason` as the result, and each is audited.
+   *
+   * `resume: false` closes them and carries nothing on, for a run that has already ended and been
+   * answered another way: a subagent's, which handed its action back to the Bot that started it.
    */
   withdrawPending(
     ownerUserId: string,
     reason: string,
     match: (action: ApprovalAction) => boolean,
+    options?: { resume?: boolean },
   ): Promise<string[]>;
   /** One audit row per settled action, so every verdict can be read back. */
   recordDecision(input: {
@@ -215,8 +233,15 @@ export type ApprovalStore = {
   finish(ownerUserId: string, id: string): Promise<void>;
   rules(ownerUserId: string): Promise<ApprovalRule[]>;
   revoke(ownerUserId: string, id: string): Promise<void>;
+  /**
+   * Whether this thread is the conversation of a task the person started from a check-in item,
+   * where every change asks first. Absent where there are no tasks.
+   */
+  asksEveryChange?(ownerUserId: string, threadId: string): Promise<boolean>;
   policy?: ApprovalPolicyStore;
 };
+/** Whether an approval may be answered with "Always allow here". Shared with the browser. */
+export { offersStandingRule } from "@openbot/shared/standing-rule";
 export class ApprovalRefusedError extends Error {
   constructor(message: string) {
     super(message);
@@ -374,7 +399,7 @@ export function approvalPreview(args: unknown, depth = 0): unknown {
         ]),
     );
   if (typeof args === "string")
-    return (args.length > 2000 ? `${args.slice(0, 1999)}…` : args)
+    return (args.length > 2000 ? `${cutAtCodeUnits(args, 1999)}…` : args)
       .replace(
         /((?:password|token|secret|api[_-]?key)\s*[=:]\s*)[^\s;]+/gi,
         "$1[private value]",

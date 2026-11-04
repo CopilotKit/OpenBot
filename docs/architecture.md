@@ -76,6 +76,8 @@ startup.
 
 `agent-computer` requires `COMPUTER_TOKEN` and permits only `/health` without it. Docker Compose binds it to `127.0.0.1:4100`.
 
+A computer made for one person or one isolated Bot, by the supervisor or as a Sandbox, never holds the deployment's `COMPUTER_TOKEN`. It holds its own, `HMAC-SHA256(COMPUTER_TOKEN, "openbot computer token v1\n<kind>:<id>")` for whose computer it is, and the server derives the same value whenever it calls that computer. A Bot can run anything on its own person's computer, root included, and can read the token that computer was started with; that token opens that computer and no other. A computer created before this, holding the deployment's token, is replaced with its volumes kept the next time it is used. The one shared computer is not a boundary between people and keeps the deployment's token.
+
 Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a shell reaches whatever its container reaches, so the database is on a `data` network carrying only itself and `migrate`, and everything else is on `default`. A deployment that runs the API server inside Compose rather than on the host joins it to both, which is the one place the two meet.
 
 With `COMPUTER_SUPERVISOR_URL`, each person gets a computer container of their own, and every Bot they use has its own folder and browser profile in it; a Bot marked Isolated gets a container of its own instead. Without it, all Bots share `AGENT_COMPUTER_URL`, still with a profile and folder for each person and Bot.
@@ -167,6 +169,11 @@ A coworker is a durable Bot profile:
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+For a message with no named Bot, the intent router chooses from the person's roster. If it cannot
+choose confidently, a unique app holder may receive the message instead of the default Bot. When
+different named apps point to different unique holders, that fallback is ambiguous and the default
+stays selected; roster order does not decide which Bot owns the conversation.
 
 A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (`group_bot_threads`), and what the people in it read is a shared transcript (`group_messages`) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
 
@@ -335,6 +342,16 @@ A skill declares the tools it needs (`skill_tools`). Before the run starts, the 
 
 This narrows the offer. It is not a boundary, and it never substitutes for one. The grant, the policy and the audit row decide what may happen; this decides only what the model can see. Every way it can fail — no skills declared, a model that cannot answer, a message that matches nothing, twelve tools or fewer — leaves the whole catalogue offered, because a narrowing that failed closed would remove capability an administrator granted, silently. `mcp.tools_discovered` records what was offered, out of how much, and why.
 
+### Holding more tools than one request carries
+
+Offered is not always sent. One app approval can grant a Bot hundreds of tools (Shopify brought 239), and every tool sent on every step costs context and worsens the model's choice; Chat Completions refuses a request with more than 128, and the Responses API caps the compiled size of the strict schemas in one request. So past fifty tools, an app's offered tools wait behind one ordinary tool, `search_tools` (`server/src/agents/tool-search.ts`), unless a chosen skill asked for them or they find sources on the web. The Bot's own tools stay in front of the model on every step.
+
+The model searches in a few words, and the tools a search names are sent from its next step on, under their real names, for the next few turns. Which tools those are is read back from the search answers in the conversation itself, so nothing is held between steps or on any one replica. The runtime fixes a run's tools when it starts, so this is done by wrapping the model (`withToolSearch`): every step passes through it, and it decides which tool definitions go up.
+
+Like narrowing, this is not a boundary. Every granted tool stays registered with the runtime and executes through the plugin store's `callTool`, so a waiting tool is checked, evaluated and audited exactly as a shown one is, and a search ranks only what the Bot was granted. The providers' own tool search (`tool_search`, `defer_loading`) is not used: replayed through the runtime it breaks a conversation from its second turn, and it exists only on some models and APIs.
+
+Before the model call, a run is counted (`toolNamesSent`, without what waits). A run that would still send more than Chat Completions accepts, or more than search allows, is refused with a sentence, and the audit trail records `agent.tool_limit_refused`.
+
 ## Personal memory
 
 A person's memory is kept in CopilotKit Intelligence when the deployment is entitled to Intelligence
@@ -390,7 +407,7 @@ Connector credentials are stored through the credential vault and referenced by 
 - Signing in, being refused, and being granted the administrator role by configuration each write an audit row. They are the only record that somebody who can edit `INITIAL_ADMIN_EMAILS` promoted themselves, and the only evidence a revoked person was ever here, since revoking them deletes their sessions.
 - Removing somebody deletes their sessions and denies their address, because deleting the user row alone is not removal: the next sign-in through the provider recreates it.
 - With no identity provider configured, the deployment refuses to start unless `OPENBOT_SINGLE_USER=true` says every request may be one fixed administrator. That flag is the only thing that permits it; `NODE_ENV` does not. The flag alone is not enough on a public address: if `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL` or any `TRUSTED_ORIGINS` entry resolves to an address the public internet routes to, the deployment refuses to start anyway, because no sign-in there means every visitor is the administrator. Loopback is silent, and a private address (a home LAN, a Tailnet, a VPN, a `.local` name) is allowed with a warning naming it, since that is the deployment the flag exists for.
-- `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`.
+- `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`. A vault read or decryption fault stops an OAuth client lookup without registering a replacement, so a misconfigured replica cannot replace a client still usable by the others. Connect records `mcp.oauth_client_read_failed` with the authenticated person and server before returning a safe 503; raw vault errors and causes are neither retained nor included in the audit payload.
 - Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
 - Browser navigation allows `http` and `https`; cloud metadata addresses are refused under every configuration.
 - `POST /api/model-provider/v1/chat/completions` exists only when `OPENBOT_MODEL_OAUTH_FILE` names a model credential file, which the desktop app sets and nothing else does. It answers a Chat Completions request using a stored Google or xAI OAuth grant. It does not use the session guard: the caller presents a separate local bearer taken from that file and compared in constant time, and the provider's own refresh token never leaves the server. The credential file is refused unless it is a regular file under 64KB with no group or other permission bits, and the upstream host, path and headers are fixed so a caller cannot redirect the request.

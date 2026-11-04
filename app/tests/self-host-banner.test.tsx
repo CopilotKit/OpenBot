@@ -88,6 +88,7 @@ function setup({
     selfHostBannerDismissed: dismissed,
     narration: null,
     skin: "openbot",
+    proactive: "on",
   };
   client.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,

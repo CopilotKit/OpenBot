@@ -14,7 +14,7 @@ import {
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
-import { markdownComponents } from "@/lib/markdown";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { Composer, toAgentOptions } from "./composer";
@@ -90,7 +90,10 @@ export function GroupChat({ channelId }: { channelId: string }) {
         }}
         ref={viewportRef}
       >
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-6">
+        <div
+          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+          data-transcript-column
+        >
           {messages.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Say something to {bots.map((bot) => bot.name).join(" and ")}.
@@ -231,7 +234,10 @@ function GroupLine({
             className="w-full"
           >
             <BubbleContent className="w-full">
-              <Streamdown components={markdownComponents}>
+              <Streamdown
+                components={markdownComponents}
+                plugins={markdownPlugins}
+              >
                 {message.text}
               </Streamdown>
             </BubbleContent>

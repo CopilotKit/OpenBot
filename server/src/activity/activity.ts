@@ -9,16 +9,29 @@
  * EVERY QUERY IS NARROWED TO THE PERSON FIRST. A public Bot works for many people; this screen shows
  * the work done in the caller's name and nothing of anybody else's.
  */
-import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
+  botTasks,
   channelAgents,
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  proactivePings,
+  proactiveSuggestions,
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
@@ -26,6 +39,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
+import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
 export type ActivityKind =
@@ -68,9 +82,30 @@ export type BotAttention = {
   approvals: number;
   handoffs: number;
   unread: number;
+  /** Open items this Bot's check-ins raised, waiting for the person to start or hide. */
+  items: number;
 };
 
 const COMPLETED_LIMIT = 25;
+
+/**
+ * Raised in the conversation or thread of one of the person's tasks that their task list shows.
+ *
+ * What waits on the person there is counted once, as that task needing input (`tasks.counts`, which
+ * reads the same approvals and questions by the same rule, tasks/state.ts), so the attention counts
+ * leave it out of `approvals` and `questions`: a task waiting on one approval is one thing that needs
+ * the person, not two.
+ */
+const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
+  sql`exists (
+    select 1 from ${botTasks}
+    left join ${intelligenceChannelMappings}
+      on ${intelligenceChannelMappings.channelId} = ${botTasks.channelId}
+      and ${intelligenceChannelMappings.userId} = ${ownerUserId}
+    where ${botTasks.ownerUserId} = ${ownerUserId}
+      and ${listedTask}
+      and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
+  )`;
 const clip = (text: string | null | undefined, max = 200) =>
   text ? Array.from(text).slice(0, max).join("") : null;
 const iso = (value: Date | string | null | undefined) =>
@@ -466,6 +501,7 @@ export function createActivityStore(database: Database) {
             approvals: 0,
             handoffs: 0,
             unread: 0,
+            items: 0,
           };
           byBot.set(agentId, found);
         }
@@ -483,6 +519,11 @@ export function createActivityStore(database: Database) {
             eq(workItems.kind, "person.question"),
             isNull(workItems.finishedAt),
             sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
+            sql`not ${inListedTask(
+              ownerUserId,
+              sql`${workItems.payload}->>'channelId'`,
+              sql`${workItems.payload}->>'threadId'`,
+            )}`,
           ),
         )
         .groupBy(
@@ -501,6 +542,11 @@ export function createActivityStore(database: Database) {
           and(
             eq(approvalRequests.ownerUserId, ownerUserId),
             eq(approvalRequests.status, "pending"),
+            sql`not ${inListedTask(
+              ownerUserId,
+              sql`null`,
+              sql`${approvalRequests.action}->>'threadId'`,
+            )}`,
           ),
         )
         .groupBy(sql`${approvalRequests.action}->>'botId'`);
@@ -555,7 +601,40 @@ export function createActivityStore(database: Database) {
         .groupBy(channelAgents.agentId);
       for (const row of unread) entry(row.agentId).unread += row.total;
 
+      /*
+       * What check-ins raised and the person has not decided: listed in the app the moment it is
+       * raised, pinged or not, and whatever the Bot may notify them of. Badges always show.
+       */
+      const items = await database
+        .select({
+          agentId: proactiveSuggestions.agentId,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(proactiveSuggestions)
+        .where(
+          and(
+            eq(proactiveSuggestions.ownerUserId, ownerUserId),
+            eq(proactiveSuggestions.status, "open"),
+          ),
+        )
+        .groupBy(proactiveSuggestions.agentId);
+      for (const row of items) entry(row.agentId).items += row.total;
+
       return [...byBot.values()];
+    },
+
+    /**
+     * The person's newest ping, across all their Bots, or null. The app fires one browser
+     * notification each time this changes, never one per item.
+     */
+    async lastPing(ownerUserId: string): Promise<string | null> {
+      const [row] = await database
+        .select({ id: proactivePings.id })
+        .from(proactivePings)
+        .where(eq(proactivePings.ownerUserId, ownerUserId))
+        .orderBy(desc(proactivePings.createdAt), desc(proactivePings.id))
+        .limit(1);
+      return row?.id ?? null;
     },
   };
 }

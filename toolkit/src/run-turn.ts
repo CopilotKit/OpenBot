@@ -91,6 +91,14 @@ export type TurnRunner = (input: {
   runId?: string;
   /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
   depth?: number;
+  /** Trusted host context, never a browser-provided analytics claim. */
+  telemetry?: {
+    trigger: "human" | "routine" | "followup" | "subagent" | "unknown";
+    surface?: "web" | "desktop" | "mobile" | "external_channel" | "unknown";
+    rootTaskId?: string;
+    parentRunId?: string;
+    attempt?: number;
+  };
   /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
   onText?: (text: string) => void;
 }) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
@@ -293,6 +301,10 @@ export function turnMessages(input: {
   continuation?: Parameters<TurnRunner>[0]["continuation"];
 }): { messages: Message[]; persistedInputMessages: Message[] } {
   const { seeded, historicIds, turn, continuation } = input;
+  /*
+   * A turn whose message the thread already holds is a retry of it, which a failed run that got as
+   * far as persisting its input leaves behind: the message is there once, never sent twice.
+   */
   const messages: Message[] = continuation
     ? sanitizeSeededHistory([
         ...continuation.snapshot.messages,
@@ -303,7 +315,9 @@ export function turnMessages(input: {
           ...continuation.result,
         },
       ])
-    : [...seeded, turn];
+    : seeded.some((message) => message.id === turn.id)
+      ? seeded
+      : [...seeded, turn];
   return {
     messages,
     persistedInputMessages: messages.filter(
@@ -501,6 +515,19 @@ export function settle(evidence: TurnEvidence): TurnOutcome {
 }
 
 /**
+ * A turn that finished and said nothing. A failure for a turn somebody is waiting to read, which is
+ * every turn but one: a check-in that read what it was asked to and found nothing new often ends
+ * without a closing line, and for it silence is the answer. Its own class so that caller can tell
+ * this apart by type; everyone else meets it as the error it always was, word for word.
+ */
+export class EmptyTurnError extends Error {
+  constructor() {
+    super("The turn finished without saying anything.");
+    this.name = "EmptyTurnError";
+  }
+}
+
+/**
  * The outcome as the caller receives it: a reply, or the error that names what happened.
  *
  * For a lost lock and a deadline, `stopped` is awaited first — the reference's own order
@@ -530,7 +557,7 @@ async function conclude(
         "The turn stopped to ask a question, and a routine has nobody to ask.",
       );
     case "empty":
-      throw new Error("The turn finished without saying anything.");
+      throw new EmptyTurnError();
     case "completed":
       return outcome.components.length > 0
         ? { replyText: outcome.replyText, components: outcome.components }
@@ -574,6 +601,17 @@ export function createTurnRunner(options: {
   heartbeatMs?: number;
   /** See `TURN_LIMITS.abortGraceMs`; injectable so a test need not wait five real seconds. */
   abortGraceMs?: number;
+  /** Host-owned input enrichment before the runner publishes RUN_STARTED.input. */
+  prepareRunInput?: (
+    input: RunAgentInput,
+    turn: Parameters<TurnRunner>[0],
+  ) => Promise<RunAgentInput>;
+  /** A cancellation/timeout this host actually observed, separate from stream completion. */
+  onKnownStop?: (
+    actorUserId: string,
+    runId: string,
+    outcome: "cancelled" | "timeout",
+  ) => Promise<void>;
 }): TurnRunner {
   const {
     intelligence,
@@ -589,20 +627,21 @@ export function createTurnRunner(options: {
     abortGraceMs = TURN_LIMITS.abortGraceMs,
   } = options;
 
-  return async ({
-    ownerUserId,
-    routineId,
-    agentId,
-    threadId,
-    instruction,
-    initiator: suppliedInitiator,
-    continuation,
-    signal,
-    userMessage,
-    runId: suppliedRunId,
-    depth,
-    onText,
-  }) => {
+  return async (hostTurn) => {
+    let {
+      ownerUserId,
+      routineId,
+      agentId,
+      threadId,
+      instruction,
+      initiator: suppliedInitiator,
+      continuation,
+      signal,
+      userMessage,
+      runId: suppliedRunId,
+      depth,
+      onText,
+    } = hostTurn;
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
     // A paused Bot or a refused capability throws here; a pause mid-turn aborts the returned signal.
     signal = await admission({ ownerUserId, agentId, signal });
@@ -726,7 +765,7 @@ export function createTurnRunner(options: {
       agent.use(new HeadlessToolsMiddleware(headlessTools, initiator));
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
 
-    const input = turnInput({
+    let input = turnInput({
       threadId,
       runId,
       messages,
@@ -734,6 +773,19 @@ export function createTurnRunner(options: {
       tools: headlessTools,
       ...(continuation ? { continuation } : {}),
     });
+
+    if (options.prepareRunInput) {
+      try {
+        input = await options.prepareRunInput(input, hostTurn);
+      } catch {
+        console.warn(
+          JSON.stringify({
+            type: "product-telemetry",
+            reason: "headless_context_failed",
+          }),
+        );
+      }
+    }
 
     /*
      * The reply is recovered by diffing the agent, because the runner throws away what `runAgent`
@@ -819,6 +871,16 @@ export function createTurnRunner(options: {
     try {
       const cancelled = new Promise<never>((_resolve, reject) => {
         cancelTurn = () => {
+          void options
+            .onKnownStop?.(ownerUserId, runId, "cancelled")
+            .catch(() => {
+              console.warn(
+                JSON.stringify({
+                  type: "product-telemetry",
+                  reason: "stop_observation_failed",
+                }),
+              );
+            });
           stopTurn();
           reject(new Error("The headless turn was cancelled."));
         };
@@ -869,6 +931,16 @@ export function createTurnRunner(options: {
       const timeout = new Promise<never>((_resolve, reject) => {
         deadline = setTimeout(() => {
           stopped = true;
+          void options
+            .onKnownStop?.(ownerUserId, runId, "timeout")
+            .catch(() => {
+              console.warn(
+                JSON.stringify({
+                  type: "product-telemetry",
+                  reason: "stop_observation_failed",
+                }),
+              );
+            });
           stopTurn();
         }, turnTimeoutMs);
         deadline.unref?.();

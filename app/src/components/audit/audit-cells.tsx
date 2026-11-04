@@ -389,6 +389,7 @@ const DECISIONS: Record<string, string> = {
   // Not a refusal, so not the refusal colour: nothing was blocked. The Bot was asked and never
   // answered, which is the same complaint as an action that was allowed and then did not happen.
   "agent.stream_stalled": "The Bot stopped responding",
+  "agent.tool_limit_refused": "Too many tools for its model",
   "computer.policy_loaded": "Boundary at start-up",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took control",

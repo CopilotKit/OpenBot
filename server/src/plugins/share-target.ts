@@ -38,6 +38,9 @@ const RECIPIENT_KEYS = [
   "chatId",
   "thread_ts",
   "to",
+  // Composio's Gmail sends and replies name their To line these two ways rather than `to`.
+  "recipient_email",
+  "extra_recipients",
   "cc",
   "bcc",
   "recipient",

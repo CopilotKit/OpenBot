@@ -18,3 +18,11 @@ export const GalleryStreamingContext = createContext(false);
  * The transcript provides it per row. Anywhere else nothing is known, and the status decides.
  */
 export const ArgumentsArrivingContext = createContext(true);
+
+/**
+ * Whether the turn a row belongs to is still running: every row after the person's last message,
+ * while the Bot works. Wider than {@link ArgumentsArrivingContext}, which is the newest row alone. A
+ * call that runs beside others, a subagent, has its arguments in and no result yet while later rows
+ * arrive, and it is still working for as long as its turn is. Outside a transcript, nothing runs.
+ */
+export const TurnInFlightContext = createContext(false);
