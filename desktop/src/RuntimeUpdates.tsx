@@ -29,10 +29,12 @@ export function RuntimeUpdates({
   root,
   onApply,
   onShellApply,
+  recoveryOnly = false,
 }: {
   root: string;
   onApply: () => Promise<unknown>;
   onShellApply?: (version: string) => Promise<unknown>;
+  recoveryOnly?: boolean;
 }) {
   const id = useId();
   const [version, setVersion] = useState("");
@@ -51,8 +53,8 @@ export function RuntimeUpdates({
       setInterruption(
         await invoke<Interruption | null>("runtime_update_status", { root }),
       );
-    } catch {
-      setInterruption(null);
+    } catch (error) {
+      setFailure(asProblem(error));
     }
   }, [root]);
   useEffect(() => {
@@ -73,43 +75,56 @@ export function RuntimeUpdates({
   }
 
   if (!root.trim()) return null;
+  const recovery = interruption && (
+    <div role="alert">
+      <p>
+        The update from {interruption.fromVersion} to {interruption.toVersion}{" "}
+        did not finish, so OpenBot will not start until it is resolved.
+      </p>
+      <p>
+        {interruption.databaseMayHaveChanged
+          ? `Its database migration may have run. Restoring puts ${interruption.fromVersion}'s files back, and restores the database from the backup taken before the update only if the database changed. Anything written after that backup is lost.`
+          : `Nothing in the database changed. Restoring puts ${interruption.fromVersion}'s files back.`}
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() =>
+          void perform(async () => {
+            const recovered = await invoke<Recovered>(
+              "recover_runtime_update",
+              { root },
+            );
+            setInterruption(null);
+            setNotice(
+              recovered.accepted
+                ? `The update to ${recovered.version} is accepted. Start OpenBot to run it.`
+                : `${recovered.version} is back in place${recovered.databaseRestored ? ", with its database restored" : ""}. Repair the installation, then start it.`,
+            );
+          })
+        }
+      >
+        Restore previous release
+      </button>
+    </div>
+  );
+  // Restoring vendor source invalidates preparation. A cold reopen must still offer recovery.
+  if (recoveryOnly) {
+    if (!interruption && !notice && !failure) return null;
+    return (
+      <details className="runtime-updates" open>
+        <summary>Runtime updates</summary>
+        {recovery}
+        {busy && <p role="status">Restoring the previous release…</p>}
+        {notice && <p role="status">{notice}</p>}
+        {failure && <Failure problem={failure} />}
+      </details>
+    );
+  }
   return (
     <details className="runtime-updates" open={interruption ? true : undefined}>
       <summary>Runtime updates</summary>
-      {interruption && (
-        <div role="alert">
-          <p>
-            The update from {interruption.fromVersion} to{" "}
-            {interruption.toVersion} did not finish, so OpenBot will not start
-            until it is resolved.
-          </p>
-          <p>
-            {interruption.databaseMayHaveChanged
-              ? `Its database migration may have run. Restoring puts ${interruption.fromVersion}'s files back, and restores the database from the backup taken before the update only if the database changed. Anything written after that backup is lost.`
-              : `Nothing in the database changed. Restoring puts ${interruption.fromVersion}'s files back.`}
-          </p>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void perform(async () => {
-                const recovered = await invoke<Recovered>(
-                  "recover_runtime_update",
-                  { root },
-                );
-                setInterruption(null);
-                setNotice(
-                  recovered.accepted
-                    ? `The update to ${recovered.version} is accepted. Start OpenBot to run it.`
-                    : `${recovered.version} is back in place${recovered.databaseRestored ? ", with its database restored" : ""}. Repair the installation, then start it.`,
-                );
-              })
-            }
-          >
-            Restore previous release
-          </button>
-        </div>
-      )}
+      {recovery}
       <p>
         Choose a release from this installation’s configured distributor.
         Checking and staging leave the running installation in place. Applying
