@@ -56,13 +56,11 @@ const auth = createAuth(
 beforeAll(async () => {
   useTestPeople();
   vault = await useTestVault();
-  await database
-    .insert(users)
-    .values({
-      id: person,
-      email: `${person}@example.test`,
-      name: "Signing In",
-    });
+  await database.insert(users).values({
+    id: person,
+    email: `${person}@example.test`,
+    name: "Signing In",
+  });
 });
 
 afterAll(async () => {
