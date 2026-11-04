@@ -473,6 +473,71 @@ export function readReleasePolicy(
   return parseReleasePolicy(JSON.parse(text), version);
 }
 
+/** Drizzle's migration journal; its last entry's tag is the database a commit migrates to. */
+export const MIGRATION_JOURNAL = "server/drizzle/meta/_journal.json";
+function lastMigration(repositoryRoot: string, revision: string): string {
+  let text: string;
+  try {
+    text = git(repositoryRoot, "show", `${revision}:${MIGRATION_JOURNAL}`);
+  } catch {
+    throw new Error(`${revision} has no ${MIGRATION_JOURNAL}.`);
+  }
+  const journal: unknown = JSON.parse(text);
+  const entries =
+    typeof journal === "object" && journal !== null && "entries" in journal
+      ? journal.entries
+      : undefined;
+  const tag = Array.isArray(entries) ? entries.at(-1)?.tag : undefined;
+  if (typeof tag !== "string" || !tag)
+    throw new Error(`${MIGRATION_JOURNAL} at ${revision} has no migrations.`);
+  return tag;
+}
+
+/**
+ * The policy's database transition, checked against the migrations themselves rather than taken on
+ * trust: `to` is the last migration in the release commit, and `from` is the last migration of each
+ * starting release, read at that release's tag. A migration that lands after the policy was written
+ * therefore stops the release instead of shipping a stale transition.
+ */
+export function checkDatabaseTransition(
+  repositoryRoot: string,
+  commit: string,
+  policy: ReleasePolicy,
+): void {
+  const { database } = policy.compatibility;
+  const to = lastMigration(repositoryRoot, commit);
+  if (database.to !== to)
+    throw new Error(
+      `${RELEASE_POLICY_FILE} says this release migrates the database to ${JSON.stringify(database.to)}, but the last migration in ${MIGRATION_JOURNAL} at ${commit} is ${JSON.stringify(to)}. Set compatibility.database.to to ${JSON.stringify(to)}.`,
+    );
+  const from = [
+    ...new Set(
+      policy.upgrade.fromVersions.map((version) => {
+        try {
+          git(
+            repositoryRoot,
+            "rev-parse",
+            "--verify",
+            `refs/tags/${version}^{commit}`,
+          );
+        } catch {
+          throw new Error(
+            `${RELEASE_POLICY_FILE} upgrades from ${version}, but this repository has no ${version} tag to read its database from. Fetch tags, or remove ${version} from upgrade.fromVersions.`,
+          );
+        }
+        return lastMigration(repositoryRoot, `refs/tags/${version}`);
+      }),
+    ),
+  ];
+  if (
+    database.from.length !== from.length ||
+    database.from.some((migration) => !from.includes(migration))
+  )
+    throw new Error(
+      `${RELEASE_POLICY_FILE} says this release upgrades databases from ${JSON.stringify(database.from)}, but the starting releases ${JSON.stringify(policy.upgrade.fromVersions)} end at ${JSON.stringify(from)} in their ${MIGRATION_JOURNAL}. Set compatibility.database.from to ${JSON.stringify(from)}.`,
+    );
+}
+
 /** The publishing identity and exact source. The upgrade policy is read separately, from the tree. */
 export function readReleaseConfiguration(
   env: Record<string, string | undefined>,
@@ -595,11 +660,16 @@ if (import.meta.main) {
       configuration.version,
     );
     parseReleaseManifest(placeholderManifest(configuration, policy));
-    if (process.argv.includes("--validate-policy"))
+    if (process.argv.includes("--validate-policy")) {
+      checkDatabaseTransition(
+        configuration.repositoryRoot,
+        configuration.commit,
+        policy,
+      );
       console.log(
         `${RELEASE_POLICY_FILE} at ${configuration.commit} describes ${configuration.version}.`,
       );
-    else {
+    } else {
       const imageManifest = resolve(
         process.env.OPENBOT_IMAGE_MANIFEST || "container-images.json",
       );

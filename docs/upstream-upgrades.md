@@ -17,9 +17,9 @@ Set these repository Actions variables before merging the next release PR:
 
 ## Write the release policy
 
-The compatibility and upgrade policy is `release-policy.json` at the repository root, reviewed with the release like any other change. Publication reads it from the release commit itself, never from a repository variable or the working tree, and refuses it in preflight, before any image is pushed, unless its `version` is the version being released. A policy left over from the previous release names that release, so it cannot ship again under the new one. Every `fromVersions` entry must be an earlier release version. The schema is `shared/release-policy.schema.json`.
+The compatibility and upgrade policy is `release-policy.json` at the repository root, reviewed with the release like any other change. Publication reads it from the release commit itself, never from a repository variable or the working tree, and refuses it in preflight, before any image is pushed, unless its `version` is the version being released. A policy left over from the previous release names that release, so it cannot ship again under the new one. Every `fromVersions` entry must be an earlier release version. The database transition is checked against the migrations rather than trusted: `compatibility.database.to` must be the last migration in `server/drizzle/meta/_journal.json` at the release commit, and `compatibility.database.from` must be the last migration at the tag of each `fromVersions` release, so every starting release needs its tag. A refusal names the value to write. The schema is `shared/release-policy.schema.json`.
 
-Write the next release's policy before merging its release PR, in that PR or before it. This example shows the complete shape. Replace versions, schema identities and capabilities with those verified for the release. Use actual database migration history identities; OpenBot's own policy names the last migration in `server/drizzle/meta/_journal.json` at each release.
+Write the next release's policy before merging its release PR, in that PR or before it. This example shows the complete shape. Replace versions, schema identities and capabilities with those verified for the release. Database identities are the last migration tags in `server/drizzle/meta/_journal.json`.
 
 ```json
 {

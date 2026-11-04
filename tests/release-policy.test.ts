@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -9,9 +10,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { parseReleasePolicy } from "../scripts/release-manifest";
 
 // The upgrade policy is reviewed with the release it describes: it lives in the tree, is read from
-// the release commit, and is refused unless it names the version being released.
+// the release commit, and is refused unless it names the version being released and the database
+// transition its migrations actually make.
 
 const root = join(import.meta.dir, "..");
 const cli = join(root, "scripts/release-manifest.ts");
@@ -39,17 +42,7 @@ function validate(cwd: string, env: Record<string, string>) {
   });
   return { exitCode: run.exitCode, output: `${run.stdout}${run.stderr}` };
 }
-/** The upstream repository publishing a release, with the given policy committed. */
-function publisher(committed: unknown) {
-  const repo = mkdtempSync(join(tmpdir(), "openbot-policy-"));
-  directories.push(repo);
-  git(repo, "init", "-b", "main");
-  writeFileSync(join(repo, "core.txt"), "release\n");
-  if (committed !== undefined)
-    writeFileSync(
-      join(repo, "release-policy.json"),
-      `${JSON.stringify(committed, null, 2)}\n`,
-    );
+function commit(repo: string, message: string) {
   git(repo, "add", ".");
   git(
     repo,
@@ -59,8 +52,55 @@ function publisher(committed: unknown) {
     "user.email=release@example.test",
     "commit",
     "-m",
-    "release",
+    message,
   );
+}
+/** A Drizzle journal whose last migration is the given tag. */
+function journal(repo: string, last: string) {
+  mkdirSync(join(repo, "server/drizzle/meta"), { recursive: true });
+  writeFileSync(
+    join(repo, "server/drizzle/meta/_journal.json"),
+    JSON.stringify({
+      version: "7",
+      dialect: "postgresql",
+      entries: ["0000_schema", last].map((tag, idx) => ({
+        idx,
+        version: "7",
+        when: 1786891733850 + idx,
+        tag,
+        breakpoints: true,
+      })),
+    }),
+  );
+}
+/**
+ * The upstream repository publishing a release: earlier releases tagged with the last migration
+ * each shipped, then the release commit with its own last migration and the given policy.
+ */
+function publisher(
+  committed: unknown,
+  {
+    tags = { "v0.3.0": "0053_identity_links" } as Record<string, string>,
+    migration = "0074_single_user_identity",
+  } = {},
+) {
+  const repo = mkdtempSync(join(tmpdir(), "openbot-policy-"));
+  directories.push(repo);
+  git(repo, "init", "-b", "main");
+  for (const [version, last] of Object.entries(tags)) {
+    journal(repo, last);
+    writeFileSync(join(repo, "core.txt"), `${version}\n`);
+    commit(repo, version);
+    git(repo, "tag", version);
+  }
+  journal(repo, migration);
+  writeFileSync(join(repo, "core.txt"), "release\n");
+  if (committed !== undefined)
+    writeFileSync(
+      join(repo, "release-policy.json"),
+      `${JSON.stringify(committed, null, 2)}\n`,
+    );
+  commit(repo, "release");
   return {
     repo,
     env: {
@@ -77,16 +117,11 @@ const forVersion = (version: string, fromVersions = ["v0.3.0"]) => ({
 });
 
 describe("release policy", () => {
-  test("the committed policy passes the release preflight for the version it names", () => {
-    const result = validate(root, {
-      GITHUB_REPOSITORY: "CopilotKit/OpenBot",
-      GITHUB_SHA: git(root, "rev-parse", "HEAD"),
-      VERSION: policy.version,
-    });
-    expect(result).toEqual({
-      exitCode: 0,
-      output: expect.stringContaining(`describes ${policy.version}`),
-    });
+  // Its database transition is checked at release time, against the release commit and tags. A
+  // test against this tree would fail every pull request that adds a migration, and CI's shallow
+  // checkout has no tags, so here it is held to everything else.
+  test("the committed policy is a valid policy for the version it names", () => {
+    expect(() => parseReleasePolicy(policy, policy.version)).not.toThrow();
   });
 
   test("the committed policy is for this release or the next one, never an earlier one", () => {
@@ -127,6 +162,65 @@ describe("release policy", () => {
 
   test("a policy written for this release passes", () => {
     const { repo, env } = publisher(forVersion("v0.4.0"));
+    expect(validate(repo, env)).toEqual({
+      exitCode: 0,
+      output: expect.stringContaining("describes v0.4.0"),
+    });
+  });
+
+  test("a migration that landed after the policy was written stops the release, naming the fix", () => {
+    const { repo, env } = publisher(forVersion("v0.4.0"), {
+      migration: "0075_later_migration",
+    });
+    const result = validate(repo, env);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain(
+      'Set compatibility.database.to to "0075_later_migration".',
+    );
+  });
+
+  test("a starting database other than the one its starting release shipped stops the release", () => {
+    const { repo, env } = publisher(forVersion("v0.4.0"), {
+      tags: { "v0.3.0": "0060_shipped_in_v0_3_0" },
+    });
+    const result = validate(repo, env);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain(
+      'Set compatibility.database.from to ["0060_shipped_in_v0_3_0"].',
+    );
+  });
+
+  test("every starting release needs its own database, read at its tag", () => {
+    const { repo, env } = publisher(
+      forVersion("v0.4.0", ["v0.2.0", "v0.3.0"]),
+      {
+        tags: { "v0.2.0": "0040_older", "v0.3.0": "0053_identity_links" },
+      },
+    );
+    const result = validate(repo, env);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain(
+      'Set compatibility.database.from to ["0040_older","0053_identity_links"].',
+    );
+  });
+
+  test("a starting release with no tag stops the release", () => {
+    const { repo, env } = publisher(forVersion("v0.4.0", ["v0.3.0", "v0.3.1"]));
+    const result = validate(repo, env);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("has no v0.3.1 tag");
+  });
+
+  test("two starting releases on the same migration name it once", () => {
+    const { repo, env } = publisher(
+      forVersion("v0.4.0", ["v0.3.0", "v0.3.1"]),
+      {
+        tags: {
+          "v0.3.0": "0053_identity_links",
+          "v0.3.1": "0053_identity_links",
+        },
+      },
+    );
     expect(validate(repo, env).exitCode).toBe(0);
   });
 
