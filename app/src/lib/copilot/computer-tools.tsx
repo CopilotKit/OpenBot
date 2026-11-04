@@ -1,10 +1,11 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
 import { HelpRequestCard } from "@/components/computer/help-request-card";
 import { tryClient } from "@/lib/client";
-import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
+import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
 import {
@@ -67,6 +68,8 @@ type ComputerOutcome = {
   humanHasControl?: boolean;
   entries?: unknown[];
   refused?: boolean;
+  /** Handed to the person, who did it themselves. Done, and not by the Bot. */
+  doneByPerson?: boolean;
   reason?: string;
   staleRefs?: boolean;
   /** The computer was still starting and the call was not performed. */
@@ -90,61 +93,15 @@ type ComputerOutcome = {
 };
 
 /**
- * What a call printed, as text a person can read.
+ * Read the SDK-render result string so the transcript can distinguish success, refusal, failure and
+ * a step the person did themselves.
  *
- * One helper because the three surfaces this feeds all want the same thing and shape it differently:
- * a command has `stdout` and `stderr`, a file read has `contents`, a listing has `entries`. A refusal
- * carries only its reason, and that is the most useful thing on the line.
- *
- * Never guesses. Something with none of those fields gives an empty string, and the pane says the
- * call printed nothing rather than inventing a summary.
- */
-export function outputOf(result: ToolOutcome): string {
-  if (result.refused === true || result.ok === false) {
-    return typeof result.reason === "string" ? result.reason : "";
-  }
-
-  // `text`, which is what the read route answers with. Not `contents`: that is the name on the way
-  // in, and reading it back gave an empty pane for a file the Bot had just read out loud.
-  if (typeof result.text === "string") return result.text;
-
-  if (Array.isArray(result.entries)) {
-    return result.entries
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") return String(entry);
-        const { path, kind, bytes } = entry as Record<string, unknown>;
-        const label = String(path ?? "");
-        // A trailing slash for a folder, the way a terminal marks one, so a listing of a workspace
-        // full of folders does not read as a list of extensionless files.
-        if (kind === "folder") return `${label}/`;
-        return typeof bytes === "number" ? `${label}  ${bytes} bytes` : label;
-      })
-      .join("\n");
-  }
-
-  const stdout = typeof result.stdout === "string" ? result.stdout : "";
-  const stderr = typeof result.stderr === "string" ? result.stderr : "";
-  // Both, in the order a terminal shows them, and labelled only when there is something on stderr:
-  // most commands write nothing there and a permanent empty heading is noise.
-  return stderr ? `${stdout}${stdout ? "\n" : ""}${stderr}` : stdout;
-}
-
-/**
- * Parse the SDK-render result string so the transcript can distinguish success, refusal, and failure.
+ * The Activity pane's reader, so the line and the pane beside it say the same thing. This one read a
+ * sentence (the server's answer for a step that was declined or not carried out) as an empty success,
+ * and the line said "Ran a command ... It printed nothing." beside a pane that said "You declined it."
  */
 function outcomeOf(result: string | undefined): ComputerOutcome {
-  if (!result) return {};
-  try {
-    const parsed = JSON.parse(result) as unknown;
-    return parsed && typeof parsed === "object"
-      ? (parsed as ComputerOutcome)
-      : {};
-  } catch {
-    // Runtime stringifies thrown handlers as "Error: <message>".
-    return result.startsWith("Error:")
-      ? { ok: false, reason: result.slice("Error:".length).trim() }
-      : {};
-  }
+  return (readOutcome(result) ?? {}) as ComputerOutcome;
 }
 
 /**
@@ -171,6 +128,7 @@ function ActionLine({
   refused,
   failed,
   notYet,
+  byYou,
 }: {
   label: string;
   detail?: string;
@@ -181,9 +139,12 @@ function ActionLine({
   failed?: boolean;
   /** The computer was still starting, so nothing was done yet. See `stillStarting`. */
   notYet?: boolean;
+  /** It was handed to the person, who did it themselves. See `ToolLine`. */
+  byYou?: boolean;
 }) {
   return (
     <ToolLine
+      byYou={byYou}
       detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
       label={label}
@@ -215,6 +176,11 @@ function didNotWork(outcome: ComputerOutcome): boolean {
  */
 function stillStarting(outcome: ComputerOutcome): boolean {
   return outcome.ok === false && outcome.starting === true;
+}
+
+/** Whether the step was handed to the person and they did it themselves, so the Bot did not. */
+function byPerson(outcome: ComputerOutcome): boolean {
+  return outcome.doneByPerson === true;
 }
 
 /**
@@ -407,6 +373,7 @@ export function ComputerTools() {
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });
@@ -446,13 +413,14 @@ export function ComputerTools() {
           detail={
             // Show refusal reason instead of an internal element ref.
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : (labelOf(result) ??
                 (typeof args?.ref === "string" ? args.ref : undefined))
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -496,6 +464,7 @@ export function ComputerTools() {
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });
@@ -640,23 +609,15 @@ export function ComputerTools() {
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
+    // Activity is read from the conversation this answer lands in: see `useConversationActivity`.
     handler: async (
       input: { path?: string },
       { agent }: ToolCallContext = {},
-    ) => {
-      const computerId = botOf(agent);
-      const result = await callComputer(computerId, "/files/list", {
+    ) =>
+      callComputer(botOf(agent), "/files/list", {
         method: "POST",
         body: input ?? {},
-      });
-      recordActivity(computerId, {
-        kind: "list_files",
-        subject: input?.path ?? "the workspace",
-        output: outputOf(result),
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
+      }),
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
       const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
@@ -666,14 +627,17 @@ export function ComputerTools() {
           label="Listed files"
           detail={
             outcome.refused === true || didNotWork(outcome)
-              ? String(outcome.reason ?? "")
-              : entries.length
-                ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
-                : "nothing saved yet"
+              ? outcomeForPerson(String(outcome.reason ?? ""))
+              : byPerson(outcome)
+                ? undefined
+                : entries.length
+                  ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
+                  : "nothing saved yet"
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -690,23 +654,11 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (
-      input: { path: string },
-      { agent }: ToolCallContext = {},
-    ) => {
-      const computerId = botOf(agent);
-      const result = await callComputer(computerId, "/files/read", {
+    handler: async (input: { path: string }, { agent }: ToolCallContext = {}) =>
+      callComputer(botOf(agent), "/files/read", {
         method: "POST",
         body: input,
-      });
-      recordActivity(computerId, {
-        kind: "read_file",
-        subject: input.path,
-        output: outputOf(result),
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
+      }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       return (
@@ -715,7 +667,7 @@ export function ComputerTools() {
           label="Read file"
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
@@ -723,6 +675,7 @@ export function ComputerTools() {
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -748,35 +701,24 @@ export function ComputerTools() {
           "The command to run, such as: apt-get install -y jq (as root)",
         ),
     }),
+    /*
+     * NOT WHERE ACTIVITY IS RECORDED, though it once was. A command is a change, and the approval
+     * wrapper sends a change to the server's gate without calling this at all: the gate runs it and
+     * answers, or runs it after a person allows it and continues the conversation itself. Recorded
+     * here, the pane beside the screen stayed empty while a Bot ran command after command. Every one
+     * of those paths ends with the answer in the conversation, which is what the pane reads; see
+     * `useConversationActivity`.
+     */
     handler: async (
       input: { command: string },
       { signal, agent }: ToolCallContext = {},
-    ) => {
-      const computerId = botOf(agent);
-      const result = await callComputer(
-        computerId,
+    ) =>
+      callComputer(
+        botOf(agent),
         "/exec",
         { method: "POST", body: input },
         signal,
-      );
-      /*
-       * Recorded here rather than in `render`, which runs again on every re-render and would append
-       * the same command each time. This is the only place that runs once per call and has both the
-       * command and what it printed.
-       */
-      recordActivity(computerId, {
-        kind: "command",
-        subject: input.command,
-        output: outputOf(result),
-        ...(typeof result.exitCode === "number"
-          ? { exitCode: result.exitCode }
-          : {}),
-        ...(result.refused === true ? { refused: true } : {}),
-        ...(result.truncated === true ? { truncated: true } : {}),
-        ...(result.timedOut === true ? { timedOut: true } : {}),
-      });
-      return result;
-    },
+      ),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       /*
@@ -789,13 +731,16 @@ export function ComputerTools() {
        */
       const printed = outputOf(outcome as ToolOutcome);
       const exit = typeof outcome.exitCode === "number" ? outcome.exitCode : 0;
+      // Nothing ran on the computer for a step the person did themselves, so there is no output to show.
+      const byYou = byPerson(outcome);
       return (
         <ToolLine
           running={status !== "complete"}
           label="Ran a command"
+          byYou={byYou}
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : typeof args?.command === "string"
                 ? args.command
                 : undefined
@@ -804,7 +749,7 @@ export function ComputerTools() {
           failed={didNotWork(outcome) || exit !== 0}
           notYet={stillStarting(outcome)}
         >
-          {status === "complete" ? (
+          {status === "complete" && !byYou ? (
             <CommandOutput
               output={printed}
               exitCode={exit}
@@ -842,30 +787,11 @@ export function ComputerTools() {
         append?: boolean;
       },
       { agent }: ToolCallContext = {},
-    ) => {
-      const computerId = botOf(agent);
-      const result = await callComputer(computerId, "/files/write", {
+    ) =>
+      callComputer(botOf(agent), "/files/write", {
         method: "POST",
         body: input,
-      });
-      /*
-       * The path and the size, never the contents. A Bot may well be saving something it was told in
-       * confidence, and the write route declines to echo it back for exactly that reason; putting it
-       * in a pane would undo that.
-       */
-      recordActivity(computerId, {
-        kind: "write_file",
-        subject: input.path,
-        output:
-          result.refused === true
-            ? outputOf(result)
-            : typeof result.bytes === "number"
-              ? `${result.bytes} bytes${input.append === true ? ", appended" : ""}`
-              : "",
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
+      }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       return (
@@ -875,7 +801,7 @@ export function ComputerTools() {
           // Show the path, never file contents.
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? outcomeForPerson(String(outcome.reason ?? ""))
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
@@ -883,6 +809,7 @@ export function ComputerTools() {
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -918,6 +845,7 @@ export function ComputerTools() {
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });

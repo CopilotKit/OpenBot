@@ -13,6 +13,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+if [ -f "$ROOT/.openbot-update-journal.json" ]; then
+  # Only the exact in-flight updater operation may start before acceptance. A normal startup
+  # must not run source whose migration/activation was interrupted.
+  bun "$ROOT/scripts/update.ts" local assert-start --root "$ROOT"
+fi
+if [ -f "$ROOT/.openbot-release.json" ] && [ -z "${OPENBOT_UPDATE_OPERATION:-}" ]; then
+  # Keep ordinary host restarts on the accepted build identity. Quoting each export treats
+  # release strings as data; no shell text from metadata is evaluated.
+  release_environment="$(bun "$ROOT/scripts/update.ts" local build-environment --root "$ROOT")"
+  while IFS= read -r release_setting; do
+    export "$release_setting"
+  done <<< "$release_environment"
+fi
 LOGS="$ROOT/.logs"
 mkdir -p "$LOGS"
 
@@ -219,6 +232,29 @@ stop_server_processes_for_restart() {
 echo
 echo "OpenBot"
 echo "======="
+
+# Provision the installation's Composio project with the existing CLI sign-in, independently of
+# Learning. The helper preserves supplied keys and Arcade. The server reads the resulting .env on
+# launch. Bun preserves exported values over .env, including empty strings. A child cannot change
+# this shell's environment, so clear only blank overrides before setup and later server processes.
+#
+# Best-effort, like Learning below. It used to run bare under `set -e`, so a checkout with no key
+# could not start at all while offline, signed out of the CLI, on a CLI without
+# `integrations composio provision`, or against an Ops without the provisioning service. A failure
+# is now the helper's one-line reason, and OpenBot starts with apps unavailable.
+if [[ "${COMPOSIO_API_KEY:-}" != *[![:space:]]* ]]; then
+  unset COMPOSIO_API_KEY
+fi
+COMPOSIO_BEFORE="$(setting COMPOSIO_API_KEY "")"
+if COMPOSIO_LINE="$(bun scripts/setup-composio.ts 2>&1 | tail -1)"; then
+  info "  $COMPOSIO_LINE"
+else
+  red "  Composio: apps are unavailable this run. ${COMPOSIO_LINE:-The Composio setup did not run.}"
+fi
+# Whatever the helper reported, a key that is new in .env must reach a server that is already up.
+if [ -z "$COMPOSIO_BEFORE" ] && [ -n "$(setting COMPOSIO_API_KEY "")" ]; then
+  SECRETS_ROTATED=true
+fi
 
 info "1/4  Docker services"
 SERVICES=(postgres)

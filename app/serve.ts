@@ -67,9 +67,17 @@ export function isApiCall(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+/**
+ * What a socket's handshake carries on to the server: who is asking, and where the browser addressed it.
+ *
+ * `host` with `origin`, as every call this passes on already carries both, because the server reads them
+ * together: a page's socket is its own when `Origin` names the `Host` it was opened to (`request-trust.ts`).
+ * Without it the server saw this process's own address, `127.0.0.1` and its port, and refused the app's
+ * socket from any origin it had not been told by name, while the same page's calls went through.
+ */
 export function upstreamWebSocketHeaders(requestHeaders: Headers): Headers {
   const headers = new Headers();
-  for (const name of ["authorization", "cookie", "origin"]) {
+  for (const name of ["authorization", "cookie", "origin", "host"]) {
     const value = requestHeaders.get(name);
     if (value) headers.set(name, value);
   }

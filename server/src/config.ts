@@ -418,7 +418,8 @@ export type DeploymentConfig = {
   /**
    * The origins this deployment's own pages are served from, besides the server's own: the public URL,
    * the app's URL, `TRUSTED_ORIGINS`, and in single-user mode the app's port on this machine's loopback
-   * names. A browser request from any other origin may read nothing and change nothing (`request-trust.ts`).
+   * names and on each of those addresses' hosts. A browser request from any other origin may read nothing
+   * and change nothing (`request-trust.ts`).
    *
    * Origins, not URLs: `scheme://host:port`, as a browser writes its `Origin` header.
    */
@@ -703,10 +704,13 @@ function singleUserAccess(environment: Environment): SingleUserAccess {
 /**
  * The origins this deployment's own pages are served from. See {@link DeploymentConfig.browserOrigins}.
  *
- * In single-user mode the app's port on all three loopback names as well, whatever else is configured,
- * because that is where OpenBot Desktop and `scripts/start.sh` open it. The app's servers proxy API calls
- * to this one, so the browser's `Origin` names the app's port and the request's `Host` this server's, and
- * the socket the app opens in development goes straight to this port from the app's origin.
+ * In single-user mode the app's port as well, on all three loopback names, whatever else is configured,
+ * because that is where OpenBot Desktop and `scripts/start.sh` open it, and on the host of every configured
+ * address, because that is where another machine opens it once one is configured
+ * (`OPENBOT_PUBLIC_URL=http://192.168.1.10:3001` puts the app at `http://192.168.1.10:3010`). The app's
+ * servers proxy API calls to this one, so the browser's `Origin` names the app's port and the request's
+ * `Host` this server's, and the socket the app opens in development goes straight to this port from the
+ * app's origin. Only that port on those hosts: another port, or another host, is still another site.
  */
 function browserOrigins(
   environment: Environment,
@@ -719,28 +723,33 @@ function browserOrigins(
 ): string[] {
   const appPort = listenPort(environment.APP_PORT, 3010);
   const port = appPort.ok ? appPort.port : 3010;
-  const named = [
+  const configured = [
     input.publicUrl,
     input.appUrl,
     input.auth?.baseUrl,
     ...commaSeparated(environment, "TRUSTED_ORIGINS"),
     ...(input.auth?.trustedOrigins ?? []),
-    ...(input.singleUser
-      ? [
-          `http://127.0.0.1:${port}`,
-          `http://localhost:${port}`,
-          `http://[::1]:${port}`,
-        ]
-      : []),
-  ];
-  const origins = new Set<string>();
-  for (const value of named) {
-    if (!value) continue;
+  ].flatMap((value) => {
+    if (!value) return [];
     try {
-      const { origin } = new URL(value);
-      if (origin !== "null") origins.add(origin);
+      const url = new URL(value);
+      return url.origin === "null" ? [] : [url];
     } catch {
       // Not an origin anybody's browser could send.
+      return [];
+    }
+  });
+  const origins = new Set(configured.map((url) => url.origin));
+  if (input.singleUser) {
+    for (const host of [
+      new URL("http://127.0.0.1"),
+      new URL("http://localhost"),
+      new URL("http://[::1]"),
+      ...configured,
+    ]) {
+      const app = new URL(host.origin);
+      app.port = String(port);
+      origins.add(app.origin);
     }
   }
   return [...origins];

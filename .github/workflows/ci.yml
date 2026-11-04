@@ -375,6 +375,13 @@ jobs:
       # ../.env; that file does not exist in CI, and DATABASE_URL comes from the job env instead.
       - run: bun scripts/migrate.ts
         working-directory: server
+      # The Kubernetes promotion tests package the real chart, which carries the bundled PostgreSQL
+      # subchart. It is fetched here with the same pinned Helm the chart job uses, so the tests read it
+      # from charts/ rather than pulling it themselves with whatever Helm the runner image has.
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+      - run: helm dependency build charts/openbot
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.
       - run: bun run test:ci
