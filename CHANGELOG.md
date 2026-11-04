@@ -20,7 +20,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
 
-**Before upgrading.** Twenty things change for an existing deployment:
+**Before upgrading.** Twenty-two things change for an existing deployment:
+- Check-ins are asked for, not switched on. A Bot no longer turns on an hourly check-in the first
+  time you talk to it alone. Instead, after it reads something that keeps changing (a document, your
+  inbox), it offers a check-in on that one thing, with Turn on and Not now, daily unless you pick
+  more often. A Bot can now watch several things, each listed by name on its check-ins. Migration
+  `0075_individual_check_ins` adds `proactive_settings.subject` and `source_link` and lets a Bot hold
+  more than one check-in. Check-ins that already exist keep running. Set
+  `OPENBOT_PROACTIVE_DEFAULTS=true` to keep switching them on as before.
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -110,6 +117,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
+- Routines is now always on. At start, OpenBot adds the Routines app if it is missing and gives
+  its tools to every Bot, including Bots made later. It can no longer be removed, and a Bot's
+  Routines tools can no longer be taken away.
+
+### A personal edition for one person on one computer
+
+Set `OPENBOT_EDITION=personal`, with single-user mode and one computer, for an OpenBot without the
+team features. It starts with one Personal Assistant and asks before acting by default. Connections
+is the one place for apps, saved logins and keys, and every Bot can use every app you connect.
+Admin is replaced by a short list of what OpenBot for Business adds. See `docs/personal-edition.md`.
+Deployments that do not set it behave as before.
 
 ### A responsibility hears about large pull requests
 

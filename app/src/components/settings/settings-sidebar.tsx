@@ -1,11 +1,15 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconBook,
   IconBrowser,
   IconChecks,
+  IconDeviceDesktop,
+  IconHistory,
   IconKey,
   IconLayoutGrid,
   IconListCheck,
+  IconLock,
   IconSchool,
   IconSettings,
 } from "@tabler/icons-react";
@@ -29,7 +33,7 @@ import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
-export const SETTINGS_SIDEBAR_ITEMS: {
+type SettingsSidebarItem = {
   /**
    * Whether this entry lights only on its own route.
    *
@@ -40,9 +44,10 @@ export const SETTINGS_SIDEBAR_ITEMS: {
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
-  /** Listed only for an admin, or the one person running OpenBot on their own machine. */
   setup?: boolean;
-}[] = [
+};
+
+export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   {
     title: "General",
     icon: IconSettings,
@@ -95,6 +100,54 @@ export const SETTINGS_SIDEBAR_ITEMS: {
   },
 ];
 
+/**
+ * What the personal edition keeps of Admin. There is no Admin there, and the one person still stores
+ * keys, writes skills for every Bot, resets the computer and reads the trail. Apps are not here:
+ * adding one and connecting it are the same step, on Connections, which also links here for keys and
+ * saved logins.
+ */
+const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
+  {
+    title: "Keys",
+    icon: IconLock,
+    linkOptions: { to: "/settings/credentials" },
+  },
+  {
+    title: "Skills for every Bot",
+    icon: IconBook,
+    linkOptions: { to: "/settings/skills" },
+  },
+  {
+    title: "Computer",
+    icon: IconDeviceDesktop,
+    linkOptions: { to: "/settings/computer" },
+  },
+  {
+    title: "Activity",
+    icon: IconHistory,
+    linkOptions: { to: "/settings/activity" },
+  },
+];
+
+export function settingsSidebarItems(
+  edition: "team" | "personal",
+): SettingsSidebarItem[] {
+  // Learning is who else's Bots use your Skills, and the personal edition has nobody else.
+  // Passwords is called Saved logins there, as on Connections.
+  return edition === "personal"
+    ? [
+        ...SETTINGS_SIDEBAR_ITEMS.filter(
+          (item) => item.title !== "Learning",
+        ).map((item) =>
+          item.title === "Passwords"
+            ? { ...item, title: "Saved logins" }
+            : item,
+        ),
+        ...PERSONAL_SETTINGS_SIDEBAR_ITEMS,
+      ]
+    : SETTINGS_SIDEBAR_ITEMS;
+}
+
 export function SettingsSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
@@ -116,6 +169,7 @@ export function SettingsSidebar({
           (row) => row.status === "needs_setup" && row.fix !== null,
         ).length
       : 0;
+  const items = settingsSidebarItems(capabilities?.edition ?? "team");
   return (
     <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}
@@ -140,35 +194,35 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {SETTINGS_SIDEBAR_ITEMS.filter(
-              (option) => !option.setup || canSetUp,
-            ).map((option) => (
-              <SidebarMenuItem key={option.title}>
-                <SidebarMenuButton
-                  render={(props) => (
-                    <Link
-                      {...option.linkOptions}
-                      activeOptions={{ exact: option.exact ?? false }}
-                      activeProps={{ className: "bg-foreground/5" }}
-                      {...props}
-                    >
-                      <option.icon className="mr-2 h-4 w-4" />
-                      {option.title}
-                      {option.setup && toFix > 0 ? (
-                        <span className="sr-only">
-                          , {toFix} {toFix === 1 ? "needs" : "need"} setup
-                        </span>
-                      ) : null}
-                    </Link>
-                  )}
-                />
-                {option.setup && toFix > 0 ? (
-                  <SidebarMenuBadge aria-hidden="true">
-                    {toFix}
-                  </SidebarMenuBadge>
-                ) : null}
-              </SidebarMenuItem>
-            ))}
+            {items
+              .filter((option) => !option.setup || canSetUp)
+              .map((option) => (
+                <SidebarMenuItem key={option.title}>
+                  <SidebarMenuButton
+                    render={(props) => (
+                      <Link
+                        {...option.linkOptions}
+                        activeOptions={{ exact: option.exact ?? false }}
+                        activeProps={{ className: "bg-foreground/5" }}
+                        {...props}
+                      >
+                        <option.icon className="mr-2 h-4 w-4" />
+                        {option.title}
+                        {option.setup && toFix > 0 ? (
+                          <span className="sr-only">
+                            , {toFix} {toFix === 1 ? "needs" : "need"} setup
+                          </span>
+                        ) : null}
+                      </Link>
+                    )}
+                  />
+                  {option.setup && toFix > 0 ? (
+                    <SidebarMenuBadge aria-hidden="true">
+                      {toFix}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuItem>
+              ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

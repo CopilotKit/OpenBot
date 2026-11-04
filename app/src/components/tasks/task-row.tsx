@@ -7,6 +7,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -157,5 +158,69 @@ export function TaskRow({
         ) : null}
       </ItemContent>
     </Item>
+  );
+}
+
+/**
+ * A task on the Needs you board: the same task, in the board's one row shape, with its actions on
+ * the right. Open leads while there is something to read or answer.
+ */
+export function TaskBoardRow({ listed }: { listed: ListedTask }) {
+  const { task, status } = listed;
+  const resolve = useMutation(resolveTaskMutationOptions(queryClient));
+  const again = useMutation(tryTaskAgainMutationOptions(queryClient));
+  const Icon = ICONS[status];
+  const busy = resolve.isPending || again.isPending;
+  const error = resolve.error ?? again.error;
+  const openFirst = status === "ready_for_review" || status === "needs_input";
+  return (
+    <BoardRow
+      actions={
+        <>
+          {status === "failed" ? (
+            <Button
+              disabled={busy}
+              onClick={() => again.mutate(task.id)}
+              size="sm"
+            >
+              {again.isPending ? "Starting…" : "Try again"}
+            </Button>
+          ) : null}
+          <Button
+            disabled={busy}
+            onClick={() => resolve.mutate({ id: task.id, done: true })}
+            size="sm"
+            variant="ghost"
+          >
+            {resolve.isPending ? "Saving…" : "Mark done"}
+          </Button>
+          <Button
+            render={
+              <Link
+                params={{ channelId: task.channelId }}
+                to="/channel/$channelId"
+              />
+            }
+            size="sm"
+            variant={openFirst ? "default" : "outline"}
+          >
+            Open
+          </Button>
+        </>
+      }
+      detail={nextLine(listed)}
+      icon={<Icon />}
+      meta={[
+        <span key="status">{TASK_STATUS_LABEL[status]}</span>,
+        <span key="when">{relativeTime(task.updatedAt)}</span>,
+        error ? (
+          <span className="text-destructive" key="error" role="alert">
+            {error.message}
+          </span>
+        ) : null,
+      ]}
+      title={task.title}
+      waiting={openFirst || status === "failed"}
+    />
   );
 }

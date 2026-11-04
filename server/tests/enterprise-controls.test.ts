@@ -188,6 +188,26 @@ describe("the computer boundary overlay", () => {
     );
   });
 
+  test("the MCP allowlist never refuses Routines, which is built in and on for every Bot", () => {
+    const current = snapshot({
+      settings: {
+        ...DEFAULT_ENTERPRISE_SETTINGS,
+        mcpAllowlist: { enabled: true, servers: ["jira"] },
+      },
+    });
+    expect(
+      decideFromSnapshot(
+        current,
+        context({
+          tool: { name: "routines__create_routine" },
+          intent: "write_tool",
+          page: { url: "", host: "" },
+          mcp: { server: "routines", tool: "create_routine", effect: "write" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
   test("a navigation off the allowlist is refused before it reaches the computer", () => {
     const current = snapshot({
       network: [

@@ -93,7 +93,15 @@ WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 # The laptop stack runs agent-langgraph on LANGGRAPH_PORT. The one-container image does not, so
 # this default stays in the script rather than in .env: a `docker run --env-file .env` must not
 # inherit a URL that points at a process the image does not contain.
-MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+#
+# The personal edition runs its Personal Assistant inside the server, so it starts no Bot process and
+# names no managed endpoint unless .env does.
+EDITION="$(setting OPENBOT_EDITION team)"
+if [ "$EDITION" = "personal" ]; then
+  MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
+else
+  MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+fi
 export MANAGED_AGENT_AG_UI_URL
 
 # Whether this run minted a secret that something already running may not have.
@@ -280,12 +288,14 @@ fi
 SERVICES+=(agent-computer)
 # The managed coworker uses LangGraph. The separate legacy sample only accepts OpenAI keys,
 # so requiring it would prevent an Anthropic-only deployment from reaching its managed Bot.
-if [ "$BOT_PROVIDER" = "anthropic" ]; then
+if [ "$EDITION" = "personal" ]; then
+  info "  agent-bot, agent-langgraph: skipped for the personal edition (its Bot runs in the server)"
+elif [ "$BOT_PROVIDER" = "anthropic" ]; then
   info "  agent-bot: skipped for Anthropic (OpenAI-only sample)"
+  SERVICES+=(agent-langgraph)
 else
-  SERVICES+=(agent-bot)
+  SERVICES+=(agent-bot agent-langgraph)
 fi
-SERVICES+=(agent-langgraph)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
@@ -301,10 +311,12 @@ if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   exit 1
 fi
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
-if [ "$BOT_PROVIDER" != "anthropic" ]; then
-  wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+if [ "$EDITION" != "personal" ]; then
+  if [ "$BOT_PROVIDER" != "anthropic" ]; then
+    wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+  fi
+  wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
 fi
-wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
 
 for table in agent_profiles agent_preferences; do
   if ! docker compose exec -T postgres \
@@ -325,7 +337,10 @@ green "  coworker tables migrated"
 # pipeline, and `set -e` then aborts the assignment before the check below could say why. The same
 # grep survives inside `setting()` only because `local v="$(...)"` takes `local`'s own exit status
 # and masks it. So: report what was resolved, and do not re-read the file.
-green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
+# The fallback stays outside the expansion: inside "${VAR:-...}" bash reads an apostrophe as an opening
+# quote, which swallowed the script up to the next one and ran the words in later comments.
+MANAGED_ENDPOINT_LINE="none (the personal edition's Bot runs in the server)"
+green "  managed coworker endpoint: ${MANAGED_AGENT_AG_UI_URL:-$MANAGED_ENDPOINT_LINE}"
 
 # Automatic Learning collects nothing until a container is assigned. The server assigns this
 # project's `openbot` container on its own once it exists (server/src/learning/auto-assign.ts), but

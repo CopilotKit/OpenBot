@@ -90,16 +90,56 @@ const settingInput = {
   intervalMinutes: 60,
 };
 
-test("settings are owner scoped, one per Bot, and bounded in frequency", async () => {
+test("a Bot watches several things, each once, and an offer accepted again turns it back on", async () => {
+  const brief = {
+    ...settingInput,
+    agentId: secondBot,
+    subject: "Launch brief in Notion",
+    sourceLink: "https://www.notion.so/launch-brief",
+    intervalMinutes: 1440,
+  };
+  const inbox = {
+    ...settingInput,
+    agentId: secondBot,
+    subject: "Your Gmail inbox",
+    intervalMinutes: 1440,
+  };
+  const first = await proactive.create(owner, brief, `${prefix}-b1`);
+  const second = await proactive.create(owner, inbox, `${prefix}-b2`);
+  expect(second.id).not.toBe(first.id);
+  expect(first).toMatchObject({
+    subject: "Launch brief in Notion",
+    sourceLink: "https://www.notion.so/launch-brief",
+  });
+  await proactive.update(owner, first.id, { enabled: false });
+  const again = await proactive.create(
+    owner,
+    { ...brief, subject: "The launch brief", intervalMinutes: 240 },
+    `${prefix}-b3`,
+  );
+  expect(again).toMatchObject({
+    id: first.id,
+    enabled: true,
+    intervalMinutes: 240,
+  });
+  const mine = (await proactive.list(owner)).filter(
+    (row) => row.agentId === secondBot,
+  );
+  expect(mine).toHaveLength(2);
+  for (const row of mine) await proactive.remove(owner, row.id);
+});
+
+test("settings are owner scoped, one per thing a Bot watches, and bounded in frequency", async () => {
   const setting = await proactive.create(owner, settingInput, `${prefix}-t`);
   expect(setting).toMatchObject({
     enabled: true,
     intervalMinutes: 60,
     lastStatus: "idle",
   });
-  await expect(
-    proactive.create(owner, settingInput, `${prefix}-t2`),
-  ).rejects.toBeInstanceOf(ProactiveRefusedError);
+  // The same thing again is the same check-in, not a second one.
+  expect((await proactive.create(owner, settingInput, `${prefix}-t2`)).id).toBe(
+    setting.id,
+  );
   await expect(
     proactive.create(
       owner,

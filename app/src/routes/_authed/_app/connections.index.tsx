@@ -1,7 +1,11 @@
 import {
+  IconApps,
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconCheck,
+  IconChevronRight,
+  IconKey,
+  IconLock,
   IconPlug,
   IconSearch,
 } from "@tabler/icons-react";
@@ -10,6 +14,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import * as React from "react";
 import {
   PageEmpty,
+  PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
@@ -20,6 +25,7 @@ import {
   linkedNotice,
   visibleLinkedNotice,
 } from "@/components/settings/linked-notice";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -30,23 +36,35 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { type ConnectionRow, connectionRows } from "@/lib/connections/rows";
+import { Separator } from "@/components/ui/separator";
+import { useConnectApp } from "@/lib/connections/connect-app";
+import {
+  type ConnectionRow,
+  connectionRows,
+  personalAppsNeedingSetup,
+  personalConnectionRows,
+} from "@/lib/connections/rows";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
 import { keyedLookup } from "@/lib/lookup";
+import { useManagePaths } from "@/lib/manage-paths";
 import {
   brokeredAccountsListedOn,
   serversListedFor,
   sharedAccountsListedOn,
 } from "@/lib/plugins/listed";
+import { moreAppsRow } from "@/lib/plugins/provider-vocabulary";
 import {
   connectionsQueryOptions,
   personalConnections,
   pluginsPageQueryOptions,
+  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
@@ -293,15 +311,52 @@ function RouteComponent() {
    * consent app, and dropping it here would hide a connection somebody does have.
    */
   const listed = plugins.data ? serversListedFor(plugins.data) : [];
-  const rows = connectionRows({
-    catalogue: yours,
-    brokered: brokeredAccountsListedOn(listed),
-    shared: sharedAccountsListedOn(listed),
-    connected,
-    links: links.data ?? [],
-    providers: providers.data,
-  });
+  /*
+   * THE PERSONAL EDITION LISTS EVERY APP HERE, added or not, because the one person is the one who
+   * adds it: a tile's press adds the app and connects it in one go (`useConnectApp`).
+   */
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const connectApp = useConnectApp();
+  const paths = useManagePaths();
+  // The broker's directory of more apps, as one more tile, where a broker is set up.
+  const provider = pluginsProvider(plugins.data);
+  const moreApps = moreAppsRow(
+    provider,
+    plugins.data?.composioConfigured ?? false,
+  );
+  const browse = personal && moreApps.linked ? moreApps : null;
+  /*
+   * Apps that need a key or an OAuth client typed first stay out of the personal grid until asked
+   * for, or searched for by name. See `personalConnectionRows`.
+   */
+  const [showSetup, setShowSetup] = React.useState(false);
   const query = search.trim().toLocaleLowerCase();
+  const needingSetup = personal
+    ? personalAppsNeedingSetup({
+        catalogue: plugins.data?.catalogue ?? [],
+        added,
+        connected,
+      })
+    : 0;
+  const rows = personal
+    ? personalConnectionRows({
+        everything: showSetup || query !== "",
+        catalogue: plugins.data?.catalogue ?? [],
+        added,
+        brokered: brokeredAccountsListedOn(listed),
+        connected,
+        links: links.data ?? [],
+        providers: providers.data,
+      })
+    : connectionRows({
+        catalogue: yours,
+        brokered: brokeredAccountsListedOn(listed),
+        shared: sharedAccountsListedOn(listed),
+        connected,
+        links: links.data ?? [],
+        providers: providers.data,
+      });
   const matching = rows.filter((row) =>
     `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
   );
@@ -319,7 +374,11 @@ function RouteComponent() {
   return (
     <PageShell
       className="@container"
-      description="Connect your accounts so Bots can use apps on your behalf."
+      description={
+        personal
+          ? "Add apps and connect your accounts so your Bots can use them."
+          : "Connect your accounts so Bots can use apps on your behalf."
+      }
       title="Connections"
     >
       {/*
@@ -351,6 +410,11 @@ function RouteComponent() {
       {arrival.authorizationNotice ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {arrival.authorizationNotice}
+        </p>
+      ) : null}
+      {connectApp.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {connectApp.error}
         </p>
       ) : null}
       {/*
@@ -403,10 +467,57 @@ function RouteComponent() {
                */
               <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
                 {matching.map((row) => (
-                  <ConnectionItem key={row.key} row={row} />
+                  <ConnectionItem
+                    key={row.key}
+                    onPress={
+                      row.state === "available" &&
+                      (row.action === "connect" || row.action === "add")
+                        ? () =>
+                            void connectApp.run(
+                              row.key,
+                              row.action as "connect" | "add",
+                            )
+                        : undefined
+                    }
+                    pending={connectApp.pending === row.key}
+                    row={row}
+                  />
                 ))}
+                {browse ? (
+                  <Item
+                    className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
+                    data-testid="account-browse"
+                    render={<Link {...paths.brokerDirectory(provider)} />}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RowMark className="size-9">
+                      <IconApps className="size-4" />
+                    </RowMark>
+                    <ItemContent className="min-w-0 gap-0.5">
+                      <ItemTitle className="block w-auto truncate">
+                        {browse.title}
+                      </ItemTitle>
+                      <ItemDescription className="line-clamp-1 text-xs">
+                        {browse.description}
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
+                ) : null}
               </div>
             )}
+            {needingSetup > 0 && !showSetup && query === "" ? (
+              <Button
+                className="mt-3"
+                onClick={() => setShowSetup(true)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Show {needingSetup === 1 ? "1 app" : `${needingSetup} apps`}{" "}
+                that need setup
+              </Button>
+            ) : null}
           </>
         )}
         {links.error || providers.error ? (
@@ -416,17 +527,73 @@ function RouteComponent() {
           </p>
         ) : null}
       </PageSection>
+      {/*
+       * The rest of what a Bot signs in with. Saved logins and keys live under Settings; these rows
+       * are a way in from beside the apps that use them, in the personal edition.
+       */}
+      {personal ? (
+        <PageSection title="Sign-ins and keys">
+          <PageRows>
+            <Item render={<Link to="/settings/passwords" />} size="sm">
+              <ItemMedia variant="icon">
+                <IconLock />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Saved logins</ItemTitle>
+                <ItemDescription>
+                  Website logins you saved when signing a Bot in.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+            <Separator />
+            <Item render={<Link {...paths.credentials()} />} size="sm">
+              <ItemMedia variant="icon">
+                <IconKey />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Keys</ItemTitle>
+                <ItemDescription>
+                  API keys and tokens your apps and models use.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+          </PageRows>
+        </PageSection>
+      ) : null}
     </PageShell>
   );
 }
 
-/** One connection: its mark, its name, one line, and where it stands. Opens its own page. */
-function ConnectionItem({ row }: { row: ConnectionRow }) {
+/**
+ * One connection: its mark, its name, one line, and where it stands. Opens its own page, or, given
+ * `onPress`, is the press that connects it (the personal edition's Connect and Add).
+ */
+function ConnectionItem({
+  row,
+  onPress,
+  pending = false,
+}: {
+  row: ConnectionRow;
+  onPress?: () => void;
+  pending?: boolean;
+}) {
   return (
     <Item
-      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
+      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 text-left"
       data-testid={`account-${row.key}`}
-      render={<Link params={{ key: row.key }} to="/connections/$key" />}
+      render={
+        onPress ? (
+          <button disabled={pending} onClick={onPress} type="button" />
+        ) : (
+          <Link params={{ key: row.key }} to="/connections/$key" />
+        )
+      }
       size="sm"
       variant="outline"
     >
@@ -445,7 +612,7 @@ function ConnectionItem({ row }: { row: ConnectionRow }) {
         ) : null}
       </ItemContent>
       <ItemActions className="shrink-0">
-        <ConnectionStateLabel state={row.state} />
+        <ConnectionStateLabel pending={pending} row={row} />
       </ItemActions>
     </Item>
   );
@@ -465,7 +632,17 @@ function ConnectionMark({
   return <Mark className="size-4" />;
 }
 
-function ConnectionStateLabel({ state }: { state: ConnectionRow["state"] }) {
+/** Where a tile stands, or the word for what pressing it does. */
+const ACTION_LABEL = { connect: "Connect", add: "Add", setup: "Set up" };
+
+function ConnectionStateLabel({
+  row,
+  pending,
+}: {
+  row: ConnectionRow;
+  pending: boolean;
+}) {
+  const { state } = row;
   if (state === "connected") {
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -473,7 +650,7 @@ function ConnectionStateLabel({ state }: { state: ConnectionRow["state"] }) {
           aria-hidden="true"
           className="size-3.5 text-emerald-600 dark:text-emerald-400"
         />
-        Connected
+        {row.noAccount ? "On" : "Connected"}
       </span>
     );
   }
@@ -482,7 +659,13 @@ function ConnectionStateLabel({ state }: { state: ConnectionRow["state"] }) {
   }
   return (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
-      {state === "needs_reconnect" ? "Reconnect" : "Connect"}
+      {pending
+        ? row.action === "add"
+          ? "Adding…"
+          : "Connecting…"
+        : state === "needs_reconnect"
+          ? "Reconnect"
+          : ACTION_LABEL[row.action ?? "connect"]}
     </span>
   );
 }

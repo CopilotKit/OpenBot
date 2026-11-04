@@ -181,6 +181,11 @@ export type CatalogueItem = {
   auth: "none" | "deployment-bearer" | "user-oauth" | "builtin";
   /** True for a vendor that gives every customer their own hostname. */
   perInstance: boolean;
+  /**
+   * Whether connecting needs nothing typed first: no account, or an OAuth vendor the deployment
+   * registers itself with. Optional so an older server's answer still reads, as "no".
+   */
+  oneStep?: boolean;
 };
 
 /** One app in Composio's directory, as the picker shows it. */

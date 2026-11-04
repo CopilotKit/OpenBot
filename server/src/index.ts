@@ -169,6 +169,7 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { setEdition } from "./edition";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -232,6 +233,11 @@ import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
+  ensureAlwaysOnApp,
+  personalDefaultsDeps,
+  withPersonalDefaults,
+} from "./plugins/personal-defaults";
+import {
   arcadeVerifierNotice,
   selectProviderWiring,
   storedProvider,
@@ -249,6 +255,7 @@ import {
   vendorAnswer,
 } from "./plugins/tools";
 import { createProactiveEngine } from "./proactive/engine";
+import { checkInOfferTools } from "./proactive/offer-tool";
 import {
   createPrivateShareCheck,
   PRIVATE_SHARE_TOOL_REF,
@@ -309,6 +316,8 @@ import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 
 const config = loadConfig();
+// Before anything resolves a capability or reads an enterprise setting. See edition.ts.
+setEdition(config.edition);
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
 // after an administrator clears a pin to follow the latest published Skills.
 clearLearningRevisionFallback();
@@ -1058,39 +1067,46 @@ await ensureSingleUserIdentity(database, {
   provider: composio?.provider ?? null,
 });
 
-const pluginStore = createPluginStore({
-  database,
-  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
-  auditStore: bootAuditStore,
-  credentials: credentialStore,
-  encryptionKey: config.keyEncryptionKey,
-  policy: () => policyStore.get(),
-  approvalGate: approvalService.gate,
-  sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
-  // A connector send to other people asks the owner first. See plugins/share-target.ts.
-  privateShareCheck: createPrivateShareCheck({
-    approvals: approvalService.store,
+// In the personal edition, every tool an app lists goes to every Bot; in every edition, Routines
+// is given to every Bot. See personal-defaults.ts.
+const pluginStore = withPersonalDefaults(
+  createPluginStore({
+    database,
+    deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+    auditStore: bootAuditStore,
+    credentials: credentialStore,
+    encryptionKey: config.keyEncryptionKey,
+    policy: () => policyStore.get(),
+    approvalGate: approvalService.gate,
+    sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
+    // A connector send to other people asks the owner first. See plugins/share-target.ts.
+    privateShareCheck: createPrivateShareCheck({
+      approvals: approvalService.store,
+    }),
+    /*
+     * Where a vendor sends people back, for a vendor whose client this deployment registers itself.
+     *
+     * The same value the connect and callback routes build, from the same config field, because it has
+     * to match what was registered character for character. Undefined without a public URL, which is
+     * the honest state: there is nowhere for a consent flow to come back to, so there is nothing worth
+     * registering.
+     */
+    redirectUri: config.publicUrl
+      ? redirectUriFor(config.publicUrl)
+      : undefined,
+    /*
+     * The same client the transport seam above was installed with, never a second one. Enabling an
+     * app writes the row here and creates the auth config at the vendor, and a store holding a
+     * different client from the one the call goes out through is two deployments' worth of state
+     * behind one screen. Undefined without a key, which leaves enabling an app refused rather than
+     * attempted.
+     */
+    broker: composio?.broker,
+    brokerProvider,
+    ...(entra ? { entra } : {}),
   }),
-  /*
-   * Where a vendor sends people back, for a vendor whose client this deployment registers itself.
-   *
-   * The same value the connect and callback routes build, from the same config field, because it has
-   * to match what was registered character for character. Undefined without a public URL, which is
-   * the honest state: there is nowhere for a consent flow to come back to, so there is nothing worth
-   * registering.
-   */
-  redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
-  /*
-   * The same client the transport seam above was installed with, never a second one. Enabling an
-   * app writes the row here and creates the auth config at the vendor, and a store holding a
-   * different client from the one the call goes out through is two deployments' worth of state
-   * behind one screen. Undefined without a key, which leaves enabling an app refused rather than
-   * attempted.
-   */
-  broker: composio?.broker,
-  brokerProvider,
-  ...(entra ? { entra } : {}),
-});
+  personalDefaultsDeps(database),
+);
 
 /*
  * Personal ⇄ Shared for a brokered app. Built here because it needs the plugin store, the shared-use
@@ -1130,6 +1146,8 @@ if (composio) {
  */
 const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
+// Routines is on from the start in every edition, for every Bot. See personal-defaults.ts.
+await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {
     const actor = await actorFor(ownerUserId);
@@ -1567,6 +1585,17 @@ const loadToolsForActor =
       composioConfigured: Boolean(composio),
       ...(composio ? { directory: () => composio.broker.listApps() } : {}),
       sharedAudience: sharedUseStore.admitsPerson,
+    }),
+    /*
+     * Held by every Bot: offering a check-in on what the person just looked at, which the card turns
+     * on only if they accept. A read; see the file. The engine is made further down, and a tool is
+     * only ever built for a run, long after.
+     */
+    ...checkInOfferTools({
+      ownerUserId: actorId,
+      agentId: botId,
+      allowed: (owner) => proactiveEngine.allowed(owner),
+      list: (owner) => proactiveStore.list(owner),
     }),
     ...(await grantedTools({
       store: pluginStore,

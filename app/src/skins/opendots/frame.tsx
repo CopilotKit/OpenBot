@@ -18,6 +18,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import {
   DropdownMenu,
@@ -124,10 +125,10 @@ function RailDestination({
   const Icon = item.icon;
   return (
     <RailTip label={item.label}>
-      <Link
+      <NavigationTarget
         aria-label={item.label}
         className={cn(railButton, "relative")}
-        to={item.to}
+        item={item}
       >
         <Icon />
         {item.id === "bots" && showBadge ? (
@@ -137,7 +138,7 @@ function RailDestination({
             <BotsNavBadge />
           </span>
         ) : null}
-      </Link>
+      </NavigationTarget>
     </RailTip>
   );
 }
