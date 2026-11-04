@@ -19,12 +19,16 @@ A task started from a check-in asks before every change, whatever the above says
 | Pay, buy or move money: a payment, a checkout, a refund, a transfer or payout, placing an order | **This needs you.** You do it yourself and mark it done, or tell the Bot not to. | Payment words anywhere in the action and its page. A transfer, payout, withdrawal, charge, order or purchase in an app's tool name. A button labelled Transfer, Withdraw, Pay, Buy, Place your order, Complete purchase, or Send with an amount. |
 | Change a password, two-factor setting or other credential, or security and sharing settings | **This needs you.** | Credential and security-setting words anywhere in the action and its page. |
 | Delete something | **Allow once** or **Deny** | Delete, trash, destroy, erase, purge, wipe or discard in an app's tool name. A button labelled Delete, Move to trash, Empty trash, Discard, Erase or Destroy. |
-| Send something to other people | **Allow once** or **Deny** | Send, reply, forward, respond, notify, broadcast, invite, comment or a new message in an app's tool name, or an app call addressed to someone's email address (a calendar event with attendees, for example). A button labelled Send. |
+| Send something to other people | **Allow once** or **Deny** | Send, reply, forward, respond, notify, broadcast, invite, comment or a new message in an app's tool name, or an app call addressed to someone's email address (a calendar event with attendees, for example). A button labelled Send. Cmd+Enter or Ctrl+Enter in the browser, and Enter in a box for writing a message, a reply or a comment. |
 | Share something with other people | **Allow once** or **Deny** | Share, sharing, a shared link, permissions, collaborators or granting access in an app's tool name. A button labelled Share, Invite or Add people. |
 | Post or publish something | **Allow once** or **Deny** | Publish, post, tweet, repost or a release in an app's tool name. A button labelled Post, Publish, Tweet, Repost or Go live. |
 
 None of these offers **Always allow here**: each one asks every time. A saved allow rule doesn't
 reach them, because they are decided before any rule is read.
+
+You are asked once. A Bot OpenBot runs is told that OpenBot asks before these, so it doesn't put
+its own approval card in front of OpenBot's (`APPROVAL_GUIDANCE` in `shared/bot-prompt.ts`). A remote
+Bot is not told so, because its own tools don't go through this policy.
 
 They are recognised by what the action is called, never by what it carries. A document that says
 "delete the old draft", a note about a purchase, or an email draft addressed to someone is an
@@ -44,8 +48,8 @@ it runs there, are not account actions and don't ask. Commands on your own compu
 ## What isn't recognised
 
 - **A button with no label**, such as an icon with no accessible name. There is nothing to read.
-- **A keyboard shortcut or Enter**, such as Cmd+Enter to send in Gmail, or typing a message and
-  submitting it. Only clicks on a labelled control are read.
+- **Other keyboard sends**, such as Enter in a box whose label doesn't say it is for a message,
+  or a mail app's own shortcut like Alt+S. Ctrl+Enter that only inserts a page break asks too.
 - **A button labelled with another word**, such as Remove, Confirm or Done on its own. Remove is
   left out on purpose: editors and filters use it for ordinary changes ("Remove formatting").
 - **An app tool that names none of the words above**, such as one that trashes mail by changing its

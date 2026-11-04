@@ -6,6 +6,7 @@ import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import {
+  APPROVAL_GUIDANCE,
   COMPONENT_GUIDANCE,
   computerGuidance,
   ORCHESTRATION_GUIDANCE,
@@ -326,7 +327,7 @@ describe("registered Copilot agents", () => {
       model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere.
-      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       apiKey: "openai-secret",
     });
   });
@@ -1582,7 +1583,7 @@ describe("a person's standing instructions", () => {
       // Byte for byte what a deployment had before any of this existed, which is what most people
       // on most days get.
       expect(prompt).toBe(
-        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       );
     },
   );

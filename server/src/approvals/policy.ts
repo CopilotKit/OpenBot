@@ -288,10 +288,65 @@ export function safetyRequirement(
     !/\bdrafts?\b/.test(named.name) &&
     addressesPeople(candidate.args)
       ? CONSEQUENTIAL.find((entry) => entry.id === "sending")
+      : undefined) ??
+    (pressesSend(candidate)
+      ? CONSEQUENTIAL.find((entry) => entry.id === "sending")
       : undefined);
   return asks
     ? { id: asks.id, reason: asks.reason, behaviour: "ask" }
     : undefined;
+}
+
+/**
+ * Whether a keypress in the browser sends what is on the page: Cmd+Enter or Ctrl+Enter, which sends
+ * in most mail and chat apps, or Enter in a box for writing a message, a reply or a comment. A
+ * `computer_type` with `submit` presses Enter once the text is in, so it counts as Enter. Shift+Enter
+ * starts a new line there and is not a send. Ctrl+Enter also inserts a page break in some editors;
+ * asking about that costs one click.
+ */
+function pressesSend(candidate: ApprovalCandidate): boolean {
+  if (
+    candidate.toolRef !== "computer_key" &&
+    candidate.toolRef !== "computer_type"
+  )
+    return false;
+  const args = (candidate.args ?? {}) as { key?: unknown; submit?: unknown };
+  const key =
+    candidate.toolRef === "computer_key"
+      ? typeof args.key === "string"
+        ? args.key
+        : ""
+      : args.submit === true
+        ? "Enter"
+        : "";
+  const parts = key.split(/\+(?=.)/).map((part) => part.trim().toLowerCase());
+  const main = parts.at(-1) ?? "";
+  if (main !== "enter" && main !== "numpadenter" && main !== "return")
+    return false;
+  if (
+    parts
+      .slice(0, -1)
+      .some((part) =>
+        ["control", "ctrl", "meta", "cmd", "command", "controlormeta"].includes(
+          part,
+        ),
+      )
+  )
+    return true;
+  // Shift+Enter starts a new line in a box for writing a message.
+  if (parts.length > 1) return false;
+  const target = candidate.target as
+    | { element?: { name?: unknown } }
+    | undefined;
+  const field =
+    typeof target?.element?.name === "string"
+      ? target.element.name.toLowerCase()
+      : "";
+  return (
+    /\b(message|reply|comment|chat|compose|tweet|post)\b|what'?s happening/.test(
+      field,
+    ) && !/\bsearch\b/.test(field)
+  );
 }
 
 /** OpenBot's own memory and Bot-settings tools, which change only the Bot itself. */
