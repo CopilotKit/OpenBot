@@ -395,7 +395,26 @@ function draw(ui: ReactNode) {
 const opens = () =>
   writes.filter((write) => write.path === browserApiPaths.open).length;
 
-test("on OpenBot Desktop the page opens the browser once, says it is a window on the desktop, and brings it forward", async () => {
+test("on OpenBot Desktop arriving opens nothing, and Open opens the person's browser in its own window", async () => {
+  state = { ...nativeState(), open: false, recorder: undefined };
+  delete state.browser;
+  state.real = { connected: false, browsers: ["chrome"] };
+  const view = draw(<BrowserPage />);
+  expect(
+    await view.findByRole("heading", { name: "Teach a Bot" }),
+  ).toBeTruthy();
+  expect(view.getByText("Google Chrome")).toBeTruthy();
+  expect(view.getByText("Closed.")).toBeTruthy();
+  await settleReactWork();
+  expect(opens()).toBe(0);
+
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Open" }));
+  await waitFor(() => expect(opens()).toBe(1));
+  expect(QuietSocket.urls).toEqual([]);
+});
+
+test("on OpenBot Desktop the page says the browser is a window on the desktop, and brings it forward", async () => {
   const view = draw(<BrowserPage />);
   expect(await view.findByText("Google Chrome")).toBeTruthy();
   expect(
@@ -407,14 +426,14 @@ test("on OpenBot Desktop the page opens the browser once, says it is a window on
       /^On\. The Recorder in your browser listens to your microphone while you record/,
     ),
   ).toBeTruthy();
-  // Strict mode runs the opening effect twice; the browser is still opened once.
-  expect(opens()).toBe(1);
+  // Arriving opens nothing: the window opens when the person asks.
+  expect(opens()).toBe(0);
   // No live screen: the browser is its own window.
   expect(QuietSocket.urls).toEqual([]);
 
   const user = userEvent.setup({ document });
   await user.click(view.getByRole("button", { name: "Bring to front" }));
-  await waitFor(() => expect(opens()).toBe(2));
+  await waitFor(() => expect(opens()).toBe(1));
   expect(view.getByText("Google Chrome")).toBeTruthy();
 });
 
@@ -1511,21 +1530,26 @@ test("on OpenBot Desktop a window that is not answering says so in its row", asy
   ).toBeNull();
 });
 
-test("while the browser opens, the page shows no loading placeholder, then the browser itself", async () => {
+test("while a browser in the page opens on arrival, the page shows no loading placeholder, then the browser itself", async () => {
   // The data-access rule: no loading text, spinner or skeleton; what arrives is the answer.
+  state = screenState();
+  openAnswer = answerFor("screen");
   let launched = () => {};
   opening = new Promise<void>((resolve) => {
     launched = resolve;
   });
   const view = draw(<BrowserPage />);
-  expect(await view.findByRole("heading", { name: "Browser" })).toBeTruthy();
+  expect(
+    await view.findByRole("heading", { name: "Teach a Bot" }),
+  ).toBeTruthy();
+  // Strict mode runs the opening effect twice; the browser is still opened once.
   await waitFor(() => expect(opens()).toBe(1));
   await settleReactWork();
   expect(view.queryByText(/Opening/)).toBeNull();
   expect(view.queryByRole("status")).toBeNull();
-  expect(view.queryByText("Google Chrome")).toBeNull();
+  expect(view.queryByLabelText(SCREEN)).toBeNull();
   launched();
-  expect(await view.findByText("Google Chrome")).toBeTruthy();
+  expect(await view.findByLabelText(SCREEN)).toBeTruthy();
 });
 
 test("where OpenBot cannot run a browser for the person, the page says so and opens nothing", async () => {

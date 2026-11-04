@@ -2,6 +2,7 @@ import type {
   BrowserApiState,
   BrowserOpenResponse,
   BrowserProduct,
+  RealBrowser,
   RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { IconBrowser } from "@tabler/icons-react";
@@ -26,6 +27,7 @@ import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { queryClient } from "@/query-client";
+import { storeOpenedSentence, TEACH_A_BOT } from "./browser-nav-item";
 import { ScreenBrowser } from "./browser-screen";
 import { NativeNarrationRow } from "./narration";
 import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
@@ -36,9 +38,9 @@ import {
   useRecording,
 } from "./recording";
 
-const TITLE = "Browser";
+const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
-  "Your own browser, with the OpenBot Recorder already in it. Record a task and what you do goes into your own Learning space.";
+  "Show your Bots how to do a task. Open your browser, press Record, and do the task as you normally would.";
 
 const PRODUCT_NAMES: Record<BrowserProduct, string> = {
   chrome: "Google Chrome",
@@ -80,8 +82,12 @@ export function BrowserPage() {
   return <OpenedBrowser state={state.data} />;
 }
 
-/** Opens the browser once on arrival, then shows it the way the answer says it shows: a window, or the page. */
+/**
+ * Shows the browser the way the server says it shows. A window on the person's desktop (`native`) opens when they press
+ * Open, so arriving here opens nothing. A browser in the page is the page itself, so it opens once on arrival.
+ */
 function OpenedBrowser({ state }: { state: BrowserApiState }) {
+  const native = state.shows === "native";
   const open = useMutation(openBrowserMutationOptions(queryClient));
   // Its own mutation, so bringing the browser forward never blanks the page while it is asked.
   const reopen = useMutation(openBrowserMutationOptions(queryClient));
@@ -89,13 +95,24 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   const asked = useRef(false);
   const { mutate } = open;
   useEffect(() => {
-    if (asked.current) return;
+    if (native || asked.current) return;
     asked.current = true;
     mutate();
-  }, [mutate]);
+  }, [mutate, native]);
 
   const opened: BrowserOpenResponse | RealBrowserOpenResponse | undefined =
     reopen.data ?? open.data;
+  if (!opened && native) {
+    return (
+      <NativeBrowser
+        product={state.browser ?? state.real?.browsers[0]}
+        state={state}
+        reopen={() => reopen.mutate()}
+        reopening={reopen.isPending}
+        reopenError={reopen.error}
+      />
+    );
+  }
   if (!opened) {
     // A browser that is there and not answering says so while it is asked to open, rather than leaving the page empty.
     const said = state.problem ?? open.error?.message;
@@ -136,6 +153,11 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
       reopen={() => reopen.mutate()}
       reopening={reopen.isPending}
       reopenError={reopen.error}
+      store={
+        "opened" in opened && opened.opened === "store"
+          ? opened.browser
+          : undefined
+      }
     />
   );
 }
@@ -151,12 +173,16 @@ function NativeBrowser({
   reopen,
   reopening,
   reopenError,
+  store,
 }: {
-  product: BrowserProduct;
+  /** Unknown until it has opened once, where the server names no installed browser. */
+  product: BrowserProduct | undefined;
   state: BrowserApiState;
   reopen: () => void;
   reopening: boolean;
   reopenError: Error | null;
+  /** The person's own browser Open put the Recorder's store page in, when that is what it did. */
+  store?: RealBrowser;
 }) {
   const choice = useNarrationChoice();
   const recording = useRecording(state, choice);
@@ -169,7 +195,9 @@ function NativeBrowser({
               <IconBrowser />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>{PRODUCT_NAMES[product]}</ItemTitle>
+              <ItemTitle>
+                {product ? PRODUCT_NAMES[product] : "Your browser"}
+              </ItemTitle>
               <ItemDescription>
                 {state.problem ??
                   (state.open
@@ -192,6 +220,10 @@ function NativeBrowser({
         {reopenError ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
             {reopenError.message}
+          </p>
+        ) : store ? (
+          <p className="mt-2 text-muted-foreground text-sm" role="status">
+            {storeOpenedSentence(store)}
           </p>
         ) : null}
       </PageSection>

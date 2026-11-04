@@ -130,7 +130,12 @@ Deployments that do not set it behave as before.
 
 `scripts/start.sh` starts your own browser in the personal edition: your installed Chrome or Edge,
 as a window on your desktop with the Recorder in it, as OpenBot Desktop does for the team edition.
-**Browser** in the sidebar opens it. `scripts/stop.sh` stops it.
+**Teach a Bot** in the sidebar takes you to the page where Open opens it. `scripts/stop.sh` stops it.
+
+The sidebar's **Browser** button is now **Teach a Bot**, in every edition. It always takes you to
+its page, and a browser that opens as a window on your desktop opens only when you press Open
+there. The popover that recorded in the browser OpenBot is open in is gone: record with the
+Recorder's own button in that browser.
 
 You can also record a task in a Bot's browser in the personal edition: take control of its screen and
 press Record. Its one computer carries only your Bots, so `scripts/start.sh` starts it as yours

@@ -26,7 +26,7 @@ It also starts your own browser, as OpenBot Desktop does for the team edition: y
 Chrome, or Microsoft Edge, as a window on your desktop with the OpenBot Recorder in it. It builds the
 Recorder (`extension/dist`) if it isn't built, runs `scripts/start-local-chrome-computer.ts` on port
 `BROWSER_PORT` (4101) with `COMPUTER_PEOPLE_ONLY=on`, and points the server at it with
-`OPENBOT_BROWSER_URL`. **Browser** in the sidebar opens or brings forward that window, and Record
+`OPENBOT_BROWSER_URL`. **Teach a Bot** in the sidebar takes you to a page whose Open opens or brings forward that window, and Record
 there goes to your own Learning space. Its profile is kept under
 `~/Library/Application Support/OpenBot/local-computer` on macOS (see
 [configuration](configuration.md#openbot-desktop-runs-it-for-the-person) for the other systems).
