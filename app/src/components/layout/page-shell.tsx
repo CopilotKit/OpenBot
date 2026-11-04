@@ -66,7 +66,7 @@ export function PageShell({
   );
 
   const barRow = bar ? (
-    <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
+    <div className="flex h-14 items-center gap-1 px-3">
       {showToggle ? <SidebarToggle /> : null}
       {!!backButton && (
         <Button
@@ -99,13 +99,21 @@ export function PageShell({
   }
 
   return (
-    <>
-      {barRow}
+    /*
+     * The bar floats over the scroller's top-left corner, only as wide as its buttons, rather than
+     * taking a band across the whole pane. As a band it cut 56px off the top of every scrolled page
+     * for a control that sits beside the centred column, not above it; the column starts the same
+     * distance down, through its own padding, so nothing moves until the page is scrolled.
+     */
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {barRow ? (
+        <div className="absolute top-0 left-0 z-10">{barRow}</div>
+      ) : null}
       <PageColumn bar={bar} className={className}>
         {header}
         {children}
       </PageColumn>
-    </>
+    </div>
   );
 }
 

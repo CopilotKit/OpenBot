@@ -64,7 +64,7 @@ components above; a screen that sets its own is drifting.
 
 | Between | Gap | Where it lives |
 |---------|-----|----------------|
-| Page edge (top / sides / bottom) | 48 / 16 / 64px | `PageShell` column (`pt-12` or `pt-8` under the bar, `px-4`, `pb-16`) |
+| Page edge (top / sides / bottom) | 48 / 16 / 64px | `PageShell` column (`pt-12`, or `pt-22` under the bar: its 56px plus 32px, `px-4`, `pb-16`) |
 | Title → description | 8px | `PageShell` header |
 | Title block → first content | 32px | `PageShell`: `[&>header+*]:mt-8` |
 | Title → tabs, tabs → content | 24px, then 32px | `PageShell`: `[&>header+nav]`, `[&>header+nav+*]` |
@@ -96,7 +96,8 @@ the action is right there. A search with no results uses `IconSearch` and "No ma
 
 1. Open with `PageShell`, giving it `title` and `description`. Leave `width` alone.
 2. On a detail screen reached from a list, pass `backButton={{ label, linkProps }}` — it draws a
-   chevron-left bar above the header. Do not put a Back button in `action`; `action` is for the
+   chevron-left button floating in the pane's top-left corner, only as wide as itself, so the page
+   scrolls under it rather than under a full-width band. Do not put a Back button in `action`; `action` is for the
    page's one primary verb, on the title's baseline.
 3. Group the page's decisions into `PageSection`s, each with a `title` and, where the grouping is not
    self-evident, a `description`.
