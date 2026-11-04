@@ -30,9 +30,9 @@ import {
   stagedAttachmentTtlHours,
 } from "../src/channels/attachments";
 import { loadConfig } from "../src/config";
+import { writeKey } from "../src/conversations/http";
 import type { Database } from "../src/db/client";
 import { createDatabase } from "../src/db/client";
-import { writeKey } from "../src/conversations/http";
 import { users } from "../src/db/schema";
 import {
   type FilesClient,
@@ -43,7 +43,9 @@ import {
 import {
   deleteConversation,
   purgeConversations,
+  restoreTestConversations,
   seedConversation,
+  unreachableConversations,
   useTestConversations,
 } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -66,9 +68,10 @@ const createdChannelIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
-  // A test that put another file store in place (one that is down, or one that records) gets the
-  // real one back before the next test runs.
+  // A test that put another file store or conversation directory in place (one that is down, or
+  // one that records) gets the real one back before the next test runs.
   restoreTestFiles();
+  await restoreTestConversations();
   // The channel's files are Intelligence's, so they are removed there, and the channel is a
   // conversation in Intelligence too, removed with its members and threads by purge.
   const channelIds = createdChannelIds.splice(0);
@@ -87,7 +90,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await database.$client.close();
-  await unreachableDatabase.$client.close();
 });
 
 function actorMiddleware(
@@ -208,20 +210,6 @@ function attachmentApp(
   app.route("/", createAttachmentRoutes(db, requireUser));
   return app;
 }
-
-/**
- * A database at an address nothing is listening on.
- *
- * The failures these routes have to answer for — a connection lost during a rollout, a pool with
- * nothing left in it, a `statement_timeout` — are all "the driver could not answer this query", and
- * a closed port produces exactly that, from the real driver, without a mock standing in for it.
- * Bun's SQL connects lazily, so building this costs nothing and no connection is ever held; the
- * query rejects in about 2ms.
- */
-const unreachableDatabase = createDatabase(
-  "postgres://openbot:openbot@127.0.0.1:1/openbot",
-  { max: 1 },
-);
 
 /**
  * Puts a file store in front of the real one for the rest of the test: every call goes through to
@@ -967,14 +955,18 @@ describe("POST /:channelId/attachments", () => {
    * `app/src/components/channels/composer/attachments.ts` reads `{ error }` off every failed upload
    * and falls back to a generic `Could not upload "<name>"` when the body will not parse as JSON.
    * There is no `app.onError` behind this router — the `formData()` guard above says so, and relies
-   * on it — so an unguarded database call meant a lost connection, a pool with nothing left, a
-   * `statement_timeout`, a full disk and a lock timeout were all Hono's plain-text
-   * `Internal Server Error`, and none of them were written down on this side either.
+   * on it — so an unguarded call meant a lost connection, a timeout or a store with nothing left
+   * were all Hono's plain-text `Internal Server Error`, and none of them were written down on this
+   * side either.
+   *
+   * The membership check is the first read, and it is Intelligence's conversation directory now
+   * (channels and their members live there), so that is the store that is down here.
    */
-  test("a database that cannot be reached refuses the upload as JSON, and says so in the log", async () => {
+  test("a membership check that cannot be made refuses the upload as JSON, and says so in the log", async () => {
     const { channelId, memberId, member } = await harness();
     const app = new Hono<{ Variables: AppVariables }>();
-    app.route("/", createChannelAttachmentRoutes(unreachableDatabase, member));
+    app.route("/", createChannelAttachmentRoutes(database, member));
+    unreachableConversations();
 
     const { result: response, logged } = await withCapturedErrorLog(() =>
       upload(
@@ -1001,7 +993,7 @@ describe("POST /:channelId/attachments", () => {
   });
 
   /*
-   * The same guarantee one step deeper. The unreachable database above never gets past the
+   * The same guarantee one step deeper. The unreachable directory above never gets past the
    * membership check, so this one lets the check through and fails only where the file is actually
    * written — Intelligence, which is where a lost connection during a rollout, a timeout or a store
    * that refused the bytes would land.
@@ -1811,7 +1803,7 @@ describe("GET /:id", () => {
   });
 
   /*
-   * The refusal the loop above cannot reach, because it needs a database that is not there.
+   * The refusal the loop above cannot reach, because it needs a membership check that cannot be made.
    *
    * A 503 is the one answer on this route that is about this side rather than about the asker, and
    * it was the one the probe spelled differently: `context.body(null, 503)` against the fetch's
@@ -1819,9 +1811,10 @@ describe("GET /:id", () => {
    * drift — and the log line is asserted too, because a fault nobody can see from outside is half of
    * what the 503 exists to report.
    */
-  test("a HEAD and a GET refuse an unreachable database in the same shape", async () => {
+  test("a HEAD and a GET refuse an unreachable conversation directory in the same shape", async () => {
     // A real attachment, so the file store answers and the membership check is the read that
-    // cannot be made: the database is the store that is down here.
+    // cannot be made: Intelligence's conversation directory, which holds the channel and its
+    // members, is the store that is down here.
     const { database: db, channelId, memberId } = await harness();
     const id = await uploadText(db, {
       channelId,
@@ -1830,7 +1823,8 @@ describe("GET /:id", () => {
       text: "hello",
       attachedAt: new Date(),
     });
-    const app = attachmentApp(unreachableDatabase, actorMiddleware(memberId));
+    const app = attachmentApp(db, actorMiddleware(memberId));
+    unreachableConversations();
 
     const { result, logged } = await withCapturedErrorLog(async () => ({
       fetched: await app.request(`http://test/${id}`),
@@ -2944,21 +2938,23 @@ describe("markAttachmentsSent", () => {
    * `attachedAt` stayed null. The culler reclaims exactly those rows, so a day later the message was
    * still displaying an attachment that no longer existed. Nobody was told at either end.
    *
-   * Through the real driver rather than a stub that returns a rejected promise: the failures this
-   * has to answer for are a lost connection, an exhausted pool and a `statement_timeout`, all of
-   * which arrive as "the driver could not answer this query", which is what a closed port produces.
+   * Through the real client rather than a stub that returns a rejected promise: the failures this
+   * has to answer for are a lost connection, a timeout and a 5xx, all of which arrive as "the request
+   * could not be answered", which is what a closed port produces.
    *
-   * The unstamped row is asserted on the REAL database, because "it raised" and "it raised and left
-   * the row alone" are different claims and only the second one makes the retry safe.
+   * The unstamped file is asserted in the REAL Intelligence, because "it raised" and "it raised and
+   * left the file alone" are different claims and only the second one makes the retry safe.
    */
-  test("a write the database refuses is raised rather than reported as a send", async () => {
+  test("a write the file store refuses is raised rather than reported as a send", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
     const id = await uploadText(db, {
       channelId,
       uploadedBy: memberId,
       name: "receipt.txt",
-      text: "sent into a database that cannot be reached",
+      text: "sent into a file store that cannot be reached",
     });
+    // The stamp is Intelligence's commit now, so Intelligence's file store is the one that is down.
+    unreachableFiles();
 
     // Collected into a local rather than read off the spy, because `mockRestore` clears the recorded
     // calls and the assertion below would then be made against an empty log whatever happened.
@@ -2970,11 +2966,9 @@ describe("markAttachmentsSent", () => {
     );
     let raised: unknown;
     try {
-      raised = await markAttachmentsSent(
-        unreachableDatabase,
-        { actorId: memberId, threadId },
-        [id],
-      ).then(
+      raised = await markAttachmentsSent(db, { actorId: memberId, threadId }, [
+        id,
+      ]).then(
         () => null,
         (reason: unknown) => reason,
       );
@@ -2993,6 +2987,7 @@ describe("markAttachmentsSent", () => {
     expect(logged.join(" ")).toContain(memberId);
     expect(logged.join(" ")).toContain(id);
     // Still staged: still withdrawable, still countable against the cap, still stampable by a retry.
+    restoreTestFiles();
     expect(await attachedAtOf(db, id)).toBeNull();
   });
 

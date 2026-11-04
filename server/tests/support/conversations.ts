@@ -87,6 +87,30 @@ export function startTestConversationDirectories(): Promise<{
   return started;
 }
 
+/**
+ * A conversation directory whose every read fails to connect: Intelligence down, for the
+ * conversations and memberships every channel check reads. It holds nothing, so every read goes to
+ * Intelligence and is refused at once. `restoreTestConversations` puts the real one back.
+ */
+export function unreachableConversations(): ConversationDirectory {
+  return installConversationDirectory(
+    createConversationDirectory({
+      // Port 9 (discard) on loopback: nothing listens, so every request is refused at once.
+      client: createConversationClient({
+        apiUrl: "http://127.0.0.1:9",
+        apiKey: "cpk_unreachable_unreachable",
+      }),
+    }),
+  );
+}
+
+/** Puts the test Intelligence's conversation directory back, after `unreachableConversations`. */
+export async function restoreTestConversations(): Promise<void> {
+  installConversationDirectory(
+    (await startTestConversationDirectories()).conversations,
+  );
+}
+
 export async function conversationClient(): Promise<ConversationClient> {
   return (await useTestConversations()).conversations.client;
 }
