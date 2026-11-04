@@ -141,6 +141,7 @@ async function boot(
     seatFor: async (botId: string) => ({ botId }),
     locate: async () => `http://127.0.0.1:${upstream.port}`,
     addressOf: (seat: { botId: string }) => seat,
+    tokenFor: () => "request-trust-computer-token",
   } as unknown as ComputerGateway;
   // createApp is positional; each dependency is placed at the index of the parameter it fills.
   const args = new Array(createApp.length) as unknown as Parameters<
