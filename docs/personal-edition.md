@@ -51,6 +51,12 @@ settings and team rules, and a paused Automatic Learning.
 The password manager uses a saved login only after the person picks it in the private sign-in
 form, and taking over the browser is always offered.
 
+To teach a Bot a task, take control of its browser and press **Record**. The recording goes to your
+own Learning space. The team edition refuses Record on a computer its Bots share, because another
+Bot's shell could read the Recorder's connection there. Here every Bot on the one computer is yours,
+so `scripts/start.sh` starts it as yours (`COMPUTER_PERSON_ID`) and the server allows Record. There
+is no browser of your own on the server: that still needs a computer no Bot runs on.
+
 ## What the app shows
 
 The menu is **Bots**, **Connections** and **Settings**. There is no Admin and no Capabilities page.

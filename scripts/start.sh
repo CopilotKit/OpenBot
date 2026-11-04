@@ -95,14 +95,17 @@ WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 # inherit a URL that points at a process the image does not contain.
 #
 # The personal edition runs its Personal Assistant inside the server, so it starts no Bot process and
-# names no managed endpoint unless .env does.
+# names no managed endpoint unless .env does. Its one computer carries only the one person's Bots, so
+# it is started as theirs, which lets them record in a Bot's browser (agent-computer's person-access.ts).
 EDITION="$(setting OPENBOT_EDITION team)"
 if [ "$EDITION" = "personal" ]; then
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
+  COMPUTER_PERSON_ID=personal
 else
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+  COMPUTER_PERSON_ID=
 fi
-export MANAGED_AGENT_AG_UI_URL
+export MANAGED_AGENT_AG_UI_URL COMPUTER_PERSON_ID
 
 # Whether this run minted a secret that something already running may not have.
 #

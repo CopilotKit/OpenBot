@@ -618,8 +618,10 @@ const computerProvider = config.computer
     )
   : undefined;
 
-/** Why Record is refused in a Bot's browser here, or undefined where each Bot has a computer of its own. */
-const recordRefused = botRecordRefusal(computerProvider) ?? undefined;
+/** Why Record is refused in a Bot's browser here, or undefined where each Bot has a computer of its own, or the one
+ * computer is the one person's (the personal edition). */
+const recordRefused =
+  botRecordRefusal(computerProvider, config.edition) ?? undefined;
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
