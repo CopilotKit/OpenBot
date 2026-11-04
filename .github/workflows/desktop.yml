@@ -25,6 +25,12 @@ concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Match the source publisher's exact repository/distribution identity in official and fork builds.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_RELEASE_REPOSITORY: ${{ github.repository }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
+
 jobs:
   # Fast formatting and lint checks. Rust regression tests run once per platform below.
   core:

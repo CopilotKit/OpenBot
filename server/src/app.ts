@@ -139,6 +139,7 @@ import {
   RECORDER_BEARER_PREFIX,
 } from "./recorder/guard";
 import { createRecorderRoutes } from "./recorder/routes";
+import { createReleaseStatusRoutes } from "./release-status";
 import type { RecorderExtensionDeps } from "./recorder/wiring";
 import { createOriginGuard, createSingleUserGate } from "./request-trust";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
@@ -497,6 +498,7 @@ export function createApp(
   mountProviderOAuthProxy(app, modelProviderProxy);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
+  app.route("/", createReleaseStatusRoutes());
   // The public key Bots' browsers sign their requests with, where Cloudflare and any other verifier
   // look for it. Public by design, and absent when Web Bot Auth is off. See web-bot-auth.ts.
   const webBotAuth = config.webBotAuth;

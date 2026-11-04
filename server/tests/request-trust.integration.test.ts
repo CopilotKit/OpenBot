@@ -261,16 +261,18 @@ const lanIsPrivate =
  *
  * A socket rather than `fetch` because the suite's network guard (server/scripts/test-network-guard.ts)
  * keeps `fetch` and `WebSocket` on loopback, and lets a raw socket reach a private address, which this
- * is. The request is written out as any client writes it.
+ * is. The request is written out as any client writes it. `address` sends it to another of this
+ * machine's addresses instead, for an answer `fetch` cannot read, such as a refused WebSocket handshake.
  */
 function overTheNetwork(input: {
   port: number;
+  address?: string;
   method?: string;
   path: string;
   headers?: Record<string, string>;
   body?: string;
 }): Promise<{ status: number; body: string }> {
-  const address = lanAddress as string;
+  const address = input.address ?? (lanAddress as string);
   const headers: Record<string, string> = {
     host: `${address}:${input.port}`,
     connection: "close",
@@ -581,6 +583,101 @@ describe("a page whose name was pointed at this machine (DNS rebinding)", () => 
         "dev-local-user",
       );
     }
+  });
+});
+
+describe("the app opened at an address on the network, the only one configured", () => {
+  /*
+   * `OPENBOT_PUBLIC_URL` alone, as somebody making a single-user OpenBot reachable on their network
+   * writes it. Another machine opens the app on the same host at the app's port, and the app opens its
+   * sockets straight to this server's port from there, so `Origin` names the app's port and `Host` this
+   * server's. The address is written out rather than read from this machine: what is asked is the
+   * configuration, and the server sees the `Host` it is sent whichever interface the request came in on.
+   */
+  const ADDRESS = "192.168.1.10";
+  const HOST = `${ADDRESS}:3001`;
+  const APP = `http://${ADDRESS}:3010`;
+  let lan: Booted;
+  beforeAll(async () => {
+    lan = await boot({
+      OPENBOT_PUBLIC_URL: `http://${HOST}`,
+      TRUSTED_ORIGINS: undefined,
+    });
+  });
+  beforeEach(() => {
+    lan.turns.length = 0;
+  });
+
+  const post = (origin: string) =>
+    fetch(`${lan.base}/api/delivery/conversations/channel-1/messages`, {
+      method: "POST",
+      headers: {
+        host: HOST,
+        origin,
+        "sec-fetch-site": "same-site",
+        "content-type": "application/json",
+      },
+      body: turn(`from ${origin}`),
+    });
+
+  test("the app's sockets open, and a change it posts to this port goes through", async () => {
+    const events = await handshake(
+      `ws://127.0.0.1:${lan.port}/api/channels/events`,
+      { host: HOST, origin: APP },
+    );
+    expect(events.opened).toBe(true);
+    const screen = await handshake(
+      `ws://127.0.0.1:${lan.port}/api/computers/general-assistant/stream`,
+      { host: HOST, origin: APP },
+      { firstMessage: true },
+    );
+    expect(screen).toEqual({ opened: true, first: "frame" });
+
+    const posted = await post(APP);
+    expect(posted.status).toBe(202);
+    expect(lan.turns).toEqual([`from ${APP}`]);
+  });
+
+  test.each([
+    ["another port on that host", `http://${ADDRESS}:4444`],
+    ["another address on the network", "http://192.168.1.11:3010"],
+    ["a name nobody configured, on the app's port", "http://evil.example:3010"],
+    ["a page that is nobody's", "null"],
+  ])(
+    "%s is still another site: no socket, no change",
+    async (_name, origin) => {
+      for (const path of [
+        "/api/channels/events",
+        "/api/computers/general-assistant/stream",
+      ]) {
+        const socket = await overTheNetwork({
+          address: "127.0.0.1",
+          port: lan.port,
+          path,
+          headers: { ...UPGRADE, host: HOST, origin },
+        });
+        expect(socket.status).toBe(403);
+        expect(JSON.parse(socket.body)).toEqual({ error: CROSS_SITE });
+      }
+
+      const posted = await post(origin);
+      expect(posted.status).toBe(403);
+      expect(await posted.json()).toEqual({ error: CROSS_SITE });
+      expect(lan.turns).toEqual([]);
+    },
+  );
+
+  test("a client that is not a browser still posts, with no Origin", async () => {
+    const posted = await fetch(
+      `${lan.base}/api/delivery/conversations/channel-1/messages`,
+      {
+        method: "POST",
+        headers: { host: HOST, "content-type": "application/json" },
+        body: turn("from a CLI"),
+      },
+    );
+    expect(posted.status).toBe(202);
+    expect(lan.turns).toEqual(["from a CLI"]);
   });
 });
 
