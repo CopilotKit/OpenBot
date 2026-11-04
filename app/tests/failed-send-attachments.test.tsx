@@ -144,6 +144,19 @@ beforeAll(() => {
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (url.pathname === "/api/plugins/for/failed-send-bot")
         return NativeResponse.json({ skills: [], tools: [] });
+      // What the Bot's runs are offered is read from these, as the server answers them.
+      if (url.pathname === "/api/agents/failed-send-bot")
+        return NativeResponse.json({
+          agent: {
+            id: "failed-send-bot",
+            visibility: "public",
+            canManage: true,
+          },
+        });
+      if (url.pathname === "/api/components/for-agent/failed-send-bot")
+        return NativeResponse.json({ components: [] });
+      if (url.pathname === "/api/admin/enterprise/me")
+        return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
           version: "fixture",
