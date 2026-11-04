@@ -17,11 +17,9 @@ import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
-import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
 import { computerKeyText } from "../src/computer/computer-key";
 import type { ComputerProvider } from "../src/computer/provider";
-import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
   actionRecords,
@@ -39,16 +37,12 @@ import {
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import {
-  liftRemovals,
-  purgeDirectoryPeople,
-  useTestPeople,
-} from "./support/directory";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
- * stores, the LISTEN/NOTIFY snapshot, the HTTP gate, the in-place store guards, and SCIM through
- * Better Auth's own handler. Needs a database at the current TS schema (TEST_DATABASE_URL).
+ * stores, the LISTEN/NOTIFY snapshot, the HTTP gate and the in-place store guards. SCIM, which
+ * Intelligence's directory serves now, is scim-directory.integration.test.ts. Needs a database at the
+ * current TS schema (TEST_DATABASE_URL).
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const auditStore = createAuditStore(database);
@@ -864,114 +858,5 @@ describe("OpenTelemetry export", () => {
     expect(received[0]).toContain("/v1/logs");
     expect(received.join("")).toContain("openbot.surface");
     expect(received.join("")).toContain("computer.action_refused");
-  });
-});
-
-describe("SCIM 2.0 through Better Auth", () => {
-  const token = `scim-${suite}-${randomUUID()}`;
-  let auth: ReturnType<typeof createAuth>;
-  const scimEmail = `ent-scim-${suite}@acme.test`;
-
-  // People, their groups and who the directory deactivated live in Intelligence's organization
-  // directory; the SCIM plugin's writes reach it once each request's transaction commits.
-  const directory = useTestPeople();
-
-  beforeAll(() => {
-    process.env.SCIM_BEARER_TOKEN = token;
-    auth = createAuth(
-      {
-        auth: {
-          baseUrl: "http://127.0.0.1:3000",
-          secret: "x".repeat(40),
-          trustedOrigins: [],
-          initialAdminEmails: [],
-          allowedEmailDomains: [],
-          google: { clientId: "id", clientSecret: "secret" },
-        },
-        keyEncryptionKey: Buffer.alloc(32, 7).toString("base64"),
-      } as unknown as DeploymentConfig,
-      database,
-      async () => false,
-      auditStore,
-    );
-  });
-  afterAll(async () => {
-    delete process.env.SCIM_BEARER_TOKEN;
-    await liftRemovals([scimEmail]);
-    const [person] = await database
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, scimEmail));
-    if (person) await purgeDirectoryPeople([person.id]);
-  });
-
-  const scim = (method: string, path: string, body?: unknown, bearer = token) =>
-    auth.handler(
-      new Request(`http://127.0.0.1:3000/api/auth/scim/v2${path}`, {
-        method,
-        headers: {
-          authorization: `Bearer ${bearer}`,
-          "content-type": "application/scim+json",
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      }),
-    );
-
-  test("a wrong token is refused", async () => {
-    expect((await scim("GET", "/Users", undefined, "wrong")).status).toBe(401);
-  });
-
-  test("provision, group, deprovision, reprovision", async () => {
-    const created = await scim("POST", "/Users", {
-      schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
-      userName: scimEmail,
-      externalId: `ext-${suite}`,
-      name: { givenName: "Scim", familyName: "Person" },
-      emails: [{ value: scimEmail, primary: true, type: "work" }],
-      active: true,
-    });
-    const createdBody = await created.json();
-    expect(created.status, JSON.stringify(createdBody)).toBe(201);
-    const [person] = await database
-      .select()
-      .from(users)
-      .where(eq(users.email, scimEmail));
-    expect(person).toBeDefined();
-    // The person the directory provisioned is Intelligence's, as a plain user.
-    expect(await directory.client.getPerson(person?.id ?? "")).toMatchObject({
-      email: scimEmail,
-      role: "user",
-    });
-
-    const group = await scim("POST", "/Groups", {
-      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-      displayName: `engineering-${suite}`,
-      members: [{ value: createdBody.id }],
-    });
-    expect(group.status, await group.clone().text()).toBe(201);
-    const [grouped] = await database
-      .select()
-      .from(users)
-      .where(eq(users.email, scimEmail));
-    expect(grouped?.groups).toEqual([`engineering-${suite}`]);
-    expect(
-      (await directory.client.getPerson(person?.id ?? ""))?.groups,
-    ).toEqual([`engineering-${suite}`]);
-
-    const deactivated = await scim("PATCH", `/Users/${createdBody.id}`, {
-      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-      Operations: [{ op: "replace", path: "active", value: false }],
-    });
-    expect(deactivated.status, await deactivated.clone().text()).toBe(200);
-    // Deny-listed in Intelligence before the directory was answered.
-    expect((await directory.client.getRemoval(scimEmail))?.removedBy).toBe(
-      "scim:directory",
-    );
-
-    await scim("PATCH", `/Users/${createdBody.id}`, {
-      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-      Operations: [{ op: "replace", path: "active", value: true }],
-    });
-    expect(await directory.client.getRemoval(scimEmail)).toBeNull();
   });
 });

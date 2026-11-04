@@ -1,32 +1,35 @@
 /**
- * SCIM 2.0 provisioning and deprovisioning, through Better Auth's own `@better-auth/scim` plugin.
+ * SCIM 2.0 provisioning, served by Intelligence's organization directory.
  *
- * A directory (Okta, Entra, OneLogin, JumpCloud) is given `<BETTER_AUTH_URL>/api/auth/scim/v2` and
- * the bearer token in `SCIM_BEARER_TOKEN`. From then on:
+ * A directory (Okta, Entra, OneLogin, JumpCloud) is given `<BETTER_AUTH_URL>/api/auth/scim/v2` and the
+ * bearer token in `SCIM_BEARER_TOKEN`, as it always was. Intelligence's directory now serves SCIM
+ * (`/api/directory/scim/v2` there), with the directory as its store, and this deployment forwards
+ * what arrives at its own address there unchanged, so a directory already set up keeps working with
+ * nothing reconfigured. At boot this deployment tells Intelligence which tokens its connection accepts,
+ * as SHA-256 hashes, never the tokens. A directory may also be pointed at Intelligence's address
+ * directly with the same token.
  *
- * - Creating a user there creates the OpenBot user, with the `user` role (or `admin` for an address
- *   in INITIAL_ADMIN_EMAILS). They still sign in through the company's SSO; SCIM never creates a
- *   password or any other way in.
- * - Group membership there becomes `users.groups` here, which is what per-group capability switches
- *   and per-group network policies read (and what `channels.allowed_groups` was always waiting for).
- * - Deactivating or deleting the user there ends their sessions (the plugin does that) and, here,
- *   deny-lists the address, retires every connector credential they granted, and stops their Bots'
- *   computers. Reactivating them lifts a deny-list entry SCIM wrote, never one an administrator did.
+ * From then on:
+ * - Creating a user there makes the person in Intelligence; it reaches this deployment through the
+ *   directory's announcements, with the `user` role (or `admin` for an address in
+ *   INITIAL_ADMIN_EMAILS), and is written to the trail (people/directory/scim-reactions.ts).
+ * - Group membership there becomes the person's groups, which per-group capability switches and
+ *   per-group network policies read.
+ * - Deactivating or deleting the user there records a removal of their address in Intelligence;
+ *   here their sessions end, what they connected is retired and their Bots' computers stop.
+ *   Reactivating them lifts a removal SCIM made, never one an administrator did.
  *
  * `SCIM_BEARER_TOKEN_NEXT` is accepted alongside the current token for rotation. Off entirely when
  * `SCIM_BEARER_TOKEN` is unset.
  */
-import type { SCIMOptions } from "@better-auth/scim";
-import { eq } from "drizzle-orm";
-import { enterpriseControls } from "../admin/controls";
-import { type AuditStore, recordAuditEvent } from "../audit";
-import type { Database } from "../db/client";
-import { users } from "../db/schema";
-import { people } from "../people/directory/directory";
-import { afterPeopleCommit } from "./directory-adapter";
-import { roleForEmail } from "./roles";
+import { createHash } from "node:crypto";
+import type { DirectoryClient } from "../people/directory/client";
 
 export const SCIM_REVOKED_BY_PREFIX = "scim:";
+
+/** Where this deployment answers SCIM, and the path Intelligence's directory serves it at. */
+const OWN_PREFIX = "/api/auth/scim/v2";
+const DIRECTORY_PREFIX = "/api/directory/scim/v2";
 
 export function scimStatus(env: Record<string, string | undefined>) {
   const configured = Boolean(env.SCIM_BEARER_TOKEN?.trim());
@@ -34,174 +37,134 @@ export function scimStatus(env: Record<string, string | undefined>) {
   return {
     configured,
     connectionId: env.SCIM_CONNECTION_ID?.trim() || "directory",
-    baseUrl: base ? `${base}/api/auth/scim/v2` : null,
+    baseUrl: base ? `${base}${OWN_PREFIX}` : null,
     rotating: Boolean(env.SCIM_BEARER_TOKEN_NEXT?.trim()),
   };
 }
 
-export type ScimDeps = {
-  database: Database;
-  auditStore?: AuditStore;
-  initialAdminEmails: readonly string[];
-};
-
-async function emailOf(database: Database, userId: string) {
-  const [row] = await database
-    .select({ email: users.email })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  return row?.email;
-}
-
-/**
- * React to a person becoming inactive or active in the directory.
- *
- * Called inside the plugin's transaction, so nothing here touches the rows that transaction holds
- * (`users`, `sessions`, the SCIM tables). The removal lives in Intelligence's directory
- * (people/directory), so it is written once that transaction commits and before the directory is
- * answered (`afterPeopleCommit`): no transaction waits on Intelligence, and a removal that cannot be
- * written fails the directory's request, which it sends again. The slower offboarding runs after.
- */
-export async function reconcileDirectoryState(
-  deps: ScimDeps,
-  state: { userId: string; active: boolean },
-): Promise<void> {
-  const email = await emailOf(deps.database, state.userId);
-  if (!email) return;
-  const normalized = email.trim().toLowerCase();
-  const by = `${SCIM_REVOKED_BY_PREFIX}directory`;
-
-  if (!state.active) {
-    await afterPeopleCommit(async () => {
-      const { created } = await people().removals.remove(normalized, by);
-      setTimeout(() => {
-        void (async () => {
-          await enterpriseControls()?.offboard(state.userId, by);
-          if (deps.auditStore && created) {
-            await recordAuditEvent(deps.auditStore, {
-              eventType: "person.deprovisioned",
-              targetType: "person",
-              targetId: state.userId,
-              payload: {
-                email,
-                via: "SCIM",
-                note: "Sessions ended, address deny-listed, connector credentials retired, computers stopped.",
-              },
-            });
-          }
-        })().catch((error) =>
-          console.error(
-            JSON.stringify({
-              type: "scim-offboard-failed",
-              error: String(error),
-            }),
-          ),
-        );
-      }, 0);
-    });
-    return;
-  }
-
-  await afterPeopleCommit(async () => {
-    // An administrator's removal stands until an administrator lifts it.
-    const lifted = await people().removals.lift(normalized, (removal) =>
-      removal.removedBy.startsWith(SCIM_REVOKED_BY_PREFIX),
-    );
-    if (lifted && deps.auditStore) {
-      await recordAuditEvent(deps.auditStore, {
-        eventType: "person.reprovisioned",
-        targetType: "person",
-        targetId: state.userId,
-        payload: { email, via: "SCIM" },
-      }).catch(() => undefined);
-    }
-  });
-}
-
-/** The plugin's options, or undefined when SCIM is not configured. */
-export function scimOptions(
-  deps: ScimDeps,
+/** The connection and the hashes of the tokens it accepts, or null when SCIM is not configured. */
+export function scimConnection(
   env: Record<string, string | undefined> = process.env,
-): SCIMOptions | undefined {
-  const token = env.SCIM_BEARER_TOKEN?.trim();
-  if (!token) return undefined;
-  const next = env.SCIM_BEARER_TOKEN_NEXT?.trim();
-  const connectionId = env.SCIM_CONNECTION_ID?.trim() || "directory";
-
+): { connectionId: string; tokenHashes: string[] } | null {
+  const tokens = [env.SCIM_BEARER_TOKEN, env.SCIM_BEARER_TOKEN_NEXT]
+    .map((token) => token?.trim())
+    .filter((token): token is string => Boolean(token));
+  if (!env.SCIM_BEARER_TOKEN?.trim()) return null;
   return {
-    connections: [
-      {
-        id: connectionId,
-        credentials: [
-          { type: "bearer", id: `${connectionId}-primary`, token },
-          ...(next
-            ? [
-                {
-                  type: "bearer" as const,
-                  id: `${connectionId}-next`,
-                  token: next,
-                },
-              ]
-            : []),
-        ],
-      },
-    ],
-    identity: {
-      reconcileUser: async (state) => {
-        await reconcileDirectoryState(deps, state);
-      },
-    },
-    /*
-     * Groups become `users.groups`. The role projection maps each SCIM Group to its display name as
-     * an opaque "role" slug, which is the plugin's supported way to hand group membership to the
-     * application; `reconcileUser` then writes the complete set, so a removal from a group removes it
-     * here too. The OpenBot role (admin/user) is never taken from the directory.
-     */
-    projection: {
-      roles: {
-        map: ({ source }) => [source.displayName],
-        exists: () => true,
-      },
-      reconcileUser: async (projected, { database }) => {
-        const groups = [
-          ...new Set(projected.grants.map((grant) => grant.role)),
-        ].sort();
-        await database.update({
-          model: "user",
-          where: [{ field: "id", value: projected.userId }],
-          update: { groups },
-        });
-      },
-    },
-    compatibility: { microsoftEntra: { acceptLegacyGroupSchema: true } },
+    connectionId: env.SCIM_CONNECTION_ID?.trim() || "directory",
+    tokenHashes: tokens.map((token) =>
+      createHash("sha256").update(token, "utf8").digest("hex"),
+    ),
   };
 }
 
 /**
- * A person SCIM just created: give them their role, and say so.
- *
- * Better Auth's `user.create.after` hook seeds the role for every new user, SCIM ones included; this
- * only writes the trail row, called from that hook when the user arrived with no provider account.
+ * Tell Intelligence's directory which tokens this deployment's SCIM connection accepts. Called at
+ * every boot, so changing or rotating `SCIM_BEARER_TOKEN` takes effect with a restart, as it did.
  */
-export async function recordProvisioned(
-  deps: ScimDeps,
-  user: { id: string; email: string },
-): Promise<void> {
-  if (!deps.auditStore) return;
-  const [role] = await deps.database
-    .select({ role: users.role })
-    .from(users)
-    .where(eq(users.id, user.id))
-    .limit(1);
-  await recordAuditEvent(deps.auditStore, {
-    eventType: "person.provisioned",
-    targetType: "person",
-    targetId: user.id,
-    payload: {
-      email: user.email,
-      via: "SCIM",
-      role: role?.role ?? roleForEmail(user.email, deps.initialAdminEmails),
-    },
-  }).catch(() => undefined);
+export async function registerScimConnection(
+  client: Pick<DirectoryClient, "putScimConnection">,
+  env: Record<string, string | undefined> = process.env,
+): Promise<boolean> {
+  const connection = scimConnection(env);
+  if (!connection) return false;
+  await client.putScimConnection(
+    connection.connectionId,
+    connection.tokenHashes,
+  );
+  return true;
+}
+
+const WRITES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Forwards a SCIM request that arrived at this deployment's address to Intelligence's directory, and
+ * its answer back. The bearer token goes as it came: Intelligence checks it against the hashes. The
+ * addresses in the answer (`Location`, `meta.location`, a member's `$ref`) are rewritten to this
+ * deployment's, so the directory goes on seeing the address it was given.
+ *
+ * After a write the directory accepted, `afterWrite` runs before the directory is answered: a
+ * deactivation's sessions end here before the directory hears it is done, as they did.
+ */
+export function createScimForwarder(options: {
+  intelligenceApiUrl: string;
+  /** This deployment's own SCIM address; from the request when absent. */
+  publicBaseUrl?: string | null;
+  afterWrite?: () => Promise<void>;
+  fetch?: typeof fetch;
+}) {
+  const directoryBase = `${options.intelligenceApiUrl.replace(/\/+$/, "")}${DIRECTORY_PREFIX}`;
+  const send = options.fetch ?? fetch;
+  return async (request: Request): Promise<Response> => {
+    const url = new URL(request.url);
+    const rest = url.pathname.slice(
+      url.pathname.indexOf(OWN_PREFIX) + OWN_PREFIX.length,
+    );
+    const ownBase =
+      options.publicBaseUrl?.replace(/\/+$/, "") ??
+      `${url.origin}${OWN_PREFIX}`;
+    const headers: Record<string, string> = {
+      accept: request.headers.get("accept") ?? "application/scim+json",
+    };
+    const authorization = request.headers.get("authorization");
+    if (authorization) headers.authorization = authorization;
+    const contentType = request.headers.get("content-type");
+    if (contentType) headers["content-type"] = contentType;
+    let answer: Response;
+    try {
+      answer = await send(`${directoryBase}${rest}${url.search}`, {
+        method: request.method,
+        headers,
+        ...(request.method === "GET" || request.method === "HEAD"
+          ? {}
+          : { body: await request.arrayBuffer() }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "scim-forward-failed",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return Response.json(
+        {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
+          status: "503",
+          detail: "The directory could not be reached. Try again.",
+        },
+        { status: 503, headers: { "content-type": "application/scim+json" } },
+      );
+    }
+    const rewrite = (text: string) =>
+      text.replace(/https?:\/\/[^"\s]*?\/api\/directory\/scim\/v2/g, ownBase);
+    const body = answer.status === 204 ? null : rewrite(await answer.text());
+    const out = new Headers();
+    for (const name of [
+      "content-type",
+      "www-authenticate",
+      "cache-control",
+      "etag",
+    ]) {
+      const value = answer.headers.get(name);
+      if (value) out.set(name, value);
+    }
+    const location = answer.headers.get("location");
+    if (location) out.set("location", rewrite(location));
+    if (WRITES.has(request.method) && answer.ok && options.afterWrite) {
+      try {
+        await options.afterWrite();
+      } catch (error) {
+        // The directory's change stands; what follows here is retried by the reactions' own timer.
+        console.error(
+          JSON.stringify({
+            type: "scim-after-write-failed",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+    return new Response(body, { status: answer.status, headers: out });
+  };
 }

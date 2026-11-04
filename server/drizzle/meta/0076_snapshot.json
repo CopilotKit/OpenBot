@@ -1,5 +1,5 @@
 {
-  "id": "dacaf232-531c-40e1-8aa2-a2251bb1c662",
+  "id": "50a7e766-fed9-4e67-bb08-9dd3cbe75e4e",
   "prevId": "13bc559a-3ce1-40e4-8d71-95002e38cba6",
   "version": "7",
   "dialect": "postgresql",
@@ -1039,6 +1039,82 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.directory_binding": {
+      "name": "directory_binding",
+      "schema": "",
+      "columns": {
+        "singleton": {
+          "name": "singleton",
+          "type": "boolean",
+          "primaryKey": true,
+          "notNull": true,
+          "default": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bound_at": {
+          "name": "bound_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "directory_binding_singleton": {
+          "name": "directory_binding_singleton",
+          "value": "\"directory_binding\".\"singleton\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.directory_removal_reactions": {
+      "name": "directory_removal_reactions",
+      "schema": "",
+      "columns": {
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "acted_at": {
+          "name": "acted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.intelligence_channel_mappings": {
       "name": "intelligence_channel_mappings",
       "schema": "",
@@ -1523,6 +1599,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
+        },
+        "directory_pending": {
+          "name": "directory_pending",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_at": {
           "name": "created_at",

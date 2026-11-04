@@ -13,8 +13,12 @@ import { join } from "node:path";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import {
+  directoryRemovalReactions,
   identityLinks,
   intelligenceCopies,
+  scimGroupMembers,
+  scimGroups,
+  scimUsers,
   revokedAccess,
   ssoProviders,
   userRoles,
@@ -29,6 +33,7 @@ import {
   copyLocalPeopleToIntelligence,
   PEOPLE_COPY_NAME,
 } from "../src/people/directory/upgrade";
+import { registerScimConnection } from "../src/auth/scim";
 import { testIntelligence } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { uniqueEmail } from "./support/directory";
@@ -64,6 +69,8 @@ const removedPerson = {
 };
 const goneEmail = uniqueEmail("upgrade-gone");
 const providerId = `upgrade-okta-${run}`;
+const scimUserId = `legacy-scim-user-${run}`;
+const scimGroupId = `legacy-scim-group-${run}`;
 const ids = [admin.id, member.id, removedPerson.id];
 
 async function resetProject() {
@@ -137,6 +144,50 @@ async function seedPreviousRelease() {
     domain: "Acme.example.test",
     userId: admin.id,
   });
+  // The SCIM endpoint this deployment served itself: a provisioned user, a group with them in it.
+  await database.insert(scimUsers).values({
+    id: scimUserId,
+    connectionId: "directory",
+    provisioningDomainId: "directory",
+    userId: admin.id,
+    connectionUserKey: `directory:${scimUserId}`,
+    userName: admin.email,
+    userNameKey: `directory:${admin.email}`,
+    primaryEmail: admin.email,
+    workEmailValueIndex: admin.email,
+    emailValueIndex: admin.email,
+    displayName: "Upgraded Admin",
+    formattedName: "Upgraded Admin",
+    givenName: "Upgraded",
+    familyName: "Admin",
+    serializedEmails: JSON.stringify([
+      { value: admin.email, type: "work", primary: true },
+    ]),
+    externalId: `okta-${run}`,
+    externalIdKey: `directory:okta-${run}`,
+    active: true,
+    orderKey: `order-${scimUserId}`,
+    createdAt: new Date("2026-09-02T08:00:00Z"),
+    updatedAt: new Date("2026-09-02T08:00:00Z"),
+  });
+  await database.insert(scimGroups).values({
+    id: scimGroupId,
+    connectionId: "directory",
+    provisioningDomainId: "directory",
+    displayName: `Upgraded ${run}`,
+    displayNameKey: `directory:upgraded-${run}`,
+    orderKey: `order-${scimGroupId}`,
+    createdAt: new Date("2026-09-03T08:00:00Z"),
+    updatedAt: new Date("2026-09-03T08:00:00Z"),
+  });
+  await database.insert(scimGroupMembers).values({
+    id: `member-${run}`,
+    connectionId: "directory",
+    groupId: scimGroupId,
+    scimUserId,
+    membershipKey: `directory:${scimGroupId}:${scimUserId}`,
+    createdAt: new Date("2026-09-03T08:00:00Z"),
+  });
   // The migration's own backfill, as a deployment runs it.
   const migration = readFileSync(
     join(import.meta.dir, "..", "drizzle", "0076_people_in_intelligence.sql"),
@@ -147,6 +198,14 @@ async function seedPreviousRelease() {
 }
 
 async function cleanLocal() {
+  await database
+    .delete(scimGroupMembers)
+    .where(eq(scimGroupMembers.groupId, scimGroupId));
+  await database.delete(scimGroups).where(eq(scimGroups.id, scimGroupId));
+  await database.delete(scimUsers).where(eq(scimUsers.id, scimUserId));
+  await database
+    .delete(directoryRemovalReactions)
+    .where(inArray(directoryRemovalReactions.email, [goneEmail]));
   await database
     .delete(identityLinks)
     .where(inArray(identityLinks.userId, ids));
@@ -168,8 +227,8 @@ beforeAll(async () => {
   // Every other pending row in this database is somebody else's fixture; the copy would take them too.
   await database
     .update(users)
-    .set({ directoryVersion: 0 })
-    .where(sql`${users.directoryVersion} is null`);
+    .set({ directoryPending: false })
+    .where(eq(users.directoryPending, true));
   await seedPreviousRelease();
 });
 
@@ -186,6 +245,8 @@ describe("the boot-time copy", () => {
       kind: "copied",
       people: 3,
       identities: 2,
+      scimUsers: 1,
+      scimGroups: 1,
     });
 
     const copiedAdmin = await client.getPerson(admin.id);
@@ -212,7 +273,10 @@ describe("the boot-time copy", () => {
       .select()
       .from(users)
       .where(inArray(users.id, ids));
-    for (const row of local) expect(row.directoryVersion).not.toBeNull();
+    for (const row of local) {
+      expect(row.directoryVersion).not.toBeNull();
+      expect(row.directoryPending).toBe(false);
+    }
     expect(local.find((row) => row.id === admin.id)?.role).toBe("admin");
 
     expect((await client.getRemoval(removedPerson.email))?.removedBy).toBe(
@@ -247,6 +311,42 @@ describe("the boot-time copy", () => {
     expect(record?.copied).toBe(3);
   });
 
+  test("hands the SCIM users and groups it served to Intelligence under their ids", async () => {
+    // The company's directory goes on with the ids it holds, now answered by Intelligence.
+    const token = `scim-${randomUUID()}`;
+    await registerScimConnection(client, {
+      SCIM_BEARER_TOKEN: token,
+      SCIM_CONNECTION_ID: "directory",
+    });
+    const base = `${testIntelligence().apiUrl}/api/directory/scim/v2`;
+    const read = await fetch(`${base}/Users/${scimUserId}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({
+      id: scimUserId,
+      userName: admin.email,
+      externalId: `okta-${run}`,
+      active: true,
+    });
+    const group = await fetch(`${base}/Groups/${scimGroupId}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(await group.json()).toMatchObject({
+      displayName: `Upgraded ${run}`,
+      members: [{ value: scimUserId }],
+    });
+    expect((await client.getPerson(admin.id))?.groups).toEqual([
+      `Upgraded ${run}`,
+    ]);
+    // A deprovision SCIM made under the previous release counts as acted on: not acted on again.
+    const [acted] = await database
+      .select()
+      .from(directoryRemovalReactions)
+      .where(eq(directoryRemovalReactions.email, goneEmail));
+    expect(acted).toBeDefined();
+  });
+
   test("never runs twice", async () => {
     expect(await copyLocalPeopleToIntelligence(database, directory)).toEqual({
       kind: "done-before",
@@ -258,7 +358,7 @@ describe("the boot-time copy", () => {
     await resetProject();
     await database
       .update(users)
-      .set({ directoryVersion: null })
+      .set({ directoryVersion: null, directoryPending: true })
       .where(inArray(users.id, ids));
     await database
       .delete(intelligenceCopies)

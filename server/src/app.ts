@@ -1,5 +1,7 @@
 import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
-import type { Hono as HonoApp, MiddlewareHandler } from "hono";
+import type { Context, Hono as HonoApp, MiddlewareHandler } from "hono";
+import { createScimForwarder, scimStatus } from "./auth/scim";
+import { scimReactions } from "./people/directory/scim-reactions";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
@@ -580,6 +582,26 @@ export function createApp(
     "/api/auth/sso/delete-provider": "identity_provider.removed",
   };
 
+  /*
+   * SCIM, at the address a company's directory was given. Intelligence's organization directory
+   * serves it now; this forwards there unchanged (auth/scim.ts), and after a write it accepted, what
+   * only this deployment can do (end a deactivated person's sessions) is done before the directory is
+   * answered. Ahead of every gate below, as Better Auth's handler was: SCIM authenticates itself.
+   */
+  const forwardScim = createScimForwarder({
+    intelligenceApiUrl: config.runtime.intelligence.apiUrl,
+    publicBaseUrl: scimStatus(process.env).baseUrl,
+    afterWrite: async () => {
+      await scimReactions()?.reconcile();
+    },
+  });
+  const scimRoute = (context: Context) =>
+    scimStatus(process.env).configured
+      ? forwardScim(context.req.raw)
+      : context.json({ error: "SCIM is not configured." }, 404);
+  app.all("/api/auth/scim/v2", scimRoute);
+  app.all("/api/auth/scim/v2/*", scimRoute);
+
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     if (
       context.req.method === "GET" &&
@@ -666,15 +688,10 @@ export function createApp(
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
   // Enterprise controls: capability switches and the model allowlist in front of the routes they
-  // govern, the admin screen's API, and the SCIM verbs the GET/POST auth handler above does not take.
+  // govern, and the admin screen's API.
   app.use("/api/*", createEnterpriseGate(requireUser));
   app.route("/api/admin/enterprise", createEnterpriseAdminRoutes(requireUser));
   app.route("/api/admin/proactive", createProactiveAdminRoutes(requireUser));
-  app.on(["PUT", "PATCH", "DELETE"], "/api/auth/scim/*", (context) =>
-    auth
-      ? auth.handler(context.req.raw)
-      : context.json({ error: "No identity provider is configured." }, 503),
-  );
 
   app.route(
     "/api/audio",

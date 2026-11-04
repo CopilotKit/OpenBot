@@ -18,6 +18,8 @@ import type {
   PersonChanges,
   PersonDraft,
   Removal,
+  ScimGroupImport,
+  ScimUserImport,
   SignInIdentity,
 } from "./types";
 
@@ -137,6 +139,7 @@ type WirePerson = {
   lastSignedInAt: string | null;
   signInIdentities: SignInIdentity[];
   principalId: string | null;
+  provisionedBy?: string | null;
 };
 
 type WireRemoval = {
@@ -214,6 +217,7 @@ function personFromWire(wire: WirePerson): Person {
     lastSignedInAt: date(wire.lastSignedInAt),
     signInIdentities: wire.signInIdentities ?? [],
     principalId: wire.principalId ?? null,
+    provisionedBy: wire.provisionedBy ?? null,
     createdAt: new Date(wire.createdAt),
     updatedAt: new Date(wire.updatedAt),
     deletedAt: date(wire.deletedAt),
@@ -512,6 +516,57 @@ export function createDirectoryClient(settings: DirectorySettings) {
       if (response.status !== 204)
         return refusal(response, `person ${id}`, "purge");
       return true;
+    },
+
+    /** The organization and project this deployment's key belongs to. */
+    async scope(): Promise<{ organizationId: string; projectId: string }> {
+      const response = await request("GET", "/api/directory/scope");
+      if (response.status !== 200)
+        return refusal(response, "the directory", "read the scope of");
+      return (await response.json()) as {
+        organizationId: string;
+        projectId: string;
+      };
+    },
+
+    /** The names of the project's directory groups (what SCIM provisioned). */
+    async groupNames(): Promise<string[]> {
+      const response = await request("GET", "/api/directory/groups");
+      if (response.status !== 200)
+        return refusal(response, "directory groups", "list");
+      return ((await response.json()) as { groups: string[] }).groups;
+    },
+
+    /** The bearer tokens a SCIM connection accepts, as SHA-256 hashes: never the tokens. */
+    async putScimConnection(
+      connectionId: string,
+      tokenHashes: string[],
+    ): Promise<void> {
+      const response = await request(
+        "PUT",
+        `/api/directory/scim/connections/${encodeURIComponent(connectionId)}`,
+        { body: { tokenHashes } },
+      );
+      if (response.status !== 200)
+        return refusal(response, `SCIM connection ${connectionId}`, "set");
+    },
+
+    /** SCIM users and groups this deployment served itself, under their own ids. */
+    async importScim(
+      connectionId: string,
+      users: ScimUserImport[],
+      groups: ScimGroupImport[],
+    ): Promise<{ users: number; groups: number }> {
+      const response = await request("POST", "/api/directory/scim/import", {
+        body: { connectionId, users, groups },
+      });
+      if (response.status !== 200)
+        return refusal(
+          response,
+          `SCIM connection ${connectionId}`,
+          "copy into",
+        );
+      return (await response.json()) as { users: number; groups: number };
     },
 
     /** Credentials for the realtime topic that announces every change to this project's directory. */

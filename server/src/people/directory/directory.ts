@@ -24,10 +24,10 @@
  * copy never replaces a newer one, and a pending row is never overwritten.
  */
 import { createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { OpenBotRole } from "../../auth/roles";
 import type { Database } from "../../db/client";
-import { accounts, users } from "../../db/schema";
+import { accounts, directoryBinding, users } from "../../db/schema";
 import {
   type DirectoryClient,
   DirectoryVersionConflictError,
@@ -144,13 +144,11 @@ function rowFrom(person: Person) {
     onboardingCompletedAt: person.onboardingCompletedAt,
     lastSignedInAt: person.lastSignedInAt,
     directoryVersion: person.version,
+    directoryPending: false,
     createdAt: person.createdAt,
     updatedAt: person.updatedAt,
   };
 }
-
-const sameList = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((value, index) => value === b[index]);
 
 const sameIdentities = (
   a: readonly SignInIdentity[],
@@ -175,8 +173,7 @@ function pendingChanges(
   if ((row.image ?? null) !== current.image) changes.image = row.image ?? null;
   if (row.emailVerified !== current.emailVerified)
     changes.emailVerified = row.emailVerified;
-  const groups = [...new Set(row.groups)].sort();
-  if (!sameList(groups, current.groups)) changes.groups = groups;
+  // Groups are the directory's: SCIM sets them in Intelligence, never a write here.
   if (!sameIdentities(identities, current.signInIdentities))
     changes.signInIdentities = identities;
   return changes;
@@ -209,6 +206,13 @@ export function createPeopleDirectory(options: {
   pushIntervalMs?: number;
   /** How announcements are subscribed to. The gateway's, unless a test drives them itself. */
   subscribe?: typeof subscribeToDirectoryChanges;
+  /**
+   * A person new to this deployment arrived from Intelligence (provisioned by SCIM, made by another
+   * replica's sign-in, or by another application). Called on one replica only.
+   */
+  onArrived?: (person: Person) => Promise<void>;
+  /** Something in the directory changed, for listeners beyond the projection (SCIM reactions). */
+  onChange?: (change: DirectoryChange) => void;
 }): PeopleDirectory {
   const { client, database } = options;
   /** When each person was last confirmed by Intelligence, so a full read can tell a purge from a newcomer. */
@@ -228,8 +232,9 @@ export function createPeopleDirectory(options: {
   const apply = async (person: Person, confirmedAt = Date.now()) => {
     seenAt.set(person.id, Math.max(seenAt.get(person.id) ?? 0, confirmedAt));
     const row = rowFrom(person);
+    let written: { inserted: boolean }[] = [];
     try {
-      await database
+      written = await database
         .insert(users)
         .values(row)
         .onConflictDoUpdate({
@@ -246,13 +251,16 @@ export function createPeopleDirectory(options: {
             onboardingCompletedAt: row.onboardingCompletedAt,
             lastSignedInAt: row.lastSignedInAt,
             directoryVersion: row.directoryVersion,
+            directoryPending: false,
             updatedAt: row.updatedAt,
           },
           setWhere: and(
-            isNotNull(users.directoryVersion),
-            sql`${users.directoryVersion} < ${person.version}`,
+            eq(users.directoryPending, false),
+            sql`coalesce(${users.directoryVersion}, 0) < ${person.version}`,
           ),
-        });
+        })
+        // `xmax` is 0 on a row this statement inserted: somebody new to this deployment.
+        .returning({ inserted: sql<boolean>`(xmax = 0)` });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
       // Another row here holds the address: a person Better Auth made a moment ago whose push has
@@ -264,6 +272,20 @@ export function createPeopleDirectory(options: {
           note: "Intelligence holds a person whose address another row here already has. The row was not written.",
         }),
       );
+    }
+    // Only the replica whose statement inserted the row hears of the newcomer: the rows are shared.
+    if (written[0]?.inserted && options.onArrived) {
+      try {
+        await options.onArrived(person);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "directory-arrival-failed",
+            personId: person.id,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
     }
   };
 
@@ -296,6 +318,7 @@ export function createPeopleDirectory(options: {
   };
 
   const heard = async (change: DirectoryChange) => {
+    options.onChange?.(change);
     if (change.kind !== "person") return;
     try {
       await refresh(change.id);
@@ -407,12 +430,13 @@ export function createPeopleDirectory(options: {
         onboardingCompletedAt: row.onboardingCompletedAt,
         lastSignedInAt: row.lastSignedInAt,
         directoryVersion: row.directoryVersion,
+        directoryPending: false,
         updatedAt: pushed.updatedAt,
       })
       .where(
         and(
           eq(users.id, person.id),
-          isNull(users.directoryVersion),
+          eq(users.directoryPending, true),
           // To the millisecond, as the row was read: a time Postgres wrote itself (`now()`) carries
           // microseconds the read dropped.
           sql`date_trunc('milliseconds', ${users.updatedAt}) = ${pushed.updatedAt}`,
@@ -426,9 +450,15 @@ export function createPeopleDirectory(options: {
       .from(users)
       .where(eq(users.id, id))
       .limit(1);
-    if (!row || row.directoryVersion !== null) return null;
+    if (!row?.directoryPending) return null;
     const identities = await identitiesFor(id);
     let current = await client.getPerson(id);
+    if (!current && row.directoryVersion !== null) {
+      // Intelligence had this person and no longer does: deleted for good there while this change
+      // waited. The deletion wins: the row goes, as it would have, and the person is not made again.
+      await forget(id);
+      return null;
+    }
     if (!current) {
       const draft = draftFrom(row, identities);
       try {
@@ -503,7 +533,7 @@ export function createPeopleDirectory(options: {
         const pending = await database
           .select({ id: users.id })
           .from(users)
-          .where(isNull(users.directoryVersion))
+          .where(eq(users.directoryPending, true))
           .orderBy(users.createdAt)
           .limit(limit);
         for (const { id } of pending) {
@@ -532,6 +562,7 @@ export function createPeopleDirectory(options: {
     client,
 
     async start() {
+      await bindToProject(database, await client.scope());
       if (options.gatewayWsUrl) {
         subscription = (options.subscribe ?? subscribeToDirectoryChanges)({
           client,
@@ -662,6 +693,46 @@ export function createPeopleDirectory(options: {
     },
   };
   return directory;
+}
+
+/** The database's people belong to another Intelligence project than the one configured. */
+export class DirectoryProjectMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DirectoryProjectMismatchError";
+  }
+}
+
+/**
+ * Bind this database to the Intelligence project its people belong to, the first time; refuse, loudly,
+ * a start against any other.
+ *
+ * The projection takes a person Intelligence does not hold for one deleted there, and deletes them,
+ * with every row that names them. Started against another project, every person here is one that
+ * project does not hold. So the database remembers its project, and a deployment pointed elsewhere
+ * stops before reading anything.
+ */
+export async function bindToProject(
+  database: Database,
+  scope: { organizationId: string; projectId: string },
+): Promise<void> {
+  await database
+    .insert(directoryBinding)
+    .values({
+      organizationId: scope.organizationId,
+      projectId: scope.projectId,
+    })
+    .onConflictDoNothing();
+  const [bound] = await database.select().from(directoryBinding).limit(1);
+  if (
+    bound &&
+    (bound.organizationId !== scope.organizationId ||
+      bound.projectId !== scope.projectId)
+  ) {
+    throw new DirectoryProjectMismatchError(
+      `This database's people belong to Intelligence project ${bound.projectId} of organization ${bound.organizationId}, but INTELLIGENCE_API_KEY is a key for project ${scope.projectId} of organization ${scope.organizationId}. Starting would take every person here for one deleted in that project and remove them, so the server has stopped and nothing was changed. Set INTELLIGENCE_API_KEY to a key for project ${bound.projectId}, or start this deployment on an empty database.`,
+    );
+  }
 }
 
 let installed: PeopleDirectory | undefined;

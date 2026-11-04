@@ -2,6 +2,7 @@ import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -98,16 +99,22 @@ export const users = pgTable("users", {
    */
   role: role("role"),
   /**
-   * The version of this person in Intelligence's organization directory that this row reflects.
+   * The version of this person in Intelligence's organization directory that this row last
+   * reflected; null when Intelligence has never had them.
    *
    * THIS TABLE IS A PROJECTION. People live in Intelligence (people/directory); this row is this
    * deployment's copy, kept because about 56 tables name a person by a foreign key to it and because
-   * the session and the guard read it on every request. Null means the row holds a change Intelligence
-   * has not acknowledged yet: Better Auth wrote it (a first sign-in, a name the identity provider
-   * changed, a directory group), and the directory pushes it after the write commits. A null row is
-   * never overwritten from Intelligence and never taken for a person Intelligence deleted.
+   * the session and the guard read it on every request.
    */
   directoryVersion: integer("directory_version"),
+  /**
+   * The row holds a change Intelligence has not acknowledged yet: Better Auth wrote it (a first
+   * sign-in, a name the identity provider changed), and the directory pushes it after the write
+   * commits. A pending row is never overwritten from Intelligence. One that Intelligence once had
+   * (it has a version) and no longer does was deleted there for good, and its push removes it here
+   * rather than making the person again.
+   */
+  directoryPending: boolean("directory_pending").notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -255,6 +262,41 @@ export const ssoProviders = pgTable("sso_providers", {
   organizationId: text("organization_id"),
   domain: text("domain").notNull(),
 });
+
+/**
+ * Which Intelligence project this database's people belong to, written once, the first time the
+ * people directory starts. A deployment pointed at another project refuses to start rather than
+ * taking every person here for one deleted there (people/directory/directory.ts).
+ */
+export const directoryBinding = pgTable(
+  "directory_binding",
+  {
+    singleton: boolean("singleton").primaryKey().default(true),
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    boundAt: timestamp("bound_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [check("directory_binding_singleton", sql`${table.singleton}`)],
+);
+
+/**
+ * The SCIM deprovisions this deployment has acted on: their sessions ended, what they connected
+ * retired, their computers stopped (people/directory/scim-reactions.ts). Operational: a ledger so
+ * each removal Intelligence's directory records is acted on once, by one replica, however many
+ * times it is heard. Losing it re-runs actions that are already done.
+ */
+export const directoryRemovalReactions = pgTable(
+  "directory_removal_reactions",
+  {
+    email: text("email").primaryKey(),
+    removedAt: timestamp("removed_at", { withTimezone: true }).notNull(),
+    actedAt: timestamp("acted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
 
 /**
  * People an administrator has removed, by email address.

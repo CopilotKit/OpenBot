@@ -21,17 +21,22 @@
  * strangers and say nothing about why.
  */
 import { createHash } from "node:crypto";
-import { eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Database } from "../../db/client";
 import {
+  directoryRemovalReactions,
   identityLinks,
   intelligenceCopies,
   revokedAccess,
+  scimGroupMembers,
+  scimGroups,
+  scimUsers,
   ssoProviders,
   users,
 } from "../../db/schema";
-import { idempotencyKey, normalizeEmail } from "./client";
+import { type DirectoryClient, idempotencyKey, normalizeEmail } from "./client";
 import type { PeopleDirectory } from "./directory";
+import type { ScimGroupImport, ScimUserImport } from "./types";
 
 export const PEOPLE_COPY_NAME = "people";
 
@@ -50,6 +55,8 @@ export type PeopleCopyOutcome =
       removals: number;
       identities: number;
       identityProviders: number;
+      scimUsers: number;
+      scimGroups: number;
     };
 
 const keyFor = (kind: string, body: unknown) =>
@@ -74,12 +81,12 @@ export async function copyLocalPeopleToIntelligence(
   const local = await database
     .select({ id: users.id })
     .from(users)
-    .where(isNull(users.directoryVersion));
+    .where(eq(users.directoryPending, true));
   for (;;) {
     const pending = await database
       .select({ id: users.id })
       .from(users)
-      .where(isNull(users.directoryVersion))
+      .where(eq(users.directoryPending, true))
       .limit(1);
     if (pending.length === 0) break;
     if ((await directory.pushPending(200)) === 0) break;
@@ -87,7 +94,7 @@ export async function copyLocalPeopleToIntelligence(
   const stuck = await database
     .select({ id: users.id, email: users.email })
     .from(users)
-    .where(isNull(users.directoryVersion));
+    .where(eq(users.directoryPending, true));
   if (stuck.length > 0) {
     throw new PeopleCopyMismatchError(
       `Intelligence's directory did not take ${stuck.length} of this deployment's ${local.length} people, so this server will not start without them (each refusal is logged as directory-push-failed or directory-push-email-taken): ${stuck.map((row) => row.id).join(", ")}`,
@@ -248,6 +255,20 @@ export async function copyLocalPeopleToIntelligence(
     );
   }
 
+  // SCIM: the users and groups this deployment's own SCIM endpoint provisioned, under the ids the
+  // company's directory holds, so it goes on working against Intelligence with nothing changed.
+  const scim = await copyScim(database, client, present);
+
+  // Removals SCIM made were acted on by the release that made them: recorded as such, so nobody's
+  // sessions are ended twice for one deactivation.
+  for (const removal of await client.allRemovals()) {
+    if (!removal.removedBy.startsWith("scim:")) continue;
+    await database
+      .insert(directoryRemovalReactions)
+      .values({ email: removal.email, removedAt: removal.removedAt })
+      .onConflictDoNothing();
+  }
+
   await database
     .insert(intelligenceCopies)
     .values({ name: PEOPLE_COPY_NAME, copied: local.length })
@@ -259,6 +280,8 @@ export async function copyLocalPeopleToIntelligence(
       removals: removals.length,
       identities: copied.length,
       identityProviders: providers.length,
+      scimUsers: scim.users,
+      scimGroups: scim.groups,
     }),
   );
   return {
@@ -267,5 +290,103 @@ export async function copyLocalPeopleToIntelligence(
     removals: removals.length,
     identities: copied.length,
     identityProviders: providers.length,
+    scimUsers: scim.users,
+    scimGroups: scim.groups,
   };
+}
+
+/** A SCIM user's addresses as the plugin kept them, or its primary address alone. */
+function emailsOf(
+  row: typeof scimUsers.$inferSelect,
+): ScimUserImport["emails"] {
+  try {
+    const parsed = JSON.parse(row.serializedEmails) as unknown;
+    if (Array.isArray(parsed)) {
+      const emails = parsed.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const { value, type, primary } = entry as Record<string, unknown>;
+        if (typeof value !== "string" || !value.trim()) return [];
+        return [
+          {
+            value: value.trim(),
+            type: typeof type === "string" ? type : null,
+            primary: primary === true,
+          },
+        ];
+      });
+      if (emails.length > 0) return emails.slice(0, 20);
+    }
+  } catch {
+    // Not what the plugin writes; the primary address below is.
+  }
+  return [{ value: row.primaryEmail, type: "work", primary: true }];
+}
+
+/** Copies the local SCIM state, connection by connection, and checks Intelligence holds all of it. */
+async function copyScim(
+  database: Database,
+  client: Pick<DirectoryClient, "importScim">,
+  people: ReadonlySet<string>,
+): Promise<{ users: number; groups: number }> {
+  const userRows = await database.select().from(scimUsers);
+  const groupRows = await database.select().from(scimGroups);
+  const memberRows = await database.select().from(scimGroupMembers);
+  const orphaned = userRows.filter((row) => !people.has(row.userId));
+  if (orphaned.length > 0) {
+    console.warn(
+      JSON.stringify({
+        type: "scim-user-copy-skipped-orphaned",
+        note: "These SCIM users name people this deployment no longer has, and are not copied.",
+        users: orphaned.map((row) => row.id),
+      }),
+    );
+  }
+  const copiedUsers = userRows.filter((row) => people.has(row.userId));
+  const copiedIds = new Set(copiedUsers.map((row) => row.id));
+  const connections = new Set([
+    ...copiedUsers.map((row) => row.connectionId),
+    ...groupRows.map((row) => row.connectionId),
+  ]);
+  let users = 0;
+  let groups = 0;
+  for (const connectionId of connections) {
+    const sentUsers: ScimUserImport[] = copiedUsers
+      .filter((row) => row.connectionId === connectionId)
+      .map((row) => ({
+        id: row.id,
+        personId: row.userId,
+        userName: row.userName,
+        externalId: row.externalId,
+        givenName: row.givenName,
+        familyName: row.familyName,
+        formattedName: row.formattedName || null,
+        displayName: row.displayName || null,
+        emails: emailsOf(row),
+        active: row.active,
+        createdAt: row.createdAt.toISOString(),
+      }));
+    const sentGroups: ScimGroupImport[] = groupRows
+      .filter((row) => row.connectionId === connectionId)
+      .map((row) => ({
+        id: row.id,
+        displayName: row.displayName,
+        externalId: row.externalId,
+        memberIds: memberRows
+          .filter(
+            (member) =>
+              member.groupId === row.id && copiedIds.has(member.scimUserId),
+          )
+          .map((member) => member.scimUserId),
+        createdAt: row.createdAt.toISOString(),
+      }));
+    const held = await client.importScim(connectionId, sentUsers, sentGroups);
+    if (held.users !== sentUsers.length || held.groups !== sentGroups.length) {
+      throw new PeopleCopyMismatchError(
+        `SCIM connection ${connectionId}: ${sentUsers.length} users and ${sentGroups.length} groups were to be copied into Intelligence, and it holds ${held.users} and ${held.groups}.`,
+      );
+    }
+    users += sentUsers.length;
+    groups += sentGroups.length;
+  }
+  return { users, groups };
 }

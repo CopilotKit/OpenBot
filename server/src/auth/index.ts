@@ -1,7 +1,6 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { electron } from "@better-auth/electron";
 import { expo } from "@better-auth/expo";
-import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
@@ -14,13 +13,6 @@ import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
 import {
   accounts,
-  scimConnectionBindings,
-  scimGroupMembers,
-  scimGroups,
-  scimIdentityTombstones,
-  scimProjectionGrants,
-  scimSubjects,
-  scimUsers,
   sessions,
   ssoProviders,
   users,
@@ -41,7 +33,6 @@ import {
   roleForEmail,
   seedRole,
 } from "./roles";
-import { recordProvisioned, scimOptions } from "./scim";
 
 /** What a person sees when SSO is required and they tried another way in. */
 /** The native app's custom scheme (mobile/app.config.ts). */
@@ -232,12 +223,6 @@ export function createAuth(
    * They converge again at the browser: `signIn.social({ provider })` starts all three, so the
    * sign-in screen has one code path and does not need to know which kind each provider is.
    */
-  const scimDeps = {
-    database,
-    initialAdminEmails: authConfig.initialAdminEmails,
-    ...(auditStore ? { auditStore } : {}),
-  };
-  const scimPluginOptions = scimOptions(scimDeps);
   const enterpriseStore = createEnterpriseStore(database);
 
   /*
@@ -250,9 +235,9 @@ export function createAuth(
   const plugins = [
     ...(nativeApp ? [expo()] : []),
     /*
-     * SCIM 2.0 at /api/auth/scim/v2, only when SCIM_BEARER_TOKEN is set. See scim.ts.
+     * SCIM 2.0 at /api/auth/scim/v2 is no longer Better Auth's: Intelligence's directory serves it and
+     * this deployment forwards to it (auth/scim.ts).
      */
-    ...(scimPluginOptions ? [scim(scimPluginOptions)] : []),
     electron({ clientID: "openbot-desktop", codeExpiresIn: 120 }),
     ...(authConfig.okta
       ? [
@@ -376,11 +361,11 @@ export function createAuth(
           input: false,
         },
         /*
-         * Which version of the person in Intelligence's directory the row reflects; null while a
-         * write of Better Auth's has not reached it (auth/directory-adapter.ts). Never from a request.
+         * Whether the row holds a change Intelligence's directory has not had yet: set by every write
+         * Better Auth makes to a person (auth/directory-adapter.ts). Never from a request.
          */
-        directoryVersion: {
-          type: "number",
+        directoryPending: {
+          type: "boolean",
           required: false,
           input: false,
         },
@@ -469,16 +454,9 @@ export function createAuth(
             accounts,
             verifications,
             ssoProviders,
-            scimConnectionBindings,
-            scimIdentityTombstones,
-            scimSubjects,
-            scimUsers,
-            scimProjectionGrants,
-            scimGroups,
-            scimGroupMembers,
           },
-          // The SCIM plugin needs interactive transactions; nothing else here asked for them.
-          transaction: Boolean(scimPluginOptions),
+          // Only the SCIM plugin asked for interactive transactions, and SCIM is Intelligence's now.
+          transaction: false,
         }),
         // Every person Better Auth writes is carried to Intelligence's directory once it commits.
         () => (peopleDirectoryInstalled() ? people() : undefined),
@@ -569,15 +547,6 @@ export function createAuth(
                 role: roleForEmail(user.email, authConfig.initialAdminEmails),
               },
             };
-          },
-          after: async (user, context) => {
-            /*
-             * Who is an administrator is decided by email, not by which provider signed them in, and
-             * was written with the person (the hook above). Nothing to seed here any more.
-             */
-            if (context?.path?.startsWith("/scim")) {
-              await recordProvisioned(scimDeps, user);
-            }
           },
         },
       },

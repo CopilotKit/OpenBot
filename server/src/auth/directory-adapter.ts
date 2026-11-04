@@ -9,7 +9,7 @@
  * transaction open.
  *
  * So this wraps the adapter, as encrypt-sso-config.ts does, and changes nothing about what Better Auth
- * stores. A write to a person marks their row pending (`directoryVersion` null, in the same statement);
+ * stores. A write to a person marks their row pending (`directoryPending`, in the same statement);
  * once the write has committed (at once outside a transaction, after the commit inside one) the person
  * is pushed to Intelligence. A push that fails leaves the row pending, and the directory's sweep pushes
  * it again. A sign-in account added or removed changes the identities the person signs in with, so it
@@ -219,7 +219,7 @@ function wrap(
       await self.update({
         model: PERSON,
         where: [{ field: "id", value: userId }],
-        update: { directoryVersion: null },
+        update: { directoryPending: true },
       });
   };
 
@@ -264,7 +264,7 @@ function wrap(
       if (data.model === PERSON) {
         const created = await inner.create({
           ...data,
-          data: { ...(data.data as Rowish), directoryVersion: null },
+          data: { ...(data.data as Rowish), directoryPending: true },
         });
         const id = created?.id;
         if (typeof id === "string") {
@@ -290,7 +290,7 @@ function wrap(
       if (data.model !== PERSON) return inner.update(data);
       const updated = await inner.update({
         ...data,
-        update: { ...(data.update as Rowish), directoryVersion: null },
+        update: { ...(data.update as Rowish), directoryPending: true },
       });
       const work = afterwards();
       if (typeof updated?.id === "string") work.push.add(updated.id);
@@ -305,7 +305,7 @@ function wrap(
             if (data.model !== PERSON) return inner.updateMany?.(data);
             const count = await inner.updateMany?.({
               ...data,
-              update: { ...(data.update as Rowish), directoryVersion: null },
+              update: { ...(data.update as Rowish), directoryPending: true },
             });
             const work = afterwards();
             work.sweep = true;

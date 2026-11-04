@@ -17,6 +17,7 @@ import {
 } from "../src/people/directory/client";
 import {
   createPeopleDirectory,
+  DirectoryProjectMismatchError,
   type PeopleDirectory,
 } from "../src/people/directory/directory";
 import { testIntelligence } from "./support/bots";
@@ -174,6 +175,7 @@ describe("changes made elsewhere", () => {
       email: uniqueEmail("missed"),
       name: "Purged while away",
       directoryVersion: 3,
+      directoryPending: false,
     });
 
     await directory.resync();
@@ -188,7 +190,7 @@ describe("changes made elsewhere", () => {
       email: uniqueEmail("pending"),
       name: "Made by Better Auth",
       role: "user",
-      directoryVersion: null,
+      directoryPending: true,
     });
 
     await directory.resync();
@@ -197,5 +199,45 @@ describe("changes made elsewhere", () => {
     expect(await directory.pushPending()).toBeGreaterThanOrEqual(1);
     expect((await client.getPerson(id))?.name).toBe("Made by Better Auth");
     expect((await row(id))?.directoryVersion).not.toBeNull();
+  });
+});
+
+describe("a database belongs to one project", () => {
+  test("started against another project, the server refuses, names both, and removes nobody", async () => {
+    // This database is bound to the second project: the directory above started on it.
+    const id = `bound-${randomUUID()}`;
+    await directory.create({
+      id,
+      email: uniqueEmail("bound"),
+      name: "Belongs to project two",
+      image: null,
+      emailVerified: true,
+      role: "user",
+    });
+    const scope = await client.scope();
+    const elsewhere = createDirectoryClient({
+      apiUrl: intelligence.apiUrl,
+      apiKey: intelligence.apiKey,
+    });
+    const other = await elsewhere.scope();
+    expect(other.projectId).not.toBe(scope.projectId);
+
+    const pointedElsewhere = createPeopleDirectory({
+      client: elsewhere,
+      database,
+    });
+    const refusal = await pointedElsewhere.start().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    pointedElsewhere.stop();
+
+    expect(refusal).toBeInstanceOf(DirectoryProjectMismatchError);
+    const message = (refusal as Error).message;
+    expect(message).toContain(`project ${scope.projectId}`);
+    expect(message).toContain(`project ${other.projectId}`);
+    expect(message).toContain("INTELLIGENCE_API_KEY");
+    // Nobody here was taken for a person deleted in the other project.
+    expect(await row(id)).toBeDefined();
   });
 });

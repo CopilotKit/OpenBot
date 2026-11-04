@@ -183,7 +183,7 @@ describe("what Better Auth writes", () => {
       .update(users)
       .set({
         name: "Ada from the IdP",
-        directoryVersion: null,
+        directoryPending: true,
         updatedAt: new Date(),
       })
       .where(eq(users.id, ada.id));
@@ -201,7 +201,7 @@ describe("what Better Auth writes", () => {
     const ada = await person();
     await database
       .update(users)
-      .set({ name: "Pending name", directoryVersion: null })
+      .set({ name: "Pending name", directoryPending: true })
       .where(eq(users.id, ada.id));
 
     // Somebody else changes the person in Intelligence meanwhile.
@@ -221,10 +221,39 @@ describe("what Better Auth writes", () => {
     expect(local?.name).toBe("Pending name");
     expect(local?.role).toBe("admin");
     expect(local?.directoryVersion).not.toBeNull();
+    expect(local?.directoryPending).toBe(false);
   });
 });
 
 describe("a person Intelligence deletes for good", () => {
+  test("is never made again by a change of Better Auth's still waiting to be pushed", async () => {
+    const ada = await person();
+    await database
+      .insert(userInstructions)
+      .values({ userId: ada.id, instructions: "Keep it brief." });
+    // Better Auth writes a new name; before it is pushed, another application purges the person.
+    await database
+      .update(users)
+      .set({
+        name: "Renamed meanwhile",
+        directoryPending: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, ada.id));
+    await directory.client.purgePerson(ada.id, idempotencyKey("test-purge"));
+
+    expect(await directory.push(ada.id)).toBeNull();
+
+    // Not made again in Intelligence; gone here, with what named them, as the purge means.
+    expect(await directory.client.getPerson(ada.id)).toBeNull();
+    expect(await row(ada.id)).toBeUndefined();
+    const [instructions] = await database
+      .select({ n: count() })
+      .from(userInstructions)
+      .where(eq(userInstructions.userId, ada.id));
+    expect(instructions?.n).toBe(0);
+  });
+
   test("leaves this deployment with every row that named them", async () => {
     const ada = await person();
     await database
@@ -250,7 +279,7 @@ describe("a person Intelligence deletes for good", () => {
       id,
       email: uniqueEmail("pending"),
       name: "Not pushed yet",
-      directoryVersion: null,
+      directoryPending: true,
     });
     await directory.refresh(id);
     expect(await row(id)).toBeDefined();

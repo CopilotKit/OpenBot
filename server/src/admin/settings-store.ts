@@ -8,13 +8,13 @@
  */
 import { and, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
+import { people } from "../people/directory/directory";
 import {
   actionRecords,
   capabilitySettings,
   enterpriseSettings,
   modelUsage,
   networkPolicies,
-  scimGroups,
   users,
 } from "../db/schema";
 import type { CapabilityRow, Member } from "./capabilities";
@@ -253,14 +253,13 @@ export function createEnterpriseStore(database: Database) {
       const fromPeople = await database.execute(
         sql`select distinct unnest(${users.groups}) as name from ${users} order by 1`,
       );
-      const provisioned = await database
-        .select({ name: scimGroups.displayName })
-        .from(scimGroups);
+      // Groups the company's directory provisioned, members or not: Intelligence's directory holds them.
+      const provisioned = await people().client.groupNames();
       const names = new Set<string>();
       for (const row of fromPeople as unknown as { name: string }[]) {
         if (row.name) names.add(row.name);
       }
-      for (const row of provisioned) names.add(row.name);
+      for (const name of provisioned) names.add(name);
       return [...names].sort((a, b) => a.localeCompare(b));
     },
 

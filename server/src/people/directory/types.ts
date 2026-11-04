@@ -29,6 +29,8 @@ export type Person = {
   signInIdentities: SignInIdentity[];
   /** The Intelligence dashboard user this person is, when Intelligence can tell. Read-only. */
   principalId: string | null;
+  /** `scim:<connection>` when the company's directory provisioned this person. Read-only. */
+  provisionedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -123,4 +125,27 @@ export type DirectoryChange = {
   personId: string | null;
   version: number;
   change: "created" | "updated" | "deleted" | "restored" | "purged";
+};
+
+/** A SCIM user an earlier release served itself, handed to Intelligence under its own id. */
+export type ScimUserImport = {
+  id: string;
+  personId: string;
+  userName: string;
+  externalId: string | null;
+  givenName: string | null;
+  familyName: string | null;
+  formattedName: string | null;
+  displayName: string | null;
+  emails: { value: string; type: string | null; primary: boolean }[];
+  active: boolean;
+  createdAt?: string;
+};
+
+export type ScimGroupImport = {
+  id: string;
+  displayName: string;
+  externalId: string | null;
+  memberIds: string[];
+  createdAt?: string;
 };

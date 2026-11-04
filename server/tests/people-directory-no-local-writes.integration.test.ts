@@ -60,6 +60,27 @@ describe("the legacy people tables", () => {
     expect(offenders).toEqual([]);
   });
 
+  test("no server source names the seven SCIM tables but the upgrade copy and the schema", () => {
+    // SCIM is Intelligence's directory's now (auth/scim.ts); the tables stay one release to be copied.
+    const root = join(import.meta.dir, "..", "src");
+    const allowed = new Set([
+      "people/directory/upgrade.ts",
+      "db/schema/scim.ts",
+      "db/schema/index.ts",
+    ]);
+    const offenders = sourceFiles(root, [".ts"]).flatMap((file) => {
+      const path = relative(root, file);
+      if (allowed.has(path)) return [];
+      const code = stripComments(readFileSync(file, "utf8"));
+      return /\bscim(?:Users|Groups|GroupMembers|Subjects|ProjectionGrants|ConnectionBindings|IdentityTombstones)\b/.test(
+        code,
+      )
+        ? [path]
+        : [];
+    });
+    expect(offenders).toEqual([]);
+  });
+
   test("a person's whole life through the stores writes nothing to them", async () => {
     useTestPeople();
     const before = await tableCounts();

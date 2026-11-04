@@ -3,13 +3,30 @@
 -- reads a person's role from it on every request.
 --
 -- `role` takes over from `user_roles`, which is no longer written and is kept for one release.
--- `directory_version` is the directory version a row reflects; null marks a row the directory has not
--- acknowledged, which is every existing row: the boot-time copy (people/directory/upgrade.ts) pushes
--- them all, with the role copied here. `revoked_access`, `identity_links` and the descriptions in
--- `sso_providers` are copied by the same step and are no longer written (an identity provider's secret
--- stays in `sso_providers`).
+-- `directory_version` is the directory version a row last reflected (null: never in Intelligence) and
+-- `directory_pending` marks a change Intelligence has not acknowledged, which is every existing row: the
+-- boot-time copy (people/directory/upgrade.ts) pushes them all, with the role copied here.
+-- `revoked_access`, `identity_links`, the seven `scim_*` tables and the descriptions in `sso_providers`
+-- are copied by the same step and are no longer written (an identity provider's secret stays in
+-- `sso_providers`). `directory_binding` records which Intelligence project the people belong to, and
+-- `directory_removal_reactions` which SCIM deprovisions have been acted on.
+CREATE TABLE "directory_binding" (
+	"singleton" boolean PRIMARY KEY DEFAULT true NOT NULL,
+	"organization_id" text NOT NULL,
+	"project_id" text NOT NULL,
+	"bound_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "directory_binding_singleton" CHECK ("directory_binding"."singleton")
+);
+--> statement-breakpoint
+CREATE TABLE "directory_removal_reactions" (
+	"email" text PRIMARY KEY NOT NULL,
+	"removed_at" timestamp with time zone NOT NULL,
+	"acted_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "users" ADD COLUMN "role" role;--> statement-breakpoint
 ALTER TABLE "users" ADD COLUMN "directory_version" integer;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN "directory_pending" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 -- `admin` wins, as the request guard always read the set.
 UPDATE "users" AS u
    SET "role" = CASE
