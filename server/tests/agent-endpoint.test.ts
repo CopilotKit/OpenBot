@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { agentAuthHeaders, storeAgentAuth } from "../src/agents/auth-header";
 import { testAgentConnection } from "../src/agents/connection-test";
 import {
@@ -7,9 +8,14 @@ import {
   EndpointNotAllowedError,
 } from "../src/agents/endpoint";
 import { parseAgentInput } from "../src/agents/routes";
-
-/** A 32-byte key, as the vault expects. */
-const TEST_KEY = Buffer.alloc(32, 7).toString("base64");
+import { createCredentialStore } from "../src/credentials";
+import {
+  purgeSecrets,
+  secretValue,
+  seedCredential,
+  storedSecret,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * Registering an external agent, tested as the security surface it is.
@@ -217,77 +223,74 @@ describe("the connection test", () => {
 });
 
 describe("the key a customer's agent sits behind", () => {
-  const vaultRow = {
-    id: "cred-1",
-    kind: "agent" as const,
-    provider: "ag-ui",
-    keyId: "agent-1",
-    metadata: { header: "Authorization" },
-    encryptedValue: "",
-    revokedAt: null as Date | null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
+  const created: string[] = [];
+  let store: ReturnType<typeof createCredentialStore>;
+
+  beforeAll(async () => {
+    store = createCredentialStore(await useTestVault());
+  });
+
+  afterAll(async () => {
+    await purgeSecrets(created.splice(0));
+  });
 
   test("it goes to the vault, and only a reference comes back", async () => {
     // The value must never be stored on the agent row: everything that can read an agent could then
     // read the key, and revoking it would mean editing the agent.
-    let stored: { kind: string; keyId: string } | null = null;
+    const agentId = `agent-${randomUUID()}`;
     const auth = await storeAgentAuth({
-      store: {
-        create: async (value) => {
-          stored = { kind: value.kind, keyId: value.keyId };
-          return { ...vaultRow, encryptedValue: value.encryptedValue };
-        },
-        revoke: async () => new Date(),
-        // No live key for this agent yet, so the vault creates one rather than rotating.
-        findLiveByKey: async () => null,
-      } as never,
-      encryptionKey: TEST_KEY,
-      agentId: "agent-1",
+      store,
+      agentId,
       header: "Authorization",
       value: "Bearer hunter2",
     });
+    created.push(auth.credentialId);
 
-    expect(stored).toEqual({ kind: "agent", keyId: "agent-1" });
-    expect(auth).toEqual({ header: "Authorization", credentialId: "cred-1" });
+    expect(await storedSecret(auth.credentialId)).toMatchObject({
+      kind: "agent",
+      keyId: agentId,
+    });
+    expect(auth).toEqual({
+      header: "Authorization",
+      credentialId: expect.any(String),
+    });
     // The reference is all that touches the agent, and it carries no secret.
     expect(JSON.stringify(auth)).not.toContain("hunter2");
   });
 
-  test("the value is encrypted at rest, not stored in the clear", async () => {
-    let written = "";
-    await storeAgentAuth({
-      store: {
-        create: async (value) => {
-          written = value.encryptedValue;
-          return vaultRow as never;
-        },
-        revoke: async () => new Date(),
-        // No live key for this agent yet, so the vault creates one rather than rotating.
-        findLiveByKey: async () => null,
-      } as never,
-      encryptionKey: TEST_KEY,
-      agentId: "agent-1",
+  test("the value is held encrypted in the vault, and nothing but a reveal hands it back", async () => {
+    const auth = await storeAgentAuth({
+      store,
+      agentId: `agent-${randomUUID()}`,
       header: "Authorization",
       value: "Bearer hunter2",
     });
-    expect(written).not.toContain("hunter2");
-    expect(written.length).toBeGreaterThan(0);
+    created.push(auth.credentialId);
+
+    const stored = await storedSecret(auth.credentialId);
+    // Encrypted under the organization's key in Intelligence; the record of it never carries it.
+    expect(stored?.encryptionKeyId.length).toBeGreaterThan(0);
+    expect(JSON.stringify(stored)).not.toContain("hunter2");
+    expect(await secretValue(auth.credentialId)).toBe("Bearer hunter2");
   });
 
   test("a revoked key sends nothing rather than falling back to no auth silently", async () => {
     // The run then fails at the agent with its own 401, which is the truthful outcome. Substituting
     // no auth would turn a revoked key into a confusing agent error with no mention of the key.
+    const agentId = `agent-${randomUUID()}`;
+    const revoked = await seedCredential({
+      kind: "agent",
+      provider: "ag-ui",
+      keyId: agentId,
+      metadata: { header: "Authorization" },
+      plaintext: "whatever",
+      revoked: true,
+    });
+    created.push(revoked.id);
     const headers = await agentAuthHeaders({
-      reader: {
-        readSecret: async () => ({
-          encryptedValue: "whatever",
-          revokedAt: new Date(),
-        }),
-      },
-      encryptionKey: TEST_KEY,
-      auth: { header: "Authorization", credentialId: "cred-1" },
+      reader: store,
+      auth: { header: "Authorization", credentialId: revoked.id },
+      botId: agentId,
     });
     expect(headers).toBeUndefined();
   });
@@ -295,9 +298,9 @@ describe("the key a customer's agent sits behind", () => {
   test("an agent with no key sends no headers at all", async () => {
     expect(
       await agentAuthHeaders({
-        reader: { readSecret: async () => null },
-        encryptionKey: TEST_KEY,
+        reader: store,
         auth: null,
+        botId: `agent-${randomUUID()}`,
       }),
     ).toBeUndefined();
   });

@@ -8,24 +8,43 @@
  * first as a 400 off `CustomServerRefusedError`, the second as a 400 off `PluginRefusedError` —
  * and on an Arcade deployment both named a vendor this deployment holds no key for.
  *
- * ONE DATABASE, TWO STORES, because the only thing under test is which vocabulary a store built on
- * one provider reads. Rows are inserted rather than enabled through `addBrokeredApp`: what these
+ * ONE DATABASE AND ONE INTELLIGENCE, TWO STORES, because the only thing under test is which
+ * vocabulary a store built on one provider reads. Apps are seeded rather than enabled through
+ * `addBrokeredApp`: what these
  * refusals read off a row is its provenance, its url and its scheme, and enabling for real would
  * put a vendor listing in front of an assertion that has nothing to do with one.
  */
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestVault();
+});
 
 afterAll(async () => {
   await database.$client.close();
@@ -86,7 +105,7 @@ async function brokeredApp(provider: BrokerProvider, toolkit: string) {
   // refusal with a different sentence.
   const id = `held-${toolkit.toLowerCase()}`;
   seededServers.push(id);
-  await database.insert(mcpServers).values({
+  await seedServer({
     id,
     title: toolkit,
     vendor: VENDOR[provider],
@@ -102,14 +121,15 @@ afterEach(async () => {
     await database
       .delete(mcpTools)
       .where(inArray(mcpTools.serverId, seededServers));
-    await database
-      .delete(mcpServers)
-      .where(inArray(mcpServers.id, seededServers));
+    await removeServers(seededServers);
   }
-  if (seededApps.length)
-    await database
-      .delete(brokeredConnections)
-      .where(inArray(brokeredConnections.app, seededApps));
+  if (seededApps.length) {
+    const apps = new Set(seededApps);
+    await removeConnectionsWhere(
+      (connection) =>
+        connection.kind === "brokered" && apps.has(connection.app),
+    );
+  }
   seededServers.length = 0;
   seededApps.length = 0;
 });
@@ -164,7 +184,7 @@ describe("the re-check retry names the active vendor", () => {
       effect: "read",
       version: "1.0",
     });
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app: toolkit,
       holder: "person",
@@ -207,7 +227,7 @@ describe("the brokered-credential invariant names the active vendor", () => {
     const action = "Orphan.Read";
     seededServers.push(id);
     await seedBot({ id: botId, name: "Helper", type: "built_in" });
-    await database.insert(mcpServers).values({
+    await seedServer({
       id,
       title: "Orphan",
       vendor: "Arcade",

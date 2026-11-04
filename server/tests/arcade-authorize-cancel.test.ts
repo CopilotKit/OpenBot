@@ -13,19 +13,21 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  pendingAuthorizations,
-} from "../src/db/schema";
+import { auditEvents, mcpTools, pendingAuthorizations } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
+import {
+  type SeedServer,
+  changeServer,
+  removeConnectionsWhere,
+  removeServers,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -160,7 +162,8 @@ const attemptsFor = (actorId: string) =>
     .where(eq(pendingAuthorizations.actorId, actorId));
 
 beforeAll(async () => {
-  await database.insert(mcpServers).values([
+  await useTestVault();
+  for (const app of [
     {
       id: personalApp,
       title: "Gmail",
@@ -217,7 +220,9 @@ beforeAll(async () => {
       accountMode: "shared",
       sharedVendorUserId: SHARED_VENDOR_ID,
     },
-  ]);
+  ] satisfies SeedServer[]) {
+    await seedServer(app);
+  }
   await database.insert(mcpTools).values(
     [personalApp, sharedApp, otherApp, movedApp].map((serverId) => ({
       serverId,
@@ -228,18 +233,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(mcpServers)
-    .where(
-      inArray(mcpServers.id, [
-        personalApp,
-        sharedApp,
-        otherApp,
-        movedApp,
-        composioApp,
-        composioSharedApp,
-      ]),
-    );
+  await removeServers([
+    personalApp,
+    sharedApp,
+    otherApp,
+    movedApp,
+    composioApp,
+    composioSharedApp,
+  ]);
   if (actors.length) {
     await database
       .delete(pendingAuthorizations)
@@ -406,9 +407,9 @@ describe("DELETE /servers/:id/authorize", () => {
         outcomes: ["completed"],
       });
     } finally {
-      await database
-        .delete(brokeredConnections)
-        .where(eq(brokeredConnections.app, toolkit));
+      await removeConnectionsWhere(
+        (row) => row.kind === "brokered" && row.app === toolkit,
+      );
     }
   });
 
@@ -421,9 +422,9 @@ describe("DELETE /servers/:id/authorize", () => {
    * a new authorization on ANY app for the full fifteen minutes.
    *
    * A HARD `DELETE` OF THE SERVER ROW IS NOT ONE OF THOSE WAYS, and that is worth writing down
-   * rather than testing: `pending_authorizations.server_id` is `references(mcpServers.id,
-   * { onDelete: "cascade" })`, so `removeServer` takes the attempt with it and there is nothing
-   * left to cancel. The two below are reachable, and both by an administrator doing something
+   * rather than testing: removing an app clears this deployment's rows that name it
+   * (`vault/local-rows.ts`), so `removeServer` takes the attempt with it and there is nothing left
+   * to cancel. The two below are reachable, and both by an administrator doing something
    * ordinary.
    */
   test("an attempt on an app whose url no longer parses as brokered can still be cancelled", async () => {
@@ -433,20 +434,14 @@ describe("DELETE /servers/:id/authorize", () => {
     expect(await attemptsFor(actor)).toHaveLength(1);
 
     // The app is re-pointed at an ordinary MCP endpoint: `appOfUrl` now answers null for it.
-    await database
-      .update(mcpServers)
-      .set({ url: `https://moved-${suite}.example/mcp` })
-      .where(eq(mcpServers.id, movedApp));
+    await changeServer(movedApp, { url: `https://moved-${suite}.example/mcp` });
     try {
       const response = await cancel(app, movedApp);
       expect(response.status).toBeLessThan(300);
       expect(await response.json()).toEqual({ cancelled: true });
       expect(await attemptsFor(actor)).toEqual([]);
     } finally {
-      await database
-        .update(mcpServers)
-        .set({ url: `arcade://M${suite}` })
-        .where(eq(mcpServers.id, movedApp));
+      await changeServer(movedApp, { url: `arcade://M${suite}` });
     }
   });
 
@@ -474,10 +469,9 @@ describe("DELETE /servers/:id/authorize", () => {
   test("with no attempt of this actor's, a non-brokered app is still refused in so many words", async () => {
     const actor = await person("refused");
     const app = appAs("user", actor);
-    await database
-      .update(mcpServers)
-      .set({ url: `https://refused-${suite}.example/mcp` })
-      .where(eq(mcpServers.id, movedApp));
+    await changeServer(movedApp, {
+      url: `https://refused-${suite}.example/mcp`,
+    });
     try {
       const response = await cancel(app, movedApp);
       expect(response.status).toBe(400);
@@ -485,10 +479,7 @@ describe("DELETE /servers/:id/authorize", () => {
         error: "That app doesn't connect this way.",
       });
     } finally {
-      await database
-        .update(mcpServers)
-        .set({ url: `arcade://M${suite}` })
-        .where(eq(mcpServers.id, movedApp));
+      await changeServer(movedApp, { url: `arcade://M${suite}` });
     }
   });
 });

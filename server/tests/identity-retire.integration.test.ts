@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray, like } from "drizzle-orm";
 import {
@@ -10,7 +10,6 @@ import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   auditEvents,
-  credentials,
   identityLinkChallenges,
   identityLinks,
 } from "../src/db/schema";
@@ -21,13 +20,18 @@ import {
 import { createIdentityStore, identityUserLock } from "../src/identity/store";
 import { IdentityLinkError } from "../src/identity/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const vault = createCredentialStore(database);
+let vault: ReturnType<typeof createCredentialStore>;
 const realm = `test-${randomUUID()}`;
 const createdCredentials: string[] = [];
 const users: string[] = [];
 const ADMIN = "admin-remover";
+
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+});
 
 afterAll(async () => {
   await database
@@ -37,10 +41,7 @@ afterAll(async () => {
     await database
       .delete(identityLinkChallenges)
       .where(inArray(identityLinkChallenges.userId, users));
-  if (createdCredentials.length)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, createdCredentials));
+  await purgeSecrets(createdCredentials.splice(0));
   await database.$client.close();
 });
 
@@ -75,7 +76,7 @@ test("retiring a removed person's links revokes their tokens and keeps the rows"
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   createdCredentials.push(credential.id);
   const linkId = randomUUID();
@@ -191,7 +192,7 @@ test("a credential revoked before the removal is not reported as revoked by it",
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   createdCredentials.push(credential.id);
   await vault.revoke(credential.id);

@@ -8,7 +8,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { responsibilityRuns } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createResponsibilityStore } from "../src/responsibilities/store";
@@ -17,6 +17,7 @@ import { createTriggerStore } from "../src/responsibilities/triggers";
 import { ResponsibilityNotFoundError } from "../src/responsibilities/types";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeSecrets, secretsNamed, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `triggers-${randomUUID()}`;
@@ -24,25 +25,27 @@ const ownerId = `${prefix}-owner`;
 const strangerId = `${prefix}-stranger`;
 const botId = `${prefix}-bot`;
 const channelId = `${prefix}-channel`;
-const credentialStore = createCredentialStore(database);
-const triggers = createTriggerStore(database, {
-  store: credentialStore,
-  reader: credentialStore,
-  encryptionKey: Buffer.alloc(32, 7).toString("base64"),
-});
+let triggers: ReturnType<typeof createTriggerStore>;
+let routes: ReturnType<typeof createTriggerIngressRoutes>;
 const store = createResponsibilityStore(database, {
   resolveTarget: async (owner, bot, channel) =>
     owner === ownerId && bot === botId && channel === channelId
       ? { threadId: `${prefix}-thread` }
       : null,
 });
-const routes = createTriggerIngressRoutes({
-  directory: triggers.directory,
-  ingest: (event) => store.ingestEvent(event),
-});
 const runIds: string[] = [];
 
 beforeAll(async () => {
+  // The trigger secrets live in Intelligence's vault.
+  const credentialStore = createCredentialStore(await useTestVault());
+  triggers = createTriggerStore(database, {
+    store: credentialStore,
+    reader: credentialStore,
+  });
+  routes = createTriggerIngressRoutes({
+    directory: triggers.directory,
+    ingest: (event) => store.ingestEvent(event),
+  });
   await database.insert(users).values([
     { id: ownerId, email: `${ownerId}@example.test` },
     { id: strangerId, email: `${strangerId}@example.test` },
@@ -61,6 +64,12 @@ afterAll(async () => {
       );
   await database.delete(users).where(inArray(users.id, [ownerId, strangerId]));
   await removeBots([botId]);
+  // Every trigger secret this file stored is the owner's, revoked ones included.
+  const { secrets } = await (await useTestVault()).client.secrets.all({
+    ownerUserId: ownerId,
+    includeRevoked: true,
+  });
+  await purgeSecrets(secrets.map((secret) => secret.id));
   await database.$client.close();
 });
 
@@ -215,10 +224,12 @@ test("rotation revokes the old key in the vault; provider secrets are pasted and
   runIds.push(...((await delivered.json()) as { runIds: string[] }).runIds);
 
   await triggers.remove(ownerId, linear.trigger.id);
-  const [revoked] = await database
-    .select({ revokedAt: credentials.revokedAt })
-    .from(credentials)
-    .where(eq(credentials.keyId, linear.trigger.id));
+  const [revoked, ...more] = await secretsNamed({
+    kind: "connector",
+    provider: "linear-trigger",
+    keyId: linear.trigger.id,
+  });
+  expect(more).toEqual([]);
   expect(revoked?.revokedAt).toBeInstanceOf(Date);
 });
 

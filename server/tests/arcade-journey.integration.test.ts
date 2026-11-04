@@ -56,15 +56,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import Arcade from "@arcadeai/arcadejs";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
   auditEvents,
-  brokeredConnections,
-  mcpServers,
   mcpTools,
   pendingAuthorizations,
   pluginGrants,
@@ -80,6 +78,13 @@ import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -519,12 +524,9 @@ const send = (method: string, path: string, body: unknown) =>
 
 /* -------------------------------------------------------------------------------- what persisted */
 
+/** The app as Intelligence holds it now, or null. */
 async function serverRow(id: string) {
-  const [row] = await database
-    .select()
-    .from(mcpServers)
-    .where(eq(mcpServers.id, id));
-  return row ?? null;
+  return await storedServer(id);
 }
 
 async function toolRows(serverId: string) {
@@ -543,11 +545,9 @@ async function toolRows(serverId: string) {
   ).sort((left, right) => (left.name < right.name ? -1 : 1));
 }
 
+/** The brokered accounts Intelligence holds now for this app. */
 async function connectionsOf(app: string) {
-  return await database
-    .select()
-    .from(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
+  return (await storedConnections()).brokered.filter((row) => row.app === app);
 }
 
 /**
@@ -610,6 +610,8 @@ beforeAll(async () => {
   // The administrator walking this journey is a real `users` row, because the attempt rows minted
   // along the way key to one on `actor_id` (with `user_id` held equal to it) and cascade from it.
   await seedPeople(database, [ADMIN]);
+  // Apps and brokered accounts live in Intelligence: the store reads them through this directory.
+  await useTestVault();
   installVendor();
   const client = createArcadeClient("never-dialled");
   broker = client.broker;
@@ -623,12 +625,10 @@ afterAll(async () => {
   await database
     .delete(pendingAuthorizations)
     .where(eq(pendingAuthorizations.actorId, ADMIN));
-  await database
-    .delete(brokeredConnections)
-    .where(inArray(brokeredConnections.app, [MAIL, DIARY]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [MAIL_ROW, DIARY_ROW]));
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && [MAIL, DIARY].includes(row.app),
+  );
+  await removeServers([MAIL_ROW, DIARY_ROW]);
   await removeBots([BOT]);
   await removePeople(database, [ADMIN]);
   await database.$client.close();

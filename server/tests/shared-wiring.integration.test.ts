@@ -2,24 +2,25 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { mcpServers } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /*
  * Every Shared-app surface was once built, tested through its own factory, and never mounted: the
@@ -30,6 +31,7 @@ import { testEnvironment } from "./support/environment";
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
 const app = `wired-${suite}`;
+let credentials: ReturnType<typeof createCredentialStore>;
 
 const broker: ConnectedAppBroker = {
   // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
@@ -61,7 +63,7 @@ function build(options: { shared: boolean }) {
     brokerProvider: "composio",
     database,
     auditStore,
-    credentials: {} as never,
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -103,8 +105,11 @@ function build(options: { shared: boolean }) {
   return createApp(...args);
 }
 
+beforeAll(async () => {
+  credentials = createCredentialStore(await useTestVault());
+});
 beforeEach(async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -115,7 +120,7 @@ beforeEach(async () => {
   });
 });
 afterEach(async () => {
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  await removeServers([app]);
 });
 
 describe("a deployment built with shared apps", () => {

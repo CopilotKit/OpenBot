@@ -3,17 +3,17 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { mcpTools, skills, skillTools, users } from "../src/db/schema";
 import {
-  mcpServers,
-  mcpTools,
-  skills,
-  skillTools,
-  users,
-} from "../src/db/schema";
-import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+  createPluginStore,
+  type PluginStore,
+  PluginRefusedError,
+} from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /**
  * A skill saying which tools it needs, and that saying so grants nothing.
@@ -28,14 +28,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const suite = randomUUID().slice(0, 8);
 const author = `user_author_${suite}`;
@@ -51,20 +44,25 @@ const withheldRef = `${server}/delete_everything`;
 const actor = { id: author, isAdmin: true };
 
 beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
   await database
     .insert(users)
     .values({ id: author, email: `${author}@example.test`, name: author })
     .onConflictDoNothing();
   await seedBot({ id: bot, name: bot });
-  await database
-    .insert(mcpServers)
-    .values({
-      id: server,
-      title: "A test server",
-      vendor: "Test",
-      url: "https://mcp.example.invalid/v1",
-    })
-    .onConflictDoNothing();
+  await seedServer({
+    id: server,
+    title: "A test server",
+    vendor: "Test",
+    url: "https://mcp.example.invalid/v1",
+  });
   await database
     .insert(mcpTools)
     .values([
@@ -91,7 +89,7 @@ afterAll(async () => {
   await database
     .delete(skills)
     .where(inArray(skills.slug, [skill, otherSkill]));
-  await database.delete(mcpServers).where(eq(mcpServers.id, server));
+  await removeServers([server]);
   await removeBots([bot]);
   await database.delete(users).where(eq(users.id, author));
 });

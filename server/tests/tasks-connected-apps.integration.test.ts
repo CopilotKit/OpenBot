@@ -26,16 +26,13 @@ import { createAuditStore, PERSON_INITIATOR } from "../src/audit";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import type { RegisteredAgent } from "../src/copilot";
-import { createCredentialStore, encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   approvalRequests,
   channelMemberships,
   channels,
-  credentials,
-  mcpServers,
   mcpTools,
-  mcpUserCredentials,
   pluginGrants,
   proactiveSettings,
   proactiveSuggestions,
@@ -60,6 +57,19 @@ import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  type SeedCredential,
+  type SeedServer,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * A task started from a check-in, working with the apps the person connected: it reads their own
@@ -79,7 +89,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
-/** 32 zero bytes in base64: a real AES-256 key, because the vault is opened for Notion's grant. */
+/** 32 zero bytes in base64: a real AES-256 key, as the store is configured with one. */
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const NOTION = "notion";
 const EXA = "exa";
@@ -355,13 +365,11 @@ const fixtures = (() => {
   const createdCredentials: string[] = [];
   let notionClientBefore: string | null | undefined;
 
-  async function server(row: typeof mcpServers.$inferInsert) {
-    const inserted = await database
-      .insert(mcpServers)
-      .values(row)
-      .onConflictDoNothing()
-      .returning({ id: mcpServers.id });
-    if (inserted.length) createdServers.push(row.id);
+  /** Add an app unless Intelligence has one under this id already: the old `DO NOTHING`. */
+  async function server(row: SeedServer) {
+    if (await storedServer(row.id)) return;
+    await seedServer(row);
+    createdServers.push(row.id);
   }
   async function tool(row: typeof mcpTools.$inferInsert) {
     const inserted = await database
@@ -372,15 +380,8 @@ const fixtures = (() => {
     if (inserted.length)
       createdTools.push({ serverId: row.serverId, name: row.name });
   }
-  async function secret(
-    row: Omit<typeof credentials.$inferInsert, "encryptedValue">,
-    value: string,
-  ) {
-    const [stored] = await database
-      .insert(credentials)
-      .values({ ...row, encryptedValue: await encryptSecret(KEY, value) })
-      .returning({ id: credentials.id });
-    if (!stored) throw new Error("credential was not stored");
+  async function secret(row: Omit<SeedCredential, "plaintext">, value: string) {
+    const stored = await seedCredential({ ...row, plaintext: value });
     createdCredentials.push(stored.id);
     return stored.id;
   }
@@ -400,11 +401,7 @@ const fixtures = (() => {
         url: "https://mcp.exa.ai/mcp",
         provenance: "first-party",
       });
-      const [notion] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, NOTION));
-      notionClientBefore = notion?.credentialId ?? null;
+      notionClientBefore = (await storedServer(NOTION))?.credentialId ?? null;
       const client = await secret(
         {
           kind: "mcp_oauth_client",
@@ -414,10 +411,7 @@ const fixtures = (() => {
         },
         JSON.stringify({ clientId: `client-${suite}`, clientSecret: "" }),
       );
-      await database
-        .update(mcpServers)
-        .set({ credentialId: client })
-        .where(eq(mcpServers.id, NOTION));
+      await changeServer(NOTION, { credentialId: client });
       // As a refresh records them from the server's own labels.
       await tool({ serverId: NOTION, name: GET_REQUEST, declaredRead: true });
       await tool({ serverId: NOTION, name: FETCH, declaredRead: true });
@@ -440,7 +434,7 @@ const fixtures = (() => {
         },
         refreshToken,
       );
-      await database.insert(mcpUserCredentials).values({
+      await seedGrant({
         serverId: NOTION,
         userId: owner,
         credentialId: grantToken,
@@ -460,14 +454,13 @@ const fixtures = (() => {
       );
     },
     async remove() {
-      await database
-        .delete(mcpUserCredentials)
-        .where(inArray(mcpUserCredentials.userId, people));
-      if (notionClientBefore !== undefined)
-        await database
-          .update(mcpServers)
-          .set({ credentialId: notionClientBefore })
-          .where(eq(mcpServers.id, NOTION));
+      await removeConnectionsWhere(
+        (connection) =>
+          connection.kind === "grant" && people.includes(connection.userId),
+      );
+      // The client pointer back before its credential goes, so the app never names a gone secret.
+      if (notionClientBefore !== undefined && !createdServers.includes(NOTION))
+        await changeServer(NOTION, { credentialId: notionClientBefore });
       for (const created of createdTools)
         await database
           .delete(mcpTools)
@@ -477,14 +470,8 @@ const fixtures = (() => {
               eq(mcpTools.name, created.name),
             ),
           );
-      if (createdServers.length)
-        await database
-          .delete(mcpServers)
-          .where(inArray(mcpServers.id, createdServers));
-      if (createdCredentials.length)
-        await database
-          .delete(credentials)
-          .where(inArray(credentials.id, createdCredentials));
+      await removeServers(createdServers);
+      await purgeSecrets(createdCredentials);
     },
   };
 })();
@@ -493,11 +480,14 @@ const fixtures = (() => {
  * One deployment, wired the way `server/src/index.ts` wires it.
  * ---------------------------------------------------------------------------------------------- */
 
+// Apps, connections and credentials live in Intelligence: the process's vault directory, before
+// the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: KEY,
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   approvalGate: approvalService.gate,

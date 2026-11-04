@@ -14,13 +14,19 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, mcpTools, pendingAuthorizations } from "../src/db/schema";
+import { mcpTools, pendingAuthorizations } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
+import {
+  removeServers,
+  type SeedServer,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -177,7 +183,8 @@ const attemptsFor = (actorId: string) =>
     .where(eq(pendingAuthorizations.actorId, actorId));
 
 beforeAll(async () => {
-  await database.insert(mcpServers).values([
+  await useTestVault();
+  for (const app of [
     {
       id: personalApp,
       title: "Gmail",
@@ -205,7 +212,9 @@ beforeAll(async () => {
       provenance: "composio",
       authScheme: "OAUTH2",
     },
-  ]);
+  ] satisfies SeedServer[]) {
+    await seedServer(app);
+  }
   await database.insert(mcpTools).values(
     [personalApp, sharedApp, composioApp].map((serverId) => ({
       serverId,
@@ -216,9 +225,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [personalApp, sharedApp, composioApp]));
+  await removeServers([personalApp, sharedApp, composioApp]);
   if (actors.length) {
     await database
       .delete(pendingAuthorizations)

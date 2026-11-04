@@ -50,7 +50,6 @@ import { originOf, type SignInRequestRecord } from "../src/passwords/types";
 const PASSWORD = "Tr0ub4dor&3-never-show-me";
 const USERNAME = "alice.private@example.test";
 const CODE = "918273";
-const KEY = Buffer.alloc(32, 7).toString("base64");
 
 function fakeGateway(
   result: Partial<SignInFillResult> = {},
@@ -119,7 +118,6 @@ function setup(
   const service = createSignInService({
     store,
     gateway: computer.gateway,
-    encryptionKey: KEY,
     auditStore: trail.store,
     passwordManagerEnabled: async () => options.manager ?? true,
     onResolved: async (request) => void resolved.push(request),
@@ -187,10 +185,13 @@ describe("a sign-in request answered with a typed login", () => {
       signedIn: true,
       site: "https://example.com",
     });
-    // Saved, encrypted.
+    // Saved, and the saved record never carries the password: only a reveal for a Bot reads it.
     const [saved] = await store.logins("owner");
     expect(saved?.username).toBe(USERNAME);
-    expect(saved?.encryptedPassword).not.toContain(PASSWORD);
+    expect(JSON.stringify(saved)).not.toContain(PASSWORD);
+    expect(await store.revealPassword("owner", saved?.id ?? "", "bot")).toBe(
+      PASSWORD,
+    );
     const logins = await service.logins("owner");
     expectNoCredential(
       everything(
@@ -386,7 +387,6 @@ describe("the other answers", () => {
     const service = createSignInService({
       store,
       gateway: fakeGateway().gateway,
-      encryptionKey: KEY,
       ttlMs: -1,
     });
     const request = await service.request({

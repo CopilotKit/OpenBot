@@ -9,10 +9,18 @@ import { savedLogins, signInRequests } from "../src/db/schema/passwords";
 import { createSignInService } from "../src/passwords/service";
 import { createPasswordStore } from "../src/passwords/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  liveSecrets,
+  purgeSecrets,
+  secretValue,
+  storedSecret,
+  useTestVault,
+} from "./support/vault";
 
 /**
- * The Postgres store behind the private sign-in form, against a real database: every read is the
- * owner's own, two submits racing end in one sign-in, and the stored password is the envelope.
+ * The store behind the private sign-in form, against a real database and a real vault: every read is
+ * the owner's own, two submits racing end in one sign-in, and a saved password is a secret in
+ * Intelligence's vault, never a row here.
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `passwords-${randomUUID()}`;
@@ -24,7 +32,6 @@ const audit: AuditEventInput[] = [];
 let releaseFill: (() => void) | undefined;
 const service = createSignInService({
   store,
-  encryptionKey: Buffer.alloc(32, 3).toString("base64"),
   auditStore: { insert: async (event) => void audit.push(event) },
   gateway: {
     seatFor: async (botId, personId) => personSeat(personId, botId),
@@ -50,17 +57,24 @@ const service = createSignInService({
 const actor = { id: owner, userId: owner };
 
 beforeAll(async () => {
+  await useTestVault();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: stranger, email: `${stranger}@example.test` },
   ]);
 });
 afterAll(async () => {
+  // A login a failed test left behind, removed for good.
+  await purgeSecrets(
+    (await liveSecrets({ kind: "website_login" }))
+      .filter((secret) => [owner, stranger].includes(secret.ownerUserId ?? ""))
+      .map((secret) => secret.id),
+  );
   await database.delete(users).where(inArray(users.id, [owner, stranger]));
   await database.$client.close();
 });
 
-test("a request and a saved login are their owner's alone, and only the envelope is stored", async () => {
+test("a request and a saved login are their owner's alone, and the password is held only in the vault", async () => {
   const request = await service.request({
     ownerUserId: owner,
     botId: `${prefix}-bot`,
@@ -88,15 +102,24 @@ test("a request and a saved login are their owner's alone, and only the envelope
   releaseFill?.();
   expect((await first).status).toBe("signed_in");
 
-  const rows = await database
-    .select()
-    .from(savedLogins)
-    .where(inArray(savedLogins.ownerUserId, [owner, stranger]));
+  const rows = [
+    ...(await store.logins(owner)),
+    ...(await store.logins(stranger)),
+  ];
   expect(rows).toHaveLength(1);
-  expect(rows[0]?.encryptedPassword).not.toContain(PASSWORD);
-  expect(JSON.parse(rows[0]?.encryptedPassword ?? "{}")).toMatchObject({
-    version: 1,
-  });
+  expect(rows[0]?.ownerUserId).toBe(owner);
+  // The vault holds it encrypted under the organization's key; its record never carries it, and
+  // nothing about it is written here.
+  const secret = await storedSecret(rows[0]?.id ?? "");
+  expect(secret?.encryptionKeyId.length).toBeGreaterThan(0);
+  expect(JSON.stringify(secret)).not.toContain(PASSWORD);
+  expect(await secretValue(rows[0]?.id ?? "")).toBe(PASSWORD);
+  expect(
+    await database
+      .select()
+      .from(savedLogins)
+      .where(inArray(savedLogins.ownerUserId, [owner, stranger])),
+  ).toEqual([]);
   const [stored] = await database
     .select()
     .from(signInRequests)
@@ -118,7 +141,6 @@ test("a request waiting on its verification code is stored, listed, and then sig
   const codes: string[] = [];
   const mfa = createSignInService({
     store,
-    encryptionKey: Buffer.alloc(32, 3).toString("base64"),
     gateway: {
       seatFor: async (botId, personId) => personSeat(personId, botId),
       signIn: async () => ({

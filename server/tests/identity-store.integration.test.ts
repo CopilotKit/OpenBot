@@ -1,9 +1,9 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, identityLinks } from "../src/db/schema";
+import { identityLinks } from "../src/db/schema";
 import { createIdentityStore } from "../src/identity/store";
 import {
   type Identity,
@@ -11,19 +11,22 @@ import {
   IdentityInputError,
 } from "../src/identity/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const vault = createCredentialStore(database);
-const store = createIdentityStore(database, vault);
+let vault: ReturnType<typeof createCredentialStore>;
+let store: ReturnType<typeof createIdentityStore>;
 const realm = `test-${randomUUID()}`;
 const createdCredentials: string[] = [];
 
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+  store = createIdentityStore(database, vault);
+});
+
 afterAll(async () => {
   await database.delete(identityLinks).where(eq(identityLinks.realm, realm));
-  if (createdCredentials.length)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, createdCredentials));
+  await purgeSecrets(createdCredentials.splice(0));
   await database.$client.close();
 });
 
@@ -43,7 +46,7 @@ async function credential(
     provider,
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "not-a-real-ciphertext",
+    plaintext: "not-a-real-token",
   });
   createdCredentials.push(id);
   return id;

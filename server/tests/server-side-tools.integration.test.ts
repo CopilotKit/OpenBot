@@ -5,16 +5,13 @@ import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-} from "../src/db/schema";
-import { createPluginStore } from "../src/plugins/store";
+import { createCredentialStore } from "../src/credentials";
+import { auditEvents, mcpTools, pluginGrants } from "../src/db/schema";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /**
  * A tool call that happens with no browser involved.
@@ -40,20 +37,21 @@ const ref = `${serverId}/${toolName}`;
 
 let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const mock = new MCPMock();
 /** What the server on the other end was actually asked, recorded where the assertion can see it. */
 const received: unknown[] = [];
 
 beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
   // Both Bots must exist: a grant names a real Bot, and purging that Bot takes its grants with it.
   for (const id of [holderId, strangerId]) {
     await seedBot({ id, name: id, type: "remote_ag_ui" });
@@ -75,16 +73,13 @@ beforeAll(async () => {
   });
   const url = await mock.start();
 
-  await database
-    .insert(mcpServers)
-    .values({
-      id: serverId,
-      title: "Notes",
-      vendor: "notes",
-      url,
-      provenance: "custom",
-    })
-    .onConflictDoNothing();
+  await seedServer({
+    id: serverId,
+    title: "Notes",
+    vendor: "notes",
+    url,
+    provenance: "custom",
+  });
   await database
     .insert(mcpTools)
     .values({
@@ -106,8 +101,7 @@ afterAll(async () => {
     .delete(pluginGrants)
     .where(and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.ref, ref)));
   await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
-  await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-  await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+  await removeServers([serverId]);
   await removeBots([holderId, strangerId]);
   await mock.stop();
 });

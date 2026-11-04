@@ -1,21 +1,32 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
-import { encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { mcpTools, pluginGrants, users } from "../src/db/schema";
 import {
-  credentials,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-  pluginGrants,
-  users,
-} from "../src/db/schema";
-import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+  createPluginStore,
+  type PluginStore,
+  PluginRefusedError,
+} from "../src/plugins/store";
+import type { ConnectionsDirectory } from "../src/vault/directory";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  liveSecrets,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  storedSecret,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * Whose credential a call to a `user-oauth` server goes out with.
@@ -42,8 +53,7 @@ const toolName = "search_files";
 const ref = `${serverId}/${toolName}`;
 
 // 32 zero bytes in base64. A real AES-256 key length, unlike `"x".repeat(44)`, which decodes to 33
-// bytes and makes `importKey` throw — the existing plugin store test gets away with it only because
-// every call there is refused before the vault is ever opened.
+// bytes and makes `importKey` throw if anything here ever seals a value with it.
 const ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
@@ -52,10 +62,10 @@ const askerRefreshToken = `refresh-token-for-asker-${suite}`;
 const otherRefreshToken = `refresh-token-for-other-${suite}`;
 
 /**
- * Every token the store decrypted, in order.
+ * Every token the store was about to send, in order.
  *
  * The store hands a token to the MCP client, which is the one thing this test cannot let happen for
- * real. Recording it at the vault boundary instead answers the only question that matters — whose
+ * real. Recording it at the vendor boundary instead answers the only question that matters — whose
  * secret was about to be sent — without a vendor to send it to.
  */
 const decrypted: string[] = [];
@@ -73,13 +83,12 @@ let serverWasAlreadyConfigured = false;
 /**
  * The OAuth client this deployment had before the suite ran, restored afterwards.
  *
- * `mcp_servers.credential_id` is live configuration: on a database somebody uses, it points at the
+ * The app's `credentialId` is live configuration: on a deployment somebody uses, it points at the
  * client an administrator registered. This suite has to repoint it to exercise the selection, and it
  * used to leave it repointed at a credential the cleanup then deleted — so the connector afterwards
  * reported "no OAuth client registered yet" and the administrator's own registration was gone.
  *
- * There is no foreign key to catch that: `mcp_servers.credential_id` is `text` against a `uuid`
- * primary key, so the database will hold a pointer to a row that does not exist.
+ * Nothing catches that: Intelligence will hold an app pointing at a secret the vault no longer has.
  */
 let clientBefore: string | null = null;
 /**
@@ -91,154 +100,124 @@ let clientBefore: string | null = null;
 let toolWasAlreadyAdvertised = false;
 const credentialIds: string[] = [];
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {
-    readSecret: async (id) => {
-      const [row] = await database
-        .select({
-          encryptedValue: credentials.encryptedValue,
-          revokedAt: credentials.revokedAt,
-        })
-        .from(credentials)
-        .where(eq(credentials.id, id));
-      return row ?? null;
-    },
-    // This suite writes its rows directly, so that what is under test is the selection rather than
-    // the connect flow. Loud rather than absent, so a call here shows up instead of passing quietly.
+let store: PluginStore;
+let directory: ConnectionsDirectory;
+
+/**
+ * The real vault, with the two writes this suite never expects made loud.
+ *
+ * This suite writes its secrets and grants directly, so that what is under test is the selection
+ * rather than the connect flow: a `create` here means the file had quietly started exercising
+ * something it did not claim to. Google does not rotate, so no exchange here ever reaches the
+ * in-place update either. Revoking is real, because retirement is under test and the assertion is
+ * that the vault's secret comes back revoked, which a stand-in cannot show.
+ */
+function guardedCredentials() {
+  const real = createCredentialStore(directory);
+  return {
+    ...real,
     create: async () => {
       throw new Error("this suite writes credentials directly");
     },
-    // Google does not rotate, so no exchange here ever reaches the in-place update. Loud, so that
-    // one starting to would show up rather than pass quietly.
     updateSecret: async () => {
       throw new Error("this suite writes credentials directly");
     },
-    /*
-     * A real revocation, against this suite's own rows.
-     *
-     * It used to throw, on the same principle as `create` above: nothing in the suite revoked, so a
-     * call here meant the file had quietly started exercising something it did not claim to. That
-     * stopped being true when retirement arrived — revoking IS the thing under test now, and the
-     * assertion is that the vault row comes back revoked, which a stub cannot show.
-     *
-     * `create` still throws, because connections are still written directly.
-     */
-    revoke: async (id) => {
-      const [row] = await database
-        .update(credentials)
-        .set({ revokedAt: new Date() })
-        .where(eq(credentials.id, id))
-        .returning({ revokedAt: credentials.revokedAt });
-      if (!row?.revokedAt) throw new Error("credential was not revoked");
-      return row.revokedAt;
-    },
-  },
-  encryptionKey: ENCRYPTION_KEY,
-  policy: () => policy,
-  // Stops before the network, and records what the call would have gone out with.
-  callVendor: async (connection) => {
-    decrypted.push(connection.token ?? "<none>");
-    return { text: "[vendor not reached in tests]", isError: false };
-  },
-  /*
-   * Stands in for Google's token endpoint, and records whose refresh token was presented.
-   *
-   * This is where the security property is observable. The access token that reaches the vendor is
-   * derived from the refresh token that was spent, so asserting on it proves the whole chain picked
-   * one person's grant — rather than proving only that some token was sent.
-   */
-  exchangeRefreshToken: async ({ client, refreshToken }) => {
-    expect(client).toEqual(CLIENT);
-    exchanged.push(refreshToken);
-    return { accessToken: accessTokenFrom(refreshToken) };
-  },
-});
+  };
+}
 
 /**
  * Retire whatever this key currently holds, the way the product now does.
  *
- * These fixtures insert straight into the vault rather than going through the store, and a key holds
- * at most one live credential since `credentials_active_key_idx`. Re-registering a client or
- * reconnecting a person is a replacement, so the row it replaces is revoked first; without this the
- * second test to call either helper meets the index instead of the behaviour it came to check.
+ * These fixtures store straight into the vault rather than going through the store, and the vault
+ * holds at most one live secret under a name. Re-registering a client or reconnecting a person is a
+ * replacement, so the secret it replaces is revoked first; without this the second test to call
+ * either helper meets the vault's refusal instead of the behaviour it came to check.
  */
 async function retireLive(
   kind: "mcp_oauth_client" | "mcp_user_token",
   keyId: string,
 ) {
-  const revokedAt = new Date();
-  await database
-    .update(credentials)
-    .set({ revokedAt, updatedAt: revokedAt })
-    .where(
-      and(
-        eq(credentials.kind, kind),
-        eq(credentials.provider, serverId),
-        eq(credentials.keyId, keyId),
-        isNull(credentials.revokedAt),
-      ),
-    );
+  for (const secret of await liveSecrets({
+    kind,
+    provider: serverId,
+    keyId,
+  })) {
+    await directory.revokeSecret(secret.id);
+  }
 }
 
-/** Register the deployment's OAuth client, which is what `mcp_servers.credential_id` holds. */
+/** Register the deployment's OAuth client, which is what the app's `credentialId` holds. */
 async function registerClient() {
   await retireLive("mcp_oauth_client", "oauth-client");
-  const [credential] = await database
-    .insert(credentials)
-    .values({
-      kind: "mcp_oauth_client",
-      provider: serverId,
-      keyId: "oauth-client",
-      metadata: { clientId: CLIENT.clientId },
-      encryptedValue: await encryptSecret(
-        ENCRYPTION_KEY,
-        JSON.stringify(CLIENT),
-      ),
-    })
-    .returning({ id: credentials.id });
-  if (!credential) throw new Error("client was not stored");
+  const credential = await seedCredential({
+    kind: "mcp_oauth_client",
+    provider: serverId,
+    keyId: "oauth-client",
+    metadata: { clientId: CLIENT.clientId },
+    plaintext: JSON.stringify(CLIENT),
+  });
   credentialIds.push(credential.id);
-  await database
-    .update(mcpServers)
-    .set({ credentialId: credential.id })
-    .where(eq(mcpServers.id, serverId));
+  await changeServer(serverId, { credentialId: credential.id });
   return credential.id;
 }
 
 async function connect(userId: string, refreshToken: string) {
   await retireLive("mcp_user_token", userId);
-  const [credential] = await database
-    .insert(credentials)
-    .values({
-      kind: "mcp_user_token",
-      provider: serverId,
-      keyId: userId,
-      metadata: {},
-      encryptedValue: await encryptSecret(ENCRYPTION_KEY, refreshToken),
-    })
-    .returning({ id: credentials.id });
-  if (!credential) throw new Error("credential was not stored");
+  const credential = await seedCredential({
+    kind: "mcp_user_token",
+    provider: serverId,
+    keyId: userId,
+    plaintext: refreshToken,
+  });
   credentialIds.push(credential.id);
 
-  await database
-    .insert(mcpUserCredentials)
-    .values({
-      serverId,
-      userId,
-      credentialId: credential.id,
-      scope: "https://www.googleapis.com/auth/drive.readonly",
-    })
-    .onConflictDoUpdate({
-      target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
-      set: { credentialId: credential.id },
-    });
+  await seedGrant({
+    serverId,
+    userId,
+    credentialId: credential.id,
+    scope: "https://www.googleapis.com/auth/drive.readonly",
+  });
   return credential.id;
 }
 
+/** Remove this suite's two people's grants on the server, never anybody else's. */
+function removeOwnGrants(userIds: string[]) {
+  return removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "grant" &&
+      connection.serverId === serverId &&
+      userIds.includes(connection.userId),
+  );
+}
+
 beforeAll(async () => {
+  directory = await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: guardedCredentials(),
+    encryptionKey: ENCRYPTION_KEY,
+    policy: () => policy,
+    // Stops before the network, and records what the call would have gone out with.
+    callVendor: async (connection) => {
+      decrypted.push(connection.token ?? "<none>");
+      return { text: "[vendor not reached in tests]", isError: false };
+    },
+    /*
+     * Stands in for Google's token endpoint, and records whose refresh token was presented.
+     *
+     * This is where the security property is observable. The access token that reaches the vendor
+     * is derived from the refresh token that was spent, so asserting on it proves the whole chain
+     * picked one person's grant — rather than proving only that some token was sent.
+     */
+    exchangeRefreshToken: async ({ client, refreshToken }) => {
+      expect(client).toEqual(CLIENT);
+      exchanged.push(refreshToken);
+      return { accessToken: accessTokenFrom(refreshToken) };
+    },
+  });
+
   await seedBot({ id: botId, name: botId });
 
   for (const [id, email] of [
@@ -251,11 +230,8 @@ beforeAll(async () => {
       .onConflictDoNothing();
   }
 
-  const [existing] = await database
-    .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, serverId));
-  serverWasAlreadyConfigured = existing !== undefined;
+  const existing = await storedServer(serverId);
+  serverWasAlreadyConfigured = existing !== null;
   toolWasAlreadyAdvertised =
     (
       await database
@@ -269,16 +245,15 @@ beforeAll(async () => {
 
   // Written directly, so the test needs no vendor to be reachable. What is under test is which
   // credential gets chosen, not the listing.
-  await database
-    .insert(mcpServers)
-    .values({
+  if (!existing) {
+    await seedServer({
       id: serverId,
       title: "Google Drive",
       vendor: "Google",
       url: "https://www.googleapis.com/drive/v3",
       provenance: "first-party",
-    })
-    .onConflictDoNothing();
+    });
+  }
   await database
     .insert(mcpTools)
     .values({
@@ -305,37 +280,21 @@ afterAll(async () => {
    * their consent had succeeded. The user ids carry this run's random suffix, so nothing outside it
    * can match.
    */
-  await database
-    .delete(mcpUserCredentials)
-    .where(
-      and(
-        eq(mcpUserCredentials.serverId, serverId),
-        inArray(mcpUserCredentials.userId, [askerId, otherId]),
-      ),
-    );
+  await removeOwnGrants([askerId, otherId]);
   /*
-   * Put the client pointer back before deleting anything, so a suite that borrowed live
-   * configuration leaves it as it found it. Ordered first on purpose: the deletes below remove the
-   * credential the row is currently pointing at.
+   * Put the client pointer back before purging anything, so a suite that borrowed live
+   * configuration leaves it as it found it. Ordered first on purpose: the purge below removes the
+   * credential the app is currently pointing at.
    *
-   * UNCONDITIONAL, and it used to be guarded by `serverWasAlreadyConfigured`. On a database that
+   * UNCONDITIONAL, and it used to be guarded by `serverWasAlreadyConfigured`. On a deployment that
    * already had the server the guard was harmless, which is why this passed locally for as long as
-   * it did. On a fresh one — CI — the guard skipped, the column kept pointing at a credential this
-   * suite created, and the delete below was refused by the foreign key.
-   *
-   * The guard was hiding a real leak rather than avoiding one. Before that key existed the delete
-   * SUCCEEDED and left `mcp_servers.credential_id` addressing a row that no longer existed, which is
-   * exactly the dangling pointer that made a configured connector report having no client. Restoring
-   * it is right in both cases: `clientBefore` is null when there was no server to borrow from, which
-   * is what the column should say.
+   * it did. On a fresh one the guard skipped and the pointer kept addressing a credential this suite
+   * purges, which is exactly the dangling pointer that made a configured connector report having no
+   * client. Restoring it is right in both cases: `clientBefore` is null when there was no server to
+   * borrow from, which is what the pointer should say.
    */
-  await database
-    .update(mcpServers)
-    .set({ credentialId: clientBefore })
-    .where(eq(mcpServers.id, serverId));
-  for (const id of credentialIds) {
-    await database.delete(credentials).where(eq(credentials.id, id));
-  }
+  await changeServer(serverId, { credentialId: clientBefore });
+  await purgeSecrets(credentialIds);
   /*
    * Scoped to this suite's own Bot, never to the ref alone. `ref` is `google-drive/search_files`,
    * a real server and a real tool, so a delete by ref alone removes an administrator's grants for
@@ -351,8 +310,7 @@ afterAll(async () => {
       .where(and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)));
   }
   if (!serverWasAlreadyConfigured) {
-    await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-    await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+    await removeServers([serverId]);
   }
   await removeBots([botId]);
   await database.delete(users).where(eq(users.id, askerId));
@@ -372,11 +330,10 @@ describe("a person who has not connected", () => {
     // The failure this whole table exists to prevent. A fallback here would answer from whatever the
     // deployment could see and look exactly like a correct answer.
     //
-    // A REAL credential row, where this used to write the string "a-deployment-credential". The
-    // column was `text` against a `uuid` primary key with no foreign key, so the database accepted a
-    // pointer to something that could not exist — and the test was therefore asserting against a
-    // state no deployment could reach, which is a weaker claim than it looked. It is now a genuine
-    // deployment credential that a fallback could really have spent.
+    // A REAL credential, where this used to write the string "a-deployment-credential", a pointer
+    // to something that could not exist — so the test was asserting against a state no deployment
+    // could reach, which is a weaker claim than it looked. It is now a genuine deployment
+    // credential that a fallback could really have spent.
     const deploymentCredential = await registerClient();
 
     await expect(
@@ -384,12 +341,9 @@ describe("a person who has not connected", () => {
     ).rejects.toThrow(PluginRefusedError);
     expect(decrypted).toEqual([]);
 
-    // Repointed away before the credential is left behind, because the foreign key is `restrict`:
-    // the row cannot be deleted while this column addresses it, which is the point of the key.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: null })
-      .where(eq(mcpServers.id, serverId));
+    // Repointed away before the credential is left behind, so the app never addresses a secret the
+    // cleanup purges.
+    await changeServer(serverId, { credentialId: null });
     expect(deploymentCredential).toBeTruthy();
   });
 });
@@ -399,7 +353,7 @@ describe("nobody in particular", () => {
     await connect(askerId, askerRefreshToken);
     decrypted.length = 0;
 
-    // The anonymous actor is the empty string, and an empty string must never match a row. A lookup
+    // The anonymous actor is the empty string, and an empty string must never match a grant. A lookup
     // that let it through would hand a run nobody is attributable for whichever grant sorted first.
     await expect(
       store.callTool({ ref, args: {}, botId, actorId: "" }),
@@ -413,10 +367,7 @@ describe("a person who has connected", () => {
     // The person did their part and cannot fix this one, so the refusal names the administrator's
     // job rather than sending them back to try connecting again.
     await connect(askerId, askerRefreshToken);
-    await database
-      .update(mcpServers)
-      .set({ credentialId: null })
-      .where(eq(mcpServers.id, serverId));
+    await changeServer(serverId, { credentialId: null });
 
     await expect(
       store.callTool({ ref, args: {}, botId, actorId: askerId }),
@@ -458,10 +409,7 @@ describe("a person who has connected", () => {
     const credentialId = await connect(askerId, askerRefreshToken);
     decrypted.length = 0;
 
-    await database
-      .update(credentials)
-      .set({ revokedAt: new Date() })
-      .where(eq(credentials.id, credentialId));
+    await directory.revokeSecret(credentialId);
 
     /*
      * A refusal rather than a thrown vendor error.
@@ -477,18 +425,11 @@ describe("a person who has connected", () => {
   });
 
   test("does not gain access to a server they connected a different one for", async () => {
-    // The lookup is keyed on the pair. A row for one server must not satisfy another.
+    // The lookup is keyed on the pair. A grant on one server must not satisfy another.
     await connect(askerId, askerRefreshToken);
     decrypted.length = 0;
 
-    await database
-      .delete(mcpUserCredentials)
-      .where(
-        and(
-          eq(mcpUserCredentials.serverId, serverId),
-          inArray(mcpUserCredentials.userId, [askerId, otherId]),
-        ),
-      );
+    await removeOwnGrants([askerId, otherId]);
 
     await expect(
       store.callTool({ ref, args: {}, botId, actorId: askerId }),
@@ -504,9 +445,9 @@ describe("a person who has connected", () => {
  */
 describe("a connection whose credential no longer works", () => {
   /*
-   * A ROW IS NOT ACCESS, and the two used to be impossible to tell apart from outside.
+   * A GRANT IS NOT ACCESS, and the two used to be impossible to tell apart from outside.
    *
-   * `connectionsFor` reads the join table, which revoking a credential does not touch. Every reader
+   * `connectionsFor` reads the grants, which revoking a credential does not touch. Every reader
    * asking "is this person connected" therefore got "does this person have a row", and the in-chat
    * connect card drew "connected" over the very refusal telling them their access was withdrawn —
    * taking away the button that is the only way to get it back.
@@ -519,34 +460,39 @@ describe("a connection whose credential no longer works", () => {
       { serverId, revoked: false },
     ]);
 
-    await database
-      .update(credentials)
-      .set({ revokedAt: new Date() })
-      .where(eq(credentials.id, credentialId));
+    await directory.revokeSecret(credentialId);
 
     expect(await store.connectionsFor(askerId)).toMatchObject([
       { serverId, revoked: true },
     ]);
   });
 
-  test("cannot have its credential deleted out from under it", async () => {
+  test("a credential gone from the vault out from under it reads as revoked, never as a third state", async () => {
     /*
-     * What makes the join above total, and therefore what makes "revoked" the only way access can
-     * be gone. `credential_id` is a real foreign key that does not cascade, so there is no third
-     * state to report — the database refuses to create one.
+     * What makes the answer above total, and therefore what makes "revoked" the only way access can
+     * be gone. A grant used to point at its credential through a foreign key that did not cascade,
+     * so the database refused to make a third state. The vault is Intelligence's now and will purge
+     * a secret a grant still names, so the third state can exist; what keeps it from being a third
+     * answer is that a grant whose secret is gone reads exactly as a revoked one, and is refused the
+     * same way.
      */
     await registerClient();
     const credentialId = await connect(askerId, askerRefreshToken);
+    expect(await store.connectionsFor(askerId)).toMatchObject([
+      { serverId, revoked: false },
+    ]);
 
-    // Awaited inside a real promise: a drizzle query builder is a thenable, not a Promise, and
-    // `rejects` given one asserts against the builder object rather than running the query.
+    await directory.purgeSecret(credentialId);
+    expect(await storedSecret(credentialId)).toBeNull();
+
+    expect(await store.connectionsFor(askerId)).toMatchObject([
+      { serverId, revoked: true },
+    ]);
+    decrypted.length = 0;
     await expect(
-      (async () => {
-        await database
-          .delete(credentials)
-          .where(eq(credentials.id, credentialId));
-      })(),
-    ).rejects.toThrow();
+      store.callTool({ ref, args: {}, botId, actorId: askerId }),
+    ).rejects.toThrow(PluginRefusedError);
+    expect(decrypted).toEqual([]);
   });
 });
 
@@ -554,27 +500,16 @@ describe("retiring the credentials a person owns", () => {
   /*
    * Counted as a property, not as a number.
    *
-   * `connect` above writes vault rows directly and leaves earlier ones alone, so how many a person
+   * `connect` above writes vault secrets directly and leaves earlier ones alone, so how many a person
    * has accumulated depends on which tests ran first — and asserting an exact `retired` count would
    * make these pass or fail on suite order rather than on behaviour. What has to be true is that
    * nothing usable is left, which is the same claim however many there were.
    *
    * The product path does not accumulate them: `recordConnection` revokes the previous credential
-   * when it repoints the join row.
+   * when it repoints the grant.
    */
   const unrevokedTokensFor = async (userId: string) =>
-    (
-      await database
-        .select({ id: credentials.id })
-        .from(credentials)
-        .where(
-          and(
-            eq(credentials.kind, "mcp_user_token"),
-            eq(credentials.keyId, userId),
-            isNull(credentials.revokedAt),
-          ),
-        )
-    ).length;
+    (await liveSecrets({ kind: "mcp_user_token", keyId: userId })).length;
 
   test("the vault stops holding a usable secret, and the connection is gone", async () => {
     await registerClient();
@@ -586,14 +521,10 @@ describe("retiring the credentials a person owns", () => {
 
     await store.retireConnectionsFor(askerId, "admin@openbot.local");
 
-    const [credential] = await database
-      .select({ revokedAt: credentials.revokedAt })
-      .from(credentials)
-      .where(eq(credentials.id, credentialId));
-    expect(credential?.revokedAt).not.toBeNull();
+    expect((await storedSecret(credentialId))?.revokedAt).not.toBeNull();
     expect(await unrevokedTokensFor(askerId)).toBe(0);
 
-    // The join row goes too, so no page claims a connection this deployment can no longer use.
+    // The grant goes too, so no page claims a connection this deployment can no longer use.
     expect(await store.connectionsFor(askerId)).toEqual([]);
 
     // And a call is refused rather than answered from a revoked credential.
@@ -603,27 +534,21 @@ describe("retiring the credentials a person owns", () => {
   });
 
   /*
-   * THE ORPHAN. `mcp_user_credentials.user_id` cascades, so deleting a user row takes the join row
-   * with it and leaves the credential behind: unrevoked, referenced by nothing, reachable from no
-   * screen. Looking the owner up in the vault by `key_id` instead of through the join table is what
-   * makes it reachable at all, so that is asserted rather than assumed.
+   * THE ORPHAN. A grant can go while its credential stays behind (deleting a user's row took their
+   * grants with it by cascade): unrevoked, referenced by nothing, reachable from no screen. Looking
+   * the owner up in the vault by name instead of through the grants is what makes it reachable at
+   * all, so that is asserted rather than assumed.
    */
   test("a credential orphaned by a deleted user row is still retired", async () => {
     await registerClient();
     const credentialId = await connect(otherId, otherRefreshToken);
 
     // Exactly what the cascade leaves behind.
-    await database
-      .delete(mcpUserCredentials)
-      .where(eq(mcpUserCredentials.userId, otherId));
+    await removeOwnGrants([otherId]);
 
     await store.retireConnectionsFor(otherId, "admin@openbot.local");
 
-    const [credential] = await database
-      .select({ revokedAt: credentials.revokedAt })
-      .from(credentials)
-      .where(eq(credentials.id, credentialId));
-    expect(credential?.revokedAt).not.toBeNull();
+    expect((await storedSecret(credentialId))?.revokedAt).not.toBeNull();
     expect(await unrevokedTokensFor(otherId)).toBe(0);
   });
 
@@ -640,7 +565,7 @@ describe("retiring the credentials a person owns", () => {
       (await store.retireConnectionsFor(askerId, "admin@openbot.local"))
         .retired,
     ).toBe(0);
-    // The empty actor is ANONYMOUS_ACTOR. It owns nothing, and must not match rows by being empty.
+    // The empty actor is ANONYMOUS_ACTOR. It owns nothing, and must not match secrets by being empty.
     expect(
       (await store.retireConnectionsFor("", "admin@openbot.local")).retired,
     ).toBe(0);

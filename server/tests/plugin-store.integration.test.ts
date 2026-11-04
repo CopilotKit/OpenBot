@@ -15,21 +15,16 @@ import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
-  type CredentialStoreValue,
+  CredentialUnusableError,
   createCredentialStore,
-  decryptSecret,
-  encryptSecret,
 } from "../src/credentials";
 import { createDatabase, type Database } from "../src/db/client";
 import {
   auditEvents,
-  brokeredConnections,
-  credentials as credentialRows,
-  credentials,
-  mcpServers,
+  mcpToolLists,
   mcpTools,
-  mcpUserCredentials,
   pluginGrants,
+  secretLeases,
   users,
 } from "../src/db/schema";
 import {
@@ -63,9 +58,35 @@ import {
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import { createVaultClient, type StoredSecret } from "../src/vault/client";
+import { createConnectionsDirectory } from "../src/vault/directory";
+import { brokeredId } from "../src/vault/ids";
 import fileActions from "./fixtures/composio-file-actions.json";
-import { removeBots, seedBot, useTestBots } from "./support/bots";
+import {
+  removeBots,
+  seedBot,
+  testIntelligence,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  secretsNamed,
+  secretValue,
+  seedBrokered,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  storedConnections,
+  storedGrant,
+  storedSecret,
+  storedServer,
+  useTestVault,
+  vaultCredentials,
+} from "./support/vault";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.
@@ -128,39 +149,37 @@ const removalServerIds = new Set<string>();
 const removalUserIds = new Set<string>();
 
 /**
- * The vault, stubbed, shared by every store in this file that does not need a real one.
+ * The vault, shared by every store in this file that does not need one of its own: the real one,
+ * over the test Intelligence, with its writes held to what this file claims.
  *
- * Named rather than inlined into the store below so that {@link freshStore} passes the SAME stub:
- * a second copy would be a second place for "no credential is read here" to stop being true, and the
- * refusals below are what make that claim worth anything.
+ * Named rather than inlined into the store below so that {@link freshStore} passes the SAME vault:
+ * a second copy would be a second place for "no credential is written here" to stop being true, and
+ * the refusals below are what make that claim worth anything.
  */
-const credentialsStub = {
-  // No credential is ever read in these tests, because every call is refused before the vault.
-  readSecret: async () => null,
-  // Nor written in place. Loud rather than absent: a call reaching either of these would mean
-  // this file had started exercising something it does not claim to, and a silent no-op would
-  // hide that.
+const vaultForReads = vaultCredentials();
+const credentialsStub: typeof vaultForReads = {
+  ...vaultForReads,
+  // Never written to. Loud rather than absent: a call reaching any of these would mean this file
+  // had started exercising something it does not claim to, and a silent no-op would hide that.
   create: async () => {
     throw new Error("this suite does not write credentials");
   },
   updateSecret: async () => {
     throw new Error("this suite does not write credentials");
   },
+  rotate: async () => {
+    throw new Error("this suite does not write credentials");
+  },
   // `removeServer` does revoke: it retires the token the server was configured with so a re-add
-  // does not collide on `credentials_active_key_idx`. The stamp goes to the real row, because
-  // `removeServer` reads liveness from the table before deciding whether to revoke at all.
+  // does not meet a live secret under the same name. The real vault's revoke, recorded, because
+  // `removeServer` reads liveness from the vault before deciding whether to revoke at all.
   revoke: async (id: string) => {
-    const revokedAt = new Date();
-    await database
-      .update(credentialRows)
-      .set({ revokedAt, updatedAt: revokedAt })
-      .where(eq(credentialRows.id, id));
     revokedCredentialIds.push(id);
-    return revokedAt;
+    return vaultForReads.revoke(id);
   },
 };
 
-const store = createPluginStore({
+const store: PluginStore = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
@@ -268,10 +287,11 @@ let ownsFixtureIds = false;
  * makes them safe.
  */
 /**
- * Every `composio_connections` row this file may claim, as one clause used by all three sites.
+ * Every brokered connection this file may claim, as one predicate used by all three sites.
  *
  * CRITERION. The pair set is an app crossed with a person: `gmail` or `linear`, held by
- * `user_asker`, by `user_leaver` or by the anonymous actor. The refuse-to-run guard, the per-test
+ * `user_asker` or by `user_leaver`. (The anonymous actor used to be a third: Intelligence refuses a
+ * connection held by an empty person, so nothing can sit there any more.) The refuse-to-run guard, the per-test
  * sweep and the teardown ask exactly that question and nothing wider, and a fixture written at a
  * pair outside the cross has to widen one clause rather than three.
  *
@@ -288,14 +308,23 @@ let ownsFixtureIds = false;
  * toolkit slug and this file asserts things about the real ones — so naming the person alone
  * claims that person's rows at every other app as well.
  */
-function ownedConnections() {
-  return and(
-    inArray(brokeredConnections.app, ["gmail", "linear"]),
-    inArray(brokeredConnections.userId, ["user_asker", "user_leaver", ""]),
+function ownedConnection(connection: {
+  kind: string;
+  app?: string;
+  holder?: string;
+  userId: string | null;
+}) {
+  return (
+    connection.kind === "brokered" &&
+    connection.holder === "person" &&
+    ["gmail", "linear"].includes(connection.app ?? "") &&
+    ["user_asker", "user_leaver"].includes(connection.userId ?? "")
   );
 }
 
 beforeAll(async () => {
+  // The vault and the apps are Intelligence's: install the process's directory before anything reads.
+  await useTestVault();
   /*
    * Stamped here, in the first hook the file registers, so no row this run writes is older than it
    * and no row an earlier run wrote is newer.
@@ -320,10 +349,10 @@ beforeAll(async () => {
    * Nothing here is waiting on anything else and a few sequential reads of empty tables cost
    * milliseconds, so there was never anything to win by issuing them together.
    */
-  const configuredServers = await database
-    .select({ id: mcpServers.id })
-    .from(mcpServers)
-    .where(inArray(mcpServers.id, ["gmail", "notion"]));
+  const configuredServers: { id: string }[] = [];
+  for (const id of ["gmail", "notion"]) {
+    if (await storedServer(id)) configuredServers.push({ id });
+  }
 
   // Bots live in Intelligence, so that is where a real `bot_helper` would be.
   const existingBot = await (await useTestBots()).registry.get("bot_helper");
@@ -332,12 +361,12 @@ beforeAll(async () => {
   /*
    * Brokered connections, keyed on the PAIR rather than on the person.
    *
-   * CRITERION. This guard refuses on {@link ownedConnections} — two real apps crossed with
-   * three people — and on no other `composio_connections` row, because every pair this file
+   * CRITERION. This guard refuses on {@link ownedConnection} — two real apps crossed with
+   * two people — and on no other brokered connection, because every pair this file
    * inserts and every pair it deletes is inside that cross.
    *
    * REASON. Every connection row this file writes is at a real app, `gmail` or `linear` — the
-   * two people it invents and the anonymous actor alike — so the app is half of what makes a
+   * two people it invents alike — so the app is half of what makes a
    * row this file's, and asking by person alone claims rows at every other app as well. Both
    * spellings of that over-reach have already cost something. `user_id = ''` caught the
    * anonymous row `composio-connections.test.ts` writes against its own run-suffixed app, so a
@@ -346,17 +375,12 @@ beforeAll(async () => {
    * would then DELETE it — a `composio_connections` row is the entire gate on a brokered
    * call, and nothing else can find it again.
    *
-   * The anonymous actor is one of the three people because `user_id` is notNull and notNull
-   * does not exclude the empty string, so `("gmail", "")` is a row a deployment can legally
-   * hold, which is the whole point of the test that inserts one.
+   * The anonymous actor is no longer one of them: Intelligence refuses a connection held by an
+   * empty person, which the test that used to insert one now asserts.
    */
-  const existingConnections = await database
-    .select({
-      toolkit: brokeredConnections.app,
-      userId: brokeredConnections.userId,
-    })
-    .from(brokeredConnections)
-    .where(ownedConnections());
+  const existingConnections = (await storedConnections()).brokered
+    .filter(ownedConnection)
+    .map((row) => ({ toolkit: row.app, userId: row.userId }));
 
   /*
    * The person, who was missing from this guard entirely.
@@ -371,11 +395,10 @@ beforeAll(async () => {
     .where(eq(users.id, "user_leaver"));
 
   const found = [
-    ...configuredServers.map((row) => `the mcp_servers row '${row.id}'`),
+    ...configuredServers.map((row) => `the app '${row.id}'`),
     ...existingBots.map((row) => `the Bot '${row.id}'`),
     ...existingConnections.map(
-      (row) =>
-        `the brokered_connections row ('${row.toolkit}', '${row.userId}')`,
+      (row) => `the brokered connection ('${row.toolkit}', '${row.userId}')`,
     ),
     ...existingPeople.map((row) => `the person '${row.id}'`),
   ];
@@ -386,7 +409,7 @@ beforeAll(async () => {
         "them before every test — and refuses to run against a database that already has them, " +
         "because deleting a real server row takes every person's per-user credentials with it, " +
         "deleting a real Bot takes the six tables behind it, and deleting a real person takes the " +
-        "ten behind them. Point TEST_DATABASE_URL at a scratch database.",
+        "ten behind them. Point TEST_DATABASE_URL and TEST_INTELLIGENCE_API_URL at scratch ones.",
     );
   }
 
@@ -396,13 +419,7 @@ beforeAll(async () => {
 beforeAll(async () => {
   for (const id of [holderId, strangerId]) await seedBot({ id, name: id });
 
-  suiteCreatedServerRow =
-    (
-      await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-    ).length === 0;
+  suiteCreatedServerRow = (await storedServer(serverId)) === null;
 
   suiteCreatedToolRow =
     (
@@ -414,18 +431,18 @@ beforeAll(async () => {
         )
     ).length === 0;
 
-  // The server row is written directly rather than through addServer, so the test needs no vendor
-  // to be reachable. What is under test is the decision, not the listing.
-  await database
-    .insert(mcpServers)
-    .values({
+  // The app is written directly rather than through addServer, so the test needs no vendor to be
+  // reachable. What is under test is the decision, not the listing. Only when there was none: an app
+  // already there is the deployment's, and is left as it is.
+  if (suiteCreatedServerRow) {
+    await seedServer({
       id: serverId,
       title: "Google Drive",
       vendor: "Google",
       url: "https://www.googleapis.com/drive/v3",
       provenance: "first-party",
-    })
-    .onConflictDoNothing();
+    });
+  }
   await database
     .insert(mcpTools)
     .values({
@@ -458,9 +475,7 @@ afterAll(async () => {
   // removeServer is under test, so teardown must not depend on it succeeding. Delete the exact
   // attempted fixtures before their credentials, including when setup failed partway through.
   if (removalServerIds.size > 0) {
-    await database
-      .delete(mcpServers)
-      .where(inArray(mcpServers.id, [...removalServerIds]));
+    await removeServers(removalServerIds);
   }
   if (removalUserIds.size > 0) {
     await database.delete(users).where(inArray(users.id, [...removalUserIds]));
@@ -498,12 +513,10 @@ afterAll(async () => {
   }
   if (suiteCreatedServerRow) {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-    await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+    await removeServers([serverId]);
   }
   await removeBots([holderId, strangerId]);
-  for (const id of issuedCredentialIds) {
-    await database.delete(credentialRows).where(eq(credentialRows.id, id));
-  }
+  await purgeSecrets(issuedCredentialIds);
 });
 
 describe("a grant is the permission", () => {
@@ -861,27 +874,21 @@ describe("a boundary written about the browser does not refuse tool calls", () =
 
 describe("removing an MCP server", () => {
   test("revokes the credential the server was configured with", async () => {
-    // Without this, the credential row stays live after the server row is
-    // gone, and re-adding the same server would unique-violate on
-    // `credentials_active_key_idx`. The audit trail also carries the
-    // revocation with `reason: mcp_server_removed`.
+    // Without this, the credential stays live in the vault after the app is
+    // gone, and re-adding the same server would meet a live secret under the
+    // same name. The audit trail also carries the revocation with
+    // `reason: mcp_server_removed`.
     const removalServerId = `removal-target-${suite}`;
     removalServerIds.add(removalServerId);
     revokedCredentialIds.length = 0;
-    const [credentialRow] = await database
-      .insert(credentialRows)
-      .values({
-        kind: "mcp",
-        provider: removalServerId,
-        keyId: `mcp-${removalServerId}`,
-        encryptedValue: "{}",
-        metadata: {},
-      })
-      .returning({ id: credentialRows.id });
-    const credentialId = credentialRow?.id;
-    if (!credentialId) throw new Error("credential row was not created");
+    const { id: credentialId } = await seedCredential({
+      kind: "mcp",
+      provider: removalServerId,
+      keyId: `mcp-${removalServerId}`,
+      plaintext: "{}",
+    });
     issuedCredentialIds.push(credentialId);
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: removalServerId,
       title: "removal target",
       vendor: "test",
@@ -893,11 +900,8 @@ describe("removing an MCP server", () => {
     await store.removeServer(removalServerId, "admin@openbot.local");
 
     expect(revokedCredentialIds).toEqual([credentialId]);
-    const [row] = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, removalServerId));
-    expect(row).toBeUndefined();
+    expect((await storedSecret(credentialId))?.revokedAt).not.toBeNull();
+    expect(await storedServer(removalServerId)).toBeNull();
     const audit = await database
       .select({
         eventType: auditEvents.eventType,
@@ -922,8 +926,8 @@ describe("removing an MCP server", () => {
   /**
    * The people's grants go too, not only the server's own token.
    *
-   * `mcp_user_credentials` cascades on the server row, so removing a `user-oauth` connector used to
-   * delete every pointer and leave every refresh token in the vault live and unreferenced: reachable
+   * Intelligence removes a person's grant with the app, so removing a `user-oauth` connector used to
+   * remove every pointer and leave every refresh token in the vault live and unreferenced: reachable
    * from no screen, revoked by no operation, and still a usable grant at the vendor. "We removed the
    * connector" has to be true of the thing that matters, which is the token sitting at Notion.
    */
@@ -944,28 +948,22 @@ describe("removing an MCP server", () => {
       })
       .onConflictDoNothing();
 
-    const [grant] = await database
-      .insert(credentialRows)
-      .values({
-        kind: "mcp_user_token",
-        provider: removalServerId,
-        keyId: connectedUserId,
-        encryptedValue: "{}",
-        metadata: {},
-      })
-      .returning({ id: credentialRows.id });
-    const grantId = grant?.id;
-    if (!grantId) throw new Error("grant row was not created");
+    const { id: grantId } = await seedCredential({
+      kind: "mcp_user_token",
+      provider: removalServerId,
+      keyId: connectedUserId,
+      plaintext: "{}",
+    });
     issuedCredentialIds.push(grantId);
 
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: removalServerId,
       title: "removal target with people",
       vendor: "test",
       url: "https://example.invalid/mcp",
       provenance: "custom",
     });
-    await database.insert(mcpUserCredentials).values({
+    await seedGrant({
       serverId: removalServerId,
       userId: connectedUserId,
       credentialId: grantId,
@@ -976,11 +974,9 @@ describe("removing an MCP server", () => {
       await store.removeServer(removalServerId, "admin@openbot.local");
 
       expect(revokedCredentialIds).toEqual([grantId]);
-      const [row] = await database
-        .select({ revokedAt: credentialRows.revokedAt })
-        .from(credentialRows)
-        .where(eq(credentialRows.id, grantId));
-      expect(row?.revokedAt).not.toBeNull();
+      expect((await storedSecret(grantId))?.revokedAt).not.toBeNull();
+      // And the grant went with the app, in Intelligence.
+      expect(await storedGrant(removalServerId, connectedUserId)).toBeNull();
 
       // And the trail says whose access ended and why, which is the row an auditor reaches for.
       const trail = await database
@@ -1008,10 +1004,10 @@ describe("removing an MCP server", () => {
   /**
    * A credential that was already retired, and the read that decides whether to retire it again.
    *
-   * CRITERION. `removeServer` must not ask the vault to revoke a credential whose row already
-   * carries a `revoked_at`, and must still remove the server row.
+   * CRITERION. `removeServer` must not ask the vault to revoke a credential the vault already
+   * holds revoked, and must still remove the app.
    *
-   * REASON. It reads liveness from the table before deciding, and nothing asserted that. The test
+   * REASON. It reads liveness from the vault before deciding, and nothing asserted that. The test
    * above inserts a LIVE row and so takes the true branch; the one below has no credential at all
    * and so never runs the query. So `isNull(revoked_at)` could be dropped with the whole suite
    * green — and in production `credentials.revoke` throws "not found or already revoked", which
@@ -1019,31 +1015,22 @@ describe("removing an MCP server", () => {
    * number of attempts, on a route with no `catch`. Two ordinary states produce the row: a
    * previous removal that failed after the revoke, and a key rotated by hand.
    *
-   * ASSERTED AS "revoke was not called", not as the absence of a throw. The vault here is a stub
-   * that is deliberately forgiving — it stamps whatever id it is handed — so a test waiting for it
-   * to complain would pass with the clause gone. What the read decides is whether the call is made
-   * at all, and that is what {@link revokedCredentialIds} records.
+   * ASSERTED AS "revoke was not called", not as the absence of a throw. What the read decides is
+   * whether the call is made at all, and that is what {@link revokedCredentialIds} records.
    */
   test("does not ask the vault to revoke a credential already revoked", async () => {
     const removalServerId = `removal-target-retired-${suite}`;
     revokedCredentialIds.length = 0;
-    const revokedAt = new Date();
-    const [credentialRow] = await database
-      .insert(credentialRows)
-      .values({
-        kind: "mcp",
-        provider: removalServerId,
-        keyId: `mcp-${removalServerId}`,
-        encryptedValue: "{}",
-        metadata: {},
-        revokedAt,
-        updatedAt: revokedAt,
-      })
-      .returning({ id: credentialRows.id });
-    const credentialId = credentialRow?.id;
-    if (!credentialId) throw new Error("credential row was not created");
+    removalServerIds.add(removalServerId);
+    const { id: credentialId } = await seedCredential({
+      kind: "mcp",
+      provider: removalServerId,
+      keyId: `mcp-${removalServerId}`,
+      plaintext: "{}",
+      revoked: true,
+    });
     issuedCredentialIds.push(credentialId);
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: removalServerId,
       title: "removal target with a retired credential",
       vendor: "test",
@@ -1054,16 +1041,11 @@ describe("removing an MCP server", () => {
 
     await store.removeServer(removalServerId, "admin@openbot.local");
 
-    // Not asked, because the row already says it is retired.
+    // Not asked, because the vault already says it is retired.
     expect(revokedCredentialIds).toEqual([]);
-    // And the server row is gone, which is the act an administrator asked for and the thing a
-    // throw from the vault would have prevented.
-    expect(
-      await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, removalServerId)),
-    ).toEqual([]);
+    // And the app is gone, which is the act an administrator asked for and the thing a throw from
+    // the vault would have prevented.
+    expect(await storedServer(removalServerId)).toBeNull();
     // No second revocation in the trail either: a row saying access ended twice is a row an
     // auditor has to reconcile against nothing having happened.
     expect(
@@ -1083,7 +1065,7 @@ describe("removing an MCP server", () => {
     const removalServerId = `removal-target-nocred-${suite}`;
     removalServerIds.add(removalServerId);
     revokedCredentialIds.length = 0;
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: removalServerId,
       title: "removal target no cred",
       vendor: "test",
@@ -1226,10 +1208,10 @@ describe("a grant on a tool the vendor no longer lists", () => {
  * makes persisting the new token part of the exchange rather than bookkeeping after it, and it makes
  * two concurrent calls a problem — both would present the same token, and one of them would lose.
  *
- * This suite needs a REAL vault, unlike the store fixture above: rotation re-encrypts the row the
- * connection already points at, and a stub that throws cannot show that happening — nor show that
- * nothing else was written. So it builds its own store, with the vendor and its token endpoint
- * injected and everything else genuine.
+ * This suite needs a vault it may write to, unlike the store fixture above: rotation replaces the
+ * value of the secret the connection already points at, and a vault that refuses writes cannot show
+ * that happening — nor show that nothing else was written. So it builds its own store, with the
+ * vendor and its token endpoint injected and everything else genuine.
  */
 describe("refresh token rotation", () => {
   const rotationBotId = `agent_rotation_bot_${suite}`;
@@ -1240,17 +1222,15 @@ describe("refresh token rotation", () => {
   const rotationToolName = `search_${suite}`;
   const rotationRef = `${rotationServerId}/${rotationToolName}`;
   /**
-   * 32 zero bytes in base64.
-   *
-   * A real AES-256 key length, unlike the `"x".repeat(44)` the fixture above gets away with: every
-   * call there is refused before the vault is opened, and every call here goes through it.
+   * 32 zero bytes in base64: the deployment's own key, which seals OAuth state. Credentials are the
+   * vault's to encrypt, in Intelligence.
    */
   const ROTATION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   const CLIENT = { clientId: "notion-client", clientSecret: "notion-secret" };
   /** Notion has no scope strings; the connection stores what the vendor said, which is nothing. */
   const SCOPE = "";
 
-  /** Every vault row this suite created, so the cleanup can take exactly those. */
+  /** Every vault secret this suite created, so the cleanup can take exactly those. */
   const vaultRows: string[] = [];
   /** Every access token the store was about to send to the vendor, in order. */
   const sent: string[] = [];
@@ -1270,63 +1250,30 @@ describe("refresh token rotation", () => {
   };
 
   /**
-   * The vault, wired once and shared by every store this describe builds.
+   * The vault, wired once and shared by every store this describe builds: the real one, over the
+   * test Intelligence, recording each secret it stores so the cleanup can purge exactly those.
    *
-   * Shared deliberately: a second replica of this deployment reads and writes the same rows through
-   * the same code, and a per-store copy of the wiring would be a second place for the fixture to
-   * drift from what production does.
+   * Shared deliberately: a second replica of this deployment reads and writes the same secrets
+   * through the same code, and a per-store copy of the wiring would be a second place for the
+   * fixture to drift from what production does.
    */
-  const vault = {
-    readSecret: async (id: string) => {
-      const [row] = await database
-        .select({
-          encryptedValue: credentials.encryptedValue,
-          revokedAt: credentials.revokedAt,
-        })
-        .from(credentials)
-        .where(eq(credentials.id, id));
-      return row ?? null;
-    },
-    create: async (value: CredentialStoreValue) => {
-      const [row] = await database
-        .insert(credentials)
-        .values(value)
-        .returning({ id: credentials.id, revokedAt: credentials.revokedAt });
-      if (!row) throw new Error("credential was not stored");
-      vaultRows.push(row.id);
-      return row;
-    },
-    /*
-     * The vault's own in-place update, not a stand-in for it.
-     *
-     * This is the write rotation now performs, and the suite asserts the ROW it leaves behind: the
-     * same id, re-encrypted, nothing added. A hand-rolled copy of the statement here would assert
-     * the copy rather than the vault — and would not join the caller's transaction, which is the
-     * whole of what keeps two replicas from spending one refresh token twice.
-     */
-    updateSecret: createCredentialStore(database).updateSecret,
-    /*
-     * The real swap and the real key lookup too: `credentials_active_key_idx` holds one live row
-     * per key, so a reconnect in this suite replaces its previous token through the same
-     * transaction production uses. A stand-in would dodge the index the test data must obey.
-     */
-    rotate: async (
-      value: CredentialStoreValue & { previousCredentialId: string },
-    ) => {
-      const stored = await createCredentialStore(database).rotate(value);
+  const realVault = vaultCredentials();
+  const vault: typeof realVault = {
+    ...realVault,
+    create: async (value) => {
+      const stored = await realVault.create(value);
       vaultRows.push(stored.id);
       return stored;
     },
-    findLiveByKey: createCredentialStore(database).findLiveByKey,
-    isLive: createCredentialStore(database).isLive,
-    revoke: async (id: string) => {
-      const [row] = await database
-        .update(credentials)
-        .set({ revokedAt: new Date() })
-        .where(eq(credentials.id, id))
-        .returning({ revokedAt: credentials.revokedAt });
-      if (!row?.revokedAt) throw new Error("credential was not revoked");
-      return row.revokedAt;
+    /*
+     * The real swap: a name holds one live secret, so a reconnect in this suite replaces its
+     * previous token through the same step production uses. A stand-in would dodge the rule the
+     * test data must obey.
+     */
+    rotate: async (value) => {
+      const stored = await realVault.rotate(value);
+      vaultRows.push(stored.id);
+      return stored;
     },
   };
 
@@ -1376,69 +1323,46 @@ describe("refresh token rotation", () => {
     });
   }
 
-  /** The deployment's OAuth client, which is what `mcp_servers.credential_id` holds. */
+  /** The deployment's OAuth client, which is what the app's `credentialId` holds. */
   async function registerClient() {
-    const [credential] = await database
-      .insert(credentials)
-      .values({
-        kind: "mcp_oauth_client",
-        provider: rotationServerId,
-        keyId: "oauth-client",
-        metadata: { clientId: CLIENT.clientId },
-        encryptedValue: await encryptSecret(
-          ROTATION_KEY,
-          JSON.stringify(CLIENT),
-        ),
-      })
-      .returning({ id: credentials.id });
-    if (!credential) throw new Error("client was not stored");
+    const credential = await seedCredential({
+      kind: "mcp_oauth_client",
+      provider: rotationServerId,
+      keyId: "oauth-client",
+      metadata: { clientId: CLIENT.clientId },
+      plaintext: JSON.stringify(CLIENT),
+    });
     vaultRows.push(credential.id);
-    await database
-      .update(mcpServers)
-      .set({ credentialId: credential.id })
-      .where(eq(mcpServers.id, rotationServerId));
+    await changeServer(rotationServerId, { credentialId: credential.id });
   }
 
-  /** Which vault row this person's connection points at, so a swap is observable. */
+  /** Which vault secret this person's connection points at, so a swap is observable. */
   async function connectionCredential() {
-    const [row] = await database
-      .select({ credentialId: mcpUserCredentials.credentialId })
-      .from(mcpUserCredentials)
-      .where(
-        and(
-          eq(mcpUserCredentials.serverId, rotationServerId),
-          eq(mcpUserCredentials.userId, rotationUserId),
-        ),
-      );
-    return row?.credentialId ?? null;
+    return (
+      (await storedGrant(rotationServerId, rotationUserId))?.credentialId ??
+      null
+    );
   }
 
   /**
-   * Every vault row this person's connection has ever had, live or revoked.
+   * Every vault secret this person's connection has ever had, live or revoked.
    *
    * The count is the point. A rotating vendor issues a new refresh token on every exchange, so a
-   * rotation that minted a row would leave one row per tool call here — which is invisible to any
+   * rotation that minted a secret would leave one per tool call here — which is invisible to any
    * assertion that only looks at where the connection currently points.
    */
   async function connectionVaultRows() {
     return (
-      database
-        .select({
-          id: credentials.id,
-          encryptedValue: credentials.encryptedValue,
-          revokedAt: credentials.revokedAt,
+      (
+        await secretsNamed({
+          kind: "mcp_user_token",
+          provider: rotationServerId,
+          keyId: rotationUserId,
         })
-        .from(credentials)
-        .where(
-          and(
-            eq(credentials.kind, "mcp_user_token"),
-            eq(credentials.provider, rotationServerId),
-            eq(credentials.keyId, rotationUserId),
-          ),
-        )
-        // Ordered, so that comparing the whole list before and after is comparing the rows rather
-        // than whatever order the database felt like returning them in.
-        .orderBy(credentials.id)
+      )
+        // Ordered, so that comparing the whole list before and after is comparing the secrets rather
+        // than whatever order the vault felt like returning them in.
+        .sort((left, right) => left.id.localeCompare(right.id))
     );
   }
 
@@ -1511,25 +1435,21 @@ describe("refresh token rotation", () => {
       })
       .onConflictDoNothing();
 
-    const [existing] = await database
-      .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, rotationServerId));
-    suiteCreatedNotionRow = existing === undefined;
+    const existing = await storedServer(rotationServerId);
+    suiteCreatedNotionRow = existing === null;
     clientBefore = existing?.credentialId ?? null;
 
     // Written directly, so the test needs no vendor to be reachable. What is under test is which
     // refresh token the next exchange presents, not the listing.
-    await database
-      .insert(mcpServers)
-      .values({
+    if (suiteCreatedNotionRow) {
+      await seedServer({
         id: rotationServerId,
         title: "Notion",
         vendor: "Notion",
         url: "https://mcp.notion.com/mcp",
         provenance: "first-party",
-      })
-      .onConflictDoNothing();
+      });
+    }
     await database
       .insert(mcpTools)
       .values({
@@ -1549,27 +1469,20 @@ describe("refresh token rotation", () => {
   });
 
   afterAll(async () => {
-    // This suite's own person, never every row for this vendor: the id carries the run's suffix.
-    await database
-      .delete(mcpUserCredentials)
-      .where(
-        and(
-          eq(mcpUserCredentials.serverId, rotationServerId),
-          eq(mcpUserCredentials.userId, rotationUserId),
-        ),
-      );
-    // Before the deletes, because the column addresses one of the rows they remove. Only when the
-    // capture actually ran: `undefined` is nobody having looked, and writing that back as null is
-    // not a restore.
-    if (clientBefore !== undefined) {
-      await database
-        .update(mcpServers)
-        .set({ credentialId: clientBefore })
-        .where(eq(mcpServers.id, rotationServerId));
+    // This suite's own person, never every grant for this vendor: the id carries the run's suffix.
+    await removeConnectionsWhere(
+      (connection) =>
+        connection.kind === "grant" &&
+        connection.serverId === rotationServerId &&
+        connection.userId === rotationUserId,
+    );
+    // Before the purges, because the pointer addresses one of the secrets they remove. Only when
+    // the capture actually ran: `undefined` is nobody having looked, and writing that back as null
+    // is not a restore.
+    if (clientBefore !== undefined && (await storedServer(rotationServerId))) {
+      await changeServer(rotationServerId, { credentialId: clientBefore });
     }
-    for (const id of vaultRows) {
-      await database.delete(credentials).where(eq(credentials.id, id));
-    }
+    await purgeSecrets(vaultRows);
     await database
       .delete(pluginGrants)
       .where(
@@ -1591,9 +1504,7 @@ describe("refresh token rotation", () => {
       await database
         .delete(mcpTools)
         .where(eq(mcpTools.serverId, rotationServerId));
-      await database
-        .delete(mcpServers)
-        .where(eq(mcpServers.id, rotationServerId));
+      await removeServers([rotationServerId]);
     }
     await removeBots([rotationBotId]);
     await database.delete(users).where(eq(users.id, rotationUserId));
@@ -1640,11 +1551,11 @@ describe("refresh token rotation", () => {
     expect(sent).toEqual(["at-1", "at-1"]);
 
     /*
-     * Two rotations, and the vault holds exactly what it held before: the same row, still live,
+     * Two rotations, and the vault holds exactly what it held before: the same secret, still live,
      * carrying the latest token.
      *
      * This is the whole reason rotation is in place rather than a swap. Every single call to a
-     * rotating vendor rotates, so minting a row per rotation would grow the vault without bound on
+     * rotating vendor rotates, so minting a secret per rotation would grow the vault without bound on
      * the hottest path there is — and would revoke a grant the vendor had already killed itself the
      * moment it handed the new token back.
      */
@@ -1655,11 +1566,9 @@ describe("refresh token rotation", () => {
       rowsBefore.map((row) => row.id),
     );
     const live = rowsAfter.filter((row) => row.revokedAt === null);
-    expect(live.map((row) => row.id)).toEqual([before]);
-    // And the row that stayed is the one the vendor rotated to, not the one it replaced.
-    expect(
-      await decryptSecret(ROTATION_KEY, live[0]?.encryptedValue ?? ""),
-    ).toBe("rt-2");
+    expect(live.map((row): string | null => row.id)).toEqual([before]);
+    // And the secret that stayed holds the token the vendor rotated to, not the one it replaced.
+    expect(await secretValue(live[0]?.id ?? "")).toBe("rt-2");
 
     // And nothing claims the person connected an account again. Rotation is the vendor's plumbing,
     // not somebody's act, and a trail that says otherwise is read as a re-consent that never
@@ -1716,11 +1625,10 @@ describe("refresh token rotation", () => {
     });
 
     /*
-     * Byte-identical, which is a stronger claim than "same row".
+     * Identical, version and all, which is a stronger claim than "same secret".
      *
-     * Encryption draws a fresh IV every time, so re-encrypting the very same token would leave a
-     * different envelope in the same row. An untouched envelope is the only evidence that the write
-     * did not happen at all.
+     * Writing the very same token again would still move the secret to a new version. An unmoved
+     * version is the only evidence that the write did not happen at all.
      */
     expect(await connectionVaultRows()).toEqual(before);
     expect(sent).toEqual(["at-1"]);
@@ -1789,10 +1697,10 @@ describe("refresh token rotation", () => {
    * This is the case the in-process queue cannot reach. Each replica has its own map, so both read
    * the stored token, both present it, and a vendor with refresh-token-reuse detection reads the
    * second presentation as a stolen token and revokes the whole family — bricking a connection that
-   * nobody did anything wrong with. The row lock is what makes the second replica wait and then read
-   * what the first rotated to.
+   * nobody did anything wrong with. The lease on the secret (`vault/leases.ts`), which replaced the
+   * row lock, is what makes the second replica wait and then read what the first rotated to.
    */
-  test("two replicas take turns at the row, and neither spends a token twice", async () => {
+  test("two replicas take turns at the secret, and neither spends a token twice", async () => {
     await connect();
     /** Every refresh token the vendor was shown, by either replica, in order. */
     const presented: string[] = [];
@@ -1823,21 +1731,19 @@ describe("refresh token rotation", () => {
     expect(results.map((result) => result.isError)).toEqual([false, false]);
     // The whole property. `["rt-1", "rt-1"]` is the double-spend: two replicas presenting one token.
     expect(presented).toEqual(["rt-1", "rt-2"]);
-    // And the row the connection points at carries the last token issued, so a third call would
+    // And the secret the connection points at carries the last token issued, so a third call would
     // present that rather than something either replica had already spent.
     const live = (await connectionVaultRows()).filter(
       (row) => row.revokedAt === null,
     );
-    expect(
-      await decryptSecret(ROTATION_KEY, live[0]?.encryptedValue ?? ""),
-    ).toBe("rt-3");
+    expect(await secretValue(live[0]?.id ?? "")).toBe("rt-3");
   });
 
   /**
    * A stored OAuth client whose decrypted bytes are not a client at all.
    *
-   * CRITERION: neither the decrypted plaintext nor a parser's account of it may reach
-   * `audit_events` or `mcp_servers.last_error`. REASON: that plaintext IS the deployment's OAuth
+   * CRITERION: neither the revealed plaintext nor a parser's account of it may reach
+   * `audit_events` or `mcp_tool_lists.last_error`. REASON: that plaintext IS the deployment's OAuth
    * client secret, and `JSON.parse` reports failure by quoting the input it choked on — so an
    * unguarded parse writes a fragment of the secret into two durable stores, both of which the
    * Plugins page draws for an administrator.
@@ -1864,44 +1770,29 @@ describe("refresh token rotation", () => {
     /** The client the suite registered, restored after each test repoints the server. */
     let registeredClientId: string | null = null;
 
-    /** Point the server at a vault row that decrypts to something that is not a client. */
+    /** Point the server at a vault secret that reads back as something that is not a client. */
     async function pointAtUnreadableClient() {
-      const [server] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, rotationServerId));
-      registeredClientId = server?.credentialId ?? null;
+      registeredClientId =
+        (await storedServer(rotationServerId))?.credentialId ?? null;
 
-      const [credential] = await database
-        .insert(credentials)
-        .values({
-          kind: "mcp_oauth_client",
-          provider: rotationServerId,
-          // Fresh per call, because `credentials_active_key_idx` holds one live row per
-          // (kind, provider, key_id) and the row this leaves behind is never revoked.
-          keyId: `oauth-client-unreadable-${randomUUID().slice(0, 8)}`,
-          metadata: {},
-          encryptedValue: await encryptSecret(
-            ROTATION_KEY,
-            UNREADABLE_PLAINTEXT,
-          ),
-        })
-        .returning({ id: credentials.id });
-      if (!credential) throw new Error("unreadable client was not stored");
+      const credential = await seedCredential({
+        kind: "mcp_oauth_client",
+        provider: rotationServerId,
+        // Fresh per call, because a name holds one live secret and the one this leaves behind is
+        // never revoked.
+        keyId: `oauth-client-unreadable-${randomUUID().slice(0, 8)}`,
+        plaintext: UNREADABLE_PLAINTEXT,
+      });
       vaultRows.push(credential.id);
 
-      await database
-        .update(mcpServers)
-        .set({ credentialId: credential.id })
-        .where(eq(mcpServers.id, rotationServerId));
+      await changeServer(rotationServerId, { credentialId: credential.id });
     }
 
     /** Put the readable client back, so the tests after this one still have one. */
     async function restoreClient() {
-      await database
-        .update(mcpServers)
-        .set({ credentialId: registeredClientId })
-        .where(eq(mcpServers.id, rotationServerId));
+      await changeServer(rotationServerId, {
+        credentialId: registeredClientId,
+      });
     }
 
     test("the trail of a refused call carries neither the plaintext nor the parser", async () => {
@@ -1950,9 +1841,9 @@ describe("refresh token rotation", () => {
     test("a refresh leaves the same absence in the server's last error", async () => {
       await connect();
       const [before] = await database
-        .select({ lastError: mcpServers.lastError })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, rotationServerId));
+        .select({ lastError: mcpToolLists.lastError })
+        .from(mcpToolLists)
+        .where(eq(mcpToolLists.serverId, rotationServerId));
       await pointAtUnreadableClient();
       try {
         // Refuses before the vendor is asked, so nothing here needs a reachable Notion.
@@ -1961,9 +1852,9 @@ describe("refresh token rotation", () => {
         ).toEqual({ tools: 0 });
 
         const [after] = await database
-          .select({ lastError: mcpServers.lastError })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, rotationServerId));
+          .select({ lastError: mcpToolLists.lastError })
+          .from(mcpToolLists)
+          .where(eq(mcpToolLists.serverId, rotationServerId));
         const written = after?.lastError ?? "";
         expect(written).not.toContain(UNREADABLE_PLAINTEXT);
         expect(written).not.toContain("JSON Parse error");
@@ -1973,143 +1864,117 @@ describe("refresh token rotation", () => {
       } finally {
         await restoreClient();
         await database
-          .update(mcpServers)
+          .update(mcpToolLists)
           .set({ lastError: before?.lastError ?? null })
-          .where(eq(mcpServers.id, rotationServerId));
+          .where(eq(mcpToolLists.serverId, rotationServerId));
       }
     });
   });
 });
 
-/** Borrow a catalogue client's slot, then restore it after removing exactly our own vault rows. */
+/**
+ * Borrow a catalogue client's name, then put back exactly what held it and remove exactly our own
+ * secrets.
+ *
+ * The vault never brings a revoked secret back to life, so what held the name is put back the way
+ * the upgrade copy writes a secret: removed for good and stored again under its own id, with its own
+ * value, metadata and creation time, live.
+ */
 function oauthClientFixture(serverId: string) {
-  const realVault = createCredentialStore(database);
+  const realVault = vaultCredentials();
   const owned = new Set<string>();
-  const clientKey = and(
-    eq(credentials.kind, "mcp_oauth_client"),
-    eq(credentials.provider, serverId),
-    eq(credentials.keyId, `oauth-client-${serverId}`),
-  );
+  const clientKey = {
+    kind: "mcp_oauth_client" as const,
+    provider: serverId,
+    keyId: `oauth-client-${serverId}`,
+  };
+  const liveClients = async () =>
+    (await secretsNamed(clientKey)).filter(
+      (secret) => secret.revokedAt === null,
+    );
   let before:
     | {
         credentialId: string | null;
-        updatedAt: string;
-        clients: { id: string; revokedAt: string | null; updatedAt: string }[];
+        clients: { secret: StoredSecret; value: string }[];
       }
     | undefined;
 
+  const vault: typeof realVault = {
+    ...realVault,
+    create: async (value) => {
+      const row = await realVault.create(value);
+      owned.add(row.id);
+      return row;
+    },
+    // rotate stores a secret of its own; wrapping create alone misses every replacement it mints.
+    rotate: async (value) => {
+      const row = await realVault.rotate(value);
+      owned.add(row.id);
+      return row;
+    },
+  };
+
   return {
     track: (id: string) => owned.add(id),
-    vault: {
-      ...realVault,
-      // Forward the caller's transaction: the credential and its pointer must commit together.
-      create: async (
-        value: Parameters<typeof realVault.create>[0],
-        executor?: Parameters<typeof realVault.create>[1],
-      ) => {
-        const row = await realVault.create(value, executor);
-        owned.add(row.id);
-        return row;
-      },
-      // rotate inserts directly; wrapping create alone misses every replacement it mints.
-      rotate: async (
-        value: Parameters<typeof realVault.rotate>[0],
-        executor?: Parameters<typeof realVault.rotate>[1],
-      ) => {
-        const row = await realVault.rotate(value, executor);
-        owned.add(row.id);
-        return row;
-      },
-    },
+    vault,
     start: async () => {
-      before = await database.transaction(async (transaction) => {
-        const [server] = await transaction
-          .select({
-            credentialId: mcpServers.credentialId,
-            updatedAt: sql<string>`${mcpServers.updatedAt}::text`,
-          })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, serverId))
-          .for("update");
-        if (!server) throw new Error("fixture server was not stored");
-        // Dates round PostgreSQL microseconds to milliseconds. Keep the exact stamps as text.
-        const clients = await transaction
-          .select({
-            id: credentials.id,
-            revokedAt: sql<string | null>`${credentials.revokedAt}::text`,
-            updatedAt: sql<string>`${credentials.updatedAt}::text`,
-          })
-          .from(credentials)
-          .where(and(clientKey, sql`${credentials.revokedAt} IS NULL`))
-          .for("update");
-        await transaction
-          .update(mcpServers)
-          .set({ credentialId: null })
-          .where(eq(mcpServers.id, serverId));
-        if (clients.length > 0) {
-          await transaction
-            .update(credentials)
-            .set({ revokedAt: new Date(), updatedAt: new Date() })
-            .where(
-              inArray(
-                credentials.id,
-                clients.map((row) => row.id),
-              ),
-            );
-        }
-        return { ...server, clients };
-      });
+      const server = await storedServer(serverId);
+      if (!server) throw new Error("fixture server was not stored");
+      const clients: { secret: StoredSecret; value: string }[] = [];
+      for (const secret of await liveClients()) {
+        clients.push({ secret, value: await secretValue(secret.id) });
+      }
+      await changeServer(serverId, { credentialId: null });
+      const directory = await useTestVault();
+      for (const { secret } of clients) await directory.revokeSecret(secret.id);
+      before = { credentialId: server.credentialId, clients };
     },
     retireClients: async () => {
       if (owned.size === 0) return;
-      await database
-        .update(credentials)
-        .set({ revokedAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            clientKey,
-            inArray(credentials.id, [...owned]),
-            sql`${credentials.revokedAt} IS NULL`,
-          ),
-        );
+      const directory = await useTestVault();
+      for (const secret of await liveClients()) {
+        if (owned.has(secret.id)) await directory.revokeSecret(secret.id);
+      }
     },
     restore: async () => {
       const snapshot = before;
       if (!snapshot) return;
-      await database.transaction(async (transaction) => {
-        await transaction
-          .update(mcpServers)
-          .set({ credentialId: null })
-          .where(eq(mcpServers.id, serverId));
-        if (owned.size > 0) {
-          await transaction
-            .delete(credentials)
-            .where(inArray(credentials.id, [...owned]));
-        }
-        // Free the active key before reviving its original row, then restore the pointer atomically.
-        for (const row of snapshot.clients) {
-          await transaction
-            .update(credentials)
-            .set({
-              revokedAt: sql`${row.revokedAt}::timestamptz`,
-              updatedAt: sql`${row.updatedAt}::timestamptz`,
-            })
-            .where(eq(credentials.id, row.id));
-        }
-        await transaction
-          .update(mcpServers)
-          .set({
-            credentialId: snapshot.credentialId,
-            updatedAt: sql`${snapshot.updatedAt}::timestamptz`,
-          })
-          .where(eq(mcpServers.id, serverId));
-      });
+      const directory = await useTestVault();
+      if (await storedServer(serverId)) {
+        await changeServer(serverId, { credentialId: null });
+      }
+      // Free the name before putting its original holder back, then restore the pointer.
+      await purgeSecrets(owned);
+      for (const { secret, value } of snapshot.clients) {
+        await directory.purgeSecret(secret.id);
+        await directory.createSecret({
+          id: secret.id,
+          kind: secret.kind,
+          provider: secret.provider,
+          keyId: secret.keyId,
+          ownerUserId: secret.ownerUserId,
+          metadata: secret.metadata,
+          plaintext: value,
+          createdAt: secret.createdAt,
+        });
+      }
+      if (await storedServer(serverId)) {
+        await changeServer(serverId, { credentialId: snapshot.credentialId });
+      }
       before = undefined;
       owned.clear();
     },
   };
 }
 
+/**
+ * The fixture above, held to putting back what it borrowed.
+ *
+ * What it used to restore byte for byte — the revoked row revived, its timestamps as they were — the
+ * vault cannot do: revocation is final. What the vault CAN show is what any reader sees: the same
+ * secret under the same id, live, with the same value, metadata and creation time, the app pointing
+ * at it, nothing the fixture minted left behind, and the secret beside it untouched, version and all.
+ */
 test.each(["success", "failure"])(
   "OAuth client fixture restores exact state after %s following create and rotate",
   async (outcome) => {
@@ -2117,39 +1982,56 @@ test.each(["success", "failure"])(
     const originalId = randomUUID();
     const sentinelId = randomUUID();
     const fixture = oauthClientFixture(fixtureServerId);
-    const value: CredentialStoreValue = {
-      kind: "mcp_oauth_client",
+    const directory = await useTestVault();
+    const value = {
+      kind: "mcp_oauth_client" as const,
       provider: fixtureServerId,
       keyId: `oauth-client-${fixtureServerId}`,
       metadata: {},
-      encryptedValue: "synthetic-fixture-value",
+      plaintext: "synthetic-fixture-value",
     };
-    const state = async () => ({
-      credentials: await database
-        .select({ row: sql`to_jsonb(${credentials})` })
-        .from(credentials)
-        .where(
-          inArray(credentials.provider, [
-            fixtureServerId,
-            `${fixtureServerId}-unrelated`,
-          ]),
-        )
-        .orderBy(credentials.id),
-      server: await database
-        .select({ row: sql`to_jsonb(${mcpServers})` })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, fixtureServerId)),
-    });
+    const state = async () => {
+      const secrets = [
+        ...(await secretsNamed({
+          kind: value.kind,
+          provider: fixtureServerId,
+          keyId: value.keyId,
+        })),
+        ...(await secretsNamed({
+          kind: value.kind,
+          provider: `${fixtureServerId}-unrelated`,
+          keyId: value.keyId,
+        })),
+      ].sort((left, right) => left.id.localeCompare(right.id));
+      return {
+        credentials: await Promise.all(
+          secrets.map(async (secret) => ({
+            id: secret.id,
+            kind: secret.kind,
+            provider: secret.provider,
+            keyId: secret.keyId,
+            ownerUserId: secret.ownerUserId,
+            metadata: secret.metadata,
+            createdAt: secret.createdAt.toISOString(),
+            revokedAt: secret.revokedAt?.toISOString() ?? null,
+            value: secret.revokedAt ? null : await secretValue(secret.id),
+          })),
+        ),
+        server: (await storedServer(fixtureServerId))?.credentialId ?? null,
+      };
+    };
     try {
-      await database.insert(credentials).values([
-        {
-          ...value,
-          id: originalId,
-          updatedAt: sql`'2020-01-02 03:04:05.123456+00'::timestamptz`,
-        },
-        { ...value, id: sentinelId, provider: `${fixtureServerId}-unrelated` },
-      ]);
-      await database.insert(mcpServers).values({
+      await directory.createSecret({
+        ...value,
+        id: originalId,
+        createdAt: new Date("2020-01-02T03:04:05.123Z"),
+      });
+      await directory.createSecret({
+        ...value,
+        id: sentinelId,
+        provider: `${fixtureServerId}-unrelated`,
+      });
+      await seedServer({
         id: fixtureServerId,
         title: fixtureServerId,
         vendor: "Synthetic fixture",
@@ -2157,24 +2039,17 @@ test.each(["success", "failure"])(
         credentialId: originalId,
       });
       const before = await state();
+      const sentinelBefore = await storedSecret(sentinelId);
       const exercise = async () => {
         try {
           await fixture.start();
           await fixture.retireClients();
-          const created = await database.transaction((transaction) =>
-            fixture.vault.create(value, transaction),
-          );
-          const rotated = await database.transaction(async (transaction) => {
-            const row = await fixture.vault.rotate(
-              { ...value, previousCredentialId: created.id },
-              transaction,
-            );
-            await transaction
-              .update(mcpServers)
-              .set({ credentialId: row.id })
-              .where(eq(mcpServers.id, fixtureServerId));
-            return row;
+          const created = await fixture.vault.create(value);
+          const rotated = await fixture.vault.rotate({
+            ...value,
+            previousCredentialId: created.id,
           });
+          await changeServer(fixtureServerId, { credentialId: rotated.id });
           expect(await fixture.vault.isLive(created.id)).toBe(false);
           expect(await fixture.vault.isLive(rotated.id)).toBe(true);
           if (outcome === "failure") {
@@ -2191,17 +2066,22 @@ test.each(["success", "failure"])(
       } else {
         await exercise();
       }
-      // Full PostgreSQL rows catch timestamp rounding, leaked replacements and sentinel damage.
+      // Every secret under the name, with its value, catches a leaked replacement, a lost original
+      // and a creation time that drifted; the sentinel, version and all, catches any write to it.
       expect(await state()).toEqual(before);
+      expect(await storedSecret(sentinelId)).toEqual(sentinelBefore);
       expect(await fixture.vault.isLive(originalId)).toBe(true);
     } finally {
       await fixture.restore();
-      await database
-        .delete(mcpServers)
-        .where(eq(mcpServers.id, fixtureServerId));
-      await database
-        .delete(credentials)
-        .where(inArray(credentials.id, [originalId, sentinelId]));
+      await removeServers([fixtureServerId]);
+      await purgeSecrets(
+        (
+          await Promise.all([
+            storedSecret(originalId),
+            storedSecret(sentinelId),
+          ])
+        ).flatMap((secret) => (secret ? [secret.id] : [])),
+      );
     }
   },
 );
@@ -2212,9 +2092,9 @@ test.each(["success", "failure"])(
  *
  * The seam is `fetch`: the host is pinned and nothing in the store will take a URL from a caller, so
  * pointing the pinned host at the mock is what lets a real listing over the real protocol happen.
- * What a refresh then overwrites is the deployment's own row — it replaces the advertised tool list
- * wholesale and stamps `toolsRefreshedAt` and `lastError` — so the list and both stamps are read
- * first and put back in a `finally`.
+ * What a refresh then overwrites is the deployment's own rows — it replaces the advertised tool list
+ * wholesale and stamps `refreshedAt` and `lastError` in `mcp_tool_lists` — so the list and its
+ * stamps are read first and put back in a `finally`.
  *
  * A `finally` rather than a paragraph copied per test, because a restore is the part that a test
  * still passes without: skip it and the cost lands on whatever runs next, reading a tool list this
@@ -2244,11 +2124,12 @@ async function withMockedNotionListing(
     .where(eq(mcpTools.serverId, notionServerId));
   const [stampBefore] = await database
     .select({
-      toolsRefreshedAt: mcpServers.toolsRefreshedAt,
-      lastError: mcpServers.lastError,
+      refreshedAt: mcpToolLists.refreshedAt,
+      lastError: mcpToolLists.lastError,
+      skippedTools: mcpToolLists.skippedTools,
     })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, notionServerId));
+    .from(mcpToolLists)
+    .where(eq(mcpToolLists.serverId, notionServerId));
 
   const realFetch = globalThis.fetch;
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -2271,12 +2152,13 @@ async function withMockedNotionListing(
       await database.insert(mcpTools).values(advertisedBefore);
     }
     await database
-      .update(mcpServers)
-      .set({
-        toolsRefreshedAt: stampBefore?.toolsRefreshedAt ?? null,
-        lastError: stampBefore?.lastError ?? null,
-      })
-      .where(eq(mcpServers.id, notionServerId));
+      .delete(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, notionServerId));
+    if (stampBefore) {
+      await database
+        .insert(mcpToolLists)
+        .values({ serverId: notionServerId, ...stampBefore });
+    }
   }
 }
 
@@ -2301,7 +2183,7 @@ describe("a dynamic client the vendor has evicted", () => {
   /** Suite-scoped, so it cannot collide with a name Notion really advertises. */
   const dynamicToolName = `search_dyn_${suite}`;
   const dynamicRef = `${dynamicServerId}/${dynamicToolName}`;
-  /** 32 zero bytes in base64: a real AES-256 key, because every call here opens the vault. */
+  /** 32 zero bytes in base64: the deployment's own key, which seals OAuth state. */
   const DYNAMIC_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   /** The client the deployment registered once and the vendor has stopped honouring. */
   const EVICTED: OAuthClient = { clientId: "dyn-1", clientSecret: "" };
@@ -2450,38 +2332,27 @@ describe("a dynamic client the vendor has evicted", () => {
     registeredAt = new Date(Date.now() - 60 * 60 * 1000),
   ) {
     /*
-     * One live client per key is law (`credentials_active_key_idx`), so planting a client the way a
-     * registration would means retiring whatever live row the key still holds from an earlier test.
+     * One live secret per name is the vault's rule, so planting a client the way a registration
+     * would means retiring whatever live secret the name still holds from an earlier test.
      */
     await clientFixture.retireClients();
-    const [row] = await database
-      .insert(credentials)
-      .values({
-        kind: "mcp_oauth_client",
-        provider: dynamicServerId,
-        keyId: `oauth-client-${dynamicServerId}`,
-        metadata: { clientId: client.clientId },
-        encryptedValue: await encryptSecret(
-          DYNAMIC_KEY,
-          JSON.stringify(client),
-        ),
-        createdAt: registeredAt,
-      })
-      .returning({ id: credentials.id });
-    if (!row) throw new Error("client was not stored");
+    const row = await (await useTestVault()).createSecret({
+      id: randomUUID(),
+      kind: "mcp_oauth_client",
+      provider: dynamicServerId,
+      keyId: `oauth-client-${dynamicServerId}`,
+      ownerUserId: null,
+      metadata: { clientId: client.clientId },
+      plaintext: JSON.stringify(client),
+      createdAt: registeredAt,
+    });
     clientFixture.track(row.id);
-    await database
-      .update(mcpServers)
-      .set({ credentialId: row.id })
-      .where(eq(mcpServers.id, dynamicServerId));
+    await changeServer(dynamicServerId, { credentialId: row.id });
   }
 
   /** A deployment that holds no client for this server at all. */
   async function clearClient(serverId = dynamicServerId) {
-    await database
-      .update(mcpServers)
-      .set({ credentialId: null })
-      .where(eq(mcpServers.id, serverId));
+    await changeServer(serverId, { credentialId: null });
   }
 
   /**
@@ -2566,22 +2437,17 @@ describe("a dynamic client the vendor has evicted", () => {
       })
       .onConflictDoNothing();
 
-    const [existing] = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, dynamicServerId));
-    suiteCreatedNotionRow = existing === undefined;
+    suiteCreatedNotionRow = (await storedServer(dynamicServerId)) === null;
 
-    await database
-      .insert(mcpServers)
-      .values({
+    if (suiteCreatedNotionRow) {
+      await seedServer({
         id: dynamicServerId,
         title: "Notion",
         vendor: "Notion",
         url: "https://mcp.notion.com/mcp",
         provenance: "first-party",
-      })
-      .onConflictDoNothing();
+      });
+    }
     await clientFixture.start();
     await database
       .insert(mcpTools)
@@ -2601,14 +2467,12 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   afterAll(async () => {
-    await database
-      .delete(mcpUserCredentials)
-      .where(
-        and(
-          eq(mcpUserCredentials.serverId, dynamicServerId),
-          eq(mcpUserCredentials.userId, dynamicUserId),
-        ),
-      );
+    await removeConnectionsWhere(
+      (connection) =>
+        connection.kind === "grant" &&
+        connection.serverId === dynamicServerId &&
+        connection.userId === dynamicUserId,
+    );
     await clientFixture.restore();
     await database
       .delete(pluginGrants)
@@ -2630,9 +2494,7 @@ describe("a dynamic client the vendor has evicted", () => {
       await database
         .delete(mcpTools)
         .where(eq(mcpTools.serverId, dynamicServerId));
-      await database
-        .delete(mcpServers)
-        .where(eq(mcpServers.id, dynamicServerId));
+      await removeServers([dynamicServerId]);
     }
     await removeBots([dynamicBotId]);
     await database.delete(users).where(eq(users.id, dynamicUserId));
@@ -2905,7 +2767,22 @@ describe("a dynamic client the vendor has evicted", () => {
     }
   });
 
-  test.each(["wrong-key", "reader-fault"] as const)(
+  /*
+   * A vault this deployment cannot read: Intelligence refuses the key it presents. A real refusal
+   * from the real vault, and what a client the vault could not hand back looks like from here — not
+   * "missing", not "revoked", a fault. It replaces the local key that could not decrypt the row,
+   * which is not a thing any more: the vault does the decrypting.
+   */
+  const refusingVault = createCredentialStore(
+    createConnectionsDirectory({
+      client: createVaultClient({
+        apiUrl: testIntelligence().apiUrl,
+        apiKey: "not-this-deployment-s-key",
+      }),
+    }),
+  );
+
+  test.each(["vault-refusal", "reader-fault"] as const)(
     "Connect audits a client read fault (%s) without replacing or exposing it",
     async (fault) => {
       await putClient(EVICTED);
@@ -2916,10 +2793,7 @@ describe("a dynamic client the vendor has evicted", () => {
         .select()
         .from(auditEvents)
         .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
-      const [before] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, dynamicServerId));
+      const before = await storedServer(dynamicServerId);
       const failingStore = createPluginStore({
         brokerProvider: "composio",
         database,
@@ -2928,15 +2802,12 @@ describe("a dynamic client the vendor has evicted", () => {
           fault === "reader-fault"
             ? {
                 ...vault,
-                readSecret: async () => {
+                reveal: async () => {
                   throw new Error(sentinel);
                 },
               }
-            : vault,
-        encryptionKey:
-          fault === "wrong-key"
-            ? Buffer.alloc(32, 1).toString("base64")
-            : DYNAMIC_KEY,
+            : refusingVault,
+        encryptionKey: DYNAMIC_KEY,
         policy: () => policy,
         ...seams,
         redirectUri: REDIRECT_URI,
@@ -2986,7 +2857,7 @@ describe("a dynamic client the vendor has evicted", () => {
           {
             type: "mcp-oauth-client-read-failed",
             server: dynamicServerId,
-            error: fault === "wrong-key" ? "OperationError" : "Error",
+            error: fault === "vault-refusal" ? "IntelligenceApiError" : "Error",
           },
         ]);
         expect(said.join("\n")).not.toContain(sentinel);
@@ -2997,10 +2868,7 @@ describe("a dynamic client the vendor has evicted", () => {
         const written = events.filter(
           (event) => !beforeEvents.some((before) => before.id === event.id),
         );
-        const [after] = await database
-          .select({ credentialId: mcpServers.credentialId })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, dynamicServerId));
+        const after = await storedServer(dynamicServerId);
         expect(response.status).toBe(503);
         expect(JSON.parse(body)).toEqual({
           error:
@@ -3032,26 +2900,36 @@ describe("a dynamic client the vendor has evicted", () => {
   );
 
   test.each(["before-lock", "under-lock"] as const)(
-    "a client decryption fault %s does not replace the deployment's client",
+    "a client read fault %s does not replace the deployment's client",
     async (where) => {
       await putClient(EVICTED);
       registrations.length = 0;
       issue = () => FRESH;
-      const [before] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, dynamicServerId));
+      const before = await storedServer(dynamicServerId);
+      // The initial read can find no client while a client is found under the lock: the vault
+      // answers the first read "not there", as it does for a secret another replica has not
+      // finished storing, and refuses the one under the lock. Neither read may interpret a fault
+      // as permission to register over the working client.
+      let reads = 0;
       const wrongKeyStore = createPluginStore({
         brokerProvider: "composio",
         database,
         auditStore: createAuditStore(database),
-        // The initial read can find no row while a client is found under the lock. Neither read
-        // may interpret a decryption failure as permission to register over the working client.
         credentials:
           where === "under-lock"
-            ? { ...vault, readSecret: async () => null }
-            : vault,
-        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+            ? {
+                ...refusingVault,
+                reveal: async (id, accessor) => {
+                  reads += 1;
+                  if (reads === 1)
+                    throw new CredentialUnusableError(
+                      "Credential was not found",
+                    );
+                  return refusingVault.reveal(id, accessor);
+                },
+              }
+            : refusingVault,
+        encryptionKey: DYNAMIC_KEY,
         policy: () => policy,
         ...seams,
         redirectUri: REDIRECT_URI,
@@ -3063,10 +2941,7 @@ describe("a dynamic client the vendor has evicted", () => {
             () => "returned",
             () => "rejected",
           );
-        const [after] = await database
-          .select({ credentialId: mcpServers.credentialId })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, dynamicServerId));
+        const after = await storedServer(dynamicServerId);
         expect({
           outcome,
           registrations: registrations.length,
@@ -3180,10 +3055,7 @@ describe("a dynamic client the vendor has evicted", () => {
      * inventing a client at a vendor that never offered to issue one — the honest answer is none,
      * and the 409 an administrator sees is the instruction to go and paste one.
      */
-    const [before] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId));
+    const before = await storedServer(serverId);
     await clearClient(serverId);
     registrations.length = 0;
 
@@ -3193,10 +3065,9 @@ describe("a dynamic client the vendor has evicted", () => {
       ).toBeNull();
       expect(registrations).toEqual([]);
     } finally {
-      await database
-        .update(mcpServers)
-        .set({ credentialId: before?.credentialId ?? null })
-        .where(eq(mcpServers.id, serverId));
+      await changeServer(serverId, {
+        credentialId: before?.credentialId ?? null,
+      });
     }
   });
 
@@ -3218,10 +3089,9 @@ describe("a dynamic client the vendor has evicted", () => {
    *
    * `POST /connect` is `requireUser`, not `requireAdmin`, so this is not a rare interleaving — it is
    * the ordinary first hour of a connector nobody has used. Unserialised, the two runs read "no live
-   * client" and then both write one: the second `create` meets the first on
-   * `credentials_active_key_idx` as a raw 23505, which reaches the person as a 500 where a consent
-   * URL belonged, and a `rotate` racing the same way fails with "Previous credential is already
-   * revoked" instead.
+   * client" and then both write one: the second `create` meets the first on the vault's one live
+   * secret per name, which reaches the person as a 500 where a consent URL belonged, and a `rotate`
+   * racing the same way fails with "Previous credential is already revoked" instead.
    *
    * One client, not two, and that part is not only about the error. Two clients means one of the two
    * consent screens names a client the vault no longer holds, so that person consents and their
@@ -3230,8 +3100,8 @@ describe("a dynamic client the vendor has evicted", () => {
    */
   test("two first connects race to one client, and both callers get it", async () => {
     await clearClient();
-    // No live row for the key either, so this really is a deployment holding nothing: `clearClient`
-    // only drops the pointer, and it is the KEY the index constrains.
+    // No live secret under the name either, so this really is a deployment holding nothing:
+    // `clearClient` only drops the pointer, and it is the NAME the vault constrains.
     await clientFixture.retireClients();
     registrations.length = 0;
     // A distinct client per registration, so two registrations cannot be mistaken for one.
@@ -3254,28 +3124,21 @@ describe("a dynamic client the vendor has evicted", () => {
     expect(registrations.length).toBe(1);
 
     /*
-     * One live row for the key, and the server row naming exactly it.
+     * One live secret under the name, and the app naming exactly it.
      *
-     * The pair is the assertion, not either half: the vault write and the pointer write are one
-     * transaction now, so a reader can never see a live client the server row does not name, nor a
-     * server row naming a client the vault retired.
+     * The pair is the assertion, not either half: both writes happen under the one lease, so once
+     * both callers are answered no reader can see a live client the app does not name, nor an app
+     * naming a client the vault retired.
      */
-    const live = await database
-      .select({ id: credentials.id })
-      .from(credentials)
-      .where(
-        and(
-          eq(credentials.kind, "mcp_oauth_client"),
-          eq(credentials.provider, dynamicServerId),
-          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
-          sql`${credentials.revokedAt} IS NULL`,
-        ),
-      );
+    const live = (
+      await secretsNamed({
+        kind: "mcp_oauth_client",
+        provider: dynamicServerId,
+        keyId: `oauth-client-${dynamicServerId}`,
+      })
+    ).filter((secret) => secret.revokedAt === null);
     expect(live.length).toBe(1);
-    const [server] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, dynamicServerId));
+    const server = await storedServer(dynamicServerId);
     expect(server?.credentialId).toBe(live[0]?.id);
   });
 
@@ -3602,16 +3465,16 @@ describe("a dynamic client the vendor has evicted", () => {
 
         const [server] = await database
           .select({
-            lastError: mcpServers.lastError,
-            skippedTools: mcpServers.skippedTools,
-            toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+            lastError: mcpToolLists.lastError,
+            skippedTools: mcpToolLists.skippedTools,
+            toolsRefreshedAt: mcpToolLists.refreshedAt,
           })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, dynamicServerId));
+          .from(mcpToolLists)
+          .where(eq(mcpToolLists.serverId, dynamicServerId));
         // Something was learned, so the refresh is stamped and is no failure — and the one thing
         // not learned is said where the administrator who pressed Refresh will read it.
         expect(server?.toolsRefreshedAt).not.toBeNull();
-        expect(server?.lastError).toBeNull();
+        expect(server?.lastError ?? null).toBeNull();
         expect(server?.skippedTools).toEqual(["notion.export"]);
 
         // And the page's read hands it on.
@@ -3663,10 +3526,10 @@ describe("a dynamic client the vendor has evicted", () => {
     });
 
     const [server] = await database
-      .select({ skippedTools: mcpServers.skippedTools })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, dynamicServerId));
-    expect(server?.skippedTools).toBeNull();
+      .select({ skippedTools: mcpToolLists.skippedTools })
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, dynamicServerId));
+    expect(server?.skippedTools ?? null).toBeNull();
     const listed = (await dynamicStore.listServers()).find(
       (entry) => entry.id === dynamicServerId,
     );
@@ -3719,9 +3582,9 @@ describe("a dynamic client the vendor has evicted", () => {
         expect(rows.map((row) => row.name)).toEqual(["notion-fetch"]);
 
         const [server] = await database
-          .select({ lastError: mcpServers.lastError })
-          .from(mcpServers)
-          .where(eq(mcpServers.id, dynamicServerId));
+          .select({ lastError: mcpToolLists.lastError })
+          .from(mcpToolLists)
+          .where(eq(mcpToolLists.serverId, dynamicServerId));
         expect(server?.lastError).toContain('"notion.fetch"');
         expect(server?.lastError).toContain("kept");
       },
@@ -3743,9 +3606,9 @@ describe("a dynamic client the vendor has evicted", () => {
     refuse = () => new Error(`vendor said: ${"y".repeat(1_000)}`);
 
     const [before] = await database
-      .select({ lastError: mcpServers.lastError })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, dynamicServerId));
+      .select({ lastError: mcpToolLists.lastError })
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, dynamicServerId));
 
     try {
       // Zero tools and no throw: a refresh records its failure rather than raising it.
@@ -3754,17 +3617,17 @@ describe("a dynamic client the vendor has evicted", () => {
       ).toEqual({ tools: 0 });
 
       const [row] = await database
-        .select({ lastError: mcpServers.lastError })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, dynamicServerId));
+        .select({ lastError: mcpToolLists.lastError })
+        .from(mcpToolLists)
+        .where(eq(mcpToolLists.serverId, dynamicServerId));
       expect(row?.lastError?.length).toBe(400);
       expect(row?.lastError?.startsWith("vendor said: ")).toBe(true);
     } finally {
       // The column is live configuration an operator reads, so this suite puts back what it found.
       await database
-        .update(mcpServers)
+        .update(mcpToolLists)
         .set({ lastError: before?.lastError ?? null })
-        .where(eq(mcpServers.id, dynamicServerId));
+        .where(eq(mcpToolLists.serverId, dynamicServerId));
     }
   });
 
@@ -3799,34 +3662,25 @@ describe("a dynamic client the vendor has evicted", () => {
      * than the window would pass these tests for the wrong reason.
      */
     async function putStoredBytes(plaintext: string) {
-      await database
-        .update(credentials)
-        .set({ revokedAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(credentials.kind, "mcp_oauth_client"),
-            eq(credentials.provider, dynamicServerId),
-            eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
-            sql`${credentials.revokedAt} IS NULL`,
-          ),
-        );
-      const [row] = await database
-        .insert(credentials)
-        .values({
-          kind: "mcp_oauth_client",
-          provider: dynamicServerId,
-          keyId: `oauth-client-${dynamicServerId}`,
-          metadata: {},
-          encryptedValue: await encryptSecret(DYNAMIC_KEY, plaintext),
-          createdAt: new Date(Date.now() - 60 * 60 * 1000),
-        })
-        .returning({ id: credentials.id });
-      if (!row) throw new Error("misshapen client was not stored");
+      const directory = await useTestVault();
+      const clientName = {
+        kind: "mcp_oauth_client" as const,
+        provider: dynamicServerId,
+        keyId: `oauth-client-${dynamicServerId}`,
+      };
+      for (const secret of await secretsNamed(clientName)) {
+        if (secret.revokedAt === null) await directory.revokeSecret(secret.id);
+      }
+      const row = await directory.createSecret({
+        id: randomUUID(),
+        ...clientName,
+        ownerUserId: null,
+        metadata: {},
+        plaintext,
+        createdAt: new Date(Date.now() - 60 * 60 * 1000),
+      });
       clientFixture.track(row.id);
-      await database
-        .update(mcpServers)
-        .set({ credentialId: row.id })
-        .where(eq(mcpServers.id, dynamicServerId));
+      await changeServer(dynamicServerId, { credentialId: row.id });
       return row.id;
     }
 
@@ -3851,13 +3705,9 @@ describe("a dynamic client the vendor has evicted", () => {
         );
     }
 
-    /** Which credential the server row names, which is the thing a re-registration replaces. */
+    /** Which credential the app names, which is the thing a re-registration replaces. */
     async function pointedAt() {
-      const [row] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, dynamicServerId));
-      return row?.credentialId ?? null;
+      return (await storedServer(dynamicServerId))?.credentialId ?? null;
     }
 
     test("a call is refused, and the deployment's client is not replaced", async () => {
@@ -3929,39 +3779,65 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
-   * The vault row and the pointer that names it commit together, or neither does.
+   * A pointer write that fails, and what it leaves for the next connect.
    *
-   * They were two transactions, so a failure between them left `mcp_user_credentials` naming a
-   * credential that had just been revoked — a connection that reads as live on the settings page and
-   * refuses every call. The pointer write is the one that can fail on its own: `user_id` is a real
-   * foreign key, so a person who is no longer in `users` is a genuine 23503 at exactly that
-   * statement, which is the injection this test uses rather than a spy.
+   * The secret and the grant naming it used to commit in one transaction, so a failure between them
+   * could not leave the grant naming a credential that had just been revoked — a connection that
+   * reads as live on the settings page and refuses every call. The vault is Intelligence's now and
+   * no transaction here holds it, so the ORDER is the guarantee: the secret is stored first, then
+   * the grant is pointed at it. A grant write that fails leaves no grant naming a dead secret, and
+   * whatever it left under the person's name is what the next connect replaces rather than collides
+   * with: one live secret, and the grant naming it.
+   *
+   * The failure is real rather than a spy: Intelligence refuses a grant on an app it does not hold,
+   * which is exactly that statement failing on its own.
    */
-  test("a pointer write that fails leaves no live grant behind", async () => {
+  test("a pointer write that fails leaves no grant naming a dead secret, and the next connect recovers", async () => {
+    const ghostServer = `ghost-server-${suite}`;
     const ghost = `user_ghost_${suite}`;
+    const name = {
+      kind: "mcp_user_token" as const,
+      provider: ghostServer,
+      keyId: ghost,
+    };
 
-    await expect(
-      dynamicStore.recordConnection({
-        serverId: dynamicServerId,
+    try {
+      await expect(
+        dynamicStore.recordConnection({
+          serverId: ghostServer,
+          userId: ghost,
+          refreshToken: "rt-ghost",
+          scope: SCOPE,
+        }),
+      ).rejects.toThrow();
+      expect(await storedGrant(ghostServer, ghost)).toBeNull();
+
+      await seedServer({
+        id: ghostServer,
+        title: "Ghost",
+        vendor: "test",
+        url: "https://ghost.invalid/mcp",
+        provenance: "custom",
+      });
+      await dynamicStore.recordConnection({
+        serverId: ghostServer,
         userId: ghost,
-        refreshToken: "rt-ghost",
+        refreshToken: "rt-again",
         scope: SCOPE,
-      }),
-    ).rejects.toThrow();
+      });
 
-    // Nothing in the vault, live or otherwise: the insert that minted it was rolled back with the
-    // pointer write that failed. Asked of the key, because that is what a later connect collides on.
-    const rows = await database
-      .select({ id: credentials.id })
-      .from(credentials)
-      .where(
-        and(
-          eq(credentials.kind, "mcp_user_token"),
-          eq(credentials.provider, dynamicServerId),
-          eq(credentials.keyId, ghost),
-        ),
+      // Asked of the name, because that is what a later connect collides on.
+      const live = (await secretsNamed(name)).filter(
+        (secret) => secret.revokedAt === null,
       );
-    expect(rows).toEqual([]);
+      expect(live).toHaveLength(1);
+      expect((await storedGrant(ghostServer, ghost))?.credentialId).toBe(
+        live[0]?.id,
+      );
+      expect(await secretValue(live[0]?.id ?? "")).toBe("rt-again");
+    } finally {
+      await removeServers([ghostServer]);
+    }
   });
 });
 
@@ -3987,11 +3863,7 @@ describe("a custom server may not be named after one of the app's own screens", 
 
     // Written-and-unopenable is the whole harm, so the refusal has to stop the write rather than
     // report on it afterwards.
-    const rows = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "composio"));
-    expect(rows).toHaveLength(0);
+    expect(await storedServer("composio")).toBeNull();
   });
 });
 
@@ -4031,64 +3903,49 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   }
 
   beforeAll(async () => {
-    const encrypted = await encryptSecret(
-      `${"A".repeat(43)}=`,
-      "not-read-here",
-    );
-    await database.insert(credentialRows).values([
-      {
-        id: deploymentCredentialId,
-        kind: "mcp",
-        provider: customServerId,
-        keyId: customServerId,
-        encryptedValue: encrypted,
-        metadata: {},
-      },
-      {
-        id: personalCredentialId,
-        kind: "mcp_user_token",
-        provider: "google-drive",
-        // For a user token the key is the person, which is what makes one pickable by name from the
-        // administrator's own credential list.
-        keyId: `user_someone_else_${suffix}`,
-        encryptedValue: encrypted,
-        metadata: {},
-      },
-      {
-        id: upsertCredentialId,
-        kind: "mcp",
-        provider: `${customServerId}-upsert`,
-        keyId: `${customServerId}-upsert`,
-        encryptedValue: encrypted,
-        metadata: {},
-      },
-      {
-        id: oauthClientCredentialId,
-        kind: "mcp_oauth_client",
-        provider: "google-drive",
-        keyId: "google-drive",
-        encryptedValue: encrypted,
-        metadata: {},
-      },
-    ]);
+    const plaintext = "not-read-here";
+    await seedCredential({
+      id: deploymentCredentialId,
+      kind: "mcp",
+      provider: customServerId,
+      keyId: customServerId,
+      plaintext,
+    });
+    await seedCredential({
+      id: personalCredentialId,
+      kind: "mcp_user_token",
+      provider: "google-drive",
+      // For a user token the key is the person, which is what makes one pickable by name from the
+      // administrator's own credential list.
+      keyId: `user_someone_else_${suffix}`,
+      plaintext,
+    });
+    await seedCredential({
+      id: upsertCredentialId,
+      kind: "mcp",
+      provider: `${customServerId}-upsert`,
+      keyId: `${customServerId}-upsert`,
+      plaintext,
+    });
+    await seedCredential({
+      id: oauthClientCredentialId,
+      kind: "mcp_oauth_client",
+      provider: "google-drive",
+      keyId: `google-drive-${suffix}`,
+      plaintext,
+    });
   });
 
   afterAll(async () => {
     if (attemptedServerIds.size > 0) {
-      await database
-        .delete(mcpServers)
-        .where(inArray(mcpServers.id, [...attemptedServerIds]));
+      await removeServers(attemptedServerIds);
     }
-    await database
-      .delete(credentialRows)
-      .where(
-        inArray(credentialRows.id, [
-          deploymentCredentialId,
-          personalCredentialId,
-          upsertCredentialId,
-          oauthClientCredentialId,
-        ]),
-      );
+    await purgeSecrets([
+      deploymentCredentialId,
+      personalCredentialId,
+      upsertCredentialId,
+      oauthClientCredentialId,
+    ]);
   });
 
   test("somebody else's connector token is refused, and no server is written", async () => {
@@ -4103,13 +3960,9 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       }),
     ).rejects.toBeInstanceOf(CustomServerRefusedError);
 
-    // The refusal has to stop the write, not merely report on it: a row here is a pointer the next
+    // The refusal has to stop the write, not merely report on it: an app here is a pointer the next
     // refresh would dereference.
-    const rows = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, id));
-    expect(rows).toHaveLength(0);
+    expect(await storedServer(id)).toBeNull();
   });
 
   test("the deployment's OAuth client is refused too", async () => {
@@ -4163,11 +4016,9 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     });
     expect(added.id).toBe(customServerId);
 
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, customServerId));
-    expect(row?.credentialId).toBe(deploymentCredentialId);
+    expect((await storedServer(customServerId))?.credentialId).toBe(
+      deploymentCredentialId,
+    );
   });
 
   test("a credential id that is not an id is refused, not a database error", async () => {
@@ -4199,11 +4050,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     });
     expect(added.id).toBe(id);
 
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, id));
-    expect(row?.credentialId).toBeNull();
+    expect((await storedServer(id))?.credentialId).toBeNull();
   });
 
   test("re-adding an existing server cannot repoint it at a refused credential", async () => {
@@ -4229,11 +4076,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       }),
     ).rejects.toBeInstanceOf(CustomServerRefusedError);
 
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, id));
-    expect(row?.credentialId).toBe(upsertCredentialId);
+    expect((await storedServer(id))?.credentialId).toBe(upsertCredentialId);
   });
 
   test("a custom server with no credential at all still works", async () => {
@@ -4447,9 +4290,7 @@ async function freshDatabase(): Promise<Database> {
   await database
     .delete(mcpTools)
     .where(inArray(mcpTools.serverId, ["gmail", "notion"]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, ["gmail", "notion"]));
+  await removeServers(["gmail", "notion"]);
   /*
    * Brokered connections, by the pair and never by half of it.
    *
@@ -4457,16 +4298,10 @@ async function freshDatabase(): Promise<Database> {
    * orphaned at the broker with no local row to find it by — the table has no foreign key to
    * `users`, which is the property the first test below is about, so nothing else would ever
    * remove it. By person it would take a `("slack", "user_asker")` row belonging to somebody else,
-   * for the same reason and at the same cost. {@link ownedConnections} is what the guard at the
+   * for the same reason and at the same cost. {@link ownedConnection} is what the guard at the
    * top of this file has already established nothing else holds.
-   *
-   * The anonymous pair is swept here as well as in the `finally` of the test that inserts it,
-   * because that `finally` covers a failed assertion and not a killed process — and the row it
-   * would leave is what the guard refuses on. A pair stranded earlier in this run is therefore
-   * gone before the next test looks; a pair that was already there when the run started is still
-   * the guard's to refuse, because at that point nothing has established it is ours.
    */
-  await database.delete(brokeredConnections).where(ownedConnections());
+  await removeConnectionsWhere(ownedConnection);
   // The person the connection outlives, who is a row in `users` like anybody else. Reached only
   // through the check at the top of this function, because there is no suffix on this id to tell a
   // fixture apart from somebody's account and ten cascades sit behind the difference.
@@ -4548,7 +4383,7 @@ async function seedComposioGmail(
     accountMode?: "personal" | "shared" | null;
   } = {},
 ) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "gmail",
     title: "Gmail",
     vendor: "Composio",
@@ -4568,7 +4403,7 @@ async function seedComposioGmail(
   });
   await seedBot({ id: "bot_helper", name: "Helper", type: "built_in" });
   if (options.connect !== false) {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: "gmail",
       holder: "person",
@@ -4639,24 +4474,8 @@ afterAll(async () => {
   await database
     .delete(mcpTools)
     .where(inArray(mcpTools.serverId, ["gmail", "notion"]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, ["gmail", "notion"]));
-  await database.delete(brokeredConnections).where(ownedConnections());
-  /*
-   * And the witness row, which is at neither `gmail` nor any person.
-   *
-   * CRITERION. Nothing at `sweep_witness_${suite}` outlives this run.
-   *
-   * REASON. It is removed in its own test's `finally`, which a killed process does not run — and
-   * nothing else would reach it: `ownedConnections` names `gmail` and `linear`, and the anonymous
-   * actor is precisely what `retireConnectionsFor` refuses to act on, so no operation in the
-   * product could clear it either. Named exactly rather than by prefix, because another run's
-   * witness is that run's to take back.
-   */
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, `sweep_witness_${suite}`));
+  await removeServers(["gmail", "notion"]);
+  await removeConnectionsWhere(ownedConnection);
   await removeBots(["bot_helper"]);
   await database.delete(users).where(eq(users.id, "user_leaver"));
 });
@@ -4667,7 +4486,7 @@ test("a Composio connection row survives the person being deleted", async () => 
   await database
     .insert(users)
     .values({ id: "user_leaver", email: "leaver@example.com", name: "Leaver" });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: "gmail",
     holder: "person",
@@ -4685,24 +4504,18 @@ test("a Composio connection row survives the person being deleted", async () => 
    * then read it into this assertion and fail over a row that has nothing to do with the property
    * under test.
    */
-  const rows = await database
-    .select({ toolkit: brokeredConnections.app })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, "gmail"),
-        eq(brokeredConnections.userId, "user_leaver"),
-      ),
-    );
+  const rows = (await storedConnections()).brokered
+    .filter((row) => row.app === "gmail" && row.userId === "user_leaver")
+    .map((row) => ({ toolkit: row.app }));
 
-  // The whole reason this table exists rather than reusing mcp_user_credentials: offboarding has to
-  // still find the connection and revoke it at Composio after the person is gone, and there is no
-  // vault row to find it by, because Composio holds the account.
+  // The whole reason a brokered account is its own connection rather than a grant: offboarding has
+  // to still find the connection and revoke it at Composio after the person is gone, and there is
+  // no vault secret to find it by, because Composio holds the account.
   expect(rows).toEqual([{ toolkit: "gmail" }]);
 });
 
 test("a Composio app is listed through the Composio transport, not dialled as MCP", async () => {
-  const { store, database } = await freshStore();
+  const { store } = await freshStore();
   const asked: string[] = [];
   useComposioClient({
     listActions: async (toolkit) => {
@@ -4711,7 +4524,7 @@ test("a Composio app is listed through the Composio transport, not dialled as MC
     },
     execute: async () => vendorAnswered(),
   });
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "gmail",
     title: "Gmail",
     vendor: "Composio",
@@ -4755,21 +4568,21 @@ test("a Composio call with nobody attributed is refused before it reaches the ve
 });
 
 /**
- * The same refusal, with a legal row sitting at the anonymous actor.
+ * The same refusal, and the anonymous actor holding no account to fall back on.
  *
- * `composio_connections.user_id` is text notNull with NO foreign key — the property that lets a
- * connection outlive its person, so offboarding can still find it and revoke it at the broker. And
- * `notNull` does not exclude the empty string, so a row at `("gmail", "")` is legal: without the
- * guard ahead of the lookup, that row IS the match, the connection gate passes, and the run goes
- * out in whatever account Composio holds against "". The sibling `user-oauth` path cannot reach
- * this state — `mcp_user_credentials.user_id` carries a foreign key to `users.id` — so its test
- * asserts only the sentence, and borrowing that shape here would leave this property untested.
+ * A brokered account has no foreign key to a person — the property that lets it outlive its person,
+ * so offboarding can still find it and revoke it at the broker. The local table it used to be did
+ * not exclude the empty string either, so an account at `("gmail", "")` was legal: without the guard
+ * ahead of the lookup, that account was the match, the connection gate passed, and the run went out
+ * in whatever account Composio held against "". Intelligence now refuses to hold a person's account
+ * for an empty person, so that state cannot be written at all; what is left to assert is that it
+ * cannot, and that the call is still refused before the vendor.
  *
  * A rejection, not a failed result, and that is the assertion doing the work: the transport repeats
  * the refusal as its own last line, but it answers with `isError` rather than throwing. So a
  * `rejects` here is what separates this gate from its twin downstream of the lookup.
  */
-test("a Composio call with nobody attributed is refused even when a connection row exists for the empty actor", async () => {
+test("a Composio call with nobody attributed is refused, and no account can be held for the empty actor", async () => {
   const { store, database } = await freshStore();
   const reached: string[] = [];
   useComposioClient({
@@ -4780,84 +4593,39 @@ test("a Composio call with nobody attributed is refused even when a connection r
     },
   });
   await seedComposioGmail(database, store);
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: "gmail",
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
-  /*
-   * A second anonymous row, at an app this file has nothing to do with.
-   *
-   * CRITERION. Whatever removes the row above must leave this one exactly where it is.
-   *
-   * REASON. The cleanup below used to be `user_id = ''`, which is every app at once. That reached
-   * the anonymous row `composio-connections.test.ts` writes against its own run-suffixed app —
-   * deleting another file's fixture out from under it when the two run together — and it is the
-   * other half of the same confusion the guard at the top of this file suffered from. Suffixed, so
-   * this row is provably this run's to insert and to take away again, and so no real deployment
-   * row can be what the assertion below is reading.
-   */
-  const unrelatedApp = `sweep_witness_${suite}`;
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: unrelatedApp,
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
 
-  try {
-    await expect(
-      store.callTool({
-        ref: "gmail/GMAIL_FETCH_EMAILS",
-        args: {},
-        botId: "bot_helper",
-        actorId: "",
-      }),
-    ).rejects.toThrow(/not attributed to anybody/i);
+  // The write the old table took, refused by Intelligence.
+  await expect(
+    (await useTestVault()).createConnection({
+      kind: "brokered",
+      id: brokeredId("composio", "gmail", "person", ""),
+      provider: "composio",
+      app: "gmail",
+      holder: "person",
+      userId: "",
+      vendorUserId: "",
+      connectedBy: null,
+      verified: false,
+      verifiedAt: null,
+      probeAction: null,
+    }),
+  ).rejects.toThrow("CONNECTION_VALIDATION_ERROR");
 
-    expect(reached).toEqual([]);
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "",
+    }),
+  ).rejects.toThrow(/not attributed to anybody/i);
 
-    // Here rather than only in `freshDatabase`, so the row is gone the moment this test is done
-    // with it and the assertion below has something to read. Keyed on the PAIR either way: the app
-    // is what makes this row this file's, and the anonymous actor on its own names nobody's.
-    await database
-      .delete(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, "gmail"),
-          eq(brokeredConnections.userId, ""),
-        ),
-      );
-
-    // What the cleanup took, and what it did not. Asked as two facts about this list rather than
-    // as the whole of it, deliberately: a third app's anonymous row is somebody else's business,
-    // and a test that failed because one existed would be the same over-reach in assertion form.
-    const anonymous = (
-      await database
-        .select({ toolkit: brokeredConnections.app })
-        .from(brokeredConnections)
-        .where(eq(brokeredConnections.userId, ""))
-    ).map((row) => row.toolkit);
-    expect(anonymous).not.toContain("gmail");
-    expect(anonymous).toContain(unrelatedApp);
-  } finally {
-    // Both, so a failed assertion above still leaves the table as this test found it. Each is keyed
-    // on an app this run named, which is what makes the deletes this run's to make.
-    await database
-      .delete(brokeredConnections)
-      .where(eq(brokeredConnections.app, unrelatedApp));
-    await database
-      .delete(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, "gmail"),
-          eq(brokeredConnections.userId, ""),
-        ),
-      );
-  }
+  expect(reached).toEqual([]);
+  expect(
+    (await storedConnections()).brokered.filter(
+      (row) => row.app === "gmail" && row.userId === "",
+    ),
+  ).toEqual([]);
 });
 
 test("a Composio call by somebody who has not connected the app is refused with a sentence they can act on", async () => {
@@ -5451,7 +5219,7 @@ test("an answer this deployment could not read is filed under the same name as a
 test("an action's effect, destructive marker and version round-trip", async () => {
   const database = await freshDatabase();
 
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "gmail",
     title: "Gmail",
     vendor: "Composio",
@@ -5510,7 +5278,7 @@ test("an action's effect, destructive marker and version round-trip", async () =
 test("an action listed before these columns existed reads as unclassified and unversioned", async () => {
   const database = await freshDatabase();
 
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "notion",
     title: "Notion",
     vendor: "Notion",
@@ -5681,7 +5449,7 @@ test("refreshing a Composio app records each action's effect, destructive marker
     execute: async () => vendorAnswered(),
   });
 
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "gmail",
     title: "Gmail",
     vendor: "Composio",
@@ -5823,19 +5591,19 @@ describe("a refresh whose transport refused to ask anybody", () => {
     const { store, database } = await freshStore();
     await seedComposioGmail(database, store);
     await database
-      .update(mcpServers)
+      .update(mcpToolLists)
       .set({ lastError: "The vendor would not answer." })
-      .where(eq(mcpServers.id, "gmail"));
+      .where(eq(mcpToolLists.serverId, "gmail"));
 
     await store.refreshTools("gmail", "admin_user");
 
     const [row] = await database
       .select({
-        lastError: mcpServers.lastError,
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpToolLists.lastError,
+        toolsRefreshedAt: mcpToolLists.refreshedAt,
       })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
 
     /*
      * The transport's own sentence, named rather than merely counted as present.
@@ -5851,7 +5619,7 @@ describe("a refresh whose transport refused to ask anybody", () => {
     expect(row?.lastError).not.toBe("The vendor would not answer.");
     // And no refresh stamp, because nothing was listed: the column says when this deployment last
     // learned what the app offers, and it did not learn it here.
-    expect(row?.toolsRefreshedAt).toBeNull();
+    expect(row?.toolsRefreshedAt ?? null).toBeNull();
   });
 
   test("does not strand the grants the app is holding", async () => {
@@ -5896,12 +5664,12 @@ describe("a refresh whose transport refused to ask anybody", () => {
     );
 
     const [row] = await database
-      .select({ lastError: mcpServers.lastError })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .select({ lastError: mcpToolLists.lastError })
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
 
     // The state is this deployment's own, so it must not be written down as something a vendor did.
-    expect(row?.lastError).toBeNull();
+    expect(row?.lastError ?? null).toBeNull();
   });
 });
 
@@ -5969,11 +5737,11 @@ describe("a refresh the vendor answered with no actions at all", () => {
 
     const [row] = await database
       .select({
-        lastError: mcpServers.lastError,
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpToolLists.lastError,
+        toolsRefreshedAt: mcpToolLists.refreshedAt,
       })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
 
     /*
      * The sentence for THIS state and not the other one. The app answered, so nothing here may
@@ -5985,7 +5753,7 @@ describe("a refresh the vendor answered with no actions at all", () => {
     expect(row?.lastError).toContain("kept rather than deleted");
     // No stamp: the column says when this deployment last learned what the app offers, and an
     // answer it declined to believe is not it.
-    expect(row?.toolsRefreshedAt).toBeNull();
+    expect(row?.toolsRefreshedAt ?? null).toBeNull();
   });
 
   test("withdraws nothing and strands no grant", async () => {
@@ -6036,8 +5804,8 @@ describe("a refresh the vendor answered with no actions at all", () => {
  */
 describe("a row that resolves to two servers at once", () => {
   /** A colliding row, spelled the way the collision actually occurs: a curated slug, brokered. */
-  async function seedCollidingNotion(database: Database) {
-    await database.insert(mcpServers).values({
+  async function seedCollidingNotion() {
+    await seedServer({
       id: "notion",
       title: "Notion",
       vendor: "Composio",
@@ -6048,7 +5816,7 @@ describe("a row that resolves to two servers at once", () => {
 
   test("a refresh refuses it, and writes nothing about a vendor", async () => {
     const { store, database } = await freshStore();
-    await seedCollidingNotion(database);
+    await seedCollidingNotion();
 
     await expect(store.refreshTools("notion", "admin_user")).rejects.toThrow(
       ServerRowAmbiguousError,
@@ -6056,21 +5824,21 @@ describe("a row that resolves to two servers at once", () => {
 
     const [row] = await database
       .select({
-        lastError: mcpServers.lastError,
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpToolLists.lastError,
+        toolsRefreshedAt: mcpToolLists.refreshedAt,
       })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "notion"));
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "notion"));
 
     // Two of our columns disagreeing is not a vendor's answer, so it must not be written where the
     // page draws what the vendor said. Raised instead, which is what the route reads.
-    expect(row?.lastError).toBeNull();
-    expect(row?.toolsRefreshedAt).toBeNull();
+    expect(row?.lastError ?? null).toBeNull();
+    expect(row?.toolsRefreshedAt ?? null).toBeNull();
   });
 
   test("the model is told the call did not happen, and nothing about our columns", async () => {
     const { store, database } = await freshStore();
-    await seedCollidingNotion(database);
+    await seedCollidingNotion();
     await database.insert(mcpTools).values({
       serverId: "notion",
       name: "notion-fetch",
@@ -6134,8 +5902,8 @@ describe("a row that resolves to two servers at once", () => {
    * somebody presses Add on it.
    */
   test("the curated add refuses it rather than writing the catalogue's url over it", async () => {
-    const { store, database } = await freshStore();
-    await seedCollidingNotion(database);
+    const { store } = await freshStore();
+    await seedCollidingNotion();
 
     await expect(
       store.addServer({ key: "notion", by: "admin_user" }),
@@ -6143,11 +5911,8 @@ describe("a row that resolves to two servers at once", () => {
 
     // Untouched, which is what keeps the app removable: the slug is still readable off the url, so
     // `removeServer` can still find the accounts to end at the vendor.
-    const [row] = await database
-      .select({ url: mcpServers.url, provenance: mcpServers.provenance })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "notion"));
-    expect(row).toEqual({
+    const row = await storedServer("notion");
+    expect({ url: row?.url, provenance: row?.provenance }).toEqual({
       url: "composio://notion",
       provenance: "composio",
     });
@@ -6369,11 +6134,11 @@ describe("a listing this database would not have taken", () => {
     ]);
 
     const [row] = await database
-      .select({ lastError: mcpServers.lastError })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .select({ lastError: mcpToolLists.lastError })
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
     // A healthy refresh, because that is what it was.
-    expect(row?.lastError).toBeNull();
+    expect(row?.lastError ?? null).toBeNull();
   });
 
   test("a U+0000 in what the vendor wrote is dropped rather than aborting the replace", async () => {
@@ -6480,11 +6245,11 @@ describe("a listing this database would not have taken", () => {
     expect(stored?.inputSchema).toEqual(spellsTheEscape);
 
     const [row] = await database
-      .select({ lastError: mcpServers.lastError })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .select({ lastError: mcpToolLists.lastError })
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
     // A healthy refresh, because that is what it was.
-    expect(row?.lastError).toBeNull();
+    expect(row?.lastError ?? null).toBeNull();
   });
 
   test("a schema this deployment cannot make storable is recorded rather than thrown out of the refresh", async () => {
@@ -6527,18 +6292,18 @@ describe("a listing this database would not have taken", () => {
 
     const [row] = await database
       .select({
-        lastError: mcpServers.lastError,
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpToolLists.lastError,
+        toolsRefreshedAt: mcpToolLists.refreshedAt,
       })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
     // Named on the row an operator reads, rather than lost with the throw.
     expect(row?.lastError).toContain("could not be stored");
     // And no statement or bound value in it, on the path that records a failure.
     expect(row?.lastError).not.toContain("Failed query");
     expect(row?.lastError).not.toContain("params:");
     // Nothing was learned about the app, so nothing says otherwise.
-    expect(row?.toolsRefreshedAt).toBeNull();
+    expect(row?.toolsRefreshedAt ?? null).toBeNull();
 
     // What the app already had is still there, because nothing was replaced.
     expect(
@@ -6589,11 +6354,11 @@ describe("a listing this database would not have taken", () => {
 
     const [row] = await database
       .select({
-        lastError: mcpServers.lastError,
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpToolLists.lastError,
+        toolsRefreshedAt: mcpToolLists.refreshedAt,
       })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, "gmail"));
+      .from(mcpToolLists)
+      .where(eq(mcpToolLists.serverId, "gmail"));
     // The action, so an administrator has one row to look at rather than the app's whole listing.
     expect(row?.lastError).toContain("GMAIL_SEND_EMAIL");
     // The field, in the vendor's own terms.
@@ -6602,7 +6367,7 @@ describe("a listing this database would not have taken", () => {
     expect(row?.lastError).not.toMatch(/is not a function/i);
     expect(row?.lastError).not.toContain("schema could not be stored");
     // Nothing was learned about the app, so nothing says otherwise.
-    expect(row?.toolsRefreshedAt).toBeNull();
+    expect(row?.toolsRefreshedAt ?? null).toBeNull();
 
     // What the app already had is still there, because nothing was replaced.
     expect(
@@ -6702,22 +6467,24 @@ describe("a listing this database would not have taken", () => {
  * ids; on the refresh path they are the vendor's tool list.
  *
  * WHERE IT COMES FROM. A per-person MCP listing is the shape that runs a query of ours inside the
- * block that catches the vendor's failures: `connectionTokenFor` reads the asking person's stored
- * grant there. `composio` never gets that far — `listNeedsCredential` is false for it, the only
- * brokered transport — and a server added by URL reads its one token from the vault rather than
- * from a query. So the failure is injected at that one read and arrives exactly where it would in
- * production, rather than being handed to the `catch` from somewhere it could not come from.
+ * block that catches the vendor's failures: `connectionTokenFor` takes the lease on the asking
+ * person's secret there (`vault/leases.ts`), the one query of ours left on that path now that the
+ * grant and the secret are Intelligence's. `composio` never gets that far — `listNeedsCredential`
+ * is false for it, the only brokered transport — and a server added by URL reads its one token from
+ * the vault rather than from a query. So the failure is injected at that one write and arrives
+ * exactly where it would in production, rather than being handed to the `catch` from somewhere it
+ * could not come from.
  */
 describe("a query of this deployment's own that failed", () => {
   /** The drizzle shape, spelled once: statement and bound values in `message`, driver on `cause`. */
   function queryFailure() {
     return Object.assign(
       new Error(
-        'Failed query: select "credential_id" from "mcp_user_credentials" where "user_id" = $1 params: user_asker',
+        'Failed query: insert into "secret_leases" ("key", "holder", "expires_at") values ($1, $2, now()) params: connection-token:5b0e, user_asker',
       ),
       {
-        query: 'select "credential_id" from "mcp_user_credentials"',
-        params: ["user_asker"],
+        query: 'insert into "secret_leases"',
+        params: ["connection-token:5b0e", "user_asker"],
         cause: new Error("canceling statement due to statement timeout"),
       },
     );
@@ -6741,31 +6508,37 @@ describe("a query of this deployment's own that failed", () => {
     }
 
     // `user_leaver` rather than a new id: this file already owns a `users` row at it, so the
-    // person, the connection and the server row are all cleaned by machinery that exists.
+    // person, the connection and the app are all cleaned by machinery that exists.
     await database.insert(users).values({
       id: "user_leaver",
       email: "leaver@example.com",
       name: "Leaver",
     });
-    const [grant] = await database
-      .insert(credentialRows)
-      .values({
-        kind: "mcp_user_token",
-        provider: "notion",
-        keyId: "user_leaver",
-        encryptedValue: "{}",
-        metadata: {},
-      })
-      .returning({ id: credentialRows.id });
-    if (!grant) throw new Error("grant row was not created");
-    await database.insert(mcpServers).values({
+    // The deployment's client, so the call gets as far as the person's secret.
+    const client = await seedCredential({
+      kind: "mcp_oauth_client",
+      provider: "notion",
+      keyId: `oauth-client-notion-${suite}`,
+      plaintext: JSON.stringify({
+        clientId: "notion-client",
+        clientSecret: "",
+      }),
+    });
+    const grant = await seedCredential({
+      kind: "mcp_user_token",
+      provider: "notion",
+      keyId: "user_leaver",
+      plaintext: "{}",
+    });
+    await seedServer({
       id: "notion",
       title: notion.title,
       vendor: notion.vendor,
       url: `${notion.host}${notion.path}`,
       provenance: "first-party",
+      credentialId: client.id,
     });
-    await database.insert(mcpUserCredentials).values({
+    await seedGrant({
       serverId: "notion",
       userId: "user_leaver",
       credentialId: grant.id,
@@ -6773,23 +6546,20 @@ describe("a query of this deployment's own that failed", () => {
     });
 
     /*
-     * The stored-grant read, failed — and nothing else.
+     * The lease on the person's secret, failed — and nothing else.
      *
      * Derived from the real database so every other query the refresh makes is the real query.
-     * The second `select` is the one: `requireServer` reads the server row first, outside the
-     * block that catches vendor failures, and `connectionTokenFor`'s read of this person's grant
-     * is the next one and is inside it. Counting is what makes the failure land there rather than
-     * somewhere a blanket override would put it, and the assertions below distinguish the two —
-     * the row id in the message is added only by the conversion in that `catch`, so a failure
-     * escaping the earlier read would arrive as the raw dump and redden.
+     * The lease is taken inside the block that catches vendor failures, and it is the only write to
+     * `secret_leases` the refresh makes, so naming the table is what makes the failure land there
+     * rather than somewhere a blanket override would put it — and the assertions below distinguish
+     * the two: the app id in the message is added only by the conversion in that `catch`, so a
+     * failure escaping elsewhere would arrive as the raw dump and redden.
      */
-    let selects = 0;
     const refusing: Database = Object.create(database);
-    Object.defineProperty(refusing, "select", {
-      value: (...args: never[]) => {
-        selects += 1;
-        if (selects === 2) throw queryFailure();
-        return database.select(...args);
+    Object.defineProperty(refusing, "insert", {
+      value: (...args: Parameters<Database["insert"]>) => {
+        if (args[0] === secretLeases) throw queryFailure();
+        return database.insert(...args);
       },
     });
     const failing = createPluginStore({
@@ -6811,11 +6581,11 @@ describe("a query of this deployment's own that failed", () => {
     try {
       const [row] = await database
         .select({
-          lastError: mcpServers.lastError,
-          toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+          lastError: mcpToolLists.lastError,
+          toolsRefreshedAt: mcpToolLists.refreshedAt,
         })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, "notion"));
+        .from(mcpToolLists)
+        .where(eq(mcpToolLists.serverId, "notion"));
 
       /*
        * Nothing in the column, asserted FIRST because it is the half that was actually broken and
@@ -6827,8 +6597,9 @@ describe("a query of this deployment's own that failed", () => {
        * while the statement and every value bound to it went into a column an operator reads and
        * an export carries.
        */
-      expect(row?.lastError).toBeNull();
-      expect(row?.toolsRefreshedAt).toBeNull();
+      // No row at all is nothing written, which is the same answer as a row holding nulls.
+      expect(row?.lastError ?? null).toBeNull();
+      expect(row?.toolsRefreshedAt ?? null).toBeNull();
 
       // Raised, because a query this database refused is not something the vendor did — the same
       // criterion the replace further down this method is held to.
@@ -6837,28 +6608,18 @@ describe("a query of this deployment's own that failed", () => {
       expect(message).toContain("canceling statement due to statement timeout");
       expect(message).not.toContain("Failed query");
       expect(message).not.toContain("params:");
-      expect(message).not.toContain("mcp_user_credentials");
+      expect(message).not.toContain("secret_leases");
       // Named by the conversion inside the refresh's own `catch`, which is how this asserts WHERE
       // the failure was classified and not merely that something was thrown.
       expect(message).toContain("notion:");
     } finally {
-      /*
-       * Locally, and in this order. `mcp_user_credentials.credential_id` is a real foreign key
-       * that deliberately does not cascade, so the join row has to go before the vault row — and
-       * the teardown that clears vault rows for this file runs before the one that clears server
-       * rows, which is what would otherwise leave a delete refusing.
-       */
-      await database
-        .delete(mcpUserCredentials)
-        .where(
-          and(
-            eq(mcpUserCredentials.serverId, "notion"),
-            eq(mcpUserCredentials.userId, "user_leaver"),
-          ),
-        );
-      await database
-        .delete(credentialRows)
-        .where(eq(credentialRows.id, grant.id));
+      await removeConnectionsWhere(
+        (connection) =>
+          connection.kind === "grant" &&
+          connection.serverId === "notion" &&
+          connection.userId === "user_leaver",
+      );
+      await purgeSecrets([grant.id, client.id]);
     }
   });
 
@@ -6906,7 +6667,7 @@ describe("a query of this deployment's own that failed", () => {
     expect(answer).toBe("That tool could not be called.");
     expect(answer).not.toContain("Failed query");
     expect(answer).not.toContain("params:");
-    expect(answer).not.toContain("mcp_user_credentials");
+    expect(answer).not.toContain("secret_leases");
   });
 
   test("the trail gets the reason and none of the query", async () => {
@@ -6964,7 +6725,7 @@ describe("a query of this deployment's own that failed", () => {
     expect(failure).toContain("canceling statement due to statement timeout");
     expect(failure).not.toContain("Failed query");
     expect(failure).not.toContain("params:");
-    expect(failure).not.toContain("mcp_user_credentials");
+    expect(failure).not.toContain("secret_leases");
   });
 });
 
@@ -6982,26 +6743,29 @@ test("an app with nothing recorded against it can be refreshed to no actions at 
     listActions: async () => [],
     execute: async () => vendorAnswered(),
   });
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "gmail",
     title: "Gmail",
     vendor: "Composio",
     url: "composio://gmail",
     provenance: "composio",
-    lastError: "Whatever was wrong last time.",
   });
+  // What the last refresh recorded, beside the tool list.
+  await database
+    .insert(mcpToolLists)
+    .values({ serverId: "gmail", lastError: "Whatever was wrong last time." });
 
   expect(await store.refreshTools("gmail", "admin_user")).toEqual({ tools: 0 });
 
   const [row] = await database
     .select({
-      lastError: mcpServers.lastError,
-      toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+      lastError: mcpToolLists.lastError,
+      toolsRefreshedAt: mcpToolLists.refreshedAt,
     })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, "gmail"));
+    .from(mcpToolLists)
+    .where(eq(mcpToolLists.serverId, "gmail"));
 
-  expect(row?.lastError).toBeNull();
+  expect(row?.lastError ?? null).toBeNull();
   expect(row?.toolsRefreshedAt).not.toBeNull();
 });
 
@@ -7058,11 +6822,11 @@ test("an audit write that fails is not recorded as the vendor misbehaving", asyn
   );
 
   const [row] = await database
-    .select({ lastError: mcpServers.lastError })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, "gmail"));
+    .select({ lastError: mcpToolLists.lastError })
+    .from(mcpToolLists)
+    .where(eq(mcpToolLists.serverId, "gmail"));
 
-  expect(row?.lastError).toBeNull();
+  expect(row?.lastError ?? null).toBeNull();
 });
 
 /**
@@ -7116,11 +6880,8 @@ test("enabling an app writes a brokered row, and asks for its auth config first"
        * whole property: an implementation that wrote the row and then asked would leave an app on
        * the page that nobody can connect to whenever this call fails.
        */
-      const rows = await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, "composio-linear"));
-      rowsWhenAsked.push(...rows.map((row) => row.id));
+      const held = await storedServer("composio-linear");
+      if (held) rowsWhenAsked.push(held.id);
       return "created";
     },
     deleteAuthConfig: unasked("delete an auth config"),
@@ -7150,13 +6911,9 @@ test("enabling an app writes a brokered row, and asks for its auth config first"
     execute: async () => vendorAnswered(),
   });
 
-  const [present] = await database
-    .select({ id: mcpServers.id })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, "composio-linear"));
-  if (present) {
+  if (await storedServer("composio-linear")) {
     throw new Error(
-      "a row at 'composio-linear' was already here, so it is not this test's to write over",
+      "an app at 'composio-linear' was already here, so it is not this test's to write over",
     );
   }
 
@@ -7194,9 +6951,7 @@ test("enabling an app writes a brokered row, and asks for its auth config first"
     await database
       .delete(mcpTools)
       .where(eq(mcpTools.serverId, "composio-linear"));
-    await database
-      .delete(mcpServers)
-      .where(eq(mcpServers.id, "composio-linear"));
+    await removeServers(["composio-linear"]);
   }
 });
 
@@ -7395,11 +7150,11 @@ test("a brokered connection row is written only where the vendor says the accoun
  */
 test("confirming a brokered connection the vendor no longer has removes the row", async () => {
   const { broker, order } = brokerSpy({ isConnected: async () => false });
-  const { store, database, auditStore } = await freshStore({ broker });
+  const { store, auditStore } = await freshStore({ broker });
   const toolkit = "gmail";
   const userId = "user_asker";
   const account = { holder: "person" as const, userId, vendorUserId: userId };
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -7494,19 +7249,16 @@ test("disconnecting a brokered connection revokes at the vendor before the row g
   const rowsWhenRevoked: string[] = [];
   const { broker, order } = brokerSpy({
     revoke: async () => {
-      const rows = await database
-        .select({ userId: brokeredConnections.userId })
-        .from(brokeredConnections)
-        .where(ownedConnections());
-      rowsWhenRevoked.push(...rows.map((row) => row.userId));
+      const rows = (await storedConnections()).brokered.filter(ownedConnection);
+      rowsWhenRevoked.push(...rows.map((row) => row.userId ?? ""));
       return true;
     },
   });
-  const { store, database, auditStore } = await freshStore({ broker });
+  const { store, auditStore } = await freshStore({ broker });
   const toolkit = "gmail";
   const userId = "user_asker";
   const account = { holder: "person" as const, userId, vendorUserId: userId };
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -7561,11 +7313,11 @@ test("a brokered connection outlives a revoke that failed, and a second attempt 
       return true;
     },
   });
-  const { store, database, auditStore } = await freshStore({ broker });
+  const { store, auditStore } = await freshStore({ broker });
   const toolkit = "gmail";
   const userId = "user_asker";
   const account = { holder: "person" as const, userId, vendorUserId: userId };
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -7617,11 +7369,11 @@ test("a brokered connection outlives a revoke that failed, and a second attempt 
  */
 test("a brokered disconnect that withdrew no grant records that it withdrew none", async () => {
   const { broker, order } = brokerSpy({ revoke: async () => false });
-  const { store, database, auditStore } = await freshStore({ broker });
+  const { store, auditStore } = await freshStore({ broker });
   const toolkit = "gmail";
   const userId = "user_asker";
   const account = { holder: "person" as const, userId, vendorUserId: userId };
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -7813,13 +7565,10 @@ test("removing an app revokes everybody, then clears rows, then drops the config
   /** Who was still connected to `linear` at the moment of each broker call, in call order. */
   const connectedWhenAsked: string[][] = [];
   const stillConnected = async () =>
-    (
-      await database
-        .select({ userId: brokeredConnections.userId })
-        .from(brokeredConnections)
-        .where(eq(brokeredConnections.app, "linear"))
-        .orderBy(asc(brokeredConnections.userId))
-    ).map((row) => row.userId);
+    (await storedConnections()).brokered
+      .filter((row) => row.app === "linear")
+      .map((row) => row.userId ?? "")
+      .sort();
 
   const { broker, order } = brokerSpy({
     ensureAuthConfig: async () => "created",
@@ -7851,19 +7600,11 @@ test("removing an app revokes everybody, then clears rows, then drops the config
    * them: `composio-linear` and the pairs at `linear` are spelled the way production spells them,
    * so a row already sitting at one belongs to somebody else and the cleanup below would take it.
    */
-  const [present] = await database
-    .select({ id: mcpServers.id })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, "composio-linear"));
-  const strangers = await database
-    .select({ userId: brokeredConnections.userId })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, "linear"),
-        inArray(brokeredConnections.userId, ["user-a", "user-b"]),
-      ),
-    );
+  const present = await storedServer("composio-linear");
+  const strangers = (await storedConnections()).brokered.filter(
+    (row) =>
+      row.app === "linear" && ["user-a", "user-b"].includes(row.userId ?? ""),
+  );
   if (present || strangers.length > 0) {
     throw new Error(
       "a 'composio-linear' server row or a 'linear' connection for user-a or user-b was already " +
@@ -7968,17 +7709,13 @@ test("removing an app revokes everybody, then clears rows, then drops the config
     await database
       .delete(mcpTools)
       .where(eq(mcpTools.serverId, "composio-linear"));
-    await database
-      .delete(mcpServers)
-      .where(eq(mcpServers.id, "composio-linear"));
-    await database
-      .delete(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, "linear"),
-          inArray(brokeredConnections.userId, ["user-a", "user-b"]),
-        ),
-      );
+    await removeServers(["composio-linear"]);
+    await removeConnectionsWhere(
+      (row) =>
+        row.kind === "brokered" &&
+        row.app === "linear" &&
+        ["user-a", "user-b"].includes(row.userId ?? ""),
+    );
   }
 });
 
@@ -8014,17 +7751,13 @@ test("removing a person revokes their brokered accounts at the broker", async ()
   const connectedWhenAsked: string[][] = [];
   /** Which app each revoke was for, which the spy's own `revoke:user_leaver` entries cannot say. */
   const revoked: string[] = [];
-  // Through the file's own handle, which is the one `freshStore` hands back: the rows this test
-  // writes are swept by {@link freshDatabase} and the teardown, so nothing here needs a local name
-  // for the database.
+  // Read from Intelligence: the accounts this test writes are swept by {@link freshDatabase} and the
+  // teardown, so nothing here needs a handle of its own.
   const stillConnected = async () =>
-    (
-      await database
-        .select({ toolkit: brokeredConnections.app })
-        .from(brokeredConnections)
-        .where(eq(brokeredConnections.userId, "user_leaver"))
-        .orderBy(asc(brokeredConnections.app))
-    ).map((row) => row.toolkit);
+    (await storedConnections()).brokered
+      .filter((row) => row.userId === "user_leaver")
+      .map((row) => row.app)
+      .sort();
 
   const { broker, order } = brokerSpy({
     isConnected: async () => true,
@@ -8141,11 +7874,11 @@ test("removing a person revokes their brokered accounts at the broker", async ()
  */
 test("offboarding a brokered account nobody held any more withdraws nothing, and says so", async () => {
   const { broker, order } = brokerSpy({ revoke: async () => false });
-  const { store, database, auditStore } = await freshStore({ broker });
+  const { store, auditStore } = await freshStore({ broker });
   const toolkit = "gmail";
   const userId = "user_leaver";
   const account = { holder: "person" as const, userId, vendorUserId: userId };
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -8202,7 +7935,7 @@ test("offboarding does not revoke or audit another provider's rows", async () =>
   const { store, auditStore } = await freshStore({ broker });
 
   // The active provider's own row, so the sweep still retires something.
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: "gmail",
     holder: "person",
@@ -8210,7 +7943,7 @@ test("offboarding does not revoke or audit another provider's rows", async () =>
     vendorUserId: "user_leaver",
   });
   // The same app, filed under the provider this deployment does not use.
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app: "gmail",
     holder: "person",
@@ -8224,13 +7957,9 @@ test("offboarding does not revoke or audit another provider's rows", async () =>
   });
   expect(order).toEqual(["revoke:user_leaver"]);
 
-  const standing = await database
-    .select({
-      provider: brokeredConnections.provider,
-      app: brokeredConnections.app,
-    })
-    .from(brokeredConnections)
-    .where(eq(brokeredConnections.userId, "user_leaver"));
+  const standing = (await storedConnections()).brokered
+    .filter((row) => row.userId === "user_leaver")
+    .map((row) => ({ provider: row.provider, app: row.app }));
   expect(standing).toEqual([{ provider: "arcade", app: "gmail" }]);
 
   const disconnected = auditStore
@@ -8332,12 +8061,12 @@ test("a destructive action says so in the list the screens read", async () => {
 });
 
 /**
- * A database fault on the vault read, which is not a withdrawn credential.
+ * A fault on the vault read, which is not a withdrawn credential.
  *
- * CRITERION. When the read that fetches a server's token fails on a query of this deployment's own,
- * the call is refused as a fault of ours — it is on the {@link isDeploymentFault} shelf, and it is
- * NOT a {@link PluginRefusedError}. Neither the sentence the caller gets nor the row the trail keeps
- * says a credential was withdrawn.
+ * CRITERION. When the read that fetches a server's token fails because the vault would not answer —
+ * not because the secret is gone or revoked — the call is refused as a fault of ours: it is on the
+ * {@link isDeploymentFault} shelf, and it is NOT a {@link PluginRefusedError}. Neither the sentence
+ * the caller gets nor the row the trail keeps says a credential was withdrawn.
  *
  * REASON. `secretFor` used to tell a withdrawn credential from a broken query by looking for the
  * words "revoked" and "not found" inside `error.message`. drizzle reports every failure as a
@@ -8355,11 +8084,12 @@ test("a destructive action says so in the list the screens read", async () => {
  * goes unreported. Told apart by class, all three audiences get "that did not work" instead, which
  * is what a fault of ours is allowed to say.
  *
- * THE FAULT IS A REAL ONE, which is the point of the fixture. The production credential store
- * issues its production statement over an address that resolves to no database, so what arrives at
- * `secretFor` is drizzle's own wrapper around the driver's complaint. A hand-thrown `Error` would
- * prove nothing here: the message is exactly what the bug was reading, so the message has to come
- * from the same place production's does.
+ * THE FAULT IS A REAL ONE, which is the point of the fixture. The vault is Intelligence's now, so the
+ * read that used to fail on a database that was not there fails here on a vault that will not answer
+ * this deployment: the production credential store, over the real Intelligence, presenting a key
+ * Intelligence refuses. What arrives at `secretFor` is the vault client's own refusal. A hand-thrown
+ * `Error` would prove nothing here: the message is exactly what the bug was reading, so the message
+ * has to come from the same place production's does.
  */
 describe("a vault read that fails on a query of this deployment's own", () => {
   const faultServerId = `vault-fault-${suite}`;
@@ -8373,19 +8103,22 @@ describe("a vault read that fails on a query of this deployment's own", () => {
   let faultCredentialId: string | null = null;
 
   /**
-   * The suite's own address, pointed at a database that is not there.
+   * The suite's own Intelligence, presenting a key it does not hold.
    *
    * Derived rather than written out, so the fixture fails the way the deployment would on whatever
-   * Postgres this run was given — including a scratch one — instead of only against localhost.
+   * Intelligence this run was given — including a scratch one.
    */
   function unreachableVault() {
-    const address = new URL(testDatabaseUrl());
-    address.pathname = `/absent_vault_${suite}`;
-    return address.toString();
+    return createConnectionsDirectory({
+      client: createVaultClient({
+        apiUrl: testIntelligence().apiUrl,
+        apiKey: `absent_vault_${suite}`,
+      }),
+    });
   }
 
   /**
-   * The vault on that address: `createCredentialStore`, unwrapped.
+   * The vault on that key: `createCredentialStore`, unwrapped.
    *
    * Every other seam is the real one, because the fault under test is meant to arrive from the real
    * read. Its own policy rather than the file's mutable `policy`, so a describe that ran earlier and
@@ -8395,9 +8128,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
     brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
-    credentials: createCredentialStore(
-      createDatabase(unreachableVault(), TEST_POOL),
-    ),
+    credentials: createCredentialStore(unreachableVault()),
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     // Loud rather than silent: the token is read before the vendor is dialled, so a call that gets
@@ -8412,24 +8143,16 @@ describe("a vault read that fails on a query of this deployment's own", () => {
   beforeAll(async () => {
     await seedBot({ id: faultBotId, name: faultBotId });
 
-    // A real vault row, on the real database. What breaks is the READ, not the pointer: the server
-    // is configured exactly as a working one is, which is what makes the fault a fault rather than
-    // a missing credential wearing one's clothes.
-    const [credential] = await database
-      .insert(credentialRows)
-      .values({
-        kind: "mcp",
-        provider: faultServerId,
-        keyId: `mcp-${faultServerId}`,
-        /*
-         * A placeholder rather than a real envelope: the read is what fails, so nothing here is
-         * ever decrypted, and an encrypted value would assert a step this test never reaches.
-         */
-        encryptedValue: "{}",
-        metadata: {},
-      })
-      .returning({ id: credentialRows.id });
-    if (!credential) throw new Error("the fixture credential was not stored");
+    // A real secret, in the real vault. What breaks is the READ, not the pointer: the server is
+    // configured exactly as a working one is, which is what makes the fault a fault rather than a
+    // missing credential wearing one's clothes.
+    const credential = await seedCredential({
+      kind: "mcp",
+      provider: faultServerId,
+      keyId: `mcp-${faultServerId}`,
+      // A placeholder: the read is what fails, so nothing here is ever revealed.
+      plaintext: "{}",
+    });
     faultCredentialId = credential.id;
 
     /*
@@ -8437,7 +8160,7 @@ describe("a vault read that fails on a query of this deployment's own", () => {
      * path — which is the branch of `connectionTokenFor` that reads the vault for a server's own
      * token, and the one whose refusal names an administrator.
      */
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: faultServerId,
       title: "a server whose vault is unreachable",
       vendor: "test",
@@ -8463,15 +8186,11 @@ describe("a vault read that fails on a query of this deployment's own", () => {
           eq(pluginGrants.agentId, faultBotId),
         ),
       );
-    // The tools go with the server row, which cascades; both ids carry this run's suffix, so
-    // neither can be a row the deployment configured.
-    await database.delete(mcpServers).where(eq(mcpServers.id, faultServerId));
+    // The tools go with the app; both ids carry this run's suffix, so neither can be one the
+    // deployment configured.
+    await removeServers([faultServerId]);
     await removeBots([faultBotId]);
-    if (faultCredentialId) {
-      await database
-        .delete(credentialRows)
-        .where(eq(credentialRows.id, faultCredentialId));
-    }
+    if (faultCredentialId) await purgeSecrets([faultCredentialId]);
   });
 
   test("is refused as this deployment's own fault, never as a withdrawn credential", async () => {
@@ -8517,10 +8236,10 @@ describe("a vault read that fails on a query of this deployment's own", () => {
     expect(written).not.toContain(WITHDRAWN);
     expect(written).not.toContain("no longer holds");
     /*
-     * And the true half is still recorded, without the statement or anything bound to it — the
-     * driver's own complaint is what `withoutStatement` keeps, and a credential id is what it drops.
+     * And the true half is still recorded, without anything it was asked with — the vault's own
+     * complaint is what is kept, and a credential id is what is dropped.
      */
-    expect(written).toContain(`absent_vault_${suite}`);
+    expect(written).toContain("AUTH_UNAUTHENTICATED");
     expect(written).not.toContain("Failed query:");
     expect(written).not.toContain(faultCredentialId ?? "<none>");
   });

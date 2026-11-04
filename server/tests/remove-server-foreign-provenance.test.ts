@@ -1,14 +1,30 @@
 // server/tests/remove-server-foreign-provenance.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { auditEvents } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * WHAT A ROW LEFT BEHIND BY THE OTHER BROKER IS REMOVED AS.
@@ -20,10 +36,15 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * revocation off the ACTIVE broker. So a foreign row's slug was handed to the wrong vendor while
  * the deletes beneath it matched nothing, and the removal reported success either way.
  *
- * SCOPING. `audit_events` is append-only and `brokered_connections` is long-lived, so every
- * assertion is keyed on names this file alone writes.
+ * SCOPING. `audit_events` is append-only and brokered accounts are long-lived in the one
+ * Intelligence project every file shares, so every assertion is keyed on names this file alone
+ * writes.
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestVault();
+});
 
 afterAll(async () => {
   await database.$client.close();
@@ -96,7 +117,7 @@ function composioStore(broker: ConnectedAppBroker) {
 
 async function server(id: string, provenance: string, url: string) {
   apps.push(id);
-  await database.insert(mcpServers).values({
+  await seedServer({
     id,
     title: id,
     vendor: provenance === "arcade" ? "Arcade" : "Composio",
@@ -109,7 +130,7 @@ async function server(id: string, provenance: string, url: string) {
 
 async function hold(provider: BrokerProvider, app: string, userId: string) {
   apps.push(app);
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider,
     app,
     holder: "person",
@@ -119,16 +140,10 @@ async function hold(provider: BrokerProvider, app: string, userId: string) {
 }
 
 const rowsFor = async (names: string[]) =>
-  (
-    await database
-      .select({
-        provider: brokeredConnections.provider,
-        app: brokeredConnections.app,
-      })
-      .from(brokeredConnections)
-      .where(inArray(brokeredConnections.app, names))
-      .orderBy(asc(brokeredConnections.app))
-  ).map((row) => `${row.provider}:${row.app}`);
+  (await storedConnections()).brokered
+    .filter((connection) => names.includes(connection.app))
+    .map((connection) => `${connection.provider}:${connection.app}`)
+    .sort();
 
 const trailFor = (names: string[]) =>
   database
@@ -147,10 +162,12 @@ const trailFor = (names: string[]) =>
 
 afterEach(async () => {
   if (apps.length) {
-    await database
-      .delete(brokeredConnections)
-      .where(inArray(brokeredConnections.app, apps));
-    await database.delete(mcpServers).where(inArray(mcpServers.id, apps));
+    const named = new Set(apps);
+    await removeConnectionsWhere(
+      (connection) =>
+        connection.kind === "brokered" && named.has(connection.app),
+    );
+    await removeServers(apps);
   }
   apps.length = 0;
 });
@@ -180,13 +197,8 @@ describe("removing a server whose provenance is not the configured provider", ()
         vendorRevocationRequested: false,
       });
     }
-    // The server row itself goes, as it always did.
-    expect(
-      await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, t.app)),
-    ).toEqual([]);
+    // The app itself goes, as it always did.
+    expect(await storedServer(t.app)).toBeNull();
   });
 
   test("a row of the configured provider's own is still revoked at the vendor", async () => {

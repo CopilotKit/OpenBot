@@ -1,27 +1,34 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  credentials,
-  mcpServers,
-  mcpUserCredentials,
-  users,
-} from "../src/db/schema";
-import { createPluginStore } from "../src/plugins/store";
+import { users } from "../src/db/schema";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  liveSecrets,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  secretsNamed,
+  seedServer,
+  storedConnections,
+  storedServer,
+  storedSecret,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * Registering a client twice, and connecting twice, against a real vault.
  *
  * Both paths used to insert a second live credential for a key and revoke the first afterwards, on
- * a best-effort basis. `credentials_active_key_idx` refuses the second insert outright, so the
+ * a best-effort basis. The vault refuses a second live secret under a name outright, so the
  * question is no longer whether an orphan is left behind but whether the path still works at all.
- * A stubbed vault cannot answer that: the index is a database object, and only a database enforces
- * it.
+ * A stubbed vault cannot answer that: the rule is Intelligence's, and only Intelligence enforces it.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -32,14 +39,7 @@ const suite = randomUUID().slice(0, 8);
 const serverId = "google-drive";
 const personId = `plugin_rotation_person_${suite}`;
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
-  encryptionKey: ENCRYPTION_KEY,
-  policy: () => policy,
-});
+let store: PluginStore;
 
 let clientBefore: string | null = null;
 let serverExisted = false;
@@ -48,16 +48,9 @@ async function rowsFor(
   kind: "mcp_oauth_client" | "mcp_user_token",
   keyId: string,
 ) {
-  return database
-    .select({ id: credentials.id, revokedAt: credentials.revokedAt })
-    .from(credentials)
-    .where(
-      and(
-        eq(credentials.kind, kind),
-        eq(credentials.provider, serverId),
-        eq(credentials.keyId, keyId),
-      ),
-    );
+  return (await secretsNamed({ kind, provider: serverId, keyId })).map(
+    (secret) => ({ id: secret.id, revokedAt: secret.revokedAt }),
+  );
 }
 
 function live<T extends { revokedAt: Date | null }>(rows: T[]) {
@@ -65,6 +58,16 @@ function live<T extends { revokedAt: Date | null }>(rows: T[]) {
 }
 
 beforeAll(async () => {
+  const directory = await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(directory),
+    encryptionKey: ENCRYPTION_KEY,
+    policy: () => policy,
+  });
+
   await database
     .insert(users)
     .values({
@@ -75,81 +78,63 @@ beforeAll(async () => {
     })
     .onConflictDoNothing();
 
-  const [existing] = await database
-    .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, serverId));
-  serverExisted = existing !== undefined;
+  const existing = await storedServer(serverId);
+  serverExisted = existing !== null;
   clientBefore = existing?.credentialId ?? null;
 
-  await database
-    .insert(mcpServers)
-    .values({
+  if (!existing) {
+    await seedServer({
       id: serverId,
       title: "Google Drive",
       vendor: "Google",
       url: "https://www.googleapis.com/drive/v3",
       provenance: "first-party",
-    })
-    .onConflictDoNothing();
+    });
+  }
 
   // This run's own client key, so a deployment's real Drive registration is never touched.
-  await database
-    .update(credentials)
-    .set({ revokedAt: new Date(), updatedAt: new Date() })
-    .where(
-      and(
-        eq(credentials.kind, "mcp_oauth_client"),
-        eq(credentials.provider, serverId),
-        isNull(credentials.revokedAt),
-      ),
-    );
+  for (const secret of await liveSecrets({
+    kind: "mcp_oauth_client",
+    provider: serverId,
+  })) {
+    await directory.revokeSecret(secret.id);
+  }
 });
 
 afterAll(async () => {
-  await database
-    .delete(mcpUserCredentials)
-    .where(eq(mcpUserCredentials.userId, personId));
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "grant" &&
+      connection.serverId === serverId &&
+      connection.userId === personId,
+  );
   /*
-   * The pointer is dropped before the rows are, and put back only if what it named survives.
-   *
-   * `mcp_servers.credential_id` is a real foreign key, so a credential this run registered cannot be
-   * deleted while the server still names it. Restoring first is not enough either: on a database
-   * where an earlier run of this file left the pointer on one of its own rows, restoring puts it
-   * straight back onto a row about to be deleted.
+   * The pointer is dropped before the secrets are, and put back only if what it named survives: on
+   * a project where an earlier run of this file left the pointer on one of its own secrets,
+   * restoring first would put it straight back onto a secret about to be purged.
    */
-  await database
-    .update(mcpServers)
-    .set({ credentialId: null })
-    .where(eq(mcpServers.id, serverId));
+  if (await storedServer(serverId)) {
+    await changeServer(serverId, { credentialId: null });
+  }
   const mine = [
     ...(await rowsFor("mcp_user_token", personId)),
     ...(await rowsFor("mcp_oauth_client", `oauth-client-${serverId}`)),
-  ].map((row) => row.id);
-  if (mine.length) {
-    await database.delete(credentials).where(inArray(credentials.id, mine));
-  }
+  ]
+    .map((row) => row.id)
+    .filter((id) => id !== clientBefore);
+  await purgeSecrets(mine);
   await database.delete(users).where(eq(users.id, personId));
-  if (clientBefore) {
-    const [survivor] = await database
-      .select({ id: credentials.id })
-      .from(credentials)
-      .where(eq(credentials.id, clientBefore));
-    if (survivor) {
-      await database
-        .update(mcpServers)
-        .set({ credentialId: clientBefore })
-        .where(eq(mcpServers.id, serverId));
-    }
+  if (clientBefore && (await storedSecret(clientBefore))) {
+    await changeServer(serverId, { credentialId: clientBefore });
   }
   if (!serverExisted) {
-    await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+    await removeServers([serverId]);
   }
   await database.$client.end();
 });
 
 describe("registering an OAuth client twice", () => {
-  test("replaces the client rather than meeting the index", async () => {
+  test("replaces the client rather than meeting the vault's one-live-secret rule", async () => {
     await store.registerOAuthClient({
       serverId,
       client: { clientId: `client-one-${suite}`, clientSecret: "one" },
@@ -173,16 +158,14 @@ describe("registering an OAuth client twice", () => {
       0,
     );
 
-    const [server] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId));
-    expect(server?.credentialId).toBe(live(all)[0]?.id as string);
+    expect((await storedServer(serverId))?.credentialId).toBe(
+      live(all)[0]?.id as string,
+    );
   });
 });
 
 describe("reconnecting the same person to the same server", () => {
-  test("replaces their token rather than meeting the index", async () => {
+  test("replaces their token rather than meeting the vault's one-live-secret rule", async () => {
     await store.recordConnection({
       serverId,
       userId: personId,
@@ -203,15 +186,9 @@ describe("reconnecting the same person to the same server", () => {
     expect(live(all)).toHaveLength(1);
     expect(live(all)[0]?.id).not.toBe(first[0]?.id);
 
-    const [connection] = await database
-      .select({ credentialId: mcpUserCredentials.credentialId })
-      .from(mcpUserCredentials)
-      .where(
-        and(
-          eq(mcpUserCredentials.serverId, serverId),
-          eq(mcpUserCredentials.userId, personId),
-        ),
-      );
+    const connection = (await storedConnections()).grants.find(
+      (grant) => grant.serverId === serverId && grant.userId === personId,
+    );
     expect(connection?.credentialId).toBe(live(all)[0]?.id as string);
   });
 });

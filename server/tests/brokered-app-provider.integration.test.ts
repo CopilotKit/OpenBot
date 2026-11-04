@@ -5,11 +5,9 @@
  * Case is never normalised: Arcade's toolkit names are case-sensitive, so `arcade://Gmail` and
  * `arcade://gmail` are distinct apps.
  */
-import { afterAll, afterEach, expect, test } from "bun:test";
-import { eq, like, or } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { BrokerConnection, ComposioBroker } from "../src/plugins/broker";
 import {
@@ -17,21 +15,49 @@ import {
   createPluginStore,
 } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  recordingCredentialStore,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
+/**
+ * The real vault, recording every write a store makes to it. Nothing in this file has a credential
+ * to store, rotate or revoke, so the record must stay empty: a write here means adding an app
+ * touched the vault, which none of these paths may.
+ */
+const vaultWrites: string[] = [];
+const vaultCreated: string[] = [];
+let credentials: Awaited<ReturnType<typeof recordingCredentialStore>>;
+beforeAll(async () => {
+  credentials = await recordingCredentialStore({
+    calls: vaultWrites,
+    created: vaultCreated,
+  });
+});
+afterEach(() => {
+  expect(vaultWrites.splice(0)).toEqual([]);
+});
+
 async function clean() {
-  await database
-    .delete(brokeredConnections)
-    .where(like(brokeredConnections.app, "bap%"));
-  await database
-    .delete(mcpServers)
-    .where(
-      or(
-        like(mcpServers.id, "arcade-bap%"),
-        like(mcpServers.id, "composio-bap%"),
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && connection.app.startsWith("bap"),
+  );
+  await removeServers(
+    (await useTestVault())
+      .servers()
+      .map((server) => server.id)
+      .filter(
+        (id) => id.startsWith("arcade-bap") || id.startsWith("composio-bap"),
       ),
-    );
+  );
 }
 afterEach(clean);
 afterAll(async () => {
@@ -88,27 +114,7 @@ function storeFor(
     brokerProvider: provider,
     database,
     auditStore: createAuditStore(database),
-    credentials: {
-      readSecret: async () => null,
-      create: async () => {
-        throw new Error("vault");
-      },
-      updateSecret: async () => {
-        throw new Error("vault");
-      },
-      rotate: async () => {
-        throw new Error("vault");
-      },
-      isLive: async () => {
-        throw new Error("vault");
-      },
-      findLiveByKey: async () => {
-        throw new Error("vault");
-      },
-      revoke: async () => {
-        throw new Error("vault");
-      },
-    },
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -117,13 +123,8 @@ function storeFor(
 
 const consent: BrokerConnection = { kind: "consent" };
 
-async function row(id: string) {
-  const [found] = await database
-    .select()
-    .from(mcpServers)
-    .where(eq(mcpServers.id, id));
-  return found;
-}
+/** The app as Intelligence holds it now, or null. */
+const row = (id: string) => storedServer(id);
 
 test("an Arcade store enables an arcade:// toolkit under an arcade- id, case kept", async () => {
   const store = storeFor("arcade");
@@ -139,7 +140,7 @@ test("an Arcade store enables an arcade:// toolkit under an arcade- id, case kep
   const stored = await row("arcade-bapGmail");
   expect(stored?.vendor).toBe("Arcade");
   expect(stored?.provenance).toBe("arcade");
-  expect(await row("composio-bapGmail")).toBeUndefined();
+  expect(await row("composio-bapGmail")).toBeNull();
 
   // Distinct apps: the lower-case spelling is its own row, not the same one.
   await store.addBrokeredApp({
@@ -164,7 +165,7 @@ test("a Composio store still enables a composio:// app under a composio- id", as
   expect(record.url).toBe("composio://bapslack");
   expect(record.provenance).toBe("composio");
   expect((await row("composio-bapslack"))?.vendor).toBe("Composio");
-  expect(await row("arcade-bapslack")).toBeUndefined();
+  expect(await row("arcade-bapslack")).toBeNull();
 });
 
 test("each store refuses a slug its own parser cannot read, naming its own vendor", async () => {
@@ -184,8 +185,13 @@ test("each store refuses a slug its own parser cannot read, naming its own vendo
       connection: consent,
     }),
   ).rejects.toThrow(/^bap dotted is not a name a Composio app can have\./);
-  expect(await row("arcade-bap.Dotted")).toBeUndefined();
-  expect(await row("composio-bap dotted")).toBeUndefined();
+  // Asked of the whole listing: Intelligence refuses to read an id with a space as malformed, which
+  // would say nothing about whether one was stored.
+  const listed = (
+    await (await useTestVault()).client.toolServers.all()
+  ).servers.map((server) => server.id);
+  expect(listed).not.toContain("arcade-bap.Dotted");
+  expect(listed).not.toContain("composio-bap dotted");
 });
 
 test("re-enabling over a connected Arcade app keeps the recorded scheme", async () => {
@@ -199,7 +205,7 @@ test("re-enabling over a connected Arcade app keeps the recorded scheme", async 
     connection: { kind: "fields", authScheme: "API_KEY" } as BrokerConnection,
   });
   const before = (await row("arcade-bapkept"))?.authScheme;
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app: "bapkept",
     holder: "deployment",
@@ -231,7 +237,7 @@ for (const provider of ["composio", "arcade"] as const) {
           `Names beginning ${prefix} belong to the ${vendor} apps this deployment enables, so ${id} is not a name a server added by URL can take. Choose another.`,
         ).message,
       );
-      expect(await row(id)).toBeUndefined();
+      expect(await row(id)).toBeNull();
     });
   }
 }
@@ -253,7 +259,7 @@ for (const provider of ["composio", "arcade"] as const) {
  * left.
  */
 test("converting a row that was not brokered settles whose account the app is", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "composio-bapconv",
     title: "Typed",
     vendor: "typed.example",
@@ -278,7 +284,7 @@ test("converting a row that was not brokered settles whose account the app is", 
 
 test("re-enabling an app that never said whose account it is settles it", async () => {
   // The state a deployment is already in, written down: brokered, scheme recorded, mode null.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "composio-bapstuck",
     title: "Stuck",
     vendor: "Composio",
@@ -301,7 +307,7 @@ test("re-enabling an app that never said whose account it is settles it", async 
 });
 
 test("re-enabling leaves an administrator's Shared choice alone", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: "composio-bapshared",
     title: "Shared",
     vendor: "Composio",

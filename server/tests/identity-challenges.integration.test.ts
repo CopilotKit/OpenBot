@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
@@ -13,11 +13,19 @@ import {
   type IdentityProvider,
 } from "../src/identity/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const store = createIdentityStore(database, createCredentialStore(database));
+let store: ReturnType<typeof createIdentityStore>;
 const realm = `test-${randomUUID()}`;
 const users: string[] = [];
+
+beforeAll(async () => {
+  store = createIdentityStore(
+    database,
+    createCredentialStore(await useTestVault()),
+  );
+});
 
 afterAll(async () => {
   if (users.length)

@@ -66,6 +66,7 @@ import type {
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestVault } from "./support/vault";
 
 /*
  * The admin's say over check-ins, through the real path: real Postgres, the real enterprise controls
@@ -95,11 +96,13 @@ const FAR = new Date("2100-01-01T00:00:00Z");
 
 const store = createProactiveStore(database);
 const queue = createWorkQueue(database);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore,
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),

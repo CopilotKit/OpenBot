@@ -1,23 +1,43 @@
 // server/tests/arcade-sibling-collateral.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { auditEvents } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 /*
- * SCOPING. `audit_events` is append-only and `brokered_connections` is long-lived, so every
+ * SCOPING. `audit_events` is append-only and brokered accounts (in Intelligence) are long-lived, so every
  * assertion here is keyed on names THIS TEST ALONE writes: each test mints its own `run()` — a
  * fresh suffix on every app and every vendor identity it touches — and reads rows and the trail
  * only by those. A "did not happen" assertion is therefore one only this test could have falsified.
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+// Apps and brokered accounts live in Intelligence: the store reads them through this directory.
+beforeAll(async () => {
+  await useTestVault();
+});
 
 /* The pool this file opened, given back. `bun test` runs every file in one process and nothing
  * reaps an idle connection, so a pool held to the end of the run is two connections the rest of
@@ -96,7 +116,7 @@ async function server(
   mode: "personal" | "shared",
   authScheme = "OAUTH2",
 ) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: app,
     vendor: "Arcade",
@@ -111,7 +131,7 @@ async function hold(
   vendorUserId: string,
   holder: "person" | "deployment" = "person",
 ) {
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app,
     holder,
@@ -119,14 +139,12 @@ async function hold(
     vendorUserId,
   });
 }
+/** The apps of the brokered accounts Intelligence holds now under these names, sorted. */
 const rowsFor = async (names: string[]) =>
-  (
-    await database
-      .select({ app: brokeredConnections.app })
-      .from(brokeredConnections)
-      .where(inArray(brokeredConnections.app, names))
-      .orderBy(asc(brokeredConnections.app))
-  ).map((row) => row.app);
+  (await storedConnections()).brokered
+    .filter((row) => names.includes(row.app))
+    .map((row) => row.app)
+    .sort();
 const trailFor = (names: string[]) =>
   database
     .select({
@@ -144,10 +162,10 @@ const trailFor = (names: string[]) =>
 
 afterEach(async () => {
   if (apps.length) {
-    await database
-      .delete(brokeredConnections)
-      .where(inArray(brokeredConnections.app, apps));
-    await database.delete(mcpServers).where(inArray(mcpServers.id, apps));
+    await removeConnectionsWhere(
+      (row) => row.kind === "brokered" && apps.includes(row.app),
+    );
+    await removeServers(apps);
   }
   apps.length = 0;
 });

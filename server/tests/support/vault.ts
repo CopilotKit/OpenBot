@@ -13,7 +13,12 @@
 // test that used to delete its `mcp_servers` or `credentials` rows removes them here instead, with
 // the helpers below; a test that needs to start from no apps at all calls `removeAllApps`.
 import { randomUUID } from "node:crypto";
-import { type CredentialKind, credentialOwner } from "../../src/credentials";
+import {
+  type CredentialKind,
+  type CredentialStore,
+  createCredentialStore,
+  credentialOwner,
+} from "../../src/credentials";
 import { createDatabase } from "../../src/db/client";
 import {
   type BrokeredConnection,
@@ -81,6 +86,48 @@ export async function anotherReplica(
   return directory;
 }
 
+/**
+ * A second Intelligence project in the test organization: ANOTHER DEPLOYMENT's vault, apps and
+ * connections, for a test about two deployments that must not see each other's. Same API and gateway
+ * as the first project; its key is `TEST_INTELLIGENCE_API_KEY_2`, failing by name when missing.
+ */
+export function secondTestProject(
+  environment: Record<string, string | undefined> = process.env,
+): ReturnType<typeof testIntelligence> {
+  const first = testIntelligence(environment);
+  const apiKey = environment.TEST_INTELLIGENCE_API_KEY_2?.trim();
+  if (!apiKey || apiKey === first.apiKey) {
+    throw new Error(
+      "TEST_INTELLIGENCE_API_KEY_2 must name a second project in the test Intelligence, other than TEST_INTELLIGENCE_API_KEY's. A deployment's apps and connections are its project's, so two deployments need two. See server/tests/support/vault.ts.",
+    );
+  }
+  return { ...first, apiKey };
+}
+
+/**
+ * One server process of the deployment whose project this is: a directory of its own, started and
+ * NOT installed, with the cleanup the server wires for a removed app pointed at that deployment's own
+ * database. A test that runs a deployment installs it while that deployment acts.
+ */
+export async function deploymentDirectory(
+  project: ReturnType<typeof testIntelligence>,
+  database?: ReturnType<typeof createDatabase>,
+): Promise<ConnectionsDirectory> {
+  const directory = createConnectionsDirectory({
+    client: createVaultClient({
+      apiUrl: project.apiUrl,
+      apiKey: project.apiKey,
+    }),
+    gatewayWsUrl: project.gatewayWsUrl,
+  });
+  if (database)
+    directory.onServerRemoved((serverId) =>
+      removeServerLocalRows(database, [serverId]),
+    );
+  await directory.start();
+  return directory;
+}
+
 // ---------------------------------------------------------------- secrets
 
 export type SeedCredential = {
@@ -141,6 +188,78 @@ export async function liveSecrets(filter: {
     ...(filter.keyId ? { keyId: filter.keyId } : {}),
   });
   return secrets;
+}
+
+/** Every secret under a name, revoked ones included, from Intelligence: the old rows for a key. */
+export async function secretsNamed(filter: {
+  kind?: CredentialKind | "website_login";
+  provider?: string;
+  keyId: string;
+}): Promise<StoredSecret[]> {
+  const directory = await useTestVault();
+  const { secrets } = await directory.client.secrets.all({
+    includeRevoked: true,
+    ...(filter.kind ? { kind: filter.kind } : {}),
+    ...(filter.provider ? { provider: filter.provider } : {}),
+    keyId: filter.keyId,
+  });
+  return secrets;
+}
+
+/**
+ * Every secret of a kind and provider whose name starts with a prefix, revoked ones included, from
+ * Intelligence: the old `LIKE 'prefix%'` over `credentials.key_id`.
+ */
+export async function secretsNamedLike(filter: {
+  kind?: CredentialKind | "website_login";
+  provider: string;
+  keyIdPrefix: string;
+}): Promise<StoredSecret[]> {
+  const directory = await useTestVault();
+  const { secrets } = await directory.client.secrets.all({
+    includeRevoked: true,
+    ...(filter.kind ? { kind: filter.kind } : {}),
+    provider: filter.provider,
+  });
+  return secrets.filter((secret) =>
+    secret.keyId.startsWith(filter.keyIdPrefix),
+  );
+}
+
+/**
+ * The real credential store over the test vault, recording each write a caller made (`create`,
+ * `rotate:<previous id>`, `revoke:<id>`, `update:<id>`) and the id of every secret it stored, so a
+ * test can say which path a caller took and purge what it made.
+ */
+export async function recordingCredentialStore(record: {
+  calls: string[];
+  created: string[];
+}): Promise<ReturnType<typeof createCredentialStore>> {
+  const store = createCredentialStore(await useTestVault());
+  const writes: CredentialStore = {
+    ...store,
+    create: async (value) => {
+      record.calls.push("create");
+      const created = await store.create(value);
+      record.created.push(created.id);
+      return created;
+    },
+    rotate: async (input) => {
+      record.calls.push(`rotate:${input.previousCredentialId}`);
+      const rotated = await store.rotate(input);
+      record.created.push(rotated.id);
+      return rotated;
+    },
+    revoke: async (id) => {
+      record.calls.push(`revoke:${id}`);
+      return store.revoke(id);
+    },
+    updateSecret: async (id, plaintext, version) => {
+      record.calls.push(`update:${id}`);
+      return store.updateSecret(id, plaintext, version);
+    },
+  };
+  return { ...store, ...writes };
 }
 
 /** Remove secrets for good, as test cleanup. */
@@ -336,4 +455,37 @@ export async function removeConnectionsWhere(
     if (await directory.removeConnection(connection.id)) removed += 1;
   }
   return removed;
+}
+
+/**
+ * The real credential store over the test vault, for a store a file builds before `useTestVault` has
+ * resolved (at collection, outside any hook). Each method reaches the process's directory when it is
+ * called, so every call is the real store's.
+ */
+export function vaultCredentials(): ReturnType<typeof createCredentialStore> {
+  const real = async () => createCredentialStore(await useTestVault());
+  return {
+    create: async (value) => (await real()).create(value),
+    updateSecret: async (id, plaintext, version) =>
+      (await real()).updateSecret(id, plaintext, version),
+    rotate: async (input) => (await real()).rotate(input),
+    revoke: async (id) => (await real()).revoke(id),
+    isLive: async (id) => (await real()).isLive(id),
+    findLiveByKey: async (key) => (await real()).findLiveByKey(key),
+    reveal: async (id, accessor) => (await real()).reveal(id, accessor),
+    revealModelSecret: async (input, accessor) =>
+      (await real()).revealModelSecret(input, accessor),
+    list: async () => (await real()).list(),
+  };
+}
+
+/** A person's grant on an app as Intelligence holds it now, past this process's memory, or null. */
+export async function storedGrant(
+  serverId: string,
+  userId: string,
+): Promise<ServerGrant | null> {
+  const found = await (await useTestVault()).client.connections.get(
+    grantId(serverId, userId),
+  );
+  return found?.kind === "grant" ? found : null;
 }

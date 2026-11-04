@@ -1,13 +1,21 @@
 // server/tests/shared-use-arcade-urls.test.ts
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, pluginGrants, users } from "../src/db/schema";
+import { pluginGrants, users } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -26,9 +34,7 @@ const spec: Record<BrokerProvider, { toolkit: string; scheme: string }> = {
 
 async function cleanup() {
   await removeBots([bot]);
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [lowId, highId]));
+  await removeServers([lowId, highId]);
   await database.delete(users).where(eq(users.id, owner));
 }
 
@@ -42,7 +48,7 @@ async function seed(provider: BrokerProvider) {
     groups: [],
   });
   for (const rowId of [lowId, highId])
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: rowId,
       title: `Team ${rowId}`,
       vendor: provider,
@@ -71,6 +77,9 @@ async function seed(provider: BrokerProvider) {
   });
 }
 
+beforeAll(async () => {
+  await useTestVault();
+});
 beforeEach(cleanup);
 afterAll(cleanup);
 /* The pool this file opened, given back. `bun test` runs every file in one process and nothing

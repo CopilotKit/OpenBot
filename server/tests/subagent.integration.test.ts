@@ -33,7 +33,6 @@ import { createDatabase } from "../src/db/client";
 import {
   approvalPreferences,
   approvalRequests,
-  mcpServers,
   mcpTools,
   pluginGrants,
   users,
@@ -43,6 +42,7 @@ import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /*
  * A Bot giving part of its work to a subagent, through the real path a person's chat turn takes: real
@@ -201,11 +201,13 @@ let environmentBefore: Record<string, string | undefined> = {};
 
 const approvalStore = createApprovalStore(database);
 const approvalService = createApprovalService(approvalStore);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   approvalGate: approvalService.gate,
@@ -472,7 +474,7 @@ beforeAll(async () => {
     type: "built_in",
     configuration: { systemPrompt: ROLE },
   });
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: SERVER,
     title: "Notes",
     vendor: "Notes",
@@ -585,7 +587,7 @@ afterAll(async () => {
     );
   await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
   await database.delete(mcpTools).where(eq(mcpTools.serverId, SERVER));
-  await database.delete(mcpServers).where(eq(mcpServers.id, SERVER));
+  await removeServers([SERVER]);
   await removeBots([botId]);
   await database.delete(users).where(eq(users.id, person));
   await database.$client.close();

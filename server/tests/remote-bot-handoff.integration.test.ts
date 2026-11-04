@@ -14,10 +14,15 @@ import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { auditEvents, pluginGrants, workItems } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeSecrets,
+  recordingCredentialStore,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * A Bot at its own endpoint hands work on, through the plugin store's own grant read.
@@ -57,26 +62,10 @@ const broker: ConnectedAppBroker = {
 };
 
 const auditStore = createAuditStore(database);
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore,
-  credentials: {
-    readSecret: async () => null,
-    create: async () => {
-      throw new Error("a handoff grant asked the vault to create a secret");
-    },
-    updateSecret: async () => {
-      throw new Error("a handoff grant asked the vault to write a secret");
-    },
-    revoke: async () => {
-      throw new Error("a handoff grant asked the vault to revoke a secret");
-    },
-  },
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-  broker,
-});
+/** What a handoff grant asked of the real vault: nothing, since a grant on a Bot holds no secret. */
+const vaultCalls: string[] = [];
+const vaultCreated: string[] = [];
+let store: PluginStore;
 
 const desk = createHandoffDesk({
   queue: createWorkQueue(database),
@@ -101,6 +90,19 @@ async function clean() {
 
 // Made once: every test reads the same three Bots and changes none of them.
 beforeAll(async () => {
+  await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore,
+    credentials: await recordingCredentialStore({
+      calls: vaultCalls,
+      created: vaultCreated,
+    }),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+    broker,
+  });
   const bots = [
     {
       id: REMOTE,
@@ -138,6 +140,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await clean();
+  await purgeSecrets(vaultCreated);
   await removeBots(ALL);
   await database.$client.end({ timeout: 5 });
 });
@@ -157,6 +160,7 @@ describe("a Bot at its own endpoint, handing work on", () => {
     await store.grant("bot", BUILT_IN, REMOTE, "test");
 
     expect(await store.botsReachableFrom(REMOTE)).toEqual([BUILT_IN]);
+    expect(vaultCalls).toEqual([]);
   });
 
   test("the screen is told it can hold the grant", async () => {
@@ -213,5 +217,6 @@ describe("a Bot at its own endpoint, handing work on", () => {
       .filter((payload) => payload.from === REMOTE)
       .map((payload) => payload.to);
     expect(targets).toEqual(expect.arrayContaining([BUILT_IN, OTHER_REMOTE]));
+    expect(vaultCalls).toEqual([]);
   });
 });

@@ -9,12 +9,12 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
@@ -22,6 +22,16 @@ import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -31,6 +41,7 @@ const authorizedFor: string[] = [];
 const returnUrlsSeen: string[] = [];
 let connectWithFieldsCalls = 0;
 const revokedFor: string[] = [];
+let credentials: ReturnType<typeof createCredentialStore>;
 // Whether retiring the ask-before-write rule fails. One test makes it, to reach the removal
 // route's clean-up branch — the removal itself has already happened at the vendor by then.
 let revokeRuleThrows = false;
@@ -83,7 +94,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
     brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
-    credentials: {} as never,
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -138,6 +149,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
 // The grant routes ask the Bot directory whether a Bot exists and who owns it.
 beforeAll(async () => {
   await useTestBots();
+  credentials = createCredentialStore(await useTestVault());
 });
 
 beforeEach(async () => {
@@ -147,7 +159,7 @@ beforeEach(async () => {
   revokedFor.length = 0;
   rules.length = 0;
   revokeRuleThrows = false;
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -159,10 +171,11 @@ beforeEach(async () => {
   });
 });
 afterEach(async () => {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && connection.app === app,
+  );
+  // Takes the app's tools, grants and approvals here with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
 });
 
 describe("connecting a shared app", () => {
@@ -202,10 +215,9 @@ describe("connecting a shared app", () => {
       { method: "POST" },
     );
     expect(response.status).toBe(200);
-    const [row] = await database
-      .select()
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+    const [row] = (await storedConnections()).brokered.filter(
+      (connection) => connection.app === app,
+    );
     expect(row).toMatchObject({
       holder: "deployment",
       userId: null,
@@ -230,7 +242,7 @@ describe("connecting a shared app", () => {
   });
 
   test("an existing deployment account refuses a second connect, naming the app rather than the person", async () => {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "deployment",
@@ -261,7 +273,7 @@ describe("connecting a shared app", () => {
 
   test("a non-admin cannot connect a key-type shared app either, and nothing is sent to the vendor", async () => {
     const keyApp = `${app}-key`;
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: keyApp,
       title: "Team GitHub Key",
       vendor: "Composio",
@@ -286,14 +298,14 @@ describe("connecting a shared app", () => {
       });
       expect(connectWithFieldsCalls).toBe(0);
     } finally {
-      await database.delete(mcpServers).where(eq(mcpServers.id, keyApp));
+      await removeServers([keyApp]);
     }
   });
 
   test("a non-admin cannot connect a personal account through a duplicate row saying personal", async () => {
     // `zz-` sorts after `team-gh-`, so the Shared row above stays the one that answers for the app.
     const duplicate = `zz-dup-${suite}`;
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: duplicate,
       title: "Team GitHub (copy)",
       vendor: "Composio",
@@ -314,14 +326,14 @@ describe("connecting a shared app", () => {
       expect(authorizedFor).toEqual([]);
       expect(connectWithFieldsCalls).toBe(0);
     } finally {
-      await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
+      await removeServers([duplicate]);
     }
   });
 });
 
 describe("GET /connections", () => {
   test("lists a shared app once as the deployment's, with its display name, for anyone", async () => {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "deployment",
@@ -447,10 +459,7 @@ describe("PUT /servers/:id/account-mode", () => {
   test("a non-admin is refused, and nothing changes", async () => {
     const response = await put("user", { mode: "personal", confirm: true });
     expect(response.status).toBe(403);
-    const [row] = await database
-      .select({ accountMode: mcpServers.accountMode })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const row = await storedServer(app);
     expect(row?.accountMode).toBe("shared");
   });
 
@@ -460,7 +469,7 @@ describe("PUT /servers/:id/account-mode", () => {
   });
 
   test("without confirm, previews what would be ended and changes nothing", async () => {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "deployment",
@@ -479,7 +488,7 @@ describe("PUT /servers/:id/account-mode", () => {
   });
 
   test("confirmed, ends the team account and makes the app Personal", async () => {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "deployment",
@@ -489,38 +498,32 @@ describe("PUT /servers/:id/account-mode", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ changed: true, revoked: 1 });
     expect(revokedFor).toEqual([VENDOR_ID]);
-    const [row] = await database
-      .select({ accountMode: mcpServers.accountMode })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const row = await storedServer(app);
     expect(row?.accountMode).toBe("personal");
   });
 
   test("a Bot's approval that cannot be read is refused before anything is ended", async () => {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal", sharedVendorUserId: null })
-      .where(eq(mcpServers.id, app));
+    await changeServer(app, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
     const response = await put("admin", {
       mode: "shared",
       confirm: true,
       approvals: { someBot: { audience: "everyone" } },
     });
     expect(response.status).toBe(400);
-    const [row] = await database
-      .select({ accountMode: mcpServers.accountMode })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const row = await storedServer(app);
     expect(row?.accountMode).toBe("personal");
   });
 });
 
 describe("removing a Shared app", () => {
   test("revokes the ask-before-write rule it was given when it became Shared", async () => {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal", sharedVendorUserId: null })
-      .where(eq(mcpServers.id, app));
+    await changeServer(app, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
     await appAs("admin").request(`/api/plugins/servers/${app}/account-mode`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -542,10 +545,10 @@ describe("removing a Shared app", () => {
    * administrator the removal failed.
    */
   test("a rule that cannot be retired does not turn a completed removal into a bodyless 500", async () => {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal", sharedVendorUserId: null })
-      .where(eq(mcpServers.id, app));
+    await changeServer(app, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
     await appAs("admin").request(`/api/plugins/servers/${app}/account-mode`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -570,9 +573,7 @@ describe("removing a Shared app", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     // The removal really did happen, which is why it is answered as one.
-    expect(
-      await database.select().from(mcpServers).where(eq(mcpServers.id, app)),
-    ).toEqual([]);
+    expect(await storedServer(app)).toBeNull();
     const line = said.find((line) =>
       line.includes("shared-rule-not-forgotten"),
     );

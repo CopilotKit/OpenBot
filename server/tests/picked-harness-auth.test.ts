@@ -1,4 +1,5 @@
-import { expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { RunAgentInput } from "@ag-ui/client";
 import { BunSQLPreparedQuery } from "drizzle-orm/bun-sql";
@@ -15,13 +16,21 @@ import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import { buildAgents } from "../src/copilot";
-import { encryptSecret } from "../src/credentials";
+import {
+  type CredentialAccessor,
+  createCredentialStore,
+} from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { loadTenantPackage } from "../src/tenant-package";
 import { testEnvironment } from "./support/environment";
+import { purgeSecrets, seedCredential, useTestVault } from "./support/vault";
 
 const fixtureToken = "synthetic-deployment-token";
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+// The customer keys this file stores in the test vault, purged when it is done.
+const customerKeys: string[] = [];
+afterAll(async () => {
+  await purgeSecrets(customerKeys.splice(0));
+});
 
 /**
  * A Bot as Intelligence's agent registry sends it on the wire (`agents/bot-registry/client.ts`), so the
@@ -68,7 +77,8 @@ function installedDirectory(): BotDirectory | undefined {
 /**
  * Real query construction and the real Bot directory and registry client, with only the boundaries
  * replaced: the SQL execution, and the registry's transport, which answers the directory's one full
- * read with the Bots below. No database and no Intelligence connects.
+ * read with the Bots below. No database connects for the roster. A customer's key is the one thing
+ * read from a real service: it is a secret in the test Intelligence's vault, as it is in production.
  */
 async function runPicked(options: {
   bundled: boolean;
@@ -142,6 +152,18 @@ async function runPicked(options: {
       ? value.replace("http://127.0.0.1", "HTTP://LOCALHOST")
       : value;
   };
+  // A customer's key is a secret in the real vault; the Bot's configuration names it by id.
+  const customerKey = options.customerAuth
+    ? await seedCredential({
+        kind: "agent",
+        provider: "ag-ui",
+        keyId: `picked-harness-${randomUUID()}`,
+        metadata: { header: "Authorization" },
+        plaintext: "Bearer synthetic-customer-key",
+      })
+    : undefined;
+  if (customerKey) customerKeys.push(customerKey.id);
+  const credentials = createCredentialStore(await useTestVault());
   let storedEndpoint = endpoint(options.target ?? "picked");
   if (options.packageProducer) {
     const publicEnvironment = {
@@ -192,7 +214,7 @@ async function runPicked(options: {
         ? {
             auth: {
               header: "Authorization",
-              credentialRef: "synthetic-customer",
+              credentialRef: customerKey?.id,
             },
           }
         : {}),
@@ -293,20 +315,13 @@ async function runPicked(options: {
         isolationAvailable: false,
       },
     });
-    const vault = options.customerAuth
+    const vault = customerKey
       ? {
-          encryptionKey,
           reader: {
-            async readSecret(id: string) {
-              expect(id).toBe("synthetic-customer");
+            async reveal(id: string, accessor: CredentialAccessor) {
+              expect(id).toBe(customerKey.id);
               credentialReads++;
-              return {
-                encryptedValue: await encryptSecret(
-                  encryptionKey,
-                  "Bearer synthetic-customer-key",
-                ),
-                revokedAt: null,
-              };
+              return credentials.reveal(id, accessor);
             },
           },
         }

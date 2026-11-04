@@ -1,30 +1,28 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  credentials,
-  identityLinkChallenges,
-  identityLinks,
-} from "../src/db/schema";
+import { identityLinkChallenges, identityLinks } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const credentialStore = createCredentialStore(database);
+let credentialStore: ReturnType<typeof createCredentialStore>;
 const realm = `test-${randomUUID()}`;
 const challengeUsers = [`user-${randomUUID()}`];
 const credentialIds: string[] = [];
+
+beforeAll(async () => {
+  credentialStore = createCredentialStore(await useTestVault());
+});
 
 afterAll(async () => {
   await database.delete(identityLinks).where(eq(identityLinks.realm, realm));
   await database
     .delete(identityLinkChallenges)
     .where(inArray(identityLinkChallenges.userId, challengeUsers));
-  if (credentialIds.length > 0)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, credentialIds));
+  await purgeSecrets(credentialIds.splice(0));
   await database.$client.close();
 });
 
@@ -80,7 +78,7 @@ test("one credential belongs to one link", async () => {
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   credentialIds.push(id);
   await database

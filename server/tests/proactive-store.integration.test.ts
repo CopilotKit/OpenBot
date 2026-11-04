@@ -5,7 +5,7 @@ import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { mcpServers, mcpTools } from "../src/db/schema/plugins";
+import { mcpTools } from "../src/db/schema/plugins";
 import { proactiveSettings } from "../src/db/schema/proactive";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
@@ -19,6 +19,7 @@ import {
 } from "../src/proactive/types";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `proactive-${randomUUID()}`;
@@ -29,11 +30,13 @@ const secondBot = `${prefix}-second-bot`;
 const server = `${prefix}-connector`;
 const ref = `${server}/list_issues`;
 const auditStore = createAuditStore(database);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore,
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
@@ -59,7 +62,7 @@ beforeAll(async () => {
       title: id,
       roleDescription: "Assist",
     });
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: server,
     title: "Issue tracker",
     vendor: "Fixture",
@@ -78,7 +81,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, secondBot]);
-  await database.delete(mcpServers).where(eq(mcpServers.id, server));
+  await removeServers([server]);
   await database.$client.close();
 });
 

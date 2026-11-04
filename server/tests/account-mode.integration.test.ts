@@ -2,6 +2,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -10,19 +11,24 @@ import {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  brokeredConnections,
-  mcpServers,
-  pluginGrants,
-  sharedUseApprovals,
-} from "../src/db/schema";
+import { pluginGrants, sharedUseApprovals } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -63,50 +69,59 @@ const broker = {
   accountName: async () => null,
 } satisfies ConnectedAppBroker;
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {} as never,
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-  broker,
-  deploymentId: "acme",
-  sharedUse: async () => ({ allowed: true }),
-});
+let store: ReturnType<typeof createPluginStore>;
 const sharedUse = createSharedUseStore(database, "composio");
-const modes = createAccountModeSwitch({
-  store,
-  sharedUse,
-  deploymentId: "acme",
-  audit: createAuditStore(database),
-  teamRules: {
-    createTeamRule: async (_by, input) => {
-      if (failCreateRule) throw new Error("The approval store is unavailable.");
-      const rule = {
-        id: randomUUID(),
-        ...input,
-        revokedAt: null,
-        createdAt: new Date(),
-        createdBy: null,
-      };
-      rules.push(rule as never);
-      return rule as never;
+let modes: ReturnType<typeof createAccountModeSwitch>;
+
+beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+    broker,
+    deploymentId: "acme",
+    sharedUse: async () => ({ allowed: true }),
+  });
+  modes = createAccountModeSwitch({
+    store,
+    sharedUse,
+    deploymentId: "acme",
+    audit: createAuditStore(database),
+    teamRules: {
+      createTeamRule: async (_by, input) => {
+        if (failCreateRule)
+          throw new Error("The approval store is unavailable.");
+        const rule = {
+          id: randomUUID(),
+          ...input,
+          revokedAt: null,
+          createdAt: new Date(),
+          createdBy: null,
+        };
+        rules.push(rule as never);
+        return rule as never;
+      },
+      teamRules: async () => rules as never,
+      revokeTeamRule: async (_by, id) => {
+        const rule = rules.find((row) => row.id === id);
+        if (rule) rule.revokedAt = new Date();
+      },
     },
-    teamRules: async () => rules as never,
-    revokeTeamRule: async (_by, id) => {
-      const rule = rules.find((row) => row.id === id);
-      if (rule) rule.revokedAt = new Date();
-    },
-  },
+  });
 });
+
+/** The app as Intelligence holds it now. */
+const appNow = () => storedServer(app);
 
 beforeEach(async () => {
   failRevokeFor = null;
   failCreateRule = false;
   revoked.length = 0;
   rules.length = 0;
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Linear",
     vendor: "Composio",
@@ -129,29 +144,22 @@ beforeEach(async () => {
     agentId: bot,
     grantedBy: "admin@example.test",
   });
-  await database.insert(brokeredConnections).values([
-    {
+  for (const person of [`p1-${suite}`, `p2-${suite}`])
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "person",
-      userId: `p1-${suite}`,
-      vendorUserId: `p1-${suite}`,
-    },
-    {
-      provider: "composio",
-      app,
-      holder: "person",
-      userId: `p2-${suite}`,
-      vendorUserId: `p2-${suite}`,
-    },
-  ]);
+      userId: person,
+      vendorUserId: person,
+    });
 });
 afterEach(async () => {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && connection.app === app,
+  );
   await removeBots([bot]);
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  // Takes the app's grants and approvals here with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
 });
 
 describe("switching to Shared", () => {
@@ -176,10 +184,7 @@ describe("switching to Shared", () => {
       },
     });
     expect(revoked).toEqual([]);
-    const [row] = await database
-      .select()
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const row = await appNow();
     expect(row?.accountMode).toBe("personal");
   });
 
@@ -192,10 +197,7 @@ describe("switching to Shared", () => {
     });
     expect(result).toEqual({ changed: true, revoked: 2 });
     expect(revoked.sort()).toEqual([`p1-${suite}`, `p2-${suite}`]);
-    const [row] = await database
-      .select()
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const row = await appNow();
     expect(row?.accountMode).toBe("shared");
     expect(row?.sharedVendorUserId).toMatch(/^openbot-deployment:acme:.+/);
     expect(
@@ -244,23 +246,17 @@ describe("switching to Shared", () => {
       changed: false,
       failures: [{ account: `p2-${suite}`, error: "Composio said no." }],
     });
-    const left = await database
-      .select({ userId: brokeredConnections.userId })
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+    const left = (await storedConnections()).brokered
+      .filter((connection) => connection.app === app)
+      .map((connection) => ({ userId: connection.userId }));
     expect(left).toEqual([{ userId: `p2-${suite}` }]);
-    const [row] = await database
-      .select()
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const row = await appNow();
     expect(row?.accountMode).toBe("personal");
   });
 });
 
 describe("a switch that fails between its steps", () => {
-  const modeNow = async () =>
-    (await database.select().from(mcpServers).where(eq(mcpServers.id, app)))[0]
-      ?.accountMode;
+  const modeNow = async () => (await appNow())?.accountMode;
   const standingRules = () =>
     rules.filter(
       (rule) =>
@@ -363,11 +359,8 @@ describe("switching back to Personal", () => {
       by: "admin",
       confirm: true,
     });
-    const [row] = await database
-      .select()
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
-    await database.insert(brokeredConnections).values({
+    const row = await appNow();
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "deployment",
@@ -383,10 +376,7 @@ describe("switching back to Personal", () => {
       }),
     ).toEqual({ changed: true, revoked: 1 });
     expect(revoked).toEqual([row!.sharedVendorUserId]);
-    const [after] = await database
-      .select()
-      .from(mcpServers)
-      .where(eq(mcpServers.id, app));
+    const after = await appNow();
     expect(after).toMatchObject({
       accountMode: "personal",
       sharedVendorUserId: null,
