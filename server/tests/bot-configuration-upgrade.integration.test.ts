@@ -41,6 +41,7 @@ import {
 } from "../src/db/schema";
 import {
   removeBots,
+  removeTestPackages,
   seedBot,
   storedAccess,
   storedPreferences,
@@ -71,9 +72,18 @@ const LOCAL = [
   components,
   skillTools,
   skills,
+  deploymentPackages,
 ] as const;
 
 async function emptyLocal() {
+  // The package records a copy made from these rows, or a case recorded under their names.
+  await removeTestPackages(
+    (
+      await database
+        .select({ name: deploymentPackages.tenantId })
+        .from(deploymentPackages)
+    ).map((row) => row.name),
+  );
   for (const table of LOCAL) await database.delete(table);
   await database
     .delete(intelligenceCopies)
@@ -112,6 +122,36 @@ async function bot(ownerUserId: string | null) {
   return made_.id;
 }
 
+/**
+ * When each seeded row was made and last changed: all in the past, all different, so a copy that
+ * stamped anything with the time it ran, or with the wrong row's time, shows.
+ */
+const at = (day: string) => new Date(`2026-${day}T09:00:00.000Z`);
+const TIMES = {
+  skillCreated: at("08-01"),
+  skillChanged: at("09-01"),
+  toolDeclared: at("08-02"),
+  grantMade: at("08-03"),
+  grantChanged: at("09-03"),
+  memberAdded: at("10-04"),
+  // The latest of the Bot's access rows: when its access record last changed.
+  assigned: at("10-05"),
+  instructionsMade: at("08-06"),
+  instructionsChanged: at("09-06"),
+  // Pinned on 10-02 and paused on 10-03: the later is when the teammate's entry last changed.
+  lifecycleChanged: at("10-03"),
+  routeChanged: at("09-07"),
+  optedOut: at("09-13"),
+  consentChanged: at("09-08"),
+  // The latest of the teammate's settings: when their record last changed.
+  consentDefaultChanged: at("10-09"),
+  componentCreated: at("07-01"),
+  componentChanged: at("09-10"),
+  sourceCreated: at("07-02"),
+  sourceChanged: at("09-11"),
+  packageApplied: at("09-12"),
+};
+
 /** What the previous release left behind for one Bot, its owner and a teammate. */
 async function seedPreviousRelease() {
   const suite = randomUUID().slice(0, 8);
@@ -121,8 +161,15 @@ async function seedPreviousRelease() {
   const skillSlug = `upgrade-${suite}`;
   const componentName = `UpgradeCard${suite}`;
   const authoredName = `custom_upgrade_${suite}`;
+  const tenantId = `upgrade-tenant-${suite}`;
   const publishedAt = new Date("2026-10-01T09:00:00.000Z");
 
+  await database.insert(deploymentPackages).values({
+    tenantId,
+    sourcePath: "/app/examples/fintech",
+    checksum: suite,
+    loadedAt: TIMES.packageApplied,
+  });
   await database.insert(skills).values({
     id: skillSlug,
     slug: skillSlug,
@@ -132,20 +179,34 @@ async function seedPreviousRelease() {
     instructions: "Say it came across.",
     origin: "yours",
     installedBy: owner,
+    createdAt: TIMES.skillCreated,
+    updatedAt: TIMES.skillChanged,
   });
   await database.insert(skillTools).values({
     skillId: skillSlug,
     ref: "github/list_issues",
     declaredBy: owner,
+    createdAt: TIMES.toolDeclared,
   });
+  const grantTimes = {
+    grantedAt: TIMES.grantMade,
+    updatedAt: TIMES.grantChanged,
+  };
   await database.insert(pluginGrants).values([
-    { kind: "skill", ref: skillSlug, agentId: botId, grantedBy: owner },
+    {
+      kind: "skill",
+      ref: skillSlug,
+      agentId: botId,
+      grantedBy: owner,
+      ...grantTimes,
+    },
     {
       kind: "mcp",
       ref: "gmail/send",
       agentId: botId,
       grantedBy: owner,
       grantedAs: "owner",
+      ...grantTimes,
     },
   ]);
   await database.insert(teamBotPublications).values({
@@ -155,15 +216,31 @@ async function seedPreviousRelease() {
     publishedAt,
   });
   await database.insert(teamBotAudience).values([
-    { agentId: botId, kind: "user", value: teammate },
-    { agentId: botId, kind: "group", value: "Sales" },
+    {
+      agentId: botId,
+      kind: "user",
+      value: teammate,
+      createdAt: TIMES.memberAdded,
+    },
+    {
+      agentId: botId,
+      kind: "group",
+      value: "Sales",
+      createdAt: TIMES.memberAdded,
+    },
   ]);
-  await database
-    .insert(teamBotAssignments)
-    .values({ agentId: botId, groupName: "Sales", assignedBy: owner });
-  await database
-    .insert(userInstructions)
-    .values({ userId: owner, instructions: "Write in British English." });
+  await database.insert(teamBotAssignments).values({
+    agentId: botId,
+    groupName: "Sales",
+    assignedBy: owner,
+    assignedAt: TIMES.assigned,
+  });
+  await database.insert(userInstructions).values({
+    userId: owner,
+    instructions: "Write in British English.",
+    createdAt: TIMES.instructionsMade,
+    updatedAt: TIMES.instructionsChanged,
+  });
   await database.insert(agentPreferences).values({
     userId: teammate,
     agentId: botId,
@@ -174,25 +251,33 @@ async function seedPreviousRelease() {
     agentId: botId,
     pausedAt: new Date("2026-10-03T09:00:00.000Z"),
     notify: "none",
+    updatedAt: TIMES.lifecycleChanged,
   });
-  await database
-    .insert(updateRoutingPreferences)
-    .values({ ownerUserId: teammate, kind: "question", transports: ["sms"] });
+  await database.insert(updateRoutingPreferences).values({
+    ownerUserId: teammate,
+    kind: "question",
+    transports: ["sms"],
+    updatedAt: TIMES.routeChanged,
+  });
   await database.insert(defaultOptOuts).values({
     ownerUserId: teammate,
     agentId: botId,
     feature: "memory_source",
     scope: "gmail",
+    createdAt: TIMES.optedOut,
   });
   await database.insert(teamBotConsents).values({
     userId: teammate,
     agentId: botId,
     serverId: "gmail",
     decision: "once",
+    updatedAt: TIMES.consentChanged,
   });
-  await database
-    .insert(teamBotConsentDefaults)
-    .values({ userId: teammate, serverId: "calendar" });
+  await database.insert(teamBotConsentDefaults).values({
+    userId: teammate,
+    serverId: "calendar",
+    updatedAt: TIMES.consentDefaultChanged,
+  });
   await database.insert(components).values([
     {
       name: componentName,
@@ -203,6 +288,8 @@ async function seedPreviousRelease() {
       published: true,
       publishedAt,
       updatedBy: "the build",
+      createdAt: TIMES.componentCreated,
+      updatedAt: TIMES.componentChanged,
     },
     {
       name: authoredName,
@@ -235,6 +322,8 @@ async function seedPreviousRelease() {
     published: true,
     publishedAt,
     authoredBy: owner,
+    createdAt: TIMES.sourceCreated,
+    updatedAt: TIMES.sourceChanged,
   });
   return {
     owner,
@@ -243,8 +332,23 @@ async function seedPreviousRelease() {
     skillSlug,
     componentName,
     authoredName,
+    tenantId,
     publishedAt,
   };
+}
+
+/** A record as Intelligence serves it, for the times OpenBot's own types leave out. */
+async function served(path: string): Promise<{ updatedAt: string | null }> {
+  const response = await fetch(
+    `${process.env.TEST_INTELLIGENCE_API_URL}${path}`,
+    {
+      headers: {
+        authorization: `Bearer ${process.env.TEST_INTELLIGENCE_API_KEY}`,
+      },
+    },
+  );
+  expect(response.status).toBe(200);
+  return (await response.json()) as { updatedAt: string | null };
 }
 
 describe("copying the Bot configuration into Intelligence", () => {
@@ -271,8 +375,8 @@ describe("copying the Bot configuration into Intelligence", () => {
     expect(access.publication).toMatchObject({
       audience: "people",
       publishedBy: seeded.owner,
-      publishedAt: seeded.publishedAt,
     });
+    expect(access.publication?.publishedAt).toEqual(seeded.publishedAt);
     expect(
       access.publication?.members.map((member) => [member.kind, member.value]),
     ).toEqual([
@@ -346,6 +450,88 @@ describe("copying the Bot configuration into Intelligence", () => {
       ),
     ).toEqual({ kind: "done-before" });
     expect(await database.select().from(pluginGrants)).toHaveLength(2);
+
+    await configuration.client.skills.remove(
+      seeded.skillSlug,
+      `t:${randomUUID()}`,
+    );
+    await configuration.client.components.remove(
+      seeded.componentName,
+      `t:${randomUUID()}`,
+    );
+    await configuration.client.components.remove(
+      seeded.authoredName,
+      `t:${randomUUID()}`,
+    );
+  });
+
+  test("every record keeps when it was created and when it last changed", async () => {
+    const configuration = await useTestConfiguration();
+    const seeded = await seedPreviousRelease();
+
+    await copyLocalConfigurationToIntelligence(database, configuration, () =>
+      bots().cached(),
+    );
+
+    // `toEqual`, not `toMatchObject`: Bun's `toMatchObject` passes any Date for any other.
+    const access = await storedAccess(seeded.botId);
+    expect(
+      access.grants.map((grant) => [grant.grantedAt, grant.updatedAt]),
+    ).toEqual([
+      [TIMES.grantMade, TIMES.grantChanged],
+      [TIMES.grantMade, TIMES.grantChanged],
+    ]);
+    expect((await served(`/api/agents/${seeded.botId}/access`)).updatedAt).toBe(
+      TIMES.assigned.toISOString(),
+    );
+
+    const owner = await storedPreferences(seeded.owner);
+    expect(owner.instructionsUpdatedAt).toEqual(TIMES.instructionsChanged);
+    expect(
+      (await served(`/api/end-users/${seeded.owner}/preferences`)).updatedAt,
+    ).toBe(TIMES.instructionsChanged.toISOString());
+    const teammate = await storedPreferences(seeded.teammate);
+    expect(teammate.bots[0]?.updatedAt).toEqual(TIMES.lifecycleChanged);
+    expect(teammate.routes[0]?.updatedAt).toEqual(TIMES.routeChanged);
+    expect(teammate.optOuts[0]?.createdAt).toEqual(TIMES.optedOut);
+    expect(teammate.consents[0]?.updatedAt).toEqual(TIMES.consentChanged);
+    expect(teammate.consentDefaults[0]?.updatedAt).toEqual(
+      TIMES.consentDefaultChanged,
+    );
+    expect(
+      (await served(`/api/end-users/${seeded.teammate}/preferences`)).updatedAt,
+    ).toBe(TIMES.consentDefaultChanged.toISOString());
+
+    const skill = await configuration.client.skills.get(seeded.skillSlug);
+    expect([
+      skill?.createdAt,
+      skill?.updatedAt,
+      skill?.tools[0]?.declaredAt,
+    ]).toEqual([TIMES.skillCreated, TIMES.skillChanged, TIMES.toolDeclared]);
+    const card = await configuration.client.components.get(
+      seeded.componentName,
+    );
+    expect([card?.createdAt, card?.updatedAt]).toEqual([
+      TIMES.componentCreated,
+      TIMES.componentChanged,
+    ]);
+    const authored = await configuration.client.components.get(
+      seeded.authoredName,
+    );
+    expect([authored?.source?.createdAt, authored?.source?.updatedAt]).toEqual([
+      TIMES.sourceCreated,
+      TIMES.sourceChanged,
+    ]);
+    const recorded = await configuration.client.packages.get(seeded.tenantId);
+    expect([
+      recorded?.appliedAt,
+      recorded?.createdAt,
+      recorded?.updatedAt,
+    ]).toEqual([
+      TIMES.packageApplied,
+      TIMES.packageApplied,
+      TIMES.packageApplied,
+    ]);
 
     await configuration.client.skills.remove(
       seeded.skillSlug,
@@ -480,6 +666,7 @@ describe("copying the Bot configuration into Intelligence", () => {
           .where(eq(intelligenceCopies.name, CONFIGURATION_COPY_NAME)),
       ).toEqual([]);
     } finally {
+      await removeTestPackages([tenantId]);
       await database
         .delete(deploymentPackages)
         .where(eq(deploymentPackages.tenantId, tenantId));

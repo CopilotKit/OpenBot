@@ -82,6 +82,8 @@ export type BotAccessChange =
       /** `replace` makes an existing grant this one; `keep` leaves an existing grant exactly as it is. */
       ifGranted: "replace" | "keep";
       grantedAt?: Date;
+      /** Only when copying an existing grant in, in the batch that creates the Bot's record. */
+      updatedAt?: Date;
     }
   | { op: "revoke"; botId: string; kind: GrantKind; ref: string }
   | {
@@ -177,8 +179,12 @@ export type PersonPreferences = {
   consentDefaults: PersonConsentDefault[];
 };
 
+/*
+ * `updatedAt` on a change is only for copying an existing setting in, in the batch that creates the
+ * person's record: Intelligence refuses it on any other.
+ */
 export type PersonPreferencesChange =
-  | { op: "setInstructions"; instructions: string | null }
+  | { op: "setInstructions"; instructions: string | null; updatedAt?: Date }
   | {
       op: "setBot";
       botId: string;
@@ -186,8 +192,14 @@ export type PersonPreferencesChange =
       pinnedAt?: Date | null;
       pausedAt?: Date | null;
       notify?: BotNotify;
+      updatedAt?: Date;
     }
-  | { op: "setRoute"; kind: string; transports: string[] | null }
+  | {
+      op: "setRoute";
+      kind: string;
+      transports: string[] | null;
+      updatedAt?: Date;
+    }
   | {
       op: "optOut";
       botId: string;
@@ -200,8 +212,14 @@ export type PersonPreferencesChange =
       botId: string;
       serverId: string;
       decision: "always" | "once" | null;
+      updatedAt?: Date;
     }
-  | { op: "setConsentDefault"; serverId: string; allowed: boolean }
+  | {
+      op: "setConsentDefault";
+      serverId: string;
+      allowed: boolean;
+      updatedAt?: Date;
+    }
   | { op: "clearConsents" };
 
 export type PersonPreferencesChangeResult = { outcome: string };
@@ -261,8 +279,8 @@ export type ComponentState = Omit<
     withheldBy: string | null;
     withheldAt?: Date;
   }[];
-  /** Only when copying an existing component in. */
-  createdAt?: Date;
+  /** Only when copying an existing component in, on the create that copies it. */
+  copied?: CopiedTimes & { source: CopiedTimes | null };
 };
 
 export type SkillEntry = {
@@ -284,7 +302,8 @@ export type SkillState = Omit<
   "slug" | "version" | "tools" | "createdAt" | "updatedAt"
 > & {
   tools: { ref: string; declaredBy: string | null }[];
-  createdAt?: Date;
+  /** Only when copying an existing skill in, on the create that copies it: with when each tool was declared. */
+  copied?: CopiedTimes & { declaredAt: Record<string, Date> };
 };
 
 /** The record of a tenant package this deployment applied, which Intelligence calls an agent package. */
@@ -295,4 +314,13 @@ export type PackageRecord = {
   source: string;
   checksum: string;
   appliedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
 };
+
+/**
+ * When a record copied in from this deployment's own tables was created and last changed, so both stay
+ * true after the move. Intelligence takes them only on the write that creates the record; an ordinary
+ * write cannot set them.
+ */
+export type CopiedTimes = { createdAt: Date; updatedAt: Date };

@@ -19,6 +19,7 @@ import type {
   ComponentEntry,
   ComponentSource,
   ComponentState,
+  CopiedTimes,
   GrantKind,
   PackageRecord,
   PersonPreferences,
@@ -199,16 +200,31 @@ export function createConfigurationClient(settings: ConfigurationSettings) {
         return accessFromWire(await json<WireAccess>(response));
       },
 
-      /** Apply every change in one transaction: all of them or none. */
+      /**
+       * Apply every change in one transaction: all of them or none. `copiedUpdatedAt` is only for
+       * copying records in: when each named Bot's record last changed, in the batch that creates it
+       * (its expected revision 0).
+       */
       async change(
         changes: BotAccessChange[],
         key: string,
         expectedRevisions?: Record<string, number>,
+        copiedUpdatedAt?: Record<string, Date>,
       ): Promise<{ results: BotAccessChangeResult[]; records: BotAccess[] }> {
         const response = await request("POST", "/api/agent-access/changes", {
           body: {
             changes: changes.map(accessChangeToWire),
             ...(expectedRevisions ? { expectedRevisions } : {}),
+            ...(copiedUpdatedAt
+              ? {
+                  updatedAt: Object.fromEntries(
+                    Object.entries(copiedUpdatedAt).map(([botId, at]) => [
+                      botId,
+                      at.toISOString(),
+                    ]),
+                  ),
+                }
+              : {}),
           },
           idempotencyKey: key,
         });
@@ -239,11 +255,16 @@ export function createConfigurationClient(settings: ConfigurationSettings) {
         return preferencesFromWire(await json<WirePreferences>(response));
       },
 
+      /**
+       * `copiedUpdatedAt` is only for copying a record in: when it last changed, in the batch that
+       * creates it (expected revision 0).
+       */
       async change(
         userId: string,
         changes: PersonPreferencesChange[],
         key: string,
         expectedRevision?: number,
+        copiedUpdatedAt?: Date,
       ): Promise<{
         results: PersonPreferencesChangeResult[];
         preferences: PersonPreferences;
@@ -252,7 +273,12 @@ export function createConfigurationClient(settings: ConfigurationSettings) {
           "POST",
           `/api/end-users/${enc(userId)}/preferences/changes`,
           {
-            body: { changes: changes.map(preferencesChangeToWire) },
+            body: {
+              changes: changes.map(preferencesChangeToWire),
+              ...(copiedUpdatedAt
+                ? { updatedAt: copiedUpdatedAt.toISOString() }
+                : {}),
+            },
             idempotencyKey: key,
             ...(expectedRevision === undefined
               ? {}
@@ -471,6 +497,61 @@ export function createConfigurationClient(settings: ConfigurationSettings) {
 
       all: () => walk("/api/agent-packages", packageFromWire),
 
+      /**
+       * Record a package only if no record has its name yet, with the times it already had.
+       * ConfigurationConflictError when one does. For copying this deployment's own record in.
+       */
+      async create(
+        name: string,
+        input: {
+          id: string;
+          source: string;
+          checksum: string;
+          appliedAt: Date;
+          copied: CopiedTimes;
+        },
+        key: string,
+      ): Promise<PackageRecord> {
+        const response = await request(
+          "PUT",
+          `/api/agent-packages/${enc(name)}`,
+          {
+            body: {
+              id: input.id,
+              source: input.source,
+              checksum: input.checksum,
+              appliedAt: input.appliedAt.toISOString(),
+              createdAt: input.copied.createdAt.toISOString(),
+              updatedAt: input.copied.updatedAt.toISOString(),
+            },
+            ifNoneMatch: true,
+            idempotencyKey: key,
+          },
+        );
+        if (response.status !== 201 && response.status !== 200)
+          return refusal(response, `Package ${name}`, "create");
+        return packageFromWire(await json<WirePackage>(response));
+      },
+
+      /**
+       * Remove a package's record, when this deployment no longer ships the package. The Bots it
+       * manages keep their entries. False when it was already gone.
+       */
+      async remove(name: string, key: string, version?: number) {
+        const response = await request(
+          "DELETE",
+          `/api/agent-packages/${enc(name)}`,
+          {
+            idempotencyKey: key,
+            ...(version === undefined ? {} : { ifMatch: version }),
+          },
+        );
+        if (response.status === 404) return false;
+        if (response.status !== 204)
+          return refusal(response, `Package ${name}`, "remove");
+        return true;
+      },
+
       /** Record that this package was applied. The first record of a name fixes its id for good. */
       async record(
         name: string,
@@ -636,6 +717,9 @@ function accessChangeToWire(change: BotAccessChange): Record<string, unknown> {
         ...(change.grantedAt
           ? { grantedAt: change.grantedAt.toISOString() }
           : {}),
+        ...(change.updatedAt
+          ? { updatedAt: change.updatedAt.toISOString() }
+          : {}),
       };
     case "revoke":
       return {
@@ -763,12 +847,21 @@ function preferencesFromWire(wire: WirePreferences): PersonPreferences {
   };
 }
 
+/** A copied setting's last-changed time, for the batch that creates the record. */
+function copiedAt(change: { updatedAt?: Date }) {
+  return change.updatedAt ? { updatedAt: change.updatedAt.toISOString() } : {};
+}
+
 function preferencesChangeToWire(
   change: PersonPreferencesChange,
 ): Record<string, unknown> {
   switch (change.op) {
     case "setInstructions":
-      return { op: "setInstructions", instructions: change.instructions };
+      return {
+        op: "setInstructions",
+        instructions: change.instructions,
+        ...copiedAt(change),
+      };
     case "setBot": {
       const wire: Record<string, unknown> = {
         op: "setAgentPreference",
@@ -778,13 +871,14 @@ function preferencesChangeToWire(
       if (change.pinnedAt !== undefined) wire.pinnedAt = iso(change.pinnedAt);
       if (change.pausedAt !== undefined) wire.pausedAt = iso(change.pausedAt);
       if (change.notify !== undefined) wire.notify = change.notify;
-      return wire;
+      return { ...wire, ...copiedAt(change) };
     }
     case "setRoute":
       return {
         op: "setNotificationRoute",
         category: change.kind,
         channels: change.transports,
+        ...copiedAt(change),
       };
     case "optOut":
       return {
@@ -802,12 +896,14 @@ function preferencesChangeToWire(
         agentId: change.botId,
         appId: change.serverId,
         decision: change.decision,
+        ...copiedAt(change),
       };
     case "setConsentDefault":
       return {
         op: "setConsentDefault",
         appId: change.serverId,
         allowed: change.allowed,
+        ...copiedAt(change),
       };
     case "clearConsents":
       return { op: "clearConsents" };
@@ -948,9 +1044,20 @@ function componentStateToWire(state: ComponentState): Record<string, unknown> {
           isPublished: state.source.isPublished,
           publishedAt: iso(state.source.publishedAt),
           authoredBy: state.source.authoredBy,
+          ...(state.copied?.source
+            ? {
+                createdAt: state.copied.source.createdAt.toISOString(),
+                updatedAt: state.copied.source.updatedAt.toISOString(),
+              }
+            : {}),
         }
       : null,
-    ...(state.createdAt ? { createdAt: state.createdAt.toISOString() } : {}),
+    ...(state.copied
+      ? {
+          createdAt: state.copied.createdAt.toISOString(),
+          updatedAt: state.copied.updatedAt.toISOString(),
+        }
+      : {}),
   };
 }
 
@@ -1000,11 +1107,20 @@ function skillStateToWire(state: SkillState): Record<string, unknown> {
     instructions: state.instructions,
     origin: state.origin,
     installedBy: state.installedBy,
-    tools: state.tools.map((tool) => ({
-      ref: tool.ref,
-      declaredBy: tool.declaredBy,
-    })),
-    ...(state.createdAt ? { createdAt: state.createdAt.toISOString() } : {}),
+    tools: state.tools.map((tool) => {
+      const declaredAt = state.copied?.declaredAt[tool.ref];
+      return {
+        ref: tool.ref,
+        declaredBy: tool.declaredBy,
+        ...(declaredAt ? { declaredAt: declaredAt.toISOString() } : {}),
+      };
+    }),
+    ...(state.copied
+      ? {
+          createdAt: state.copied.createdAt.toISOString(),
+          updatedAt: state.copied.updatedAt.toISOString(),
+        }
+      : {}),
   };
 }
 
@@ -1019,6 +1135,8 @@ type WirePackage = {
   source: string;
   checksum: string;
   appliedAt: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 function packageFromWire(wire: WirePackage): PackageRecord {
@@ -1029,5 +1147,7 @@ function packageFromWire(wire: WirePackage): PackageRecord {
     source: wire.source,
     checksum: wire.checksum,
     appliedAt: date(wire.appliedAt),
+    createdAt: date(wire.createdAt),
+    updatedAt: date(wire.updatedAt),
   };
 }

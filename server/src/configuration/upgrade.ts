@@ -9,6 +9,10 @@
  * where each lands), then checks Intelligence holds every piece, and only then records the copy as
  * done so it never runs again. The local tables stay, written by nothing, for one release.
  *
+ * EVERY RECORD KEEPS ITS TIMES. Each goes across with when it was created and when it last changed, as
+ * the local rows say, so "Last changed" reads the same after the upgrade as before it. Intelligence
+ * takes those times only on the write that creates a record, which is the only write this copy makes.
+ *
  * SAFE TO RUN ANY NUMBER OF TIMES, FROM ANY NUMBER OF REPLICAS AT ONCE. Each record is written by one
  * request under an idempotency key made from what the local rows say, and only where Intelligence has
  * nothing yet: a Bot's access and a person's preferences are written on condition their revision is
@@ -82,6 +86,16 @@ function copyKey(what: string, body: unknown): string {
   return `openbot-upgrade:${what}:${createHash("sha256").update(JSON.stringify(body)).digest("hex")}`;
 }
 
+/** The later of two times, either of which may be missing. */
+function later(
+  one: Date | null | undefined,
+  other: Date | null | undefined,
+): Date | undefined {
+  if (!one) return other ?? undefined;
+  if (!other) return one;
+  return one > other ? one : other;
+}
+
 /** A grant's kind as it was stored: `mcp`, `skill` or `bot`. */
 function grantKind(kind: string): GrantKind {
   if (kind === "mcp" || kind === "skill" || kind === "bot") return kind;
@@ -128,14 +142,21 @@ export async function copyLocalConfigurationToIntelligence(
       source: row.sourcePath,
       checksum: row.checksum,
       appliedAt: row.loadedAt,
+      // The row kept one time, when the package was last applied: its last change, and the earliest
+      // this deployment knows of it.
+      copied: { createdAt: row.loadedAt, updatedAt: row.loadedAt },
     };
     await client.packages
-      .record(
+      .create(
         row.tenantId,
         input,
         copyKey("package", { ...input, name: row.tenantId }),
       )
-      .catch(refusedBy(`package ${row.tenantId}`));
+      .catch((error: unknown) => {
+        // Already recorded, by another replica's copy or an application since. Its id is checked below.
+        if (error instanceof ConfigurationConflictError) return;
+        refusedBy(`package ${row.tenantId}`)(error);
+      });
   }
 
   /* --------------------------------------------------------------------------------------------
@@ -144,6 +165,7 @@ export async function copyLocalConfigurationToIntelligence(
   const skillRows = await database.select().from(skills);
   const declared = await database.select().from(skillTools);
   for (const row of skillRows) {
+    const tools = declared.filter((tool) => tool.skillId === row.id);
     const state = {
       ownerUserId: row.ownerUserId,
       title: row.title,
@@ -151,10 +173,17 @@ export async function copyLocalConfigurationToIntelligence(
       instructions: row.instructions,
       origin: row.origin,
       installedBy: row.installedBy,
-      tools: declared
-        .filter((tool) => tool.skillId === row.id)
-        .map((tool) => ({ ref: tool.ref, declaredBy: tool.declaredBy })),
-      createdAt: row.createdAt,
+      tools: tools.map((tool) => ({
+        ref: tool.ref,
+        declaredBy: tool.declaredBy,
+      })),
+      copied: {
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        declaredAt: Object.fromEntries(
+          tools.map((tool) => [tool.ref, tool.createdAt]),
+        ),
+      },
     };
     await client.skills
       .create(row.slug, state, copyKey("skill", { slug: row.slug, ...state }))
@@ -173,46 +202,68 @@ export async function copyLocalConfigurationToIntelligence(
   const audience = await database.select().from(teamBotAudience);
   const assignments = await database.select().from(teamBotAssignments);
   const accessByBot = new Map<string, BotAccessChange[]>();
-  const add = (botId: string, change: BotAccessChange) =>
+  /** When each Bot's access last changed: the latest of its rows' times. */
+  const accessChangedAt = new Map<string, Date>();
+  const add = (botId: string, change: BotAccessChange, at: Date) => {
     accessByBot.set(botId, [...(accessByBot.get(botId) ?? []), change]);
+    accessChangedAt.set(botId, later(accessChangedAt.get(botId), at) ?? at);
+  };
   for (const row of grants) {
     if (!keepBot("plugin_grants", row.agentId)) continue;
-    add(row.agentId, {
-      op: "grant",
-      botId: row.agentId,
-      kind: grantKind(row.kind),
-      ref: row.ref,
-      grantedBy: row.grantedBy,
-      grantedAs: row.grantedAs ?? "admin",
-      ifGranted: "keep",
-      grantedAt: row.grantedAt,
-    });
+    add(
+      row.agentId,
+      {
+        op: "grant",
+        botId: row.agentId,
+        kind: grantKind(row.kind),
+        ref: row.ref,
+        grantedBy: row.grantedBy,
+        grantedAs: row.grantedAs ?? "admin",
+        ifGranted: "keep",
+        grantedAt: row.grantedAt,
+        updatedAt: row.updatedAt,
+      },
+      row.updatedAt,
+    );
   }
   for (const row of publications) {
     if (!keepBot("team_bot_publications", row.agentId)) continue;
-    add(row.agentId, {
-      op: "publish",
-      botId: row.agentId,
-      audience: row.audience,
-      members:
-        row.audience === "people"
-          ? audience
-              .filter((member) => member.agentId === row.agentId)
-              .map((member) => ({ kind: member.kind, value: member.value }))
-          : [],
-      publishedBy: row.publishedBy,
-      publishedAt: row.publishedAt,
-    });
+    const members =
+      row.audience === "people"
+        ? audience.filter((member) => member.agentId === row.agentId)
+        : [];
+    add(
+      row.agentId,
+      {
+        op: "publish",
+        botId: row.agentId,
+        audience: row.audience,
+        members: members.map((member) => ({
+          kind: member.kind,
+          value: member.value,
+        })),
+        publishedBy: row.publishedBy,
+        publishedAt: row.publishedAt,
+      },
+      members.reduce<Date>(
+        (latest, member) => later(latest, member.createdAt) ?? latest,
+        row.publishedAt,
+      ),
+    );
   }
   for (const row of assignments) {
     if (!keepBot("team_bot_assignments", row.agentId)) continue;
-    add(row.agentId, {
-      op: "assign",
-      botId: row.agentId,
-      group: row.groupName,
-      assignedBy: row.assignedBy,
-      assignedAt: row.assignedAt,
-    });
+    add(
+      row.agentId,
+      {
+        op: "assign",
+        botId: row.agentId,
+        group: row.groupName,
+        assignedBy: row.assignedBy,
+        assignedAt: row.assignedAt,
+      },
+      row.assignedAt,
+    );
   }
   /*
    * Checked against what Intelligence answered, which is what it committed (or, for a second replica
@@ -222,8 +273,14 @@ export async function copyLocalConfigurationToIntelligence(
   const missing: string[] = [];
   const accessCopied = new Set<string>();
   for (const [botId, changes] of accessByBot) {
+    const changedAt = accessChangedAt.get(botId);
     const answer = await client.access
-      .change(changes, copyKey("access", changes), { [botId]: 0 })
+      .change(
+        changes,
+        copyKey("access", { changes, changedAt }),
+        { [botId]: 0 },
+        changedAt ? { [botId]: changedAt } : undefined,
+      )
       .catch((error: unknown) => {
         if (error instanceof ConfigurationConflictError) return null;
         refusedBy(`Bot ${botId}'s access`)(error);
@@ -267,7 +324,11 @@ export async function copyLocalConfigurationToIntelligence(
       change,
     ]);
   for (const row of instructions)
-    say(row.userId, { op: "setInstructions", instructions: row.instructions });
+    say(row.userId, {
+      op: "setInstructions",
+      instructions: row.instructions,
+      updatedAt: row.updatedAt,
+    });
   const perBot = new Map<
     string,
     Extract<PersonPreferencesChange, { op: "setBot" }>
@@ -286,12 +347,15 @@ export async function copyLocalConfigurationToIntelligence(
     const entry = botEntry(row.userId, row.agentId);
     entry.hiddenAt = row.hiddenAt;
     entry.pinnedAt = row.pinnedAt;
+    // The row kept no time of its own: hiding or pinning is the last thing that changed it.
+    entry.updatedAt = later(later(entry.updatedAt, row.hiddenAt), row.pinnedAt);
   }
   for (const row of lifecycle) {
     if (!keepBot("bot_lifecycle", row.agentId)) continue;
     const entry = botEntry(row.ownerUserId, row.agentId);
     entry.pausedAt = row.pausedAt;
     entry.notify = row.notify;
+    entry.updatedAt = later(entry.updatedAt, row.updatedAt);
   }
   for (const [key, entry] of perBot) {
     const [userId] = JSON.parse(key) as [string, string];
@@ -302,6 +366,7 @@ export async function copyLocalConfigurationToIntelligence(
       op: "setRoute",
       kind: row.kind,
       transports: row.transports,
+      updatedAt: row.updatedAt,
     });
   for (const row of optOuts) {
     if (!keepBot("default_opt_outs", row.agentId)) continue;
@@ -320,6 +385,7 @@ export async function copyLocalConfigurationToIntelligence(
       botId: row.agentId,
       serverId: row.serverId,
       decision: row.decision,
+      updatedAt: row.updatedAt,
     });
   }
   for (const row of consentDefaults)
@@ -327,11 +393,31 @@ export async function copyLocalConfigurationToIntelligence(
       op: "setConsentDefault",
       serverId: row.serverId,
       allowed: true,
+      updatedAt: row.updatedAt,
     });
   const preferencesCopied = new Set<string>();
   for (const [userId, changes] of preferencesByPerson) {
+    // When the person's record last changed: the latest of the times its settings kept.
+    const changedAt = changes.reduce<Date | undefined>(
+      (latest, change) =>
+        later(
+          latest,
+          change.op === "optOut"
+            ? change.createdAt
+            : "updatedAt" in change
+              ? change.updatedAt
+              : undefined,
+        ),
+      undefined,
+    );
     const answer = await client.preferences
-      .change(userId, changes, copyKey("preferences", { userId, changes }), 0)
+      .change(
+        userId,
+        changes,
+        copyKey("preferences", { userId, changes, changedAt }),
+        0,
+        changedAt,
+      )
       .catch((error: unknown) => {
         if (error instanceof ConfigurationConflictError) return null;
         refusedBy(`${userId}'s preferences`)(error);
@@ -427,7 +513,13 @@ export async function copyLocalConfigurationToIntelligence(
             updatedAt: source.updatedAt,
           }
         : null,
-      createdAt: row.createdAt,
+      copied: {
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        source: source
+          ? { createdAt: source.createdAt, updatedAt: source.updatedAt }
+          : null,
+      },
     };
     await client.components
       .create(row.name, state, copyKey("component", { name: row.name, state }))
