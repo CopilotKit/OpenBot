@@ -75,6 +75,7 @@ import {
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
+import { useResultVisibility } from "@/lib/product-telemetry";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import { AppAccessCard } from "./app-access-card";
 import { isBrowserStep } from "./browser-activity";
@@ -111,6 +112,8 @@ import {
 import { VoiceChatCard } from "./voice-chat-card";
 
 type ChatTranscriptProps = {
+  /** Server-owned thread identity, used only to correlate rendered result messages. */
+  threadId?: string;
   busy?: boolean;
   /** Comma-separated `/` command names, used to tell a skill chip from a leading slash. */
   commandNames?: string;
@@ -718,12 +721,18 @@ const TranscriptMessage = memo(function TranscriptMessage({
   commandNames = "",
   role,
   streaming = false,
+  settled = true,
   text,
+  threadId,
+  messageId,
 }: {
   commandNames?: string;
   role: "user" | "assistant";
+  threadId?: string;
+  messageId: string;
   /* This is the Bot's reply still being written: the last row of a turn in flight. */
   streaming?: boolean;
+  settled?: boolean;
   text: string;
 }) {
   const isUser = role === "user";
@@ -739,6 +748,10 @@ const TranscriptMessage = memo(function TranscriptMessage({
    * chip split, the end alignment and the bubble are all wrong for it, and each one of them would
    * have to learn about firings separately if this branched any later.
    */
+  const resultRef = useResultVisibility(
+    threadId ? { threadId, messageId } : undefined,
+    !isUser && settled && revealed.trim().length > 0,
+  );
   const firing = isUser ? readFiring(text) : null;
   if (firing !== null) {
     return (
@@ -811,13 +824,15 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closing token arrives, so the answer visibly rewrites itself as it lands. This
                  * closes them for the duration.
                  */
-                <Streamdown
-                  components={markdownComponents}
-                  mode={mode}
-                  plugins={markdownPlugins}
-                >
-                  {revealed}
-                </Streamdown>
+                <div ref={resultRef}>
+                  <Streamdown
+                    components={markdownComponents}
+                    mode={mode}
+                    plugins={markdownPlugins}
+                  >
+                    {revealed}
+                  </Streamdown>
+                </div>
               )}
             </BubbleContent>
           </Bubble>
@@ -1832,6 +1847,7 @@ function TranscriptRenderersWatch({
 }
 
 export function ChatTranscript({
+  threadId,
   busy = false,
   commandNames = "",
   intro,
@@ -2196,6 +2212,9 @@ export function ChatTranscript({
         {...openingProps(item.id)}
       >
         <TranscriptMessage
+          threadId={threadId}
+          messageId={item.id}
+          settled={!busy || index < turnStart}
           commandNames={commandNames}
           role={item.role}
           streaming={

@@ -46,6 +46,7 @@ import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createSubagents, SUBAGENT_HANDED_BACK } from "./agents/subagent";
+import { toolLimitRecorder } from "./agents/tool-limit";
 import { serverTurnAdmission } from "./agents/turn-admission";
 import {
   createWakeUpRunner,
@@ -65,6 +66,7 @@ import { ApprovalRefusedError } from "./approvals/types";
 import { createServerApprovalService } from "./approvals/wiring";
 import {
   type AuditInitiator,
+  addAuditTap,
   auditSink,
   createAuditReader,
   createAuditStore,
@@ -74,8 +76,8 @@ import {
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth, sessionLifetimeMs } from "./auth";
-import { createEntra, withEntraBearer } from "./auth/entra";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
+import { createEntra, withEntraBearer } from "./auth/entra";
 import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
@@ -290,6 +292,8 @@ import { createTaskRunner } from "./tasks/runner";
 import { createTaskStore } from "./tasks/store";
 import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
+import { createProductTelemetry } from "./telemetry/product";
+import { productHeadlessBoundary } from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -310,6 +314,12 @@ clearLearningRevisionFallback();
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
+const productTelemetry = await createProductTelemetry({
+  privacyKey: config.keyEncryptionKey,
+  deploymentId: config.deploymentId,
+});
+addAuditTap(productTelemetry.recordAudit);
+const prepareProductRunInput = productHeadlessBoundary(productTelemetry);
 const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
@@ -1832,6 +1842,8 @@ const routineRunner = createRoutineRunner({
   routineStore,
   channelStore,
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -1867,6 +1879,8 @@ const routineRunner = createRoutineRunner({
  */
 const subagents = createSubagents({
   turn: {
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -1899,6 +1913,7 @@ const subagents = createSubagents({
  * is talking to.
  */
 const actorAgentResolver = createActorAgentResolver({
+  productTelemetry,
   loadAgents: loadAgentsForActor,
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
@@ -1923,6 +1938,7 @@ const actorAgentResolver = createActorAgentResolver({
         actorId,
         botId,
         threadId: input.threadId,
+        runId: input.runId,
         initiator: initiator ?? PERSON_INITIATOR,
         ...(depth ? { depth } : {}),
       }),
@@ -1939,6 +1955,7 @@ const actorAgentResolver = createActorAgentResolver({
     return copilotRuntime.learning?.acquire;
   },
   loadPersonalMemoryForActor,
+  recordToolLimitRefusalForActor: toolLimitRecorder(bootAuditStore),
 });
 
 const copilotRuntime = mountCopilotRuntime(
@@ -1947,6 +1964,7 @@ const copilotRuntime = mountCopilotRuntime(
   identifyUser,
   identifyActor,
   {
+    productTelemetry,
     onRunBusy: (input) => {
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
@@ -1961,6 +1979,7 @@ const copilotRuntime = mountCopilotRuntime(
 );
 
 const responsibilityEngine = createServerResponsibilityEngine({
+  productTelemetry,
   database,
   responsibilityStore,
   routineIntelligence,
@@ -2002,6 +2021,8 @@ const responsibilityAnswerTurn = ({
     ...(responsibilityRunId ? { responsibilityRunId } : {}),
   });
   return createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2077,6 +2098,8 @@ const executeApprovedAction = createApprovedActionExecutor({
   personInitiator: PERSON_INITIATOR,
 });
 const approvalContinuationRunner = createTurnRunner({
+  prepareRunInput: prepareProductRunInput,
+  onKnownStop: productTelemetry.stopKnown,
   admission: serverTurnAdmission,
   intelligence: routineIntelligence,
   runner: routineAgentRunner,
@@ -2109,6 +2132,8 @@ const groupConversations = createGroupConversations({
     return bots;
   },
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2306,6 +2331,8 @@ const proactiveEngine = createProactiveEngine({
   queue: createWorkQueue(database),
   owner: workOwner("proactive"),
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2360,6 +2387,8 @@ const wakeUpRunner = createWakeUpRunner({
   actorFor,
   channels: channelStore,
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2480,6 +2509,7 @@ let workOfferedListener: WorkOfferedListener | undefined;
 
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   workOfferedListener = await startHandoffDelivery({
+    productTelemetry,
     config,
     database,
     bootAuditStore,
@@ -2759,6 +2789,7 @@ const app = createApp(
     inspect: copilotRuntime.learning?.inspect,
   },
   {
+    productTelemetry,
     approvals: approvalService,
     shared: { modes: accountModes, use: sharedUseStore },
     ...(signInService ? { passwords: signInService } : {}),
@@ -2933,6 +2964,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     recorderExpirySweep.stop();
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
+      productTelemetry.flush(),
       channelActivityListener.stop(),
       policyListener.stop(),
       // Started only where handing work between Bots is switched on, so it is often not there.

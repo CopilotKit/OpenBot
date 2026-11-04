@@ -80,6 +80,11 @@ export function createTaskTurn(deps: {
       const result = await deps.runTurn({
         ...scope,
         routineId: input.runId,
+        telemetry: {
+          trigger: "human",
+          surface: "web",
+          rootTaskId: input.askId,
+        },
         instruction: input.text,
         userMessage: { id: input.askId, role: "user", content: input.text },
         initiator: PERSON_INITIATOR,

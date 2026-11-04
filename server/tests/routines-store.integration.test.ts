@@ -1348,6 +1348,7 @@ describe("the runner's read of one firing", () => {
     // thread it continues are that person's, and nothing else in the run row says who that is.
     expect(await store.runContext(runId)).toEqual({
       routineId: routine.id,
+      source: "schedule",
       ownerUserId: owner.id,
       agentId,
       channelId: channel.id,

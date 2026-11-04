@@ -23,6 +23,15 @@ export type GrantedTool = {
    */
   concurrent?: true;
   /**
+   * May wait behind `search_tools` instead of being sent on every model step.
+   *
+   * Set on an app's tools, which are the ones that arrive by the hundred: one Composio approval
+   * granted a Bot 239 Shopify actions. Left off the tools a Bot needs to be itself, such as its
+   * memory, its follow-ups and the card that asks for an app, because a Bot that has to search for
+   * its own memory before using it will not use it. See `server/src/agents/tool-search.ts`.
+   */
+  searchable?: true;
+  /**
    * `<serverId>/<toolName>`, carried alongside the name the model is offered.
    *
    * The two spellings exist because a model tool name may not contain a slash, and selection has to

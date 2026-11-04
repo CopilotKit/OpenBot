@@ -59,6 +59,7 @@ export const SUBAGENT_HANDED_BACK =
 
 /** The run asking, as this deployment knows it. */
 export type SubagentParent = {
+  runId?: string;
   actorId: string;
   botId: string;
   threadId: string;
@@ -166,6 +167,7 @@ export function createSubagents(options: {
           try {
             const { replyText } = await runTurn({
               ownerUserId: parent.actorId,
+              telemetry: { trigger: "subagent", parentRunId: parent.runId },
               routineId: SUBAGENT_TOOL,
               agentId: parent.botId,
               threadId,

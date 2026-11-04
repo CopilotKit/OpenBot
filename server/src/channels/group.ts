@@ -827,6 +827,11 @@ export function createGroupConversations(deps: {
           flush();
         },
         ownerUserId: turn.ownerUserId,
+        telemetry: {
+          trigger: turn.fromAgentId ? "subagent" : "human",
+          surface: "web",
+          rootTaskId: `group:${turn.channelId}:${turn.messageId}`,
+        },
         routineId: `group:${turn.channelId}`,
         runId,
         agentId,
