@@ -156,6 +156,8 @@ export function ProviderPicker({
   busy: starting = false,
   local = false,
   status,
+  failure: setupFailure,
+  onProviderChange,
 }: {
   chosen: ModelChoice | null;
   /**
@@ -180,6 +182,13 @@ export function ProviderPicker({
   local?: boolean;
   /** One line about work running behind this screen. */
   status?: ReactNode;
+  /** A failure from setup itself (a Start that sent the window back here), shown in this card. */
+  failure?: ReactNode;
+  /**
+   * The person chose another provider, or went back to the list. Any failure from setup belongs to
+   * the provider tried before, so the caller drops it, as this screen drops its own.
+   */
+  onProviderChange?: () => void;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
   const [reuse, setReuse] = useState(
@@ -540,6 +549,7 @@ export function ProviderPicker({
     signInRunRef.current += 1;
     setOpen(null);
     setFailure(null);
+    onProviderChange?.();
     setSignInUrl(null);
     setCode("");
     setBusy(false);
@@ -567,7 +577,8 @@ export function ProviderPicker({
       {!returning && <Sections local={local} at="AI" />}
       <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
-        Connect your provider with a supported plan or an API key.
+        Choose the AI your Bots use. Sign in with a plan you already have, or
+        use an API key.
       </p>
       {status}
 
@@ -591,8 +602,10 @@ export function ProviderPicker({
                 setOpen(r.id);
                 // A failure belongs to the row that produced it. Left in place, a refused OpenAI
                 // sign-in stayed on screen under the endpoint row's fields, where it read as a
-                // complaint about the address just typed.
+                // complaint about the address just typed. The same goes for a failure setup sent
+                // back here: a refused OpenAI key stayed under the Anthropic row.
                 setFailure(null);
+                onProviderChange?.();
                 setSignInUrl(null);
                 setCode("");
                 setBusy(false);
@@ -658,6 +671,8 @@ export function ProviderPicker({
                   onClick={() => {
                     if (login === "oauth" && option !== login)
                       void cancelOAuth();
+                    // A refused sign-in says nothing about the API key tab, and the reverse.
+                    if (option !== login) setFailure(null);
                     setLogin(option);
                   }}
                 >
@@ -746,9 +761,9 @@ export function ProviderPicker({
                  * `harness::speaking_for` for the failure that came of not saying it at all.
                  */}
                 <p className="footnote">
-                  Your Bot will be{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangGraph"},
-                  which is the one that can use this plan.
+                  Your Bot will use{" "}
+                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangGraph"}.
+                  It’s the one that can use this plan.
                 </p>
               </>
             ) : signInUrl ? (
@@ -967,6 +982,8 @@ export function ProviderPicker({
           )}
         </div>
       )}
+
+      {setupFailure}
 
       <div className="row">
         {onBack && (

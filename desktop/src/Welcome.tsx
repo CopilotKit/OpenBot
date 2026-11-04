@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /**
  * What OpenBot is, before it asks for anything.
  *
@@ -8,6 +10,7 @@
 export function Welcome({
   onStart,
   local,
+  failure,
 }: {
   onStart: () => void;
   /**
@@ -16,6 +19,8 @@ export function Welcome({
    * for somebody who already knows local is not for them, so they need not fail at it first.
    */
   local?: { onInstall: () => void; onHosted: () => void };
+  /** A failure from setup itself, shown inside this card rather than under it. */
+  failure?: ReactNode;
 }) {
   if (local) {
     return (
@@ -37,6 +42,7 @@ export function Welcome({
             Use CopilotKit's hosted service instead
           </button>
         </div>
+        {failure}
       </div>
     );
   }
@@ -60,6 +66,7 @@ export function Welcome({
         Takes a few minutes. OpenBot installs what it needs first, then asks you
         to sign in to the AI plan you already have.
       </p>
+      {failure}
     </div>
   );
 }

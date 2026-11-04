@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
@@ -16,8 +22,7 @@ type Seen =
   | { at: "agreement"; terms: Extract<LocalTerms, { status: "required" }> }
   | { at: "failed"; said: string };
 
-const COULD_NOT_CHECK =
-  "OpenBot could not check your CopilotKit account. Try again.";
+const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
 
 /**
  * The CopilotKit account step of a local first run: sign in, then read and accept the evaluation
@@ -33,9 +38,12 @@ const COULD_NOT_CHECK =
  */
 export function CopilotKitAccount({
   onDone,
+  failure,
 }: {
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
+  /** A failure from setup itself, shown inside this card rather than under it. */
+  failure?: ReactNode;
 }) {
   const [seen, setSeen] = useState<Seen>({ at: "checking" });
   const attempt = useRef<string | null>(null);
@@ -63,7 +71,7 @@ export function CopilotKitAccount({
         else if (terms.status === "unavailable")
           setSeen({
             at: "failed",
-            said: "The evaluation agreement is not available right now. Try again later.",
+            said: "The evaluation agreement isn’t available right now. Try again later.",
           });
         // Accepted already, or none needed: nothing to do here.
         else if (terms.status === "required" || terms.status === "not-required")
@@ -98,30 +106,19 @@ export function CopilotKitAccount({
       if (attempt.current !== started.attempt) return;
       attempt.current = null;
       if (signedIn) check();
-      else
-        setSeen({ at: "failed", said: "Sign-in did not finish. Try again." });
+      else setSeen({ at: "failed", said: "Sign-in didn’t finish. Try again." });
     } catch {
       if (attempt.current !== started.attempt) return;
       attempt.current = null;
-      setSeen({ at: "failed", said: "Sign-in did not finish. Try again." });
+      setSeen({ at: "failed", said: "Sign-in didn’t finish. Try again." });
     }
   }
 
   const agreement = seen.at === "agreement" ? seen.terms : null;
   return (
     <div className="sheet">
-      <picture>
-        {/* The reversed wordmark on dark, as the brand sets it; the symbol keeps its colour. */}
-        <source
-          srcSet="/copilotkit-logo-dark.svg"
-          media="(prefers-color-scheme: dark)"
-        />
-        <img
-          className="copilotkit-logo"
-          src="/copilotkit-logo.svg"
-          alt="CopilotKit"
-        />
-      </picture>
+      {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
+          CopilotKit is named where that is true: the account and the agreement's own title. */}
       <Sections local at="Account" />
       <h1>
         {agreement
@@ -130,15 +127,17 @@ export function CopilotKitAccount({
       </h1>
       <p className="lede">
         {agreement
-          ? `To run Intelligence on this computer, accept the CopilotKit Intelligence evaluation agreement for ${agreement.organizationName}.`
-          : "Intelligence runs on this computer under your CopilotKit account. Sign in, then accept the evaluation agreement."}
+          ? `To run OpenBot on this computer, accept the CopilotKit Intelligence evaluation agreement for ${agreement.organizationName}.`
+          : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the evaluation agreement."}
       </p>
 
       {seen.at === "checking" && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
       {seen.at === "signing-in" && (
-        <StatusLine>Finish signing in in your browser…</StatusLine>
+        <StatusLine>
+          Finish signing in to CopilotKit in your browser…
+        </StatusLine>
       )}
       {agreement && (
         <p className="footnote">
@@ -146,7 +145,10 @@ export function CopilotKitAccount({
           {agreement.version})
         </p>
       )}
-      {seen.at === "failed" && <p className="footnote">{seen.said}</p>}
+      {seen.at === "failed" && (
+        <p className="footnote inline-error">{seen.said}</p>
+      )}
+      {failure}
 
       <div className="row">
         {seen.at === "signed-out" && (

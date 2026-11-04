@@ -141,7 +141,9 @@ function SetupProgressRow({ step }: { step: Progress }) {
         {running ? <span className="step-spinner" /> : step.ok ? "✓" : "✗"}
       </span>
       <span className="step-label">{label(step.step)}</span>
-      <span className="step-status">
+      <span
+        className={`step-status${running ? "" : step.ok ? " good" : " bad"}`}
+      >
         {running ? "In progress" : step.ok ? "Complete" : "Failed"}
         {running && (
           <span className="step-elapsed" aria-hidden="true" aria-live="off">
