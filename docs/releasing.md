@@ -66,13 +66,17 @@ When it runs:
 
 - pull requests and pushes to `main` that touch the desktop run only **Updater regressions
   (no Apple access)**. It holds no secrets.
+- every release starts it. After `publish-release.yml` creates the tag and the release, it
+  dispatches this workflow on the tag with `signing-mode: developer-id` and `release-tag` set to
+  that version. The tag alone would not start it, because GitHub starts no workflow from a push
+  made with `GITHUB_TOKEN`; a `workflow_dispatch` is the exception. The run still waits for a
+  required reviewer of the `macos-signing` environment to approve it.
 - **Actions → Desktop macOS signing → Run workflow** with `signing-mode: developer-id` signs any
   ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
   release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
-  files, and `latest.json` to it. After a release is published, run this against the release tag.
-- a `v*` tag pushed by a person does the same thing automatically. The tag `publish-release.yml`
-  creates does not start it, because GitHub does not start workflows from events made with
-  `GITHUB_TOKEN`. That is why the step above is manual for now.
+  files, and `latest.json` to it. Run it on the release tag (**Use workflow from** → the tag) so
+  the build carries the release version. This is how to re-sign a release by hand.
+- a `v*` tag pushed by a person does the same thing automatically.
 
 Signing imports the certificate into a temporary keychain made for the run, and always deletes
 that keychain afterwards, even when an earlier step failed.
@@ -84,19 +88,28 @@ Tauri refuses to finish any bundle that asks for updater artifacts without
 build above. Do not rename the overlay `tauri.macos.conf.json`: Tauri merges that filename into
 every Mac build automatically.
 
+The overlay also holds the updater itself, `plugins.updater` with its endpoint and public key.
+The app registers the updater plugin only when its config has that block, so desktop CI, local
+builds and the unsigned release installers have no updater. They never offer an update and never
+show an update error, because they could not verify one.
+
 ### The updater
 
-The app checks `https://copilotkit.ai/openbot/desktop/latest.json` once at launch. If a newer
-version is listed, the window offers **Update and restart**. Nothing installs without that click.
-`copilotkit.ai` redirects that address to
-`https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`, so the newest
-non-draft release is always the one offered.
+A signed app checks `https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`
+once at launch. If a newer version is listed, the window offers **Update and restart**. Nothing
+installs without that click. GitHub redirects that address to the `latest.json` attached to the
+release marked Latest, so the newest non-draft, non-prerelease release is always the one offered.
+
+After it attaches `latest.json`, the signing workflow fetches that address the way the app does,
+following redirects, and fails unless the answer is JSON whose `version` is the release version and
+which has a `darwin-*` platform with a URL and signature. A release that is not marked Latest fails
+this check, because the apps would not see it.
 
 `latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
 that archive's minisign signature. The app verifies the signature against the public key in
-`plugins.updater.pubkey` in `tauri.conf.json` and refuses any archive that does not match. That
-key pair is the Tauri updater key. It is not the Developer ID certificate, and it is not the
-Windows Key Vault certificate. Losing the private key means installed apps can never update
+`plugins.updater.pubkey` in `tauri.macos-signing.conf.json` and refuses any archive that does not
+match. That key pair is the Tauri updater key. It is not the Developer ID certificate, and it is
+not the Windows Key Vault certificate. Losing the private key means installed apps can never update
 again, so keep it in 1Password as well as in the environment.
 
 A failed check says nothing, because an offline laptop is not a problem to report. A failed
@@ -122,8 +135,8 @@ The job also reads the existing `OPENBOT_GOOGLE_MODEL_OAUTH_*` variables and sec
 desktop builds do.
 
 Put the matching updater **public** key in `plugins.updater.pubkey` in
-`desktop/src-tauri/tauri.conf.json`. The signing job refuses to run while that field still holds
-`REPLACE_WITH_UPDATER_PUBKEY`.
+`desktop/src-tauri/tauri.macos-signing.conf.json`. The signing job refuses to run while that field
+still holds `REPLACE_WITH_UPDATER_PUBKEY`.
 
 ## What merging does
 
@@ -147,6 +160,9 @@ Then, in order:
   every one of them
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   and `container-images.json` as an asset
+- [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
+  for a `macos-signing` reviewer, then attaches the signed `.dmg` files, the updater archives and
+  `latest.json` to the release
 
 ## Deploying a release
 
