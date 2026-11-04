@@ -115,9 +115,6 @@ server/tests/delivery-routes.test.ts: error TS2322: Type '(input: Omit<DeliveryB
 server/tests/delivery-routes.test.ts: error TS2322: Type 'Promise<DeliveryBinding | null>' is not assignable to type 'Promise<{ transport: BindingTransport; identity: string; realm: string; address: string; mentionId: string | null; enabled: boolean; optedOutAt: Date | null; createdAt: Date; ... 4 more ...; id: string; }>'.
 server/tests/delivery-turn.test.ts: error TS2322: Type 'string | ContentPart[]' is not assignable to type 'string'.
 server/tests/dictation-routes.test.ts: error TS2739: Type 'Response & TypedResponse<{ error: string; }, 401, "json">' is missing the following properties from type 'Promise<void | Response>': then, catch, finally, [Symbol.toStringTag]
-server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but got 1.
-server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but got 1.
-server/tests/encrypt-sso-config.test.ts: error TS2554: Expected 0 arguments, but got 1.
 server/tests/enterprise-controls.integration.test.ts: error TS2345: Argument of type '(context: Parameters<Parameters<MiddlewareHandlerInterface<{ Variables: AppVariables; }, BlankSchema, "/">>[1]>[0], next: () => Promise<void>) => Promise<...>' is not assignable to parameter of type 'MiddlewareHandler<{ Variables: AppVariables; }>'.
 server/tests/enterprise-controls.integration.test.ts: error TS2345: Argument of type '(context: Parameters<Parameters<MiddlewareHandlerInterface<{ Variables: AppVariables; }, BlankSchema, "/">>[1]>[0], next: () => Promise<void>) => Promise<...>' is not assignable to parameter of type 'MiddlewareHandler<{ Variables: AppVariables; }>'.
 server/tests/enterprise-controls.integration.test.ts: error TS2769: No overload matches this call.

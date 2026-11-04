@@ -1,4 +1,5 @@
 import { type AuditStore, recordAuditEvent } from "./audit";
+import { isSignInSecret } from "./auth/sign-in-secrets";
 import { reasonWithoutStatement } from "./db/query-failure";
 import type { credentialKind } from "./db/schema";
 import {
@@ -260,6 +261,10 @@ export function credentialOwner(value: {
 function credentialKindOf(secret: StoredSecret): CredentialKind {
   if (secret.kind === "website_login")
     throw new Error(`Secret ${secret.id} is a saved login, not a credential.`);
+  if (secret.kind === "password_hash" || isSignInSecret(secret))
+    throw new Error(
+      `Secret ${secret.id} is a sign-in secret, not a credential.`,
+    );
   return secret.kind;
 }
 
@@ -482,7 +487,11 @@ export function createCredentialStore(
     list: async () =>
       directory
         .secrets()
-        .filter((secret) => CREDENTIAL_KINDS.has(secret.kind))
+        // Better Auth's sign-in secrets share two kinds with the credentials and are not ones.
+        .filter(
+          (secret) =>
+            CREDENTIAL_KINDS.has(secret.kind) && !isSignInSecret(secret),
+        )
         .sort(
           (left, right) =>
             left.createdAt.getTime() - right.createdAt.getTime() ||

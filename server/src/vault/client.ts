@@ -94,7 +94,7 @@ export class ConnectionRecordExistsError extends IntelligenceApiError {
   }
 }
 
-/** OpenBot's credential kinds, and a person's saved website login. */
+/** OpenBot's credential kinds, a person's saved website login, and the hash of their sign-in password. */
 export type SecretKind =
   | "model"
   | "connector"
@@ -102,7 +102,8 @@ export type SecretKind =
   | "mcp"
   | "mcp_oauth_client"
   | "mcp_user_token"
-  | "website_login";
+  | "website_login"
+  | "password_hash";
 
 const TO_VAULT_KIND: Record<SecretKind, string> = {
   model: "model_api_key",
@@ -112,6 +113,7 @@ const TO_VAULT_KIND: Record<SecretKind, string> = {
   mcp_oauth_client: "oauth_client",
   mcp_user_token: "oauth_token",
   website_login: "website_login",
+  password_hash: "password_hash",
 };
 const FROM_VAULT_KIND = Object.fromEntries(
   Object.entries(TO_VAULT_KIND).map(([openbot, vault]) => [vault, openbot]),

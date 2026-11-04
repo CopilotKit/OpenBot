@@ -478,19 +478,32 @@ async function signedInWithMicrosoft(who: { oid: string; upn: string }) {
   return id;
 }
 
+/**
+ * The person's stored refresh token: what the column holds (a reference to a vault secret, see
+ * auth/sign-in-secrets.ts), what Better Auth reads back through its adapter (its own encryption of the
+ * token), and the token itself.
+ */
 async function storedRefreshToken(id: string) {
   const ctx = (await betterAuth.$context) as unknown as Parameters<
     typeof decryptOAuthToken
-  >[1];
+  >[1] & {
+    internalAdapter: {
+      findAccounts(
+        userId: string,
+      ): Promise<{ providerId: string; refreshToken?: string | null }[]>;
+    };
+  };
   const [row] = await database
     .select({ refreshToken: accounts.refreshToken })
     .from(accounts)
     .where(and(eq(accounts.userId, id), eq(accounts.providerId, "microsoft")));
+  const read = (await ctx.internalAdapter.findAccounts(id)).find(
+    (account) => account.providerId === "microsoft",
+  )?.refreshToken;
   return {
     raw: row?.refreshToken ?? null,
-    plain: row?.refreshToken
-      ? await decryptOAuthToken(row.refreshToken, ctx)
-      : null,
+    stored: read ?? null,
+    plain: read ? await decryptOAuthToken(read, ctx) : null,
   };
 }
 
@@ -848,9 +861,12 @@ describe("a routine reaches the system as its person, with nobody in the browser
 
     const after = await storedRefreshToken(caraId);
     expect(after.plain).not.toBe(before.plain);
-    // The one Entra now honours, and still encrypted the way Better Auth writes it.
+    // The one Entra now honours, still encrypted the way Better Auth writes it, and held by the vault:
+    // the column names a secret.
     expect(entra.refreshTokens.get(after.plain ?? "")?.oid).toBe(cara.oid);
-    expect(after.raw).not.toBe(after.plain);
+    expect(after.stored).not.toBe(after.plain);
+    expect(after.raw).toStartWith("vault:");
+    expect(after.raw).not.toBe(before.raw);
   });
 
   test("a person who never signed in with Microsoft is told so", async () => {

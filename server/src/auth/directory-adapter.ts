@@ -8,14 +8,14 @@
  * Intelligence now (people/directory), and an Intelligence call must never be made with an OpenBot
  * transaction open.
  *
- * So this wraps the adapter, as encrypt-sso-config.ts does, and changes nothing about what Better Auth
+ * So this wraps the adapter, as sign-in-secrets.ts does, and changes nothing about what Better Auth
  * stores. A write to a person marks their row pending (`directoryPending`, in the same statement);
  * once the write has committed (at once outside a transaction, after the commit inside one) the person
  * is pushed to Intelligence. A push that fails leaves the row pending, and the directory's sweep pushes
  * it again. A sign-in account added or removed changes the identities the person signs in with, so it
  * marks the person pending too. An enterprise identity provider Better Auth's SSO plugin registers,
  * changes or removes is described to the directory the same way, after the write commits; its client
- * secret or signing certificate stays in this deployment's `sso_providers` row.
+ * secret or signing certificate is a vault secret its `sso_providers` row names (sign-in-secrets.ts).
  *
  * Chosen over Better Auth's database hooks because the SCIM plugin writes a person's groups through the
  * adapter directly, where no hook runs, and over a custom adapter for the `user` model because every

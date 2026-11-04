@@ -530,6 +530,11 @@ export function installConnectionsDirectory(
   return directory;
 }
 
+/** Whether a vault directory is installed in this process. */
+export function vaultInstalled(): boolean {
+  return installed !== undefined;
+}
+
 /**
  * The vault and connections, as this process holds them.
  *

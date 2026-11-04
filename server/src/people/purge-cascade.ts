@@ -3,8 +3,9 @@
  * them for good.
  *
  * A person's row in `users` used to take with it, by `ON DELETE CASCADE`: their memories and memory
- * sources, their Learning space, sharing choice and thread containers, and their routines, check-ins
- * and responsibilities with every run. Those live in Intelligence now, in capabilities that know
+ * sources, their Learning space, sharing choice and thread containers, their routines, check-ins and
+ * responsibilities with every run, and the sign-in accounts holding their provider tokens and password
+ * hash (whose values are vault secrets now, auth/sign-in-secrets.ts). Those live in Intelligence now, in capabilities that know
  * nothing of the directory, so this is that cascade, run by hand when the people directory says a
  * person was deleted for good (`PeopleDirectory.onPurged`). Their Bot configuration (preferences,
  * publications, owned skills) goes by its own sweep (`configuration/people-sweep.ts`).
@@ -12,9 +13,11 @@
  * Every part runs whatever the others did, so one that fails leaves no other undone; the failures are
  * then thrown together, naming each part.
  */
+import { purgeSignInSecretsOf } from "../auth/sign-in-secrets";
 import { removePersonLearning } from "../learning/personal-space";
 import type { LearningIntelligence } from "../learning/intelligence";
 import type { MemoryStore } from "../memory/store";
+import type { ConnectionsDirectory } from "../vault/directory";
 
 export function createPersonPurgeCascade(parts: {
   memory: Pick<MemoryStore, "forgetPerson">;
@@ -23,6 +26,7 @@ export function createPersonPurgeCascade(parts: {
     "purgePersonalSpace" | "deleteThreadAssignments"
   >;
   schedules: { purgeOwner(ownerUserId: string): Promise<unknown> };
+  vault: Pick<ConnectionsDirectory, "secrets" | "purgeSecret">;
 }): (userId: string) => Promise<void> {
   return async (userId) => {
     const failures: { part: string; error: unknown }[] = [];
@@ -30,6 +34,7 @@ export function createPersonPurgeCascade(parts: {
       ["memory", () => parts.memory.forgetPerson(userId)],
       ["Learning", () => removePersonLearning(parts.learning, userId)],
       ["schedules", () => parts.schedules.purgeOwner(userId)],
+      ["sign-in secrets", () => purgeSignInSecretsOf(parts.vault, userId)],
     ];
     for (const [part, run] of steps) {
       try {

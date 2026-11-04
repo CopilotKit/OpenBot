@@ -116,6 +116,7 @@ import { startAuditRetentionSync } from "./audit-trail/retention";
 import { installAuditTrail } from "./audit-trail/trail";
 import { startAuditHistoryCopy } from "./audit-trail/upgrade";
 import { createAuth, sessionLifetimeMs } from "./auth";
+import { copySignInSecretsToVault } from "./auth/sign-in-secrets-upgrade";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createEntra, withEntraBearer } from "./auth/entra";
 import type { AuthService } from "./auth/guards";
@@ -810,6 +811,13 @@ await vaultDirectory.start();
 // An upgraded deployment's secrets, apps and connections, copied from the local tables once
 // (vault/upgrade.ts), decrypted with the local key they were written under.
 await copyLocalVaultToIntelligence(
+  database,
+  vaultDirectory,
+  config.keyEncryptionKey,
+);
+// And the secrets Better Auth kept for signing people in: provider tokens, password hashes and the
+// identity providers' configurations (auth/sign-in-secrets-upgrade.ts).
+await copySignInSecretsToVault(
   database,
   vaultDirectory,
   config.keyEncryptionKey,
@@ -1822,6 +1830,7 @@ await peopleDirectory.onPurged(
     memory: personalMemoryStore,
     learning: learningIntelligence,
     schedules: scheduleDirectory.client,
+    vault: vaultDirectory,
   }),
 );
 const recorderExtension = createRecorderExtension({

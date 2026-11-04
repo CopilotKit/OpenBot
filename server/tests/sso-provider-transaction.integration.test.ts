@@ -3,9 +3,10 @@
  *
  * Signing in through a registered OIDC provider, the SSO plugin locks the provider's row and re-reads
  * it through the transaction's own adapter (`lockSSOProviderRow`, then a comparison of the issuer and
- * the OIDC configuration). That adapter was never wrapped by encrypt-sso-config.ts, so the config came
- * back as ciphertext, the plugin took it for a provider changed under it, and every such sign-in ended
- * on SSO_PROVIDER_CHANGED. Against the real Better Auth context and a real database, with transactions
+ * the OIDC configuration). That adapter was once left unwrapped, so the config came back as what the
+ * column holds rather than the configuration, the plugin took it for a provider changed under it, and
+ * every such sign-in ended on SSO_PROVIDER_CHANGED. The column holds a vault reference now
+ * (auth/sign-in-secrets.ts); the transaction's adapter must reveal it as the outer one does. Against the real Better Auth context and a real database, with transactions
  * off (no SCIM) and on (SCIM configured).
  */
 import { afterAll, describe, expect, test } from "bun:test";
@@ -17,9 +18,12 @@ import { createDatabase } from "../src/db/client";
 import { ssoProviders } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPeople } from "./support/directory";
+import { useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 useTestPeople();
+// The configuration is a vault secret the row names (auth/sign-in-secrets.ts).
+await useTestVault();
 const made: string[] = [];
 
 afterAll(async () => {
@@ -76,12 +80,13 @@ describe.each([
         oidcConfig,
       },
     });
-    // Ciphertext in the column.
+    // A reference to a vault secret in the column, never the secret.
     const [stored] = await database
       .select({ oidcConfig: ssoProviders.oidcConfig })
       .from(ssoProviders)
       .where(eq(ssoProviders.providerId, providerId));
     expect(stored?.oidcConfig).not.toContain("the-secret");
+    expect(stored?.oidcConfig).toStartWith("vault:");
 
     // What lockSSOProviderRow does, through the transaction's adapter.
     const locked = await adapter.transaction(async (trx) => {

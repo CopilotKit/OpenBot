@@ -23,9 +23,10 @@ import {
   peopleDirectoryInstalled,
 } from "../people/directory/directory";
 import { ACCESS_REMOVED_MESSAGE, copilotKitSignIn } from "./copilotkit";
+import { vault, vaultInstalled } from "../vault/directory";
 import { projectPeopleToDirectory } from "./directory-adapter";
 import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
-import { encryptSsoConfig } from "./encrypt-sso-config";
+import { keepSignInSecretsInVault } from "./sign-in-secrets";
 import { SIGN_OUT_UNFINISHED } from "./organization";
 import {
   applyConfiguredAdmin,
@@ -437,13 +438,11 @@ export function createAuth(
       ...(nativeApp ? [NATIVE_APP_ORIGIN] : []),
     ],
     /*
-     * Wrapped, so a company's client secret is ciphertext in the column.
-     *
-     * The SSO plugin writes `oidc_config` and `saml_config` as plaintext JSON, and the client secret
-     * for a customer's directory is inside them. Every other secret this deployment keeps goes
-     * through `KEY_ENCRYPTION_KEY`; these two were the exception. See encrypt-sso-config.ts.
+     * Wrapped, so the secrets Better Auth keeps for signing people in are the vault's: a person's
+     * provider tokens and password hash, and a company identity provider's configuration with its
+     * client secret or signing material. The columns hold references. See sign-in-secrets.ts.
      */
-    database: encryptSsoConfig(
+    database: keepSignInSecretsInVault(
       projectPeopleToDirectory(
         drizzleAdapter(database, {
           provider: "pg",
@@ -461,6 +460,8 @@ export function createAuth(
         // Every person Better Auth writes is carried to Intelligence's directory once it commits.
         () => (peopleDirectoryInstalled() ? people() : undefined),
       ),
+      () => (vaultInstalled() ? vault() : undefined),
+      // What the identity provider configurations were encrypted with before the vault.
       config.keyEncryptionKey,
     ),
     account: {

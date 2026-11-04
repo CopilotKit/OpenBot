@@ -606,7 +606,7 @@ pub fn compose(
      * MINTED ONCE PER DEPLOYMENT, NOT ONCE PER START.
      *
      * `KEY_ENCRYPTION_KEY` is the one that makes this data loss rather than churn: every secret the
-     * server keeps goes through it, and `encrypt-sso-config.ts` names the symptom itself, that a
+     * server keeps goes through it, and `auth/sign-in-secrets.ts` names the symptom itself, that a
      * changed key leaves stored configuration unreadable and sign-in broken until it is registered
      * again. A new one on every Start quietly orphaned everything the last run had encrypted.
      *
@@ -1528,7 +1528,7 @@ HTTPS_PROXY=http://proxy:8080
     /**
     A SECOND START OF THE SAME DEPLOYMENT KEEPS THE KEY. This is the data-loss one.
 
-    Every secret the server stores goes through `KEY_ENCRYPTION_KEY`, and `encrypt-sso-config.ts`
+    Every secret the server stores goes through `KEY_ENCRYPTION_KEY`, and `auth/sign-in-secrets.ts`
     names the symptom itself: a changed key leaves stored configuration unreadable and sign-in
     broken until it is registered again. The shell used to mint a new one on every Start, so
     everything the previous run had encrypted was orphaned by pressing a button labelled Start.

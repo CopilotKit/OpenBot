@@ -3,7 +3,8 @@
 // A person deleted for good takes what Intelligence holds of them beyond the directory.
 //
 // Their row in `users` used to take, by `ON DELETE CASCADE`, their memories and memory sources, their
-// Learning space and thread containers, and their routines. Those moved into Intelligence beside the
+// Learning space and thread containers, their routines, and the sign-in accounts whose secrets are the
+// vault's now. Those moved into Intelligence beside the
 // directory, so nothing cascades there any more: the people directory tells its listeners instead,
 // and the server's listener (people/purge-cascade.ts) removes them. Both ways a person goes for good
 // are driven here, against a real Intelligence: purged through the directory, and purged elsewhere
@@ -15,7 +16,9 @@ import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { idempotencyKey } from "../src/people/directory/client";
 import type { PeopleDirectory } from "../src/people/directory/directory";
+import { storeSignInSecret } from "../src/auth/sign-in-secrets";
 import { createPersonPurgeCascade } from "../src/people/purge-cascade";
+import type { ConnectionsDirectory } from "../src/vault/directory";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { directoryFor, uniqueEmail } from "./support/directory";
 import { testLearningIntelligence } from "./support/learning";
@@ -26,6 +29,7 @@ import {
   testScheduleClient,
   useTestSchedules,
 } from "./support/schedules";
+import { useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const memory = testMemory(database);
@@ -33,15 +37,18 @@ const learning = testLearningIntelligence();
 const run = randomUUID().slice(0, 8);
 const made: string[] = [];
 let people: PeopleDirectory;
+let vault: ConnectionsDirectory;
 
 beforeAll(async () => {
   await useTestSchedules();
+  vault = await useTestVault();
   people = directoryFor(database);
   await people.onPurged(
     createPersonPurgeCascade({
       memory: memory.store,
       learning,
       schedules: testScheduleClient(),
+      vault,
     }),
   );
 });
@@ -58,7 +65,10 @@ afterAll(async () => {
   await database.$client.close();
 });
 
-/** A person in the directory, with a memory, a memory source, a Learning space and thread, and a routine. */
+/**
+ * A person in the directory, with a memory, a memory source, a Learning space and thread, a routine,
+ * and the password hash their sign-in account names.
+ */
 async function personWithEverything(label: string) {
   const person = await people.create({
     id: `purge-${label}-${run}`,
@@ -92,6 +102,13 @@ async function personWithEverything(label: string) {
     agentId: `bot-${run}`,
     channelId: `channel-${person.id}`,
   });
+  await storeSignInSecret(
+    vault,
+    "account",
+    "password",
+    { userId: person.id, providerId: "credential" },
+    "$scrypt$hash",
+  );
   return person;
 }
 
@@ -108,6 +125,12 @@ async function heldFor(userId: string) {
         includeDeleted: true,
       })
     ).items.length,
+    signInSecrets: (
+      await vault.client.secrets.all({
+        includeRevoked: true,
+        ownerUserId: userId,
+      })
+    ).secrets.length,
   };
 }
 
@@ -117,6 +140,7 @@ const NOTHING = {
   spaceVersion: 0,
   threads: 0,
   routines: 0,
+  signInSecrets: 0,
 };
 
 describe("a person deleted for good", () => {
@@ -127,6 +151,7 @@ describe("a person deleted for good", () => {
       sources: 1,
       threads: 1,
       routines: 1,
+      signInSecrets: 1,
     });
 
     await people.purge(person.id);

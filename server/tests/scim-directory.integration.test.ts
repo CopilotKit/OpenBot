@@ -9,20 +9,15 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, count, eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createAuth } from "../src/auth";
 import { createScimForwarder, registerScimConnection } from "../src/auth/scim";
 import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  scimGroups,
-  scimUsers,
-  sessions,
-  users,
-} from "../src/db/schema";
+import { scimGroups, scimUsers, sessions, users } from "../src/db/schema";
 import { createScimReactions } from "../src/people/directory/scim-reactions";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { testIntelligence } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
@@ -33,6 +28,8 @@ import {
 } from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// The trail is Intelligence's: the reactions write it through the outbox, read back from there.
+useTestAuditTrail();
 const directory = useTestPeople();
 const auditStore = createAuditStore(database);
 const token = `scim-${randomUUID()}`;
@@ -108,18 +105,9 @@ const personWith = async (email: string) =>
   (await directory.client.pagePeople({ email, includeDeleted: true }))
     .people[0];
 
-const auditFor = async (targetId: string, eventType: string) => {
-  const [row] = await database
-    .select({ n: count() })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.targetId, targetId),
-        eq(auditEvents.eventType, eventType),
-      ),
-    );
-  return row?.n ?? 0;
-};
+/** How many of this event the trail in Intelligence holds for the person (written through the outbox). */
+const auditFor = async (targetId: string, eventType: string) =>
+  (await auditRows({ targetId, eventType })).length;
 
 let legacyCounts: { users: number; groups: number };
 
