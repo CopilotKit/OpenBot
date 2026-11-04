@@ -14,12 +14,17 @@ Set these repository Actions variables before merging the next release PR:
 | `OPENBOT_RELEASE_CHANNEL` | Trusted channel, default `stable`. |
 | `OPENBOT_UPSTREAM_REPOSITORY` | Upstream `owner/repository`, default `CopilotKit/openbot`. |
 | `OPENBOT_UPSTREAM_COMMIT` | Exact upstream ancestor for a fork's first integration/release; later integrations record `.openbot-upstream.json`. Remove the bootstrap variable after accepting the first recorded integration so it does not override future baselines. |
-| `OPENBOT_RELEASE_POLICY` | Reviewed JSON containing `compatibility` and `upgrade`, shown below. Required; publication fails in preflight before pushing any image if it is missing or invalid. |
 
-This example shows the complete policy shape. Replace versions, schema identities and capabilities with those verified for the release. Use actual database migration history identities; the example does not declare the current repository's migrations compatible.
+## Write the release policy
+
+The compatibility and upgrade policy is `release-policy.json` at the repository root, reviewed with the release like any other change. Publication reads it from the release commit itself, never from a repository variable or the working tree, and refuses it in preflight, before any image is pushed, unless its `version` is the version being released. A policy left over from the previous release names that release, so it cannot ship again under the new one. Every `fromVersions` entry must be an earlier release version. The schema is `shared/release-policy.schema.json`.
+
+Write the next release's policy before merging its release PR, in that PR or before it. This example shows the complete shape. Replace versions, schema identities and capabilities with those verified for the release. Use actual database migration history identities; OpenBot's own policy names the last migration in `server/drizzle/meta/_journal.json` at each release.
 
 ```json
 {
+  "$schema": "./shared/release-policy.schema.json",
+  "version": "v0.3.0",
   "compatibility": {
     "launcherApi": 1,
     "configSchema": 1,
@@ -48,13 +53,14 @@ export GITHUB_REPOSITORY=acme/openbot
 export GITHUB_SHA="$(git rev-parse HEAD)"
 export VERSION=v0.3.0
 export OPENBOT_UPSTREAM_COMMIT=<exact-upstream-ancestor>
-export OPENBOT_RELEASE_POLICY="$(cat reviewed-release-policy.json)"
 bun scripts/release-manifest.ts --validate-policy
 ```
 
 The release PR/version/changelog gates remain in place. The additional compatibility setup is intentional: an existing publisher must declare it before its next release rather than silently make a rollback promise. The pipeline archives the exact source commit with `git archive`, computes SHA-256 locally, and attests the source archive, both manifest formats, and image digests using the publishing workflow's OIDC identity. No release is published by these local commands.
 
-Each release also packages the checked-out Helm chart, including locked dependencies. Its exact chart version, release-specific GitHub asset URL, and SHA-256 appear in `artifacts.chart`; the `.tgz` is uploaded and attested with the source. Local artifact generation accepts `OPENBOT_CHART_PATH` and `OPENBOT_CHART_VERSION` together. The filename must be `openbot-<chart-version>.tgz`. Existing release assets are compared and retained on reruns; different bytes require a new release version.
+Each release also packages the checked-out Helm chart, including locked dependencies. Its exact chart version, release-specific GitHub asset URL, and SHA-256 appear in `artifacts.chart`; the `.tgz` is uploaded and attested with the source. Local artifact generation accepts `OPENBOT_CHART_PATH` and `OPENBOT_CHART_VERSION` together. The filename must be `openbot-<chart-version>.tgz`.
+
+A rerun of a release that failed partway completes it. `helm package` stamps the time it ran, and the provenance bundle is signed again on every run, so a rerun never produces the same bytes even when nothing changed. Instead the workflow downloads what was already published and compares by content: the source archive and chart by the files inside them (paths, modes and contents, not timestamps or compression), `container-images.json` and `release-manifest.json` by their parsed values. Published bytes are kept and only missing assets are uploaded, so the manifest's checksums and the attestation describe exactly what is downloadable. The provenance bundle is kept when it attests the same assets, and replaced only when the published one attests assets that were never published. Any real difference, such as a rerun that rebuilt the images under new digests, is refused; publish a new release version instead.
 
 Published server and monolithic images bake public `OPENBOT_BUILD_VERSION`, `OPENBOT_BUILD_COMMIT`, `OPENBOT_BUILD_DISTRIBUTION_ID`, `OPENBOT_BUILD_REPOSITORY`, and `OPENBOT_BUILD_CHANNEL` at build time. Host adapters pass these from the authenticated candidate. `GET /release` returns `{version,commit,distributionId,repository,channel}` from the startup build environment with `Cache-Control: no-store`, or 503 when identity is incomplete. It never reads the accepted installation sidecar while verifying a candidate. `/health` remains liveness. The base Compose file forwards build arguments to all uses of the server image and deliberately does not set empty runtime identity overrides. Always verify source/image digests as well as the endpoint; environment metadata alone is not artifact authentication.
 

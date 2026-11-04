@@ -15,6 +15,7 @@ import { integrateUpstream } from "../scripts/integrate-upstream";
 import {
   createReleaseArtifacts,
   readReleaseConfiguration,
+  readReleasePolicy,
 } from "../scripts/release-manifest";
 import { parseReleaseManifest } from "../shared/release-manifest";
 
@@ -186,6 +187,13 @@ function releaseOptions(repo: ReturnType<typeof repository>) {
     images: fixture.artifacts.images,
   };
 }
+function releasePolicy(options: ReturnType<typeof releaseOptions>) {
+  return {
+    version: options.version,
+    compatibility: options.compatibility,
+    upgrade: options.upgrade,
+  };
+}
 describe("release source artifacts", () => {
   test("publishes an exact chart artifact beside the source with a release-specific URL", () => {
     const repo = repository();
@@ -212,6 +220,12 @@ describe("release source artifacts", () => {
   });
   test("the publication CLI emits the fork's exact source and manifest without dependencies", () => {
     const repo = repository();
+    writeFileSync(
+      join(repo.root, "release-policy.json"),
+      JSON.stringify(releasePolicy(releaseOptions(repo))),
+    );
+    git(repo.root, "add", "release-policy.json");
+    git(repo.root, "commit", "-m", "release policy");
     const options = releaseOptions(repo);
     writeFileSync(
       join(repo.root, "container-images.json"),
@@ -236,10 +250,6 @@ describe("release source artifacts", () => {
           OPENBOT_DISTRIBUTION_ID: options.distributionId,
           OPENBOT_UPSTREAM_COMMIT: options.upstreamCommit,
           OPENBOT_RELEASE_OUTPUT: options.outputDirectory,
-          OPENBOT_RELEASE_POLICY: JSON.stringify({
-            compatibility: options.compatibility,
-            upgrade: options.upgrade,
-          }),
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -316,7 +326,7 @@ describe("release source artifacts", () => {
     ).toThrow();
     expect(existsSync(options.outputDirectory)).toBe(false);
   });
-  test("publication configuration refuses missing compatibility policy and fork baseline", () => {
+  test("publication refuses a fork without a baseline and a commit without a policy", () => {
     const repo = repository();
     const options = releaseOptions(repo);
     const env = {
@@ -324,19 +334,12 @@ describe("release source artifacts", () => {
       GITHUB_SHA: options.commit,
       VERSION: "v0.3.0",
     };
-    expect(() => readReleaseConfiguration(env, repo.root)).toThrow();
+    expect(() => readReleaseConfiguration(env, repo.root)).toThrow(
+      "Fork publication requires",
+    );
     expect(() =>
-      readReleaseConfiguration(
-        {
-          ...env,
-          OPENBOT_RELEASE_POLICY: JSON.stringify({
-            compatibility: options.compatibility,
-            upgrade: options.upgrade,
-          }),
-        },
-        repo.root,
-      ),
-    ).toThrow();
+      readReleasePolicy(repo.root, options.commit, options.version),
+    ).toThrow("has no release-policy.json");
   });
 });
 
