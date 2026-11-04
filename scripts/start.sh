@@ -220,6 +220,29 @@ echo
 echo "OpenBot"
 echo "======="
 
+# Provision the installation's Composio project with the existing CLI sign-in, independently of
+# Learning. The helper preserves supplied keys and Arcade. The server reads the resulting .env on
+# launch. Bun preserves exported values over .env, including empty strings. A child cannot change
+# this shell's environment, so clear only blank overrides before setup and later server processes.
+#
+# Best-effort, like Learning below. It used to run bare under `set -e`, so a checkout with no key
+# could not start at all while offline, signed out of the CLI, on a CLI without
+# `integrations composio provision`, or against an Ops without the provisioning service. A failure
+# is now the helper's one-line reason, and OpenBot starts with apps unavailable.
+if [[ "${COMPOSIO_API_KEY:-}" != *[![:space:]]* ]]; then
+  unset COMPOSIO_API_KEY
+fi
+COMPOSIO_BEFORE="$(setting COMPOSIO_API_KEY "")"
+if COMPOSIO_LINE="$(bun scripts/setup-composio.ts 2>&1 | tail -1)"; then
+  info "  $COMPOSIO_LINE"
+else
+  red "  Composio: apps are unavailable this run. ${COMPOSIO_LINE:-The Composio setup did not run.}"
+fi
+# Whatever the helper reported, a key that is new in .env must reach a server that is already up.
+if [ -z "$COMPOSIO_BEFORE" ] && [ -n "$(setting COMPOSIO_API_KEY "")" ]; then
+  SECRETS_ROTATED=true
+fi
+
 info "1/4  Docker services"
 SERVICES=(postgres)
 if [ "$ONE_COMPUTER_EACH" = "true" ]; then

@@ -111,6 +111,17 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    has a saved setting.
    Managed Intelligence needs no separate licence token.
 
+   The same CopilotKit CLI sign-in provisions Composio automatically when you run
+   `bash scripts/start.sh`. If that cannot complete, OpenBot still starts, with apps
+   unavailable. You can run `bun run setup:composio` first to prepare it separately, or
+   later to retry; it does not need a Learning container. The helper creates or reuses one
+   isolated Composio project for this installation and saves its project key to `.env`.
+   Existing Composio keys and Arcade configurations are preserved. Keep the private
+   `.env.openbot-installation-id` file across restarts and interrupted setup attempts;
+   do not copy it into a new installation. This needs a published CopilotKit CLI with
+   `integrations composio provision` and the hosted provisioning service enabled.
+   See [Composio setup](docs/plugins/composio.md#automatic-project-setup) for deployment preparation.
+
 3. Fill the remaining required values:
 
    - `OPENAI_API_KEY`
