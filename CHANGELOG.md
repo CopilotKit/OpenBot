@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Choosing Anthropic in the Desktop setup screen, or setting `BOT_PROVIDER=anthropic` without a `BOT_MODEL`, now runs `claude-sonnet-5-5` instead of `claude-sonnet-4-5`, which Anthropic retires on 2026-11-30. A deployment that pins `BOT_MODEL` is unaffected.
+- Code and markdown in a Bot's interface are drawn the way a reply draws them: highlighted in the light and dark themes, with the same copy and download buttons, tables and Doc links. They were plain monospace before, and nearly unreadable in dark mode.
+- The Computer panel's Activity lists every command the Bot runs and every file it reads, saves or lists, with what it printed, whether the step ran at once, after you allowed it, or before the page was opened. It had stayed empty for anything that went through approval. A step that was not done shows why in your words ("You declined it."), not the sentence the Bot is told, and the line in the conversation says the same. A command you decline on the Bot's own approval card is listed too. A step you did yourself shows as done by you. A step shows the time it ran only when the page saw it run, never the time the page was opened. Resetting a computer from Admin clears the Activity of every Bot that ran on it, and a reload or another tab no longer brings it back.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, the app's port on this machine) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, and the app's port on this machine and on each of those hosts) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+
+- Each person's computer, and each Isolated Bot's, now holds a token of its own, derived from `COMPUTER_TOKEN`, and the server calls it with that token rather than the deployment's. A Bot that reads its own computer's token can open that computer and no other. Existing per-person and per-Bot computers are recreated the first time they are used after upgrading, keeping their files and sign-ins. Helm `sandbox` writes each Sandbox its own token. The one shared computer (no supervisor) is unchanged.
+
+- A Bot's endpoint no longer receives the `Authorization` header, or any `x-*` header, from the request of the person running it. A Bot's own key and the deployment's agent token are still sent. A remote Bot that read a header the person's client sent has to be given it as one of the Bot's own headers instead.
+
 - OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
 
 **Before upgrading.** Twenty things change for an existing deployment:
@@ -101,6 +111,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
 
+### A responsibility hears about large pull requests
+
+GitHub events for a responsibility were refused above 32 KB, and most `pull_request` deliveries are
+larger: the pull request repeats its repository under `head` and `base`. For the last 30 pull
+requests on this repository, 23 were refused. They were answered 503, which GitHub does not deliver
+again on its own, so the responsibility never ran and nothing said why. The route now takes up to
+256 KB, like the event triggers, and fits what it stores into 32 KB the same way they do: an event
+over 32 KB is kept as its short top-level fields (`action`, `number`) and an excerpt from the start of
+the rest, so the Bot sees which pull request changed and the beginning of its details. A body over
+256 KB is answered 413.
+
 ### A Bot can hold hundreds of tools
 
 A Bot that holds more than 50 tools is no longer sent all of them on every step. Its own tools stay
@@ -114,6 +135,15 @@ A run that would still send more than 128 tools at once, counting the room it ke
 answer, is refused before the model is called. Chat Completions refuses more than 128 itself, and
 search never sends more. The person is told why, and the audit log records it under Blocked as "Too
 many tools for its model".
+
+### A Bot's shell in the one-container image installs packages and nothing else as root
+
+In the `openbot` image (one container, and Helm's computer pods), a Bot installs a package with
+`sudo openbot-apt update` and `sudo openbot-apt install <package>` (`-y` is accepted and changes
+nothing), which is what its tool description now says. `sudo apt-get`, `sudo dpkg` and the other package commands are refused: with
+any arguments they ran any command as root, and root there reads the deployment's secrets. The
+helper takes package names only. `/app` is no longer owned by the Bot's user, so a Bot cannot change
+the API's code or the page it serves. Computers that run as root keep using `apt-get` directly.
 
 ### Bots can install packages on their computers
 
@@ -131,6 +161,14 @@ so a question that needs several lookups makes more model calls than before. A s
 on the person: an action that needs approval is handed back, and the Bot asks in the conversation.
 Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
 OpenBot runs the tool itself, so a remote agent needs no change.
+
+### The Bot's screen, opened full size, has a close button
+
+The full-size view of a Bot's screen now has an X in its corner that closes it and goes back to the
+conversation, including while the person has control. Before, Escape was the only way out of a live
+view. Closing does what Escape does: it leaves the wheel where it is. While the person holds the
+wheel, the small view of the screen now says so on an amber band, and that the Bot waits until they
+hand it back.
 
 ### Bots tell you when something needs you
 
@@ -300,6 +338,30 @@ can also call OpenBot's API with a person's Entra token; a token issued to any o
 Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
+### Shopify and other Composio apps on a server-to-server grant can be connected
+
+Composio publishes some apps, Shopify among them, with only `OAUTH2` and `S2S_OAUTH2` and nothing
+it manages, so they were hidden from the picker and refused at enable. Set
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` (for Shopify,
+`COMPOSIO_SHOPIFY_CLIENT_ID` and `COMPOSIO_SHOPIFY_CLIENT_SECRET`) to the OAuth client you
+registered with the vendor, and the app can be enabled and connected: Composio exchanges that client
+for the token, and the connect form asks only for what the connection needs, such as the store
+subdomain. Because the credential is the deployment's, such an app connects only as one shared
+account: an administrator makes it shared, connects it and grants it to Bots, and a personal
+Connect is refused and not offered. The client is saved on the app's config at Composio when it is
+enabled; see [rotating the client](docs/configuration.md#rotating-a-composio-apps-own-client).
+Unset, nothing changes.
+
+### A Bot sees the images its tools return
+
+An image a tool returned, such as a Gmail attachment fetched through Composio, reached the model as
+a storage link it could not open, so "look at the photo the customer attached" could not work. The
+server now downloads it and puts the picture in front of the model on the next step, beside the
+tool's answer: https only, only from Composio's file storage host, never from a name that resolves
+to a private, loopback or metadata address, at most 8 MB each and the newest four in a run. A picture that cannot be downloaded, including one whose link has expired by
+a later turn, is replaced by a sentence telling the model it is not there. Each picture is sent to
+the model provider on every later step of the conversation, so expect more input tokens there.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
@@ -433,6 +495,28 @@ pace, and the view follows it until the person scrolls up or selects some of it,
 again when they come back to the end or press the arrow. A rail beside a conversation has a mark
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
+
+### First run gets you into the app in three clicks at most
+
+- The looping intro is replaced by a short onboarding. Welcome shows what OpenBot does as one
+  animation (asking in plain words, the browser and files Bots use apart from yours, and picking a
+  Bot), with Set up your permissions beside it: the Ask before making changes switch, the same one
+  as Settings → Approvals. Somebody running OpenBot alone, on Desktop or with `copilotkit local`,
+  then gets Talk to us, where Book a call opens CopilotKit's booking page in a new tab and Not now
+  moves on. Last comes the name, skipped when sign-in already gave one. A reload and browser Back
+  keep the person's place, which is now saved as they go.
+- Notifications are offered in a conversation once the first task has started, with Enable
+  notifications and Not now, instead of during onboarding.
+- New **Settings → Setup**, for admins and somebody running OpenBot alone, asks the new
+  `GET /api/setup` whether Intelligence, the model key, the Bot computer, more apps and Slack and
+  Teams work, row by row, with the page or the variables that close each gap. The Settings sidebar
+  counts the rows an admin can fix. Check again asks Intelligence and the model provider again, at
+  most every 10 seconds. Reading the checklist does the same once an answer could not be had or is
+  five minutes old, without waiting for it, so the next read has the new answer; a refusal (a
+  licence, a key, a computer's policy) waits for Check again or the five minutes. To check the Bot
+  computer, the server sends each running computer its network policy whenever it asks, and sees
+  that it answers; it wakes none.
+- The self-host banner's link now reads Book a call.
 
 ### Generated interfaces use A2UI 1.0
 
@@ -720,6 +804,15 @@ now asks Composio again, records the account it holds, and shows the app as conn
 opening the app's page already did. A Shared app's team account is still recorded only by an admin.
 If Composio then reports no account after all, Connect says nothing was connected and asks you to
 press it again. It no longer tells you to disconnect anything.
+
+### A Bot's Slack link code works only in a direct message
+
+The `link <code>` message a Bot's Reaching you shows now links on Slack only when it is sent to the
+app in a direct message. Sent in a channel, with or without a mention, it is cancelled and the sender
+is told to make a new one, as an account code from Connections already was. Whoever sends the code
+first is linked to that Bot: their messages run it as its owner, and its questions and approval
+requests go to them, so a code others have seen must not still work. Teams codes still link wherever
+they are sent, until OpenTag is confirmed to mark a Teams one-to-one chat as private.
 
 ### A Bot with an app or web research can use its browser in a conversation again
 

@@ -448,6 +448,27 @@ function AppConnectionPage() {
    * way in demonstrably drew a row for. Falling through to the `user-oauth` branch instead is no
    * better: its title and summary are the catalogue's, and there is none.
    */
+  /*
+   * AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT, NOT YET MADE SHARED. It signs in with this
+   * deployment's own client, so there is no account here that is this person's: the server refuses
+   * a personal Connect, and this page draws none. Read off the listing's `sharedOnly`, never off the
+   * app's name. The list on the way in leaves it out; a link from elsewhere still lands here.
+   */
+  if (brokered && server?.sharedOnly) {
+    return (
+      <PageShell
+        backButton={back}
+        description="You don't connect this app yourself."
+        title={server.title}
+      >
+        <PageEmpty icon={IconUsers} title="Shared account only">
+          An admin connects {server.title} once as a shared account and gives it
+          to Bots.
+        </PageEmpty>
+      </PageShell>
+    );
+  }
+
   if (brokered && server) {
     /* Bound once because the row below is told it twice — once inside the whole disconnected
        sentence and once on its own — and two copies of it would drift. */

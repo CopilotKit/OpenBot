@@ -1,0 +1,30 @@
+[
+  {
+    "name": "official",
+    "expected": {
+      "id": "CopilotKit/OpenBot",
+      "repository": "CopilotKit/OpenBot",
+      "channel": "stable"
+    }
+  },
+  {
+    "name": "fork default",
+    "repository": "Acme/ForkBot",
+    "expected": {
+      "id": "Acme/ForkBot",
+      "repository": "Acme/ForkBot",
+      "channel": "stable"
+    }
+  },
+  {
+    "name": "configured fork",
+    "repository": "Acme/ForkBot",
+    "distributionId": "acme.openbot",
+    "channel": "preview",
+    "expected": {
+      "id": "acme.openbot",
+      "repository": "Acme/ForkBot",
+      "channel": "preview"
+    }
+  }
+]

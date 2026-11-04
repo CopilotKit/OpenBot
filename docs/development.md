@@ -30,6 +30,17 @@ its runtime key. Local development may use a loopback HTTP origin. Existing key-
 use authenticated Intelligence administration to create a container and assign it in OpenBot Admin.
 There is no managed licence step. Then add `OPENAI_API_KEY`.
 
+The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;
+`bun run setup:composio` runs that step alone, independently of Learning. A failure
+does not stop the start: OpenBot runs with apps unavailable until a retry succeeds. A supplied
+`COMPOSIO_API_KEY`, an explicit Arcade selection, or an Arcade-only key is preserved.
+The helper saves a stable installation UUID privately before any provisioning request,
+then the CLI saves this installation's Composio project key in `.env`. Keep
+`.env.openbot-installation-id` with the installation when restarting or retrying;
+new installations generate their own file. A compatible published CLI and enabled hosted
+provisioning service must be available before adopting this startup flow. See
+[automatic project setup](plugins/composio.md#automatic-project-setup).
+
 Start the stack:
 
 ```sh

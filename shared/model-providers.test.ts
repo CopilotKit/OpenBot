@@ -40,7 +40,7 @@ describe("the provider registry", () => {
 
   test("each provider has a model to run when none was configured", () => {
     expect(MODEL_PROVIDERS.openai.defaultModel).toBe("gpt-5.5");
-    expect(MODEL_PROVIDERS.anthropic.defaultModel).toBe("claude-sonnet-4-5");
+    expect(MODEL_PROVIDERS.anthropic.defaultModel).toBe("claude-sonnet-5-5");
     expect(MODEL_PROVIDERS.google.defaultModel).toBe("gemini-2.5-flash");
   });
 
@@ -141,7 +141,7 @@ describe("which model this Bot was told to use", () => {
     expect(configuredModel("openai", undefined)).toBe("gpt-5.5");
     expect(configuredModel("openai", "")).toBe("gpt-5.5");
     expect(configuredModel("openai", "   ")).toBe("gpt-5.5");
-    expect(configuredModel("anthropic", undefined)).toBe("claude-sonnet-4-5");
+    expect(configuredModel("anthropic", undefined)).toBe("claude-sonnet-5-5");
     expect(configuredModel("google", "")).toBe("gemini-2.5-flash");
   });
 
@@ -300,7 +300,7 @@ describe("what a Bot runs from the spec file", () => {
   test("a provider from the environment takes that provider's default", () => {
     expect(botSettings("agent-adk", { BOT_PROVIDER: "anthropic" })).toEqual({
       provider: "anthropic",
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-5-5",
     });
   });
 

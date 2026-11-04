@@ -19,6 +19,7 @@ metadata:
   labels:
 {{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
 spec:
+  suspend: {{ default false (.Values.routines).suspend }}
   {{- $schedule := "*/5 * * * *" -}}
   {{- if not (kindIs "invalid" (.Values.routines).schedule) -}}
   {{- $schedule = (.Values.routines).schedule -}}

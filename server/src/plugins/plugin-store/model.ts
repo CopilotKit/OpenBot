@@ -174,6 +174,16 @@ export type ServerRecord = {
    */
   sharedVendorConnected: boolean;
   /**
+   * Whether this app may only hold the deployment's one shared account, never a person's own.
+   *
+   * True for an app connected on this deployment's own OAuth client (a server-to-server grant):
+   * what a person would type is a store subdomain and the credential is the deployment's, so a
+   * personal account would be the organization's access under one person's name. Read off the
+   * recorded scheme by `sharedAccountOnly`, so a screen decides what to offer from this and never
+   * from the app's name. The connect route refuses a personal account here whatever a screen draws.
+   */
+  sharedOnly: boolean;
+  /**
    * Whether a call to this server goes out on the asking person's own credential: their own grant
    * at the vendor, or their own account behind a broker. See `ServerAccess.ownCredential`.
    *

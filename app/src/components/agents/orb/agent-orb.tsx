@@ -85,6 +85,11 @@ export interface AgentOrbProps {
   size?: string;
   /** Shared AI state driving speed, scale, saturation and reactivity. */
   state?: AIState;
+  /**
+   * Held still, as reduced motion holds it: for an orb nobody can see right now, such as a picture
+   * scrolled off screen or in a hidden tab, so a loop nobody watches does not keep running.
+   */
+  still?: boolean;
 }
 
 const AgentOrb: React.FC<AgentOrbProps> = ({
@@ -94,8 +99,9 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
   animationDuration = 20,
   amplitude,
   state = "idle",
+  still = false,
 }) => {
-  const shouldReduceMotion = useReducedMotion();
+  const shouldReduceMotion = useReducedMotion() || still;
   const amplitudeValue = useAmplitudeValue(amplitude);
   const stateMotion = getAIStateMotion(state);
 
@@ -258,6 +264,7 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
 
       <motion.div
         className="agent-orb"
+        data-still={still ? "" : undefined}
         style={
           {
             "--animation-duration": `${loopDuration}s`,
@@ -427,6 +434,11 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
           .agent-orb-sheen {
             animation: none;
           }
+        }
+
+        .agent-orb[data-still]::before,
+        .agent-orb[data-still] .agent-orb-sheen {
+          animation: none;
         }
       `}</style>
       </motion.div>

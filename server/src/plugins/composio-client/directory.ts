@@ -11,6 +11,11 @@ import {
   textOf,
   VENDOR_SHAPE_REMEDY,
 } from "../composio-vendor";
+import {
+  DEPLOYMENT_CLIENT_SCHEME,
+  deploymentClientOf,
+  deploymentClientVariables,
+} from "../deployment-clients";
 import type { ClientContext } from "./context";
 import { CONFIG_SUFFIX, copyOf, DIRECTORY_TTL_MS } from "./model";
 
@@ -192,7 +197,26 @@ export function directoryMethods(context: ClientContext) {
        * at connect time. A key app needs none HERE because the key is one person's: it belongs to
        * each connection made against this config, which is per-deployment, and a key written onto
        * it would be one person's secret shared by everybody the app is enabled for.
+       *
+       * EXCEPT A SERVER-TO-SERVER GRANT, WHOSE CREDENTIAL IS THE DEPLOYMENT'S AND NOT A PERSON'S.
+       * `S2S_OAUTH2` is a client-credentials grant: Composio exchanges a client id and secret for
+       * the token itself, so the client belongs on the config, and it is the one registered by
+       * whoever runs this deployment (`deployment-clients.ts`). {@link connectionOf} offers the
+       * scheme only while that client is held, and the pair is read again here: variables removed
+       * between the directory read and this enable would otherwise create a config with no client,
+       * which Composio accepts and every connect against it then fails on. So that is refused, by
+       * name, and nothing is created.
        */
+      const s2s =
+        connection.kind === "fields" &&
+        connection.authScheme === DEPLOYMENT_CLIENT_SCHEME;
+      const client = s2s ? deploymentClientOf(toolkit) : null;
+      if (s2s && client === null) {
+        const { id, secret } = deploymentClientVariables(toolkit);
+        throw new BrokerRefusalError(
+          `${toolkit} connects with a server-to-server grant on this deployment's own OAuth client, and this deployment no longer holds one, so no authorization config was created and the app is not enabled. Set ${id} and ${secret} on this deployment and enable it again.`,
+        );
+      }
       const options =
         connection.kind === "consent"
           ? ({ type: "use_composio_managed_auth", name: configName } as const)
@@ -207,9 +231,10 @@ export function directoryMethods(context: ClientContext) {
                * THE EMPTY RECORD IS THE VENDOR'S PRICE FOR SENDING NOTHING — see the field's own
                * comment on {@link ComposioVendor}. Omitting it is a `ValidationError` raised before
                * any request, which reads as a refusal to enable rather than as the secret-free
-               * config this branch is for.
+               * config this branch is for. A server-to-server grant's is the one config that is
+               * sent something, and its client was refused above if it was missing.
                */
-              credentials: {},
+              credentials: client ?? {},
             } as const);
 
       const created = await askVendor(

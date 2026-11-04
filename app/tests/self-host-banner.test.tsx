@@ -107,7 +107,7 @@ test("offers self-hosting with a link CopilotKit can tell came from the app", ()
   expect(
     view.getByText("Self-host OpenBot for your organization."),
   ).toBeTruthy();
-  const link = view.getByRole("link", { name: "Talk to an engineer" });
+  const link = view.getByRole("link", { name: "Book a call" });
   expect(link.getAttribute("href")).toBe(SELF_HOST_URL);
   expect(SELF_HOST_URL).toContain("ref=openbot_app");
   expect(link.getAttribute("target")).toBe("_blank");
