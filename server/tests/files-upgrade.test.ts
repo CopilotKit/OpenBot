@@ -23,6 +23,7 @@ import {
   FileCopyMismatchError,
   PAGE_FRAME_COPY_NAME,
 } from "../src/files/upgrade";
+import { purgeConversations, seedConversation } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { restoreTestFiles, useTestFiles } from "./support/files";
 
@@ -171,6 +172,7 @@ afterEach(async () => {
       collection: channelId,
     });
     await database.delete(channels).where(eq(channels.id, channelId));
+    await purgeConversations([channelId]);
   }
   for (const userId of seededUsers.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -259,6 +261,14 @@ describe("the boot-time copy of attachments", () => {
     await quietly(() =>
       copyLocalAttachmentsToIntelligence(database, { stagedTtlHours: 24 }),
     );
+    // The channel and its member move too, by the conversations' own boot-time copy
+    // (conversations/upgrade.ts), under the same id: membership is read there now.
+    await seedConversation({
+      id: seeded.channelId,
+      name: "Upgraded channel",
+      description: "Files from before the upgrade.",
+      members: [{ userId: seeded.memberId }],
+    });
 
     const member: MiddlewareHandler<{ Variables: AppVariables }> = async (
       context,
