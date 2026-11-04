@@ -681,21 +681,27 @@ async fn prepare_installation(
         }
         images.sort();
         images.dedup();
-        for (index, image) in images.iter().enumerate() {
-            attempt.require_current()?;
-            let detail = format!(
-                "Downloading local software ({}/{}).",
-                index + 1,
-                images.len()
-            );
-            report_running(&handle, "images", &detail, None);
-            pull_metrics::pull_image(
-                &address,
-                image,
-                |bytes| report_running(&handle, "images", &detail, Some(bytes)),
-                |metrics| desktop_telemetry::pull_completed(&handle, metrics),
-            )?;
-        }
+        // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
+        pull_metrics::pull_images_limited(
+            &images,
+            pull_metrics::IMAGE_PULLS_AT_ONCE,
+            |_, image, on_bytes| {
+                pull_metrics::pull_image(&address, image, on_bytes, |metrics| {
+                    desktop_telemetry::pull_completed(&handle, metrics)
+                })
+            },
+            || attempt.require_current(),
+            |done, total, bytes| {
+                // `done` counts FINISHED pulls, so this reads "(0/7)" while the first pulls run.
+                // The byte figure is the sum over every pull, running and finished.
+                report_running(
+                    &handle,
+                    "images",
+                    format!("Downloading local software ({done}/{total})."),
+                    (bytes > 0).then_some(bytes),
+                )
+            },
+        )?;
         report(
             &handle,
             "images",

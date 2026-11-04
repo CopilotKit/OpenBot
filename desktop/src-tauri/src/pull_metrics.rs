@@ -163,6 +163,92 @@ pub fn pull_image(
     )
 }
 
+/// How many images Install pulls at once.
+pub const IMAGE_PULLS_AT_ONCE: usize = 4;
+
+/// Pull `images` with at most `limit` pulls in flight, starting them in list order.
+///
+/// `pull(index, image, on_bytes)` is one blocking pull; it calls `on_bytes` with the bytes that
+/// pull has downloaded so far. `keep_going` is asked before each pull starts; an `Err` (Stop)
+/// starts no further pull. On the first failure no further pull starts, the pulls already running
+/// finish, and that first error is returned.
+///
+/// `on_progress(done, total, bytes)`: `done` counts FINISHED pulls (not started ones), and
+/// `bytes` is the sum of the bytes of every pull so far, running and finished. It never goes
+/// down, and after the last pull succeeds it is called with `done == total`.
+pub fn pull_images_limited<P, K, O>(
+    images: &[String],
+    limit: usize,
+    pull: P,
+    keep_going: K,
+    on_progress: O,
+) -> Result<(), Problem>
+where
+    P: Fn(usize, &str, &dyn Fn(u64)) -> Result<(), Problem> + Sync,
+    K: Fn() -> Result<(), Problem> + Sync,
+    O: Fn(usize, usize, u64) + Sync,
+{
+    struct Shared {
+        next: usize,
+        done: usize,
+        bytes: Vec<u64>,
+        error: Option<Problem>,
+    }
+    let total = images.len();
+    let shared = std::sync::Mutex::new(Shared {
+        next: 0,
+        done: 0,
+        bytes: vec![0; total],
+        error: None,
+    });
+    // Reported under the lock, so the person sees `done` and `bytes` only ever go up.
+    let report = |state: &Shared| on_progress(state.done, total, state.bytes.iter().sum());
+    report(&shared.lock().unwrap());
+    let worker = || loop {
+        let index = {
+            let mut state = shared.lock().unwrap();
+            if state.error.is_some() || state.next >= total {
+                return;
+            }
+            if let Err(problem) = keep_going() {
+                state.error = Some(problem);
+                return;
+            }
+            state.next += 1;
+            state.next - 1
+        };
+        let on_bytes = |bytes: u64| {
+            let mut state = shared.lock().unwrap();
+            // One pull's own figure is cumulative; keep its highest so the sum never drops.
+            if bytes > state.bytes[index] {
+                state.bytes[index] = bytes;
+                report(&state);
+            }
+        };
+        let outcome = pull(index, &images[index], &on_bytes);
+        let mut state = shared.lock().unwrap();
+        match outcome {
+            Ok(()) => {
+                state.done += 1;
+                report(&state);
+            }
+            Err(problem) => {
+                state.error.get_or_insert(problem);
+                return;
+            }
+        }
+    };
+    std::thread::scope(|scope| {
+        for _ in 0..limit.max(1).min(total) {
+            scope.spawn(worker);
+        }
+    });
+    match shared.into_inner().unwrap().error {
+        Some(problem) => Err(problem),
+        None => Ok(()),
+    }
+}
+
 /// Complete one explicit pull and report its outcome before the caller can start containers.
 /// A failed pull is returned as the same two-part Problem used by the existing startup path.
 pub(crate) fn run(
@@ -300,6 +386,159 @@ fn read_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    /// Wait, at most two seconds, until `count` reaches `want`. A bounded wait, so a sequential
+    /// implementation fails the test instead of hanging it.
+    fn wait_for(count: &AtomicUsize, want: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while count.load(SeqCst) < want && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn names(count: usize) -> Vec<String> {
+        (0..count).map(|index| format!("image-{index}")).collect()
+    }
+
+    #[test]
+    fn pulls_several_images_at_once_but_never_more_than_the_limit() {
+        let images = names(10);
+        let running = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        let arrived = AtomicUsize::new(0);
+        pull_images_limited(
+            &images,
+            IMAGE_PULLS_AT_ONCE,
+            |index, _, _| {
+                let now = running.fetch_add(1, SeqCst) + 1;
+                most.fetch_max(now, SeqCst);
+                // The first four pulls wait to be running together.
+                if index < IMAGE_PULLS_AT_ONCE {
+                    arrived.fetch_add(1, SeqCst);
+                    wait_for(&arrived, IMAGE_PULLS_AT_ONCE);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                running.fetch_sub(1, SeqCst);
+                Ok(())
+            },
+            || Ok(()),
+            |_, _, _| {},
+        )
+        .unwrap();
+        assert_eq!(most.load(SeqCst), IMAGE_PULLS_AT_ONCE);
+    }
+
+    #[test]
+    fn first_failure_starts_no_new_pull_lets_running_ones_finish_and_is_returned() {
+        let images = names(10);
+        let started = Mutex::new(Vec::new());
+        let finished = Mutex::new(Vec::new());
+        let failed = std::sync::atomic::AtomicBool::new(false);
+        let started_after_failure = AtomicUsize::new(0);
+        let arrived = AtomicUsize::new(0);
+        let error = pull_images_limited(
+            &images,
+            3,
+            |index, _, _| {
+                if failed.load(SeqCst) {
+                    started_after_failure.fetch_add(1, SeqCst);
+                }
+                started.lock().unwrap().push(index);
+                if index < 3 {
+                    arrived.fetch_add(1, SeqCst);
+                    wait_for(&arrived, 3);
+                }
+                if index == 0 {
+                    failed.store(true, SeqCst);
+                    return Err(Problem::plain("pull 0 failed"));
+                }
+                if index == 1 {
+                    // Fails later than pull 0; its error is not the one returned.
+                    std::thread::sleep(Duration::from_millis(40));
+                    return Err(Problem::plain("pull 1 failed"));
+                }
+                std::thread::sleep(Duration::from_millis(40));
+                finished.lock().unwrap().push(index);
+                Ok(())
+            },
+            || Ok(()),
+            |_, _, _| {},
+        )
+        .unwrap_err();
+        assert_eq!(error, Problem::plain("pull 0 failed"));
+        assert_eq!(started_after_failure.load(SeqCst), 0);
+        let mut started = started.lock().unwrap().clone();
+        started.sort();
+        assert_eq!(started, vec![0, 1, 2]);
+        assert_eq!(*finished.lock().unwrap(), vec![2]);
+    }
+
+    #[test]
+    fn cancellation_starts_no_new_pull() {
+        let images = names(10);
+        let started = AtomicUsize::new(0);
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let error = pull_images_limited(
+            &images,
+            2,
+            |_, _, _| {
+                if started.fetch_add(1, SeqCst) + 1 == 3 {
+                    cancelled.store(true, SeqCst);
+                }
+                Ok(())
+            },
+            || {
+                if cancelled.load(SeqCst) {
+                    Err(Problem::plain("cancelled"))
+                } else {
+                    Ok(())
+                }
+            },
+            |_, _, _| {},
+        )
+        .unwrap_err();
+        assert_eq!(error, Problem::plain("cancelled"));
+        assert!(started.load(SeqCst) <= 4, "{}", started.load(SeqCst));
+    }
+
+    #[test]
+    fn progress_counts_finished_pulls_and_sums_bytes_across_pulls() {
+        let images = names(6);
+        let calls = Mutex::new(Vec::new());
+        pull_images_limited(
+            &images,
+            3,
+            |index, _, on_bytes| {
+                let base = (index as u64 + 1) * 100;
+                on_bytes(base);
+                std::thread::sleep(Duration::from_millis(2));
+                on_bytes(base * 2);
+                Ok(())
+            },
+            || Ok(()),
+            |done, total, bytes| calls.lock().unwrap().push((done, total, bytes)),
+        )
+        .unwrap();
+        let calls = calls.lock().unwrap();
+        // Each image ends at 200 * (index + 1) bytes: 200 * (1 + ... + 6) in all.
+        let expected: u64 = (1..=6).map(|n| n * 200).sum();
+        assert_eq!(*calls.last().unwrap(), (6, 6, expected));
+        assert!(calls.iter().all(|(_, total, _)| *total == 6));
+        assert!(calls
+            .windows(2)
+            .all(|w| w[0].0 <= w[1].0 && w[0].2 <= w[1].2));
+        // Done counts finishes: it goes up by one per pull, from 0 to 6.
+        let mut seen: Vec<usize> = calls.iter().map(|(done, _, _)| *done).collect();
+        seen.dedup();
+        assert_eq!(seen, (0..=6).collect::<Vec<_>>());
+        // Bytes from running pulls are summed, not only the last pull's own figure.
+        assert!(calls
+            .iter()
+            .any(|(done, _, bytes)| *done < 6 && *bytes > 1200));
+    }
 
     #[test]
     fn streams_download_bytes_before_the_child_exits() {
