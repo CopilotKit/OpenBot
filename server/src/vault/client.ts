@@ -17,27 +17,32 @@ import {
   walkPages,
 } from "./http";
 
-/** The vault refused because the secret is not there: never stored, or purged. */
+/**
+ * The vault refused because the secret is not there: never stored, or purged.
+ *
+ * No secret error names the secret: its message can reach an audit row or a person, and a credential
+ * id is not something either is told.
+ */
 export class SecretMissingError extends IntelligenceApiError {
-  constructor(id: string) {
-    super(`Secret ${id} is not in the vault.`, 404, "VAULT_SECRET_NOT_FOUND");
+  constructor(_id: string) {
+    super("The secret is not in the vault.", 404, "VAULT_SECRET_NOT_FOUND");
     this.name = "SecretMissingError";
   }
 }
 
 /** The vault refused because the secret is revoked. */
 export class SecretRevokedError extends IntelligenceApiError {
-  constructor(id: string) {
-    super(`Secret ${id} is revoked.`, 409, "VAULT_SECRET_REVOKED");
+  constructor(_id: string) {
+    super("The secret is revoked.", 409, "VAULT_SECRET_REVOKED");
     this.name = "SecretRevokedError";
   }
 }
 
 /** The secret changed since it was read. */
 export class SecretVersionConflictError extends IntelligenceApiError {
-  constructor(id: string) {
+  constructor(_id: string) {
     super(
-      `Secret ${id} changed since it was read.`,
+      "The secret changed since it was read.",
       412,
       "VAULT_VERSION_CONFLICT",
     );
@@ -47,9 +52,9 @@ export class SecretVersionConflictError extends IntelligenceApiError {
 
 /** A live secret already holds this kind, provider, name and owner. */
 export class SecretNameTakenError extends IntelligenceApiError {
-  constructor(id: string) {
+  constructor(_id: string) {
     super(
-      `A live secret already holds the name secret ${id} was to take.`,
+      "A live secret already holds this kind, provider, name and owner.",
       409,
       "VAULT_SECRET_NAME_TAKEN",
     );
@@ -59,8 +64,12 @@ export class SecretNameTakenError extends IntelligenceApiError {
 
 /** A secret with this id is already in the vault. */
 export class SecretAlreadyExistsError extends IntelligenceApiError {
-  constructor(id: string) {
-    super(`Secret ${id} already exists.`, 409, "VAULT_SECRET_ALREADY_EXISTS");
+  constructor(_id: string) {
+    super(
+      "A secret with this id already exists.",
+      409,
+      "VAULT_SECRET_ALREADY_EXISTS",
+    );
     this.name = "SecretAlreadyExistsError";
   }
 }
@@ -516,7 +525,8 @@ export function createVaultClient(settings: IntelligenceApiSettings) {
     if (code === "VAULT_SECRET_ALREADY_EXISTS")
       throw new SecretAlreadyExistsError(id);
     throw new IntelligenceApiError(
-      `Intelligence refused to ${action} secret ${id}: ${response.status}${code ? ` ${code}` : ""}.`,
+      // Never the secret's id: this sentence can reach an audit row or a person.
+      `Intelligence refused to ${action} a secret: ${response.status}${code ? ` ${code}` : ""}.`,
       response.status,
       code,
     );
