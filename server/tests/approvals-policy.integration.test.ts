@@ -174,10 +174,15 @@ test("'Always allow here' saves a personal allow rule that the gate then honours
   await service.decide(owner, request?.id as string, "allow_always");
   const rules = await store.rules(owner);
   expect(rules).toContainEqual(
-    expect.objectContaining({ toolRef: "mcp/drive/rename_file", behaviour: "allow" }),
+    expect.objectContaining({
+      toolRef: "mcp/drive/rename_file",
+      behaviour: "allow",
+    }),
   );
   await expect(
-    service.gate(candidate({ toolRef: "mcp/drive/rename_file", scope: "drive" })),
+    service.gate(
+      candidate({ toolRef: "mcp/drive/rename_file", scope: "drive" }),
+    ),
   ).resolves.toBeUndefined();
   await store.setEnabled(owner, false);
 });
