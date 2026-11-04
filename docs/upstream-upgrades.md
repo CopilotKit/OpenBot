@@ -77,9 +77,16 @@ The portable bundle supports verification with `--bundle release-provenance.sigs
 
 ## Prepare a fork integration
 
-Opt in with `OPENBOT_UPSTREAM_UPGRADES=true`. Configure the upstream repository and initial baseline above. Optionally set `OPENBOT_UPGRADE_CHECKS` to JSON argv arrays, for example `[["bun","install","--frozen-lockfile"],["bun","test"],["bun","run","typecheck"]]`. Include meaningful customer component and migration regression commands. Commands run sequentially in the candidate without shell interpolation. No automatic migration-history rewrites or codemods are applied.
+Opt in with `OPENBOT_UPSTREAM_UPGRADES=true`. Configure the upstream repository and initial baseline above. By default the candidate is checked the way CI checks it: every `run` step of the candidate's own `.github/workflows/ci.yml` `static` and `test` jobs, in order, with bash `-eo pipefail`, in each step's working directory and with the job's and step's environment, against the same `pgvector/pgvector:pg17` database service the CI `test` job has. A step that cannot run that way (an expression, a condition, another shell) fails the run rather than being skipped. To run something else, set `OPENBOT_UPGRADE_CHECKS` to JSON argv arrays, for example `[["bun","install","--frozen-lockfile"],["bun","run","test:ci"]]`; those run sequentially in the candidate without shell interpolation. Include meaningful customer component and migration regression commands. No automatic migration-history rewrites or codemods are applied.
 
-Manually dispatch **Propose upstream upgrade** from `main` with an exact release tag and its independently verified 40-character commit. It checks the fetched tag resolves to that commit, requires the old baseline to be an ancestor on both sides, preserves Git ancestry, runs the declared checks, and proposes a branch and PR. It never merges, releases or deploys the result. The fork's subsequent reviewed release uses its own publication workflow and identity.
+Manually dispatch **Propose upstream upgrade** from `main` with an exact release tag and its independently verified 40-character commit. It never merges, releases or deploys the result. The fork's subsequent reviewed release uses its own publication workflow and identity.
+
+The workflow has two jobs, because the checks execute upstream code that nobody has reviewed yet:
+
+1. **integrate and test** can only read the repository. It checks the fetched tag resolves to that commit, requires the old baseline to be an ancestor on both sides, preserves Git ancestry, runs the checks, and hands a ready candidate over as a Git bundle.
+2. **push and propose** holds the write token and runs no candidate code. In a fresh clone of `main` it accepts the bundle only if its content is exactly a clean merge of a `main` commit with the verified upstream commit, recomputed with `git merge-tree`, plus the `.openbot-upstream.json` record and nothing else. It pushes with hooks disabled and opens the PR from its own verification, not from the first job's report.
+
+GitHub's own `GITHUB_TOKEN` cannot push changes to `.github/workflows`, and a pull request it opens gets CI runs that wait for a maintainer to approve them. To lift both limits, create a GitHub App with repository contents, pull requests and workflows write, install it on the fork, and set the `OPENBOT_UPGRADE_APP_CLIENT_ID` variable and the `OPENBOT_UPGRADE_APP_PRIVATE_KEY` secret. Without them the workflow falls back to `GITHUB_TOKEN`, says in the PR body and the job summary that CI must be started by hand, and refuses, before pushing anything, an upstream release that changes workflows. [GitHub documents both limits](https://docs.github.com/en/actions/concepts/security/github_token) and [the App token action](https://github.com/actions/create-github-app-token).
 
 The equivalent local command is:
 
@@ -90,12 +97,13 @@ bun scripts/integrate-upstream.ts \
   --baseline <previous-upstream-SHA> \
   --upstream https://github.com/CopilotKit/openbot.git \
   --tag refs/tags/v0.3.0 --commit <verified-upstream-SHA> \
-  --checks '[["bun","install","--frozen-lockfile"],["bun","test"]]' \
-  --report ../upstream-report.json
+  --checks ci --report ../upstream-report.json
 ```
+
+`--checks ci` needs the database the CI `test` job uses, at the `DATABASE_URL` and `TEST_DATABASE_URL` that job sets.
 
 The output must be a new path outside the original checkout. The script creates a standalone clone without shared hardlinks, preserving the original branch, index, remotes and committed/uncommitted files. Dirty source is reported and excluded from the candidate; commit the intended work before integrating if it belongs in the proposed release. [Git documents the clone isolation options](https://git-scm.com/docs/git-clone).
 
-Conflicts keep the candidate's conflict markers and unmerged index for resolution. Failing checks keep command output and an unaccepted candidate. The CLI exits 2 in either case. Reports live at `<candidate>/.git/openbot-upgrade-report.json` and the requested report path. The workflow retains the report and a candidate archive, including `.git`, for 14 days; it creates no PR for a conflicted or failed candidate. Resolve and verify that retained candidate deliberately. Never use an automatic reset, migration journal edit, data deletion, or key regeneration to make integration appear successful.
+Conflicts keep the candidate's conflict markers and unmerged index for resolution. Failing checks keep command output (the last 64 KiB of each stream) and an unaccepted candidate. The CLI exits 2 in either case. Reports live at `<candidate>/.git/openbot-upgrade-report.json` and the requested report path. The workflow retains the report and a candidate archive, including `.git`, for 14 days, and a ready candidate's bundle beside them; it creates no PR for a conflicted or failed candidate. Resolve and verify that retained candidate deliberately. Never use an automatic reset, migration journal edit, data deletion, or key regeneration to make integration appear successful.
 
 The report says `accepted: false` even when checks pass. PR review must evaluate changed paths, configuration/schema changes, declared downtime, recovery class and actual customer workflows. A successful textual merge is preparation for a release; activation belongs to the desktop, explicit local-update, or customer Kubernetes deployment workflow.
