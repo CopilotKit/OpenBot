@@ -1171,6 +1171,15 @@ export function ChannelChat({
               transcriptMessages(agent.messages, seed).map(shownAnswer),
               voiceArchive.entries,
             )}
+            attached={
+              question && channel.active ? (
+                <QuestionNotice
+                  avatarSeed={botSeed}
+                  botName={botName}
+                  question={question}
+                />
+              ) : undefined
+            }
             notice={
               /*
                * Two things can be worth saying at once — a deleted coworker and a history with holes in
@@ -1212,13 +1221,6 @@ export function ChannelChat({
                   >
                     {historyNotice}
                   </p>
-                ) : null}
-                {question && channel.active ? (
-                  <QuestionNotice
-                    avatarSeed={botSeed}
-                    botName={botName}
-                    question={question}
-                  />
                 ) : null}
                 {answer.error ? (
                   <p className="pb-2 text-sm text-destructive" role="alert">

@@ -9,10 +9,11 @@
 @import "./openmuse/skin.css";
 
 /*
- * OpenBot's own look draws a Bot's answers in a column wider than the composer. Every skin keeps the
- * column it was drawn with, as wide as the composer under it.
+ * OpenBot's own look draws a Bot's answers and the composer in a 768px column. Every skin keeps the
+ * column it was drawn with, 672px for both.
  */
-:root[data-skin] [data-transcript-column] {
+:root[data-skin] [data-transcript-column],
+:root[data-skin] [data-slot="composer-column"] {
   max-width: var(--container-2xl);
 }
 

@@ -65,9 +65,10 @@ export function shownAnswer(message: Message): Message {
 }
 
 /**
- * Pinned above the composer while the Bot waits on the person: what it asked and why, so the answer
- * is written with the question in view however far the conversation has scrolled. Sending answers
- * it; Dismiss puts it down with nothing sent.
+ * The composer's drawer while the Bot waits on the person: what it asked and why, so the answer is
+ * written with the question in view however far the conversation has scrolled. A long question
+ * scrolls inside the drawer rather than pushing the conversation away. Sending answers it; Dismiss
+ * puts it down with nothing sent.
  */
 export function QuestionNotice({
   question,
@@ -84,10 +85,10 @@ export function QuestionNotice({
   return (
     <section
       aria-label={`${botName} is waiting on your answer`}
-      className="mb-2 flex gap-3 rounded-lg border border-border bg-card p-3"
+      className="flex gap-2.5 px-3 pt-2.5 pb-2"
     >
       <BotOrb name={botName} seed={avatarSeed} size={20} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex max-h-36 min-w-0 flex-1 flex-col gap-1 overflow-y-auto">
         <p className="text-muted-foreground text-xs">
           <span className="font-medium text-foreground">{botName}</span> is
           waiting on your answer
