@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
@@ -38,6 +38,7 @@ export function Ask({
   onBack,
   onViewIntelligence,
   local = false,
+  failure: setupFailure,
 }: {
   /** Which of `PRESET_QUESTIONS` the box starts with; one at random unless a test says. */
   firstQuestion?: number;
@@ -50,6 +51,8 @@ export function Ask({
   onViewIntelligence?: () => Promise<void>;
   /** The local first run's wording: "Try OpenBot" as its heading. */
   local?: boolean;
+  /** A failure from setup itself, shown inside this card rather than under it. */
+  failure?: ReactNode;
 }) {
   const [preset, setPreset] = useState(firstQuestion % PRESET_QUESTIONS.length);
   const [question, setQuestion] = useState<string>(PRESET_QUESTIONS[preset]);
@@ -212,6 +215,7 @@ export function Ask({
       )}
 
       {leavingSaid}
+      {setupFailure}
       <div className="row">
         {asked ? (
           <button type="button" disabled={leaving !== null} onClick={open}>

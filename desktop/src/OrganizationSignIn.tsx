@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { asProblem, Failure } from "./Problem";
 import { StatusLine } from "./SetupProgress";
 
@@ -8,11 +8,14 @@ export function OrganizationSignIn({
   authorityUrl,
   onSignedIn,
   onBack,
+  failure: setupFailure,
 }: {
   root: string;
   authorityUrl: string;
   onSignedIn: () => void | Promise<void>;
   onBack?: () => void;
+  /** A failure from setup itself, shown inside this card rather than under it. */
+  failure?: ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
@@ -92,6 +95,7 @@ export function OrganizationSignIn({
         </p>
       )}
       {failure && <Failure problem={failure} />}
+      {setupFailure}
       {onBack && (
         <button type="button" disabled={busy} onClick={onBack}>
           Back

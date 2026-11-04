@@ -1,51 +1,83 @@
 /*
- * OpenBot Desktop: the setup window, in the CopilotKit visual system.
+ * OpenBot Desktop: the setup window, in OpenBot's own visual system.
  *
- * Values come from the CopilotKit UI theme and brand rules (the CopilotCloud design tokens, also
- * used by the AG-UI dojo) and are applied as given rather than approximated: the cool lavender-gray
- * ground with six blurred colour fields behind it, one frosted-glass card per screen with a white
- * edge, Plus Jakarta Sans for reading, Spline Sans Mono uppercase for buttons and technical status,
- * and a 4px spacing grid. Where a value is not a named token it is marked an implementation default.
+ * The values are OpenBot's tokens from `app/src/theme.css`, copied rather than approximated, so the
+ * window someone sets up in looks like the product it turns into: Inter, OpenBot's lavender frame
+ * with a white card on it, its near-black primary button, its periwinkle focus ring, its 10px radius
+ * and its type scale (on a 15px base, as the app sets text). The app's shadcn names are kept as
+ * written (`--background`, `--card`, `--muted-foreground`, ...) and the names these screens were
+ * first written against are mapped onto them below, so every rule still reads one vocabulary.
  *
- * Both faces are bundled (`@fontsource-variable`), not fetched: the window draws before anything
+ * Inter is bundled (`@fontsource-variable`), not fetched: the window draws before anything
  * guarantees a network, and a first-run screen that falls back to the system face is not on brand.
  *
- * Light only, as before: this window exists for a few minutes, once, and then becomes OpenBot,
- * which keeps its own light and dark. The macOS title bar takes this ground (see `match_title_bar`).
+ * Light and dark follow the system through `prefers-color-scheme`, as the window's appearance does.
+ * The app switches with a `.dark` class instead; the dark values below are its `.dark` values. The
+ * macOS title bar takes this ground (see `SETUP_BACKGROUND` and `match_title_bar`).
  */
 :root {
-  /* Surfaces */
-  --surface-main: #dedee9;
-  --surface-container: #ffffff;
-  --surface-hovered: #fafcfa;
-  --white-50: rgba(255, 255, 255, 0.5);
-  --white-65: rgba(255, 255, 255, 0.65);
-  --white-70: rgba(255, 255, 255, 0.7);
-  --active-tint: #bec2ff1a;
+  /* OpenBot's tokens, light (app/src/theme.css `:root`). */
+  --background: oklch(0.983 0.003 286.4);
+  --foreground: oklch(0.108 0.015 220.9);
+  --card: oklch(1 0 0);
+  --primary: oklch(0.108 0.015 220.9);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.956 0.005 286.3);
+  --muted: oklch(0.956 0.005 286.3);
+  --muted-foreground: oklch(0.506 0.013 285.9);
+  --destructive: oklch(0.504 0.178 22.9);
+  --success: oklch(0.514 0.1 167.2);
+  --border: oklch(0.894 0.014 286.1);
+  --input: oklch(0.894 0.014 286.1);
+  --ring: oklch(0.644 0.167 276.1);
+  /* The frame: the sidebar's tint, which the window edge (and here the whole ground) shares. */
+  --sidebar: oklch(0.948 0.011 286.2);
+  --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
+  --radius: 0.625rem;
 
-  /* Borders */
-  --border-default: #ffffff;
-  --border-container: #dbdbe5;
-  --border-action: #bec2ff;
+  /* OpenBot's radius scale (theme.css `@theme`). */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
 
-  /* Text */
-  --text-primary: #010507;
-  --text-secondary: #57575b;
-  --text-disabled: #838389;
-  --text-invert: #ffffff;
+  /* OpenBot's type scale: Tailwind's sizes times 15/16 (theme.css `@theme`). */
+  --text-xs: 0.703125rem; /* 11.25px */
+  --text-sm: 0.8203125rem; /* 13.125px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0546875rem; /* 16.875px */
+  --text-2xl: 1.40625rem; /* 22.5px */
 
-  /* Greys */
-  --grey-200: #f0f0f4;
-  --grey-600: #afafb7;
-  --grey-900: #2b2b2b;
-  --ink-5: #0105070d;
+  /* Tailwind's shadows, which the app's cards and popovers use. */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
 
-  /* Actions: the filled button and its states. */
-  --action: var(--text-primary);
-  --action-ink: var(--text-invert);
-  --action-hover: #2b2b2b;
-  --action-disabled: #afafb7;
-  --action-disabled-ink: #ffffff;
+  /* The names these screens were written against, onto OpenBot's tokens. */
+  --surface-main: var(--sidebar);
+  --surface-container: var(--card);
+  --surface-hovered: var(--muted);
+  --white-50: var(--card);
+  --white-65: var(--card);
+  --white-70: var(--muted);
+  --active-tint: var(--sidebar-accent);
+
+  --border-default: var(--border);
+  --border-container: var(--border);
+  --border-action: var(--ring);
+
+  --text-primary: var(--foreground);
+  --text-secondary: var(--muted-foreground);
+  --text-disabled: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --text-invert: var(--primary-foreground);
+
+  --grey-200: var(--secondary);
+  --grey-600: color-mix(in srgb, var(--foreground) 25%, var(--border));
+  --ink-5: var(--muted);
+
+  /* Actions: the app's default button, its `primary/80` hover, and `opacity-50` when disabled. */
+  --action: var(--primary);
+  --action-ink: var(--primary-foreground);
+  --action-hover: color-mix(in srgb, var(--primary) 80%, transparent);
 
   /* Brand marks are drawn for a white ground, in either theme. */
   --mark-ground: #ffffff;
@@ -54,26 +86,25 @@
   --color-scheme: light;
 
   /* State */
-  --good: #189370;
-  --bad: #fa5f67;
-  --lilac-30: #bec2ff4d;
+  --good: var(--success);
+  --bad: var(--destructive);
+  /* The app's focus ring: `ring-3 ring-ring/50`. */
+  --lilac-30: color-mix(in srgb, var(--ring) 50%, transparent);
 
-  /* Radius: 4px items, 8px cards and controls, full for pills. */
-  --r-item: 4px;
-  --r-card: 8px;
+  --r-item: var(--radius-sm);
+  --r-card: var(--radius-lg);
+  --r-sheet: var(--radius-xl);
   --r-full: 9999px;
 
-  --elevation-sm: 0px 1px 3px 0px rgba(1, 5, 7, 0.08);
-  --elevation-md: 0px 6px 6px -2px rgba(1, 5, 7, 0.08);
+  --elevation-sm: var(--shadow-xs);
+  --elevation-md: var(--shadow-sm);
 
-  --sans:
-    "Plus Jakarta Sans Variable", "Plus Jakarta Sans", -apple-system,
-    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Machine output only (technical details, commands): the system's own monospace. */
   --mono:
-    "Spline Sans Mono Variable", "Spline Sans Mono", ui-monospace,
-    SFMono-Regular, Menlo, monospace;
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
 
-  /* The names the screens were written against, kept so every rule reads one vocabulary. */
   --ink: var(--text-primary);
   --ink-soft: var(--text-secondary);
   --ink-faint: var(--text-disabled);
@@ -105,14 +136,8 @@ body {
 }
 
 /*
- * The six blurred colour fields behind everything: the signature depth cue, without which the
- * ground reads flat. Positions, sizes and colours are the CopilotCloud frame's (1440 wide), scaled
- * to the window so they sit in the same places at 1000 wide.
- *
- * MEASURED: drawn as six discs under `filter: blur(103px)`, the window felt laggy. WebKit repaints
- * a filtered layer whenever anything above it changes, and the progress spinners and elapsed
- * counters change every frame and every second. Each field is now a radial gradient with the same
- * centre and a soft edge as wide as that blur, painted once with the page.
+ * The ground. OpenBot's pages sit on flat surfaces, so the window does too: the frame's lavender,
+ * with nothing painted over it. The element stays so a skin can draw on it later.
  */
 .backdrop {
   position: fixed;
@@ -120,37 +145,7 @@ body {
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(
-      circle 24vw at 87.7vw 16.3vw,
-      rgba(255, 172, 77, 0.14),
-      transparent
-    ),
-    radial-gradient(
-      circle 30vw at 114.2vw 64.6vw,
-      #c9c9da 15%,
-      rgba(201, 201, 218, 0)
-    ),
-    radial-gradient(
-      circle 30vw at 67.7vw -4.2vw,
-      #c9c9da 15%,
-      rgba(201, 201, 218, 0)
-    ),
-    radial-gradient(
-      circle 30vw at 56.5vw 70vw,
-      #f3f3fc 15%,
-      rgba(243, 243, 252, 0)
-    ),
-    radial-gradient(
-      circle 24vw at 24.4vw 38.5vw,
-      rgba(255, 243, 136, 0.22),
-      transparent
-    ),
-    radial-gradient(
-      circle 24vw at 1.3vw 71.3vw,
-      rgba(255, 172, 77, 0.14),
-      transparent
-    );
+  background: var(--surface-main);
 }
 
 /*
@@ -166,16 +161,17 @@ main {
   padding: 32px 24px;
 }
 
-/* The one focal surface per screen: frosted glass with the white edge. */
+/* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
 .sheet {
   width: 100%;
   max-width: 36rem;
   display: flex;
   flex-direction: column;
-  padding: 40px;
-  background: var(--white-50);
-  border: 2px solid var(--border-default);
-  border-radius: var(--r-card);
+  padding: 32px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--elevation-md);
   /* One authored entrance, on the step rather than on every element. */
   animation: settle 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -193,28 +189,43 @@ main {
   }
 }
 
-/* Where you are: a technical label in mono, with the line the theme's section titles carry. */
+/*
+ * The top of every setup step: OpenBot's mark and name, then where you are. The product the person
+ * is setting up is named on every screen, whichever account a step signs in to.
+ */
+.setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 28px;
+}
+
+/* The header's own, smaller lockup is set after `.lockup` and `.orb`, below. */
+
+/* Where you are: every section by name, the current one as the app marks a selected row. */
 .steps-of {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 12px;
+  gap: 4px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-secondary);
-  margin: 0 0 24px;
+  margin: 0;
 }
 
-/* Every section by name: the current one in full ink, those done softer, those ahead fainter. */
 .sections {
   list-style: none;
   padding: 0;
 }
 
 .sections li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--r-full);
   color: var(--text-disabled);
   white-space: nowrap;
 }
@@ -223,56 +234,57 @@ main {
   color: var(--text-secondary);
 }
 
+/* Done is ticked, in the success colour; the tick is drawn, so the name reads as before. */
+.sections li.done::before {
+  content: "";
+  width: 6px;
+  height: 10px;
+  margin: -3px 2px 0 0;
+  border: solid var(--good);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
 .sections li.current {
   color: var(--text-primary);
-}
-
-.sections li + li::before {
-  content: "·";
-  margin-right: 8px;
-  color: var(--text-disabled);
-}
-
-.steps-of::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border-container);
+  background: var(--active-tint);
 }
 
 h1 {
-  font-size: 32px;
-  line-height: 36px;
-  font-weight: 500;
-  margin: 0 0 12px;
+  font-size: var(--text-2xl);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin: 0 0 8px;
   text-wrap: balance;
 }
 
 h2 {
-  font-size: 18px;
-  line-height: 20px;
+  font-size: var(--text-base);
+  line-height: 22px;
   font-weight: 600;
-  margin: 0 0 8px;
+  margin: 0 0 4px;
 }
 
 .lede {
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--text-base);
+  line-height: 22px;
   color: var(--text-secondary);
-  margin: 0 0 24px;
+  margin: 0 0 20px;
   max-width: 34rem;
+  text-wrap: pretty;
 }
 
 .lede.big {
-  font-size: 20px;
-  line-height: 28px;
+  font-size: var(--text-lg);
+  line-height: 26px;
 }
 
 .footnote {
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   color: var(--text-secondary);
-  margin: 20px 0 0;
+  margin: 16px 0 0;
 }
 
 /* Controls */
@@ -318,25 +330,35 @@ h2 {
     "summary";
 }
 
-/* Buttons are mono and uppercase, as the brand sets controls and pills. */
+/*
+ * Buttons are OpenBot's `Button`: sentence case in the body face, 10px corners, the near-black
+ * primary fill. `lg` (40px) on these screens, as the app's own onboarding sets its Continue.
+ */
 button {
-  font-family: var(--mono);
-  font-size: 14px;
-  line-height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  line-height: 1;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  min-height: 44px;
-  padding: 0 20px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  min-height: 40px;
+  padding: 0 14px;
   border-radius: var(--r-card);
   border: 1px solid transparent;
   background: var(--action);
   color: var(--action-ink);
   cursor: pointer;
   transition:
-    background-color 80ms ease,
-    border-color 80ms ease,
-    color 80ms ease;
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    opacity 150ms ease-out;
 }
 
 button:hover:not(:disabled) {
@@ -352,54 +374,47 @@ button:active:not(:disabled) {
   transition: none;
 }
 
+/* The app's disabled button: the same button at half strength. */
 button:disabled {
-  background: var(--action-disabled);
-  color: var(--action-disabled-ink);
+  opacity: 0.5;
   cursor: default;
 }
 
+/* The app's `outline` button. */
 button.quiet {
-  background: var(--surface-container);
+  background: var(--background);
   color: var(--text-primary);
-  border-color: var(--border-container);
+  border-color: var(--border);
 }
 
 button.quiet:hover:not(:disabled) {
-  background: var(--surface-hovered);
-  border-color: var(--grey-600);
+  background: var(--muted);
 }
 
 button.quiet:active:not(:disabled) {
-  background: var(--grey-200);
+  background: var(--muted);
 }
 
-button.quiet:disabled,
-button.text-link:disabled,
-button.another-question:disabled {
-  opacity: 0.5;
-}
-
-/* A way out that reads as a sentence, not as a second choice of equal weight. */
+/* A way out that reads as a sentence, not as a second choice of equal weight: the app's `link`. */
 button.text-link {
   font-family: var(--sans);
-  font-size: 14px;
-  line-height: 22px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
   min-height: 0;
   background: transparent;
   border: 0;
   padding: 0;
   margin-top: 16px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   text-decoration: underline;
-  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 4px;
 }
 
 button.text-link:hover:not(:disabled) {
   background: transparent;
-  color: var(--text-primary);
+  text-decoration-color: currentColor;
 }
 
 /* The last screen's question box, with the button that swaps in another question beside it. */
@@ -418,38 +433,34 @@ button.another-question {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
+  width: 40px;
   padding: 0;
-  background: var(--surface-container);
+  background: var(--background);
   color: var(--text-secondary);
-  border: 1px solid var(--border-container);
+  border: 1px solid var(--border);
   border-radius: var(--r-card);
 }
 
 button.another-question:hover:not(:disabled) {
-  background: var(--surface-hovered);
+  background: var(--muted);
   color: var(--text-primary);
-  border-color: var(--grey-600);
 }
 
 /*
- * Intelligence stopped while another screen is in front: a card that interrupts on purpose. Lilac
- * when it is waiting on the person, the failure dot when it failed.
+ * Intelligence stopped while another screen is in front: a card that interrupts on purpose. The
+ * ring's tint when it is waiting on the person, the destructive tint when it failed.
  */
 .local-alert {
-  border: 1px solid var(--border-default);
+  border: 1px solid color-mix(in srgb, var(--destructive) 30%, var(--border));
   border-radius: var(--r-card);
-  background: var(--surface-container);
-  box-shadow: var(--elevation-md);
-  padding: 20px;
-  margin: 0 0 24px;
+  background: color-mix(in srgb, var(--destructive) 6%, var(--card));
+  padding: 16px;
+  margin: 0 0 20px;
 }
 
 .local-alert.needs {
-  border-color: var(--border-action);
-  box-shadow:
-    0 0 0 3px var(--lilac-30),
-    var(--elevation-md);
+  border-color: color-mix(in srgb, var(--ring) 45%, var(--border));
+  background: color-mix(in srgb, var(--ring) 7%, var(--card));
 }
 
 .local-alert h2 {
@@ -468,75 +479,84 @@ button.another-question:hover:not(:disabled) {
 }
 
 .local-alert.needs h2::before {
-  background: var(--border-action);
+  background: var(--ring);
 }
 
 .local-alert p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 .local-alert .row {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 /* Local Intelligence setting up behind the screen in front: one line. */
 .local-status {
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   margin: 0 0 20px;
 }
 
+/* The app's focus: the ring colour, three pixels, at half strength. */
 :focus-visible {
-  outline: 2px solid var(--text-primary);
-  outline-offset: 2px;
+  outline: 3px solid var(--lilac-30);
+  outline-offset: 1px;
 }
 
-/* Fields */
+/* Fields: the app's `Label` over its `Input`. */
 .field {
   margin-bottom: 16px;
 }
 
 .field label {
   display: block;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 .field input {
   font: inherit;
-  font-size: 16px;
+  font-size: var(--text-sm);
   width: 100%;
-  min-height: 44px;
-  padding: 0 12px;
+  min-height: 36px;
+  padding: 0 10px;
   border-radius: var(--r-card);
-  border: 1px solid var(--border-container);
-  background: var(--surface-container);
+  border: 1px solid var(--input);
+  background: var(--card);
   color: var(--text-primary);
+  transition:
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
 
 .field input::placeholder {
-  color: var(--text-disabled);
+  color: var(--muted-foreground);
 }
 
 .field input:focus-visible {
-  border-color: var(--border-action);
+  border-color: var(--ring);
   outline: none;
   box-shadow: 0 0 0 3px var(--lilac-30);
+}
+
+.field input:disabled {
+  opacity: 0.5;
+  background: var(--muted);
 }
 
 /* The list of choices. Rows, not a grid of same-size cards. */
 fieldset.picker {
   border: 0;
   padding: 0;
-  margin: 12px 0 0;
+  margin: 4px 0 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -573,8 +593,8 @@ button.text-link.change-provider {
  * nothing looked broken: the names were simply invisible, and the screen asked somebody to choose
  * between six empty boxes.
  *
- * A tile that is a button also undoes the button's mono, uppercase and fixed height: it is a row
- * of reading text, not a control label.
+ * A tile that is a button also undoes the button's size and centring: it is a row of reading text,
+ * not a control label. Drawn as the app's outline `Item`: 16px in, 12px between mark and text.
  */
 .tile {
   position: relative;
@@ -583,44 +603,47 @@ button.text-link.change-provider {
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
+  white-space: normal;
+  text-align: left;
   line-height: 1.5;
   min-height: 0;
   display: grid;
-  grid-template-columns: 40px 1fr;
+  justify-content: stretch;
+  grid-template-columns: 36px 1fr;
   grid-template-areas:
     "mark name"
     "mark summary";
   align-items: center;
   column-gap: 12px;
-  row-gap: 2px;
+  row-gap: 0;
   padding: 12px 16px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border);
   border-radius: var(--r-card);
-  background: var(--white-65);
+  background: var(--card);
   cursor: pointer;
   transition:
-    border-color 80ms ease,
-    background-color 80ms ease,
-    box-shadow 80ms ease;
+    border-color 100ms ease,
+    background-color 100ms ease,
+    box-shadow 100ms ease;
 }
 
 .tile:active,
 button.tile:active:not(:disabled) {
   transform: none;
-  background: var(--surface-container);
-  border-color: var(--border-action);
+  background: var(--muted);
   transition: none;
 }
 
 .tile:hover,
 button.tile:hover:not(:disabled) {
-  background: var(--surface-container);
+  background: color-mix(in srgb, var(--muted) 60%, var(--card));
 }
 
-.tile.chosen {
-  background: var(--surface-container);
-  border-color: var(--border-action);
-  box-shadow: var(--elevation-sm);
+/* Chosen as the app marks a selected row: the lilac tint, edged in the ring colour. */
+.tile.chosen,
+.tile.chosen:hover {
+  background: color-mix(in srgb, var(--ring) 6%, var(--card));
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
 }
 
 .mark-tile {
@@ -638,43 +661,40 @@ button.tile:hover:not(:disabled) {
 
 .tile-name {
   font-weight: 500;
-  font-size: 16px;
-  line-height: 24px;
-}
-
-.tile-summary {
-  color: var(--text-disabled);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
 }
 
-/* A pill: mono and uppercase, as the brand sets them. */
+.tile-summary {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+/* A pill, as the app draws a badge. */
 .tile-note {
   justify-self: start;
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 10px;
+  font-size: var(--text-xs);
+  line-height: 16px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-secondary);
-  background: var(--grey-200);
+  background: var(--secondary);
   border-radius: var(--r-full);
-  padding: 4px 8px;
+  padding: 1px 8px;
   margin-top: 4px;
 }
 
 /* A brand's mark, or its name where no usable mark exists. Same box either way. */
 .mark-tile {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
-  border-radius: var(--r-card);
+  padding: 7px;
+  border-radius: var(--radius-md);
   background: var(--mark-ground);
-  border: 1px solid var(--border-container);
+  border: 1px solid var(--border);
   flex: none;
 }
 
@@ -688,7 +708,7 @@ button.tile:hover:not(:disabled) {
 }
 
 .mark-wordmark span {
-  font-size: 0.52rem;
+  font-size: 0.5rem;
   font-weight: 600;
   line-height: 1.05;
   text-align: center;
@@ -707,20 +727,22 @@ button.tile:hover:not(:disabled) {
 }
 
 .tile:has(.tile-input:focus-visible) {
-  outline: 2px solid var(--text-primary);
-  outline-offset: 2px;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--lilac-30);
 }
 
 /* The framework list, which almost nobody should open. */
 details {
-  border-top: 1px solid var(--border-container);
-  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 4px;
 }
 
 details > summary {
   cursor: pointer;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
   color: var(--text-secondary);
   list-style: none;
   display: flex;
@@ -732,32 +754,49 @@ details > summary::-webkit-details-marker {
   display: none;
 }
 
+/* A chevron, as the app's disclosures draw one. */
 details > summary::before {
   content: "";
-  width: 0;
-  height: 0;
-  border-left: 4px solid currentColor;
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
+  width: 5px;
+  height: 5px;
+  margin: 0 2px 0 1px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
   transition: transform 0.15s ease;
 }
 
 details[open] > summary::before {
-  transform: rotate(90deg);
+  transform: rotate(45deg);
 }
 
 details > summary:hover {
   color: var(--text-primary);
 }
 
-/* The chosen provider's own panel: solid white inside the glass card. */
+/* The chosen provider's own panel: a muted well inside the card, as the app sets a group apart. */
 .chosen-provider {
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border);
   border-radius: var(--r-card);
-  background: var(--surface-container);
-  box-shadow: var(--elevation-sm);
-  padding: 20px;
-  margin-top: 12px;
+  background: color-mix(in srgb, var(--muted) 45%, var(--card));
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.chosen-provider > .lede {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  margin-bottom: 12px;
+}
+
+.chosen-provider > .field:last-child,
+.chosen-provider > .field:has(+ .footnote) {
+  margin-bottom: 0;
+}
+
+.chosen-provider > button:not(.quiet):not(.text-link) {
+  align-self: flex-start;
+  margin-bottom: 12px;
 }
 
 .provider-sign-in-actions {
@@ -766,94 +805,109 @@ details > summary:hover {
   gap: 8px;
 }
 
-/* The theme's view toggle: active white, inactive transparent, on a faint well. */
+/* The app's tabs: a muted track with the active tab raised in the card colour. */
 .segmented {
   display: inline-flex;
-  gap: 4px;
-  background: var(--ink-5);
+  gap: 2px;
+  background: var(--muted);
   border-radius: var(--r-card);
-  padding: 4px;
-  margin-bottom: 16px;
+  padding: 3px;
+  margin-bottom: 14px;
 }
 
 .segmented button {
-  font-family: var(--sans);
-  font-size: 14px;
-  line-height: 14px;
+  font-size: var(--text-sm);
   font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  min-height: 32px;
-  padding: 0 12px;
-  border: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: var(--r-card);
+  border-radius: var(--radius-md);
 }
 
 .segmented button:hover:not(:disabled) {
-  background: var(--white-50);
+  background: transparent;
   color: var(--text-primary);
 }
 
 .segmented button.on,
 .segmented button.on:hover:not(:disabled) {
-  background: var(--surface-container);
+  background: var(--card);
   color: var(--text-primary);
-  box-shadow: var(--elevation-sm);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
 }
 
 a {
   color: var(--text-primary);
-  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 4px;
+}
+
+a:hover {
+  text-decoration-color: currentColor;
 }
 
 .caution,
 .fallback {
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--text-disabled);
-  margin: 16px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  margin: 14px 0 0;
 }
 
 .caution a,
 .fallback a {
   color: var(--text-primary);
-  text-underline-offset: 2px;
 }
 
-/* Something is in the way, or something failed. */
+/* A failure said inside a row: the sentence in the destructive colour, the rest as before. */
+.inline-failure .caution,
+.inline-error {
+  color: var(--destructive);
+}
+
+/*
+ * Something is in the way, or something failed: the app's destructive alert. A tinted card with
+ * the state in its colour, inside the card it belongs to.
+ */
 .blocker {
-  /* No coloured side border: the heading carries the state, with one small dot of red. */
-  border: 1px solid var(--border-default);
+  border: 1px solid color-mix(in srgb, var(--destructive) 28%, var(--border));
   border-radius: var(--r-card);
-  background: var(--surface-container);
-  box-shadow: var(--elevation-sm);
-  padding: 16px 20px;
-  margin: 16px 0 0;
+  background: color-mix(in srgb, var(--destructive) 5%, var(--card));
+  padding: 14px 16px;
+  margin: 20px 0 0;
 }
 
 .blocker h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-primary);
+  color: var(--destructive);
 }
 
+/* A filled circle with a mark in it, drawn so it takes the theme's destructive colour. */
 .blocker h2::before {
-  content: "";
+  content: "!";
   flex: none;
-  width: 8px;
-  height: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--bad);
+  background: var(--destructive);
+  color: var(--card);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
 }
 
 .blocker p {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 22px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 /* A Windows prerequisite: wider than a step, because its commands are long and must stay legible. */
@@ -932,28 +986,34 @@ a {
 
 .setup-help {
   display: inline-block;
-  margin-top: 12px;
+  margin-top: 10px;
   color: var(--text-secondary);
-  font-size: 14px;
-  text-underline-offset: 2px;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .external-link-error {
   display: block;
   margin-top: 8px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
-/* Per-item progress, because this is the slowest screen in the product. */
+/*
+ * Per-item progress, because this is the slowest screen in the product. One bordered group of
+ * rows, as the app lists the rows of a settings section.
+ */
 .steps {
-  margin: 20px 0 0;
+  margin: 4px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  overflow: hidden;
 }
 
 .step {
@@ -963,32 +1023,52 @@ a {
     "mark label status"
     ". detail detail";
   column-gap: 12px;
-  row-gap: 4px;
+  row-gap: 2px;
   align-items: center;
-  font-size: 16px;
-  line-height: 24px;
+  padding: 12px 16px;
+  font-size: var(--text-base);
+  line-height: 22px;
+}
+
+.step + .step {
+  border-top: 1px solid var(--border);
 }
 
 .step .mark {
   grid-area: mark;
-  font-size: 14px;
+  display: inline-flex;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .step-label {
   grid-area: label;
+  font-weight: 500;
 }
 
-/* Status is technical annotation: mono, uppercase, small. */
+/* Status is a badge, as the app draws one: small, rounded, tinted by state. */
 .step-status {
   grid-area: status;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 12px;
+  justify-self: end;
+  font-size: var(--text-xs);
+  line-height: 18px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-secondary);
-  text-align: right;
+  background: var(--secondary);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.step-status.good {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.step-status.bad {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
 }
 
 .step-elapsed {
@@ -1000,8 +1080,8 @@ a {
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid var(--border-container);
-  border-top-color: var(--text-primary);
+  border: 2px solid var(--border);
+  border-top-color: var(--ring);
   border-radius: 50%;
   animation: step-spin 0.8s linear infinite;
 }
@@ -1028,14 +1108,23 @@ a {
 .step .detail {
   grid-area: detail;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   overflow-wrap: anywhere;
+}
+
+.step .detail:empty {
+  display: none;
 }
 
 @media (max-width: 580px) {
   .sheet {
     padding: 24px;
+  }
+
+  .setup-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .step {
@@ -1047,7 +1136,7 @@ a {
   }
 
   .step-status {
-    text-align: left;
+    justify-self: start;
   }
 }
 
@@ -1120,45 +1209,56 @@ a {
     inset 0 -2px 5px hsl(0 0% 0% / 0.4);
 }
 
-/* The app's name beside its mark: light, as the theme sets an app title. */
+/* The app's name beside its mark, set as the app's sidebar sets it. */
 .lockup {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
 .lockup span {
-  font-size: 18px;
-  line-height: 20px;
-  font-weight: 300;
+  font-size: var(--text-lg);
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
-/* The CopilotKit logotype, full lockup, with its clearspace (half its height) below it. */
-.copilotkit-logo {
-  display: block;
-  height: 28px;
-  width: auto;
-  align-self: flex-start;
-  margin-bottom: 28px;
+/* The lockup at the top of every setup step: smaller, as the app's sidebar header sets it. */
+.setup-header .lockup {
+  margin: 0;
+  gap: 8px;
+}
+
+.setup-header .orb {
+  width: 22px;
+  height: 22px;
+}
+
+.setup-header .lockup span {
+  font-size: var(--text-base);
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 /* The developer half of a failure: present, and never the headline. */
 .detail-of {
   border: 0;
-  padding: 12px 0 0;
+  padding: 10px 0 0;
   margin: 0;
 }
 
 .detail-of > summary {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 
 .detail-of pre {
   margin: 8px 0 0;
-  padding: 12px;
-  background: var(--ink-5);
-  border-radius: var(--r-item);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--muted) 70%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   font-size: 12px;
   line-height: 18px;
   white-space: pre-wrap;
@@ -1175,29 +1275,25 @@ a {
  * wizard that was produced rather than written, and it is the proof the install actually worked.
  */
 .answer {
-  margin: 24px 0 4px;
-  padding: 20px 24px;
+  margin: 20px 0 4px;
+  padding: 16px 20px;
   border-radius: var(--r-card);
-  background: var(--surface-container);
-  border: 1px solid var(--border-default);
-  box-shadow: var(--elevation-sm);
+  background: color-mix(in srgb, var(--muted) 45%, var(--card));
+  border: 1px solid var(--border);
 }
 
 .answer-from {
-  margin: 0 0 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 12px;
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+  line-height: 16px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-secondary);
 }
 
 .answer-text {
   margin: 0;
-  font-size: 20px;
-  line-height: 28px;
+  font-size: var(--text-lg);
+  line-height: 26px;
   color: var(--text-primary);
   white-space: pre-wrap;
 }
@@ -1214,8 +1310,8 @@ a {
   align-items: center;
   gap: 8px;
   margin: 12px 0 0;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   color: var(--text-secondary);
 }
 
@@ -1223,13 +1319,12 @@ a {
   flex: none;
 }
 
-/* The Status window: one white card per part, each with its memory and its actions. */
+/* The Status window: one card per part, each with its memory and its actions. */
 .status-part {
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border);
   border-radius: var(--r-card);
-  background: var(--surface-container);
-  box-shadow: var(--elevation-sm);
-  padding: 16px 20px;
+  background: var(--card);
+  padding: 16px;
   margin-top: 12px;
 }
 
@@ -1253,13 +1348,13 @@ a {
 }
 
 .status-state {
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 12px;
+  font-size: var(--text-xs);
+  line-height: 18px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-secondary);
+  background: var(--secondary);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1277,8 +1372,8 @@ a {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
   color: var(--text-secondary);
 }
 
@@ -1296,8 +1391,8 @@ a {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 16px;
   margin: 24px 0 0;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 .status-details dt {
@@ -1318,10 +1413,10 @@ a {
   bottom: 20px;
   transform: translateX(-50%);
   max-width: calc(100% - 32px);
-  padding: 8px 16px;
-  border: 1px solid var(--border-container);
+  padding: 8px 14px;
+  border: 1px solid var(--border);
   border-radius: var(--r-card);
-  background: var(--surface-container);
+  background: var(--card);
   box-shadow: var(--elevation-md);
 }
 
@@ -1330,76 +1425,47 @@ a {
 }
 
 /*
- * Dark, following the system. The CopilotKit theme defines light only; the brand's one verified dark
- * context is near-black #010507 with the reversed wordmark. Everything else here is an
- * implementation default built on that: the same structure, glass as faint white over near-black,
- * text from the verified grey scale, and the ambient fields in the brand's lilac and mint rather
- * than the light theme's greys, which would vanish.
+ * Dark, following the system: OpenBot's own `.dark` tokens (app/src/theme.css), the near-black plum
+ * ground with the frame darkest and the cards lightest. Everything else follows from the mapping in
+ * `:root`.
  */
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface-main: #010507;
-    --surface-container: #14151b;
-    --surface-hovered: #1b1c23;
-    --white-50: rgba(255, 255, 255, 0.04);
-    --white-65: rgba(255, 255, 255, 0.05);
-    --white-70: rgba(255, 255, 255, 0.08);
+    --background: oklch(0.182 0.023 296.6);
+    --foreground: oklch(0.956 0.005 286.3);
+    --card: oklch(0.212 0.028 297.1);
+    --primary: oklch(0.956 0.005 286.3);
+    --primary-foreground: oklch(0.108 0.015 220.9);
+    --secondary: oklch(0.253 0.032 297.6);
+    --muted: oklch(0.253 0.032 297.6);
+    --muted-foreground: oklch(0.69 0.017 285.9);
+    --destructive: oklch(0.792 0.121 16.4);
+    --success: oklch(0.832 0.13 170.1);
+    --border: oklch(0.28 0.035 298.6);
+    --input: oklch(0.28 0.035 298.6);
+    --ring: oklch(0.713 0.151 277.7);
+    --sidebar: oklch(0.156 0.017 295.8);
+    --sidebar-accent: oklch(0.832 0.085 281.4 / 12%);
 
-    --border-default: rgba(255, 255, 255, 0.1);
-    --border-container: rgba(255, 255, 255, 0.12);
-
-    --text-primary: #f7f7f9;
-    --text-secondary: #afafb7;
-    --text-disabled: #838389;
-    --text-invert: #010507;
-
-    --grey-200: rgba(255, 255, 255, 0.08);
-    --grey-600: rgba(255, 255, 255, 0.24);
-    --ink-5: rgba(255, 255, 255, 0.06);
-
-    --action-hover: #e2e2ea;
-    --action-disabled: #2b2b2b;
-    --action-disabled-ink: #838389;
-
-    --good: #85ecce;
-
-    --elevation-sm: 0px 1px 3px 0px rgba(0, 0, 0, 0.4);
-    --elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.4);
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
 
     --color-scheme: dark;
   }
 
-  .backdrop {
-    background:
-      radial-gradient(
-        circle 24vw at 87.7vw 16.3vw,
-        rgba(190, 194, 255, 0.12),
-        transparent
-      ),
-      radial-gradient(
-        circle 30vw at 67.7vw -4.2vw,
-        rgba(190, 194, 255, 0.08),
-        transparent
-      ),
-      radial-gradient(
-        circle 24vw at 24.4vw 38.5vw,
-        rgba(133, 236, 206, 0.07),
-        transparent
-      ),
-      radial-gradient(
-        circle 24vw at 1.3vw 71.3vw,
-        rgba(255, 172, 77, 0.06),
-        transparent
-      ),
-      radial-gradient(
-        circle 30vw at 56.5vw 70vw,
-        rgba(190, 194, 255, 0.05),
-        transparent
-      );
+  /* The app's dark `outline` button: `dark:bg-input/30`, a shade above the card. */
+  button.quiet,
+  button.another-question {
+    background: color-mix(in srgb, var(--input) 30%, transparent);
+    border-color: var(--input);
   }
 
-  /* White edges on glass become faint ones; a 2px white rim on near-black is a frame, not frost. */
-  .sheet {
-    border-width: 1px;
+  button.quiet:hover:not(:disabled),
+  button.another-question:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--input) 50%, transparent);
+  }
+
+  .field input {
+    background: color-mix(in srgb, var(--input) 30%, transparent);
   }
 }

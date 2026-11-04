@@ -973,8 +973,10 @@ function Setup() {
   if (blockerFailure) {
     return (
       <main>
-        <h1>OpenBot could not check Windows setup</h1>
-        <Failure problem={blockerFailure} />
+        <div className="sheet">
+          <h1>OpenBot could not check Windows setup</h1>
+          <Failure problem={blockerFailure} />
+        </div>
       </main>
     );
   }
@@ -1032,8 +1034,8 @@ function Setup() {
               recoverFromStart(error);
             }
           }}
+          failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
-        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -1069,8 +1071,8 @@ function Setup() {
                 }
               : undefined
           }
+          failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
-        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -1234,8 +1236,8 @@ function Setup() {
               ? () => openLocalIntelligence(root).opened
               : undefined
           }
+          failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
-        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -1260,8 +1262,8 @@ function Setup() {
               setStep("model");
             } else void installLocally();
           }}
+          failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
-        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -1307,8 +1309,13 @@ function Setup() {
                   setStep(returningToInstallation ? "connect" : "install");
                 }
           }
+          failure={displayedFailure && <Failure problem={displayedFailure} />}
+          // A failure from the provider tried before is not about the one chosen now.
+          onProviderChange={() => {
+            setFailure(null);
+            setRecoveryFailure(null);
+          }}
         />
-        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -1424,8 +1431,8 @@ function Setup() {
           {!returningToInstallation && <Sections local at="Start" />}
           <h1>Getting ready</h1>
           <p className="lede">
-            OpenBot starts as soon as Intelligence is ready. This can take a few
-            minutes.
+            OpenBot is setting up on this computer and starts by itself when
+            it’s ready. This can take a few minutes.
           </p>
           <LocalIntelligence sequence={local} offerStart />
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
@@ -1495,7 +1502,7 @@ function Setup() {
         </h1>
         <p className="lede">
           {running && !displayedFailure
-            ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
+            ? "OpenBot is open in this window. You can also show it or stop it from the menu bar."
             : choosingIntelligence && !running
               ? "OpenBot keeps your conversations in CopilotKit Intelligence. Nothing is set up until you continue."
               : returningToInstallation
@@ -1592,7 +1599,7 @@ function Setup() {
                   <>
                     <p className="footnote">
                       {intelligenceSignInKind === "self-hosted"
-                        ? "That account has no available projects. Ask your Intelligence administrator for access, or sign in with a different account."
+                        ? "That account has no available projects. Ask your Intelligence admin for access, or sign in with a different account."
                         : "That account has no projects yet. Create one below, or sign in with a different account."}
                     </p>
                     <button

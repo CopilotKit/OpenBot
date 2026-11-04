@@ -796,7 +796,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Accept the evaluation agreement" });
   expect(
     view.getByText(
-      "To run Intelligence on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
+      "To run OpenBot on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
     ),
   ).toBeTruthy();
   expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
@@ -2377,6 +2377,54 @@ test.each(["model", "intelligence"])(
     expect(view.queryByRole("button", { name: "Ask" })).toBeNull();
   },
 );
+
+test("a refused provider's failure sits in the AI card and goes when another provider is chosen", async () => {
+  setupRootConfiguration("/tmp/installed-switch-provider", async () => ({
+    ...savedOpenAiConfiguration(),
+    saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
+    launch: { harness: { id: "mastra" } },
+  }));
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "last_failure")
+      return { said: "OpenAI refused the saved API key.", connection: "model" };
+    if (command === "providers")
+      return [
+        {
+          id: "openai",
+          name: "OpenAI",
+          summary: "Use OpenAI.",
+          logins: ["api-key"],
+          mark: null,
+          caution: null,
+        },
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          summary: "Use Claude.",
+          logins: ["api-key"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  const heading = await view.findByRole("heading", {
+    name: "Refresh your AI connection",
+  });
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toContain("OpenAI refused the saved API key.");
+  // Inside the card it belongs to, not under it.
+  expect(alert.closest(".sheet")).toBe(heading.closest(".sheet"));
+
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
+  await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
+  expect(view.queryByRole("alert")).toBeNull();
+});
 
 test("reopening a retained root waits for its saved setup without flashing the wizard", async () => {
   const root = "/tmp/reopen-pending-configuration";

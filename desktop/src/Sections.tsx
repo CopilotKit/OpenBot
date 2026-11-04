@@ -12,23 +12,37 @@ const HOSTED: Section[] = ["Bot", "Install", "AI", "Start"];
 
 /**
  * Where you are in setup, and what is left: every section by name, the current one marked.
+ *
+ * Beside OpenBot's mark and name, so every step says which product is being set up, including the
+ * step that signs in to a CopilotKit account. The name is decoration here: the window's title
+ * already says it, so it is hidden from assistive technology rather than read on every screen.
  */
 export function Sections({ local, at }: { local: boolean; at: Section }) {
   const names = local ? LOCAL : HOSTED;
   const current = names.indexOf(at);
   return (
-    <ol className="steps-of sections" aria-label="Setup">
-      {names.map((name, index) => (
-        <li
-          key={name}
-          aria-current={index === current ? "step" : undefined}
-          className={
-            index === current ? "current" : index < current ? "done" : undefined
-          }
-        >
-          {name}
-        </li>
-      ))}
-    </ol>
+    <div className="setup-header">
+      <div className="lockup" aria-hidden="true">
+        <div className="orb" />
+        <span>OpenBot</span>
+      </div>
+      <ol className="steps-of sections" aria-label="Setup">
+        {names.map((name, index) => (
+          <li
+            key={name}
+            aria-current={index === current ? "step" : undefined}
+            className={
+              index === current
+                ? "current"
+                : index < current
+                  ? "done"
+                  : undefined
+            }
+          >
+            {name}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
