@@ -1,13 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-} from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
@@ -16,35 +8,41 @@ const calls: { command: string; args: unknown }[] = [];
 let permitted = true;
 let failure: string | null = null;
 let shellAvailable = false;
+async function handle(command: string, args: unknown) {
+  calls.push({ command, args });
+  if (failure) throw failure;
+  if (command === "check_shell_update")
+    return {
+      configured: shellAvailable,
+      available: shellAvailable,
+      version: shellAvailable ? "0.3.0" : null,
+      detail: shellAvailable
+        ? "Signed shell update is available."
+        : "Signed desktop shell updates are not configured in this build.",
+    };
+  if (command === "check_runtime_update")
+    return {
+      allowed: permitted,
+      reasons: permitted ? [] : ["wrong distribution"],
+      fromVersion: "v0.2.0",
+      toVersion: "v0.3.0",
+      requiresDowntime: true,
+      recovery: "restart-previous",
+    };
+  return { version: "v0.3.0" };
+}
+/*
+ * The same seam App.test.tsx, Problem.test.tsx and ProviderPicker.test.tsx use. `mockIPC` patches
+ * `window.__TAURI_INTERNALS__`, but once any of those files has mocked `@tauri-apps/api/core`, Bun
+ * keeps that module mock for the rest of the run and `invoke` never reaches the IPC mock. Mocking
+ * the module here as well is what makes this file pass in the whole suite, not only on its own.
+ */
+mock.module("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: unknown) => handle(command, args),
+}));
 const { RuntimeUpdates } = await import("./RuntimeUpdates");
 beforeAll(() => GlobalRegistrator.register());
-beforeEach(() =>
-  mockIPC(async (command, args) => {
-    calls.push({ command, args });
-    if (failure) throw failure;
-    if (command === "check_shell_update")
-      return {
-        configured: shellAvailable,
-        available: shellAvailable,
-        version: shellAvailable ? "0.3.0" : null,
-        detail: shellAvailable
-          ? "Signed shell update is available."
-          : "Signed desktop shell updates are not configured in this build.",
-      };
-    if (command === "check_runtime_update")
-      return {
-        allowed: permitted,
-        reasons: permitted ? [] : ["wrong distribution"],
-        fromVersion: "v0.2.0",
-        toVersion: "v0.3.0",
-        requiresDowntime: true,
-        recovery: "restart-previous",
-      };
-    return { version: "v0.3.0" };
-  }),
-);
 afterEach(() => {
-  clearMocks();
   cleanup();
   calls.length = 0;
   permitted = true;
