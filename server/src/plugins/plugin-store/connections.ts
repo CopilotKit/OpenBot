@@ -20,6 +20,10 @@ import {
   askAction as composioAskAction,
   VERSION_ARG,
 } from "../composio";
+import {
+  sharedAccountOnly,
+  sharedAccountOnlySentence,
+} from "../deployment-clients";
 import type { AccountRef } from "../shared-accounts";
 import type { StoreContext } from "./context";
 import {
@@ -2263,6 +2267,19 @@ export function connectionMethods(context: StoreContext) {
       if (!isFieldScheme(authScheme)) {
         throw new BrokerRefusalError(
           `${input.toolkit} is not an app this deployment connects with values somebody types, so nothing was sent. Open the app on the Plugins page and connect it the way it asks for; if it is not listed there at all, an administrator has to enable it first.`,
+        );
+      }
+
+      /*
+       * AND A PERSON IS NEVER CONNECTED ON THE DEPLOYMENT'S OWN CLIENT. The connect route refuses
+       * this before the form is drawn; it is asked again here, before the values travel, because
+       * this method is callable without that route and what it would make is the organization's
+       * access filed as one person's account (see `sharedAccountOnly`).
+       */
+      if (input.account.holder === "person" && sharedAccountOnly(authScheme)) {
+        throw new PluginRefusedError(
+          sharedAccountOnlySentence(input.toolkit),
+          null,
         );
       }
 

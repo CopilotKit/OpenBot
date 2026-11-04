@@ -141,6 +141,7 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
     accountMode: null,
     entraScope: null,
     sharedVendorConnected: false,
+    sharedOnly: false,
     ownCredential: false,
     ownerGrants: "admin",
     ownerGrantsChosen: null,

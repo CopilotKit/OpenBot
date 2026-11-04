@@ -16,6 +16,7 @@ import {
   toolkitOfFor,
 } from "../access";
 import { ownerGrantsOf } from "../app-access";
+import { sharedAccountOnly } from "../deployment-clients";
 import {
   type BrokerConnection,
   BrokerUnconfiguredError,
@@ -2085,6 +2086,9 @@ export function serverMethods(context: StoreContext) {
             toolkit !== null &&
             brokeredApps.get(row.url)?.accountMode === "shared" &&
             deploymentHeld.has(toolkit),
+          sharedOnly:
+            toolkit !== null &&
+            sharedAccountOnly(brokeredApps.get(row.url)?.authScheme ?? null),
           ownCredential,
           ownerGrants: ownerGrantsOf({
             provider: toolkit ? brokerProvider : entry ? "catalogue" : "custom",

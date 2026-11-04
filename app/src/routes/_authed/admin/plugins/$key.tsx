@@ -616,26 +616,39 @@ function RouteComponent() {
                   <ItemTitle>Whose account</ItemTitle>
                   <ItemDescription>
                     {server.accountMode === "shared"
-                      ? "One shared account for everyone."
-                      : "Each person connects their own."}
+                      ? server.sharedOnly
+                        ? "One shared account for everyone. It signs in with this deployment's own client, so it can't be made personal."
+                        : "One shared account for everyone."
+                      : server.sharedOnly
+                        ? "It signs in with this deployment's own client, so only a shared account can connect it."
+                        : "Each person connects their own."}
                   </ItemDescription>
                 </ItemContent>
-                <ItemActions>
-                  <Button
-                    onClick={() =>
-                      setModeTarget(
-                        server.accountMode === "shared" ? "personal" : "shared",
-                      )
-                    }
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {server.accountMode === "shared"
-                      ? "Make personal"
-                      : "Make shared"}
-                  </Button>
-                </ItemActions>
+                {/*
+                 * NO WAY BACK TO PERSONAL FOR AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT, read off
+                 * the listing's `sharedOnly` and never off the app's name. Personal would leave it
+                 * with nobody able to connect it: the server refuses a person's account there.
+                 */}
+                {server.sharedOnly && server.accountMode === "shared" ? null : (
+                  <ItemActions>
+                    <Button
+                      onClick={() =>
+                        setModeTarget(
+                          server.accountMode === "shared"
+                            ? "personal"
+                            : "shared",
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {server.accountMode === "shared"
+                        ? "Make personal"
+                        : "Make shared"}
+                    </Button>
+                  </ItemActions>
+                )}
               </Item>
             </>
           ) : null}
@@ -905,6 +918,21 @@ function RouteComponent() {
                 <Separator />
                 {connectionsUnreadable ? (
                   <ConnectionStateUnreadable />
+                ) : server?.sharedOnly && !shared ? (
+                  /*
+                   * NO PERSONAL CONNECT FOR AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT. It signs in
+                   * with this deployment's own client, so this administrator's "own" account would
+                   * be the organization's access under their name; the server refuses it. What is
+                   * left to do is the switch above, after which the team account row is drawn here.
+                   */
+                  <Item size="sm">
+                    <ItemContent>
+                      <ItemTitle>Team account</ItemTitle>
+                      <ItemDescription>
+                        {`${title} connects only as one shared account. Make it shared above, then connect the team account here and give it to Bots.`}
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
                 ) : shared ? (
                   <BrokeredAccountRow
                     account={brokeredAccount}

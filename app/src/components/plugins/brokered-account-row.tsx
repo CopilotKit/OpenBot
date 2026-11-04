@@ -59,7 +59,13 @@ import {
 export type BrokeredAccountKind = "consent" | "fields" | "no-auth";
 
 /** The schemes whose secret a person types, which is the whole of what `fields` means here. */
-const FIELD_SCHEMES = ["API_KEY", "BASIC", "BEARER_TOKEN", "BASIC_WITH_JWT"];
+const FIELD_SCHEMES = [
+  "API_KEY",
+  "BASIC",
+  "BEARER_TOKEN",
+  "BASIC_WITH_JWT",
+  "S2S_OAUTH2",
+];
 
 /**
  * Which of the three a recorded scheme is.
