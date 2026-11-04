@@ -160,6 +160,11 @@ export const answerPersonQuestion = (id: string, response: string) =>
     body: { response },
     fallback: "Your answer could not be saved.",
   });
+export const dismissPersonQuestion = (id: string) =>
+  client(`/api/approvals/questions/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+    fallback: "Couldn't dismiss that question.",
+  });
 export const updateApprovalRule = (
   id: string,
   input: Partial<ApprovalRuleInput>,
@@ -244,6 +249,15 @@ export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
     mutationFn: ({ id, response }: { id: string; response: string }) =>
       answerPersonQuestion(id, response),
     onSuccess: settle(queryClient),
+  });
+
+/** Put a question down unanswered. Everything is read again: a task waiting on it moves on too. */
+export const dismissPersonQuestionMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: ({ id }: { id: string }) => dismissPersonQuestion(id),
+    onSuccess: () => queryClient.invalidateQueries(),
   });
 
 /**

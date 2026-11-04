@@ -442,6 +442,13 @@ export function createApprovalService(
         );
       return questions.respond(ownerUserId, id, response);
     },
+    async dismissQuestion(ownerUserId: string, id: string) {
+      if (!questions)
+        throw new ApprovalRefusedError(
+          "Questions are unavailable in this deployment.",
+        );
+      return questions.dismiss(ownerUserId, id);
+    },
     async inbox(ownerUserId: string) {
       const requests = await store.list(ownerUserId);
       const policy = store.policy;

@@ -179,6 +179,35 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
   ).toBeTruthy();
 });
 
+test("a question can be put down without answering it", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  fireEvent.click(
+    await view.findByRole("button", { name: "Dismiss Which card?" }),
+  );
+  await waitFor(() =>
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        path: "/api/approvals/questions/q1/dismiss",
+        method: "POST",
+      }),
+    ),
+  );
+});
+
 test("a hand-off is marked done by the person, never allowed on their behalf", async () => {
   inbox = {
     ...base,

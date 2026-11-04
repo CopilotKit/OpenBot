@@ -4,6 +4,7 @@ import {
   IconDots,
   IconHandStop,
   IconMessageQuestion,
+  IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
@@ -41,6 +42,7 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   decideApprovalMutationOptions,
+  dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
 
@@ -256,16 +258,38 @@ export function useWaitingByBot(agentId: string | undefined) {
  */
 function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   const [answering, setAnswering] = useState(false);
+  const dismiss = useMutation(
+    dismissPersonQuestionMutationOptions(queryClient),
+  );
   return (
     <>
       <BoardRow
         actions={
-          <Button onClick={() => setAnswering(true)} size="sm">
-            Answer
-          </Button>
+          <>
+            <Button onClick={() => setAnswering(true)} size="sm">
+              Answer
+            </Button>
+            {/* Put it down unanswered: the Bot is not resumed, and nothing is sent to it. */}
+            <Button
+              aria-label={`Dismiss ${question.question}`}
+              disabled={dismiss.isPending}
+              onClick={() => dismiss.mutate({ id: question.id })}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <IconX />
+            </Button>
+          </>
         }
         detail={question.why}
         icon={<IconMessageQuestion />}
+        meta={[
+          dismiss.error ? (
+            <span className="text-destructive" key="error" role="alert">
+              {dismiss.error.message}
+            </span>
+          ) : null,
+        ]}
         onSelect={() => setAnswering(true)}
         title={question.question}
         waiting
