@@ -350,6 +350,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Only to dispatch Desktop macOS signing for the tag below.
+      actions: write
     steps:
       # No credential is left in the runner: the tag is created through the API below rather than
       # with `git push`, so nothing here needs one, and no later step or action can read one.
@@ -434,3 +436,15 @@ jobs:
             gh release create "$VERSION" container-images.json \
               --title "$VERSION" --notes-file notes.md
           fi
+      # The tag above was created with GITHUB_TOKEN, and GitHub starts no workflow from that push, so
+      # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
+      # the tag, so the signed build is this commit and carries the release version. The
+      # `macos-signing` environment's required reviewers still approve the signing itself.
+      - name: Start signing the Mac build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh workflow run desktop-macos-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
+            -f signing-mode=developer-id -f release-tag="$VERSION"
