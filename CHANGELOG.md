@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
+  composer, including before the first message. The list is read from the model provider, or from
+  the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
+  kept per person and conversation, and every run there uses it, including routines. Off by default
+  in the team edition: an admin turns it on under Admin, Enterprise controls, Models, "Let people
+  choose a model". Turning it off puts every run back on the configured model and keeps the saved
+  picks. Always on in the personal edition. Adds a nullable column (migration
+  `0076_model_selection`). Bots on their own framework, plans, and groups keep their own model.
+- The conversation composer is two rows: the message box, then attach and the model on the left,
+  dictation and send on the right. It no longer draws a focus ring, and opening a conversation puts
+  the caret in it.
 - The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
   CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
   instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;

@@ -33,12 +33,15 @@ export function ModelPicker({
   value,
   onChange,
   disabled,
+  saving,
   className,
 }: {
   catalogue: ModelCatalogue | undefined;
   value: string | undefined;
   onChange: (model: string) => void;
   disabled?: boolean;
+  /** A pick is being saved: the picker shows it and holds still until the save settles. */
+  saving?: boolean;
   className?: string;
 }) {
   if (!catalogue?.choosable || !value) return null;
@@ -56,7 +59,7 @@ export function ModelPicker({
       }}
       itemToStringLabel={(model) => model.label}
       isItemEqualToValue={(a, b) => a.id === b.id}
-      disabled={disabled}
+      disabled={disabled || saving}
     >
       <Tooltip>
         <TooltipTrigger

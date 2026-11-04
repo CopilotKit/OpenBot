@@ -1,95 +1,76 @@
-import { useCopilotKit } from "@copilotkit/react-core/v2";
-import { useCallback, useEffect, useState } from "react";
-import type { ModelCatalogue } from "./queries";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "@/components/ui/toast";
+import { queryClient } from "@/query-client";
+import { setConversationModelMutationOptions } from "./mutations";
+import { conversationModelQueryOptions, type ModelCatalogue } from "./queries";
 
-/**
- * The forwarded property a run names its model in. The server reads the same name
- * (`RUN_MODEL_PROPERTY` in server/src/model-catalogue.ts) and checks it against what it offers.
- */
-export const RUN_MODEL_PROPERTY = "openbotModel";
+const SAVE_FAILED_TOAST = "conversation-model-save";
 
-const KEY = "openbot.model";
-
-/** Where one conversation's pick is kept. Per conversation, so each one remembers its own. */
-export function modelChoiceKey(conversationId: string): string {
-  return `${KEY}:${conversationId}`;
-}
-
-function remembered(conversationId: string): string | null {
-  try {
-    return window.localStorage.getItem(modelChoiceKey(conversationId));
-  } catch {
-    // Storage can be unavailable. The conversation still works on OpenBot's own model.
-    return null;
-  }
-}
-
-function remember(conversationId: string, model: string | null): void {
-  try {
-    if (model)
-      window.localStorage.setItem(modelChoiceKey(conversationId), model);
-    else window.localStorage.removeItem(modelChoiceKey(conversationId));
-  } catch {
-    // As above: the pick holds for this visit and is simply not there next time.
-  }
+/** The model id a picker shows: the pick when the catalogue offers it, otherwise the default. */
+function shown(
+  picked: string | null | undefined,
+  catalogue: ModelCatalogue | undefined,
+): string | undefined {
+  if (picked && catalogue?.models.some((model) => model.id === picked))
+    return picked;
+  return catalogue?.default;
 }
 
 /**
- * The model one conversation runs on, as the picker shows it.
+ * The model one conversation runs on, as its picker shows it, and the way to change it.
  *
- * A remembered pick the catalogue no longer offers (the admin narrowed the allowlist, the provider
- * retired the model) reads as the default, so the picker never shows a model a send would refuse.
- * Picking the default forgets the pick, so a conversation follows OpenBot's own model when that
- * changes.
+ * The pick is the server's: saved per person and conversation, and read there when each run starts.
+ * The browser never names a model on a run, so what this shows is what the next message uses.
+ * While a save is in flight the picker shows the new pick and is held still, so a second change
+ * cannot race the first.
  */
 export function useConversationModel(
-  conversationId: string | undefined,
+  channelId: string,
   catalogue: ModelCatalogue | undefined,
 ) {
-  const [picked, setPicked] = useState<string | null>(() =>
-    conversationId ? remembered(conversationId) : null,
-  );
-  useEffect(() => {
-    setPicked(conversationId ? remembered(conversationId) : null);
-  }, [conversationId]);
-
-  const offered =
-    picked && catalogue?.models.some((model) => model.id === picked)
-      ? picked
-      : undefined;
-  const value = offered ?? catalogue?.default;
-
-  const choose = useCallback(
-    (model: string) => {
-      const next = model === catalogue?.default ? null : model;
-      setPicked(next);
-      if (conversationId) remember(conversationId, next);
-    },
-    [catalogue?.default, conversationId],
-  );
+  const choosable = catalogue?.choosable === true;
+  const saved = useQuery({
+    ...conversationModelQueryOptions(channelId),
+    enabled: choosable,
+  });
+  const save = useMutation(setConversationModelMutationOptions(queryClient));
+  const picked = save.isPending ? save.variables.model : saved.data;
 
   return {
-    /** What the picker shows. Undefined until the catalogue has loaded. */
-    value,
-    /** What runs should ask for: nothing, when it is the default. */
-    requested: value && value !== catalogue?.default ? value : undefined,
-    choose,
+    /** What the picker shows. Undefined until both the catalogue and the pick have loaded. */
+    value:
+      choosable && saved.data === undefined
+        ? undefined
+        : shown(picked, catalogue),
+    saving: save.isPending,
+    choose: (model: string) =>
+      save.mutate(
+        { channelId, model: model === catalogue?.default ? null : model },
+        {
+          onError: (error) =>
+            toast.add({
+              id: SAVE_FAILED_TOAST,
+              title: error.message,
+              type: "error",
+            }),
+        },
+      ),
   };
 }
 
 /**
- * Send the picked model with every run of this agent: a typed message, a queued one, a resumed
- * handoff. Scoped to the agent, which is per conversation, so another conversation is untouched.
- * Nothing is sent while the default is picked, so those runs are exactly what they were before.
+ * The pick for a conversation that does not exist yet. Held here until the first message creates
+ * the conversation, which saves it before that message runs (`lib/channels/start.ts`).
  */
-export function useRunModel(agentId: string, model: string | undefined): void {
-  const { copilotkit } = useCopilotKit();
-  useEffect(() => {
-    if (!model) return;
-    const id = copilotkit.addScopedProperties({
-      properties: { [RUN_MODEL_PROPERTY]: model },
-      agentIds: [agentId],
-    });
-    return () => copilotkit.removeScopedProperties(id);
-  }, [copilotkit, agentId, model]);
+export function useDraftModel(catalogue: ModelCatalogue | undefined) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const value = shown(picked, catalogue);
+  return {
+    value,
+    /** What to save with the new conversation: nothing, when it is the default. */
+    requested: value && value !== catalogue?.default ? value : null,
+    choose: (model: string) =>
+      setPicked(model === catalogue?.default ? null : model),
+  };
 }

@@ -28,6 +28,8 @@ export type ModelCatalogue = {
 export const modelKeys = {
   all: ["models"] as const,
   catalogue: ["models", "catalogue"] as const,
+  conversation: (channelId: string) =>
+    ["models", "conversation", channelId] as const,
 };
 
 export function modelCatalogueQueryOptions() {
@@ -39,5 +41,20 @@ export function modelCatalogueQueryOptions() {
       ).json(),
     // The server keeps the provider's listing for ten minutes; asking more often learns nothing.
     staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * The model the signed-in person picked for one conversation, or null for OpenBot's own. Null too
+ * while an admin has picking off, or when the saved pick is no longer offered: the server answers
+ * with what a run there would use.
+ */
+export function conversationModelQueryOptions(channelId: string) {
+  return queryOptions({
+    queryKey: modelKeys.conversation(channelId),
+    queryFn: (): Promise<string | null> =>
+      client(`/api/channels/${encodeURIComponent(channelId)}/model`, "model", {
+        fallback: "Couldn't load this conversation's model",
+      }),
   });
 }

@@ -59,7 +59,7 @@ import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interru
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
-import { useConversationModel, useRunModel } from "@/lib/models/run-model";
+import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import {
   askChannelAgent,
@@ -647,7 +647,6 @@ export function ChannelChat({
     channel.id,
     botProfile?.runsOnOpenBotModel ? models.data : undefined,
   );
-  useRunModel(localAgentId, runModel.requested);
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
    * it until all three are in, so it lands once at the bottom instead of drawing the conversation
@@ -1190,6 +1189,7 @@ export function ChannelChat({
                 }
                 disabled={!channel.active}
                 onChange={runModel.choose}
+                saving={runModel.saving}
                 value={runModel.value}
               />
             }
