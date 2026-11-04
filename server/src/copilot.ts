@@ -31,6 +31,7 @@ import {
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
+import { type PlatformRun, stopRecorder } from "@openbot/toolkit/run-stop";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
@@ -2204,6 +2205,9 @@ export function mountCopilotRuntime(
       learning,
       onRunBusy,
     }),
+    /** A run's `recordStop` on this client, for a run this server drives itself. See run-stop.ts. */
+    stopRecorder: (run: PlatformRun, holdsLock: () => boolean) =>
+      stopRecorder(intelligenceClient, run, holdsLock),
     agentFor,
     /**
      * A thread's messages, as the platform holds them.

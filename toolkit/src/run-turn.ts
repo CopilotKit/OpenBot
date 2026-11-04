@@ -68,6 +68,7 @@ import {
 import { sanitizeSeededHistory } from "./history-sanitize";
 import type { AuditInitiator } from "./initiator";
 import { keepLease } from "./lease";
+import { type StopRecorder, stopRecorder } from "./run-stop";
 import { TURN_LIMITS } from "./limits";
 import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
@@ -163,6 +164,14 @@ export type IntelligenceLike = {
     threadId: string;
     runId: string;
   }): Promise<void>;
+  /** Records a stop OpenBot made; absent before `@copilotkit/runtime` has it. See `run-stop.ts`. */
+  ɵrecordRunStop?(params: {
+    threadId: string;
+    runId: string;
+    userId: string;
+    agentId: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
 };
 
 /**
@@ -184,6 +193,8 @@ export type RunnerLike = {
     agent: AbstractAgent;
     input: RunAgentInput;
     persistedInputMessages?: Message[];
+    /** Called by a runner that records its own stops; ignored by one that does not. */
+    recordStop?: StopRecorder;
   }): EventStream;
   stop(request: {
     threadId: string;
@@ -873,6 +884,7 @@ export function createTurnRunner(options: {
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let backstop: ReturnType<typeof setTimeout> | undefined;
     let heartbeatError: unknown;
+    let lockLost = false;
     let waiting: HeadlessToolSuspension | undefined;
     /** Whether the deadline stopped this turn. See `settle`. */
     let stopped = false;
@@ -919,6 +931,7 @@ export function createTurnRunner(options: {
        */
       onLost: (error) => {
         heartbeatError = error;
+        lockLost = true;
         stopTurn();
       },
     });
@@ -944,8 +957,24 @@ export function createTurnRunner(options: {
       });
       const completed = new Promise<void>((resolve, reject) => {
         let terminal: Error | undefined;
+        /*
+         * A stop this turn makes (its cancel, a pause, the deadline) is recorded with Intelligence
+         * before the run's terminal event, so the run reads as cancelled. The runner does the
+         * recording and bounds it; see `run-stop.ts`.
+         */
+        const recordStop = stopRecorder(
+          intelligence,
+          { threadId, runId, userId: ownerUserId, agentId },
+          () => !lockLost,
+        );
         runner
-          .run({ threadId, agent, input, persistedInputMessages })
+          .run({
+            threadId,
+            agent,
+            input,
+            persistedInputMessages,
+            ...(recordStop ? { recordStop } : {}),
+          })
           .subscribe({
             /*
              * RUN_ERROR THROUGH `next` IS TERMINAL. The Intelligence runner reports a failed run by

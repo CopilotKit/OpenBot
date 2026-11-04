@@ -109,6 +109,7 @@ export async function startHandoffDelivery(deps: {
       },
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,
+      recordStopFor: copilotRuntime.stopRecorder,
       /*
        * A scratch thread of the addressed Bot's own, one per hop.
        *
