@@ -31,6 +31,7 @@ import { createRequestActor } from "../src/request-actor";
 import { auditRows } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
 import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
 import {
@@ -528,6 +529,9 @@ async function backgroundCall(
 beforeAll(async () => {
   // Sign-in and Bot reset read the organization policy (support/policy.ts).
   await useTestPolicy();
+  // And sign-in stamps the person in the people directory, which this file installs for itself
+  // rather than relying on a file that ran before it in the same process.
+  useTestPeople();
   const pair = await generateKeyPair("RS256", { extractable: true });
   signingKey = pair.privateKey;
   // As Entra publishes its keys: a kid and a use, and no `alg`.
