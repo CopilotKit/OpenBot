@@ -506,6 +506,9 @@ routines:
   # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
   # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
   enabled: false
+  # Pause new scheduled runs during an operator-controlled maintenance window. Existing Jobs
+  # retain their lease/timeout behavior; suspension does not cancel work already in flight.
+  suspend: false
   # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
   schedule: "*/5 * * * *"
 

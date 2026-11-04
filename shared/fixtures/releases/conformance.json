@@ -1,0 +1,51 @@
+{
+  "parse": [
+    {
+      "name": "installed",
+      "file": "installed.json",
+      "valid": true
+    },
+    {
+      "name": "candidate",
+      "file": "candidate.json",
+      "valid": true
+    },
+    {
+      "name": "unsupported-schema",
+      "file": "invalid-unsupported-schema.json",
+      "valid": false
+    },
+    {
+      "name": "mutable-image",
+      "file": "invalid-mutable-image.json",
+      "valid": false
+    },
+    {
+      "name": "incompatible-recovery",
+      "file": "invalid-incompatible-recovery.json",
+      "valid": false
+    }
+  ],
+  "plan": {
+    "installed": "installed.json",
+    "candidate": "candidate.json",
+    "policy": {
+      "distributionId": "acme.openbot",
+      "repository": "acme/openbot",
+      "channel": "stable"
+    },
+    "sourceKind": "extended",
+    "configSchema": 1,
+    "extensionApi": 1,
+    "launcherApi": 1,
+    "intelligenceCapabilities": ["conversations.v1"],
+    "expected": {
+      "allowed": true,
+      "reasons": [],
+      "fromVersion": "v0.2.0",
+      "toVersion": "v0.3.0",
+      "requiresDowntime": true,
+      "recovery": "restart-previous"
+    }
+  }
+}

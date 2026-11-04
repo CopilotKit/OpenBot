@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ask } from "./Ask";
-import { StartFresh } from "./StartFresh";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
@@ -17,6 +16,8 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
+import { RuntimeUpdates } from "./RuntimeUpdates";
+import { StartFresh } from "./StartFresh";
 import {
   harnessChoiceEvent,
   modelChoiceEvent,
@@ -552,9 +553,13 @@ export function App() {
         return next;
       });
     });
+    const updateStopped = listen<void>("runtime:update-stopped", () => {
+      if (active) setRunning(false);
+    });
     return () => {
       active = false;
       stop.then((unlisten) => unlisten());
+      updateStopped.then((unlisten) => unlisten());
     };
   }, [loadConfiguredRoot, recoverFromStart]);
 
@@ -643,6 +648,58 @@ export function App() {
         .catch(() => undefined);
     }
   }
+
+  async function applyRuntimeUpdate() {
+    setBusy(true);
+    setFailure(null);
+    setSteps([]);
+    try {
+      const result = await invoke("apply_runtime_update", {
+        root: root.trim(),
+        apiUrl,
+        gatewayWsUrl: wsUrl,
+        apiKey,
+        model,
+        harness,
+        ...(organizationAuthorityUrl !== null
+          ? { organizationAuthUrl: organizationAuthorityUrl }
+          : {}),
+        backupAcknowledged: true,
+      });
+      setRunning(true);
+      setRecoveryFailure(null);
+      return result;
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyShellUpdate(version: string) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      return await invoke("apply_shell_update", {
+        root: root.trim(),
+        version,
+        restartAcknowledged: true,
+      });
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const runtimeUpdates = (
+    <RuntimeUpdates
+      key={root}
+      root={root}
+      onApply={applyRuntimeUpdate}
+      onShellApply={applyShellUpdate}
+    />
+  );
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
@@ -938,6 +995,7 @@ export function App() {
           }}
           onBack={changeModelAfterAskFailure}
         />
+        {runtimeUpdates}
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
@@ -1010,6 +1068,7 @@ export function App() {
             Repair installation
           </button>
         )}
+        {runtimeUpdates}
         <details>
           <summary>Installation options</summary>
           <button
@@ -1032,6 +1091,7 @@ export function App() {
   return (
     <main>
       <div className="sheet connection-sheet">
+        {returningToInstallation && runtimeUpdates}
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
