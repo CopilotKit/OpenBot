@@ -39,6 +39,7 @@ export default function Layout() {
       <Stack.Screen name="index" options={{ title: "OpenBot" }} />
       <Stack.Screen name="conversation" options={{ title: "Conversation" }} />
       <Stack.Screen name="approvals" options={{ title: "Approval inbox" }} />
+      <Stack.Screen name="needs-you" options={{ title: "Needs you" }} />
       <Stack.Screen name="bots" options={{ title: "Bots" }} />
       <Stack.Screen name="bot" options={{ title: "Bot" }} />
       <Stack.Screen name="computer" options={{ title: "Computer" }} />

@@ -715,3 +715,7 @@ describe("a Shared app whose rule lets Bot owners decide", () => {
     expect(await allowed(bot, owner)).toBe(true);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

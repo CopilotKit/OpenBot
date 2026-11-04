@@ -169,6 +169,11 @@ describe("createRoutineRunner", () => {
         ownerUserId: CONTEXT.ownerUserId,
         // Carried so the turn's audit rows say a routine ran this, not that the owner did.
         routineId: CONTEXT.routineId,
+        telemetry: {
+          trigger: "routine",
+          surface: "unknown",
+          rootTaskId: RUN_ID,
+        },
         agentId: CONTEXT.agentId,
         threadId: CHANNEL.threadId,
         instruction: CONTEXT.instruction,

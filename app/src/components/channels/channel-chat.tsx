@@ -6,11 +6,12 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import {
   seedMessage,
@@ -30,15 +31,21 @@ import {
   type ChannelSummary,
   channelKeys,
 } from "@/lib/channels/queries";
-import { useActiveBot } from "@/lib/copilot/active-bot";
-import { observeApprovalAgent } from "@/lib/copilot/approval-context";
-import { ConversationProvider } from "@/lib/copilot/conversation";
-import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
-import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import {
   onTurnFinishedAway,
   turnFinishedAway,
 } from "@/lib/channels/turns-finished-away";
+import { useConversationActivity } from "@/lib/computers/activity";
+import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
+import {
+  observeApprovalAgent,
+  whileObserved,
+} from "@/lib/copilot/approval-context";
+import { offerItsOwnTools } from "@/lib/copilot/bot-offer";
+import { ConversationProvider } from "@/lib/copilot/conversation";
+import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
+import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
+import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -71,6 +78,9 @@ const JOIN_DEADLINE_MS = 1500;
  * Backstop for a message typed before the runtime agent exists; it must not be discarded.
  */
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
+
+/** What a turn that never left the browser says, with the person's words back in the box. */
+const NOT_SENT = "Your message wasn't sent. Try again.";
 
 type ChannelActivitySignature = {
   agentId: string;
@@ -326,9 +336,12 @@ export function ChannelChat({
   const { copilotkit } = useCopilotKit();
   // Mentions are scoped to the channel's permitted agents.
   const { data: agentProfiles } = useQuery(agentListQueryOptions());
-  const channelAgentId = `channel:${channel.id}`;
+  const botProfile = agentProfiles?.find(
+    (profile) => profile.id === runtimeAgentId,
+  );
+  const localAgentId = channelAgentId(channel.id);
   const { agent, isReady } = useAgent({
-    agentId: channelAgentId,
+    agentId: localAgentId,
     runtimeAgentId,
     threadId: channel.threadId,
     updates: [
@@ -336,7 +349,21 @@ export function ChannelChat({
       UseAgentUpdate.OnRunStatusChanged,
     ],
   });
-  useEffect(() => observeApprovalAgent(agent), [agent]);
+  /*
+   * FOR THE AGENT'S TURNS, NOT THE SCREEN'S. A turn goes on after the person leaves this
+   * conversation, and a step a rule asks about is still sent to the gate with this conversation,
+   * which needs the run's input captured. Leaving lets the observer go, and it stops once the last
+   * turn started here (`whileObserved`, below) is over. It used to stop on leaving, and a run that
+   * started after that went to the gate under the previous run's id.
+   *
+   * And the agent is given its own Bot's offer as it is made, so its runs, here or after the person
+   * has left, are offered this Bot's tools and never the screen's (`bot-offer.ts`).
+   */
+  const queries = useQueryClient();
+  useEffect(() => {
+    offerItsOwnTools(agent, runtimeAgentId, queries);
+    return observeApprovalAgent(agent);
+  }, [agent, runtimeAgentId, queries]);
 
   /**
    * First-message seed from the compose screen. It is taken once per mount and retained until the
@@ -420,7 +447,10 @@ export function ChannelChat({
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
         await joinWithin({
-          connect: copilotkit.connectAgent({ agent }),
+          // A turn too: restoring a thread can run the calls it left unanswered.
+          connect: whileObserved(agent, () =>
+            copilotkit.connectAgent({ agent }),
+          ),
           deadline: afterMs(JOIN_DEADLINE_MS),
           detach: () => agent.detachActiveRun(),
         });
@@ -589,6 +619,8 @@ export function ChannelChat({
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);
+  // And what they did there is what the Activity pane beside its screen lists, whichever way they ran.
+  useConversationActivity(runtimeAgentId, agent.messages);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
   /*
@@ -650,6 +682,8 @@ export function ChannelChat({
    */
   const turnFailure = useRef<string | null>(null);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
+  /** The reply this turn last told the roster about, so a later run of the turn says only what's new. */
+  const reportedReply = useRef<string | null>(null);
 
   /*
    * TWO DIFFERENT FACTS ABOUT ONE TURN, AND NEITHER OF THEM IS `agent.isRunning`.
@@ -766,6 +800,7 @@ export function ChannelChat({
 
     setRunError(null);
     turnFailure.current = null;
+    reportedReply.current = null;
     assistantMessagesBeforeRun.current = new Set(
       target.messages
         .filter((message) => message.role === "assistant")
@@ -818,13 +853,37 @@ export function ChannelChat({
       target.setMessages(repaired as typeof target.messages);
     }
 
+    // A wait the server already answered must not hold this message back. See the module.
+    releaseServerOwnedInterrupts(target);
+    /*
+     * Whether the run got past the agent's own checks and left the browser. One refused there (an
+     * interrupt something else still waits on) never reaches a subscriber's `onRunFailed`, and
+     * `copilotkit.runAgent` resolves as if it had answered, so without this the message was counted
+     * as sent: the box emptied, and the words were gone on the next reload.
+     */
+    let started = false;
+    const watching = target.subscribe({
+      onRunInitialized: () => {
+        started = true;
+      },
+    });
     setRunsInFlight((count) => count + 1);
     try {
       await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
-        copilotkit.runAgent({ agent: target }),
+        whileObserved(target, () => copilotkit.runAgent({ agent: target })),
       );
     } finally {
+      watching.unsubscribe();
       setRunsInFlight((count) => count - 1);
+    }
+    if (!started && turnFailure.current === null && awaitingReply.current) {
+      awaitingReply.current = false;
+      // It never left this browser, so it is not part of the conversation: the words go back in the box.
+      target.setMessages(
+        target.messages.filter((message) => existingMessageIds.has(message.id)),
+      );
+      turnFailure.current = NOT_SENT;
+      setRunError(NOT_SENT);
     }
 
     /*
@@ -930,17 +989,27 @@ export function ChannelChat({
       onRunFinishedEvent: () => {
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
-        if (!wasOurs) return;
+        /*
+         * EVERY RUN OF A TURN STILL GOING HERE, not only its first. A turn that touches the browser
+         * is several runs: the first ends on the call the browser answers (a click, a card waiting on
+         * the person) and has said nothing yet, and the answer comes in a later run of the same turn.
+         * Told only about the first, the roster kept the person's message as the last thing said, and
+         * a task's list read their own words as its outcome.
+         */
+        if (!wasOurs && turnsRef.current === 0) return;
 
         const reply = [...agent.messages]
           .reverse()
           .find(
             (message) =>
               message.role === "assistant" &&
-              !assistantMessagesBeforeRun.current.has(message.id),
+              !assistantMessagesBeforeRun.current.has(message.id) &&
+              typeof message.content === "string" &&
+              message.content.trim() !== "",
           );
-        const content = typeof reply?.content === "string" ? reply.content : "";
-        if (content) reportRef.current(content, runtimeAgentId);
+        if (!reply || reply.id === reportedReply.current) return;
+        reportedReply.current = reply.id;
+        reportRef.current(String(reply.content), runtimeAgentId);
       },
     });
     return () => subscription?.unsubscribe();
@@ -1016,7 +1085,7 @@ export function ChannelChat({
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's
     // channel instance so an action continues this thread instead of looking for a default agent.
     <CopilotChatConfigurationProvider
-      agentId={channelAgentId}
+      agentId={localAgentId}
       threadId={channel.threadId}
     >
       <ConversationProvider ask={askFromComponent}>
@@ -1034,6 +1103,7 @@ export function ChannelChat({
             taskRunning={agent.isRunning || runsInFlight > 0}
           />
           <ConversationView
+            threadId={channel.threadId}
             voiceCall={
               call.available
                 ? {
@@ -1045,6 +1115,10 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            intro={
+              /* From the roster this screen already reads; nothing while it loads. */
+              botProfile ? <ConversationIntro agent={botProfile} /> : undefined
+            }
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
@@ -1072,7 +1146,9 @@ export function ChannelChat({
                   run={async () => {
                     setRunsInFlight((count) => count + 1);
                     try {
-                      await copilotkit.runAgent({ agent });
+                      await whileObserved(agent, () =>
+                        copilotkit.runAgent({ agent }),
+                      );
                     } finally {
                       setRunsInFlight((count) => count - 1);
                     }

@@ -19,6 +19,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { cutAtCodeUnits } from "../channels/text";
 import { DELIVERY_REQUEST_TIMEOUT_MS } from "../timeouts";
 import {
   type BindingTransport,
@@ -357,6 +358,8 @@ export function confirmWriteInterrupt(input: {
   approver: string;
   effect?: string;
   fields: { label: string; value: string }[];
+  /** Whether the card offers "Always allow". Not for a check-in task's approval. */
+  allowAlways?: boolean;
 }) {
   return {
     __opentag_interrupt_id__: interruptIdForApproval(input.approvalId),
@@ -370,7 +373,7 @@ export function confirmWriteInterrupt(input: {
         ["read", "write", "destructive"].includes(input.effect)
           ? { effect: input.effect }
           : {}),
-        allow_always: true,
+        allow_always: input.allowAlways ?? true,
       },
     },
   };
@@ -391,7 +394,7 @@ export function approvalFields(preview: unknown) {
 }
 function clip(value: string | undefined, max = 300) {
   const text = value ?? "";
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  return text.length <= max ? text : `${cutAtCodeUnits(text, max - 1)}…`;
 }
 
 /** Minimal AG-UI SSE writer: `data: <event>\n\n` per event, as `@ag-ui/client`'s parser reads it. */

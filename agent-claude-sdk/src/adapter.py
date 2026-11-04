@@ -4,6 +4,9 @@ ag-ui-claude-sdk 0.1.5 returns a placeholder from its MCP tool, then sends
 the client's real result as a new user prompt. A synchronous PostToolUse hook
 replaces that placeholder before Claude sees it. AG-UI requests consume
 segments of the same running SDK query, resolving hooks by tool-use ID.
+
+It also keeps a failed tool call failed in the history that ends the turn; see
+`_keep_failures`.
 """
 
 import asyncio
@@ -12,7 +15,7 @@ from dataclasses import dataclass, field
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEvent
 from ag_ui_claude_sdk import ClaudeAgentAdapter
-from claude_agent_sdk import AssistantMessage, HookMatcher
+from claude_agent_sdk import AssistantMessage, HookMatcher, ToolResultBlock, UserMessage
 from claude_agent_sdk.types import StreamEvent
 
 
@@ -37,6 +40,9 @@ class _Turn:
     task: asyncio.Task | None = None
     cancelled: bool = False
     authentication_failed: bool = False
+    # Tool calls Claude Code reported as failed, and the result the turn streamed for each.
+    failed: set[str] = field(default_factory=set)
+    failed_results: dict[str, str] = field(default_factory=dict)
 
     def result(self, tool_id):
         if tool_id not in self.results:
@@ -154,6 +160,11 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     and message.event.get("type") == "message_start"
                 ):
                     streaming = True
+                if isinstance(message, UserMessage) and isinstance(message.content, list):
+                    turn = self._turns.get(thread_id)
+                    for block in message.content:
+                        if turn and isinstance(block, ToolResultBlock) and block.is_error:
+                            turn.failed.add(block.tool_use_id)
                 yield message
                 complete = isinstance(message, AssistantMessage) and not streaming
                 if (
@@ -174,6 +185,34 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         ):
             yield event
 
+    @staticmethod
+    def _keep_failures(event, turn):
+        """The history at the end of a turn, with each failed call as the turn streamed it.
+
+        AG-UI has no field for a failed tool result, so ag-ui-claude-sdk marks one in the
+        TOOL_CALL_RESULT it streams, as `{"error": true, "content": "..."}`. The MESSAGES_SNAPSHOT
+        it sends when the turn ends is built from the bare result, which drops the mark, and that
+        snapshot is the history a reloaded conversation draws. A refused write or a blocked
+        command then read as having worked. Each failed call's snapshot entry is given the result
+        it streamed, so the two say the same thing.
+        """
+        if event.type == EventType.TOOL_CALL_RESULT and event.tool_call_id in turn.failed:
+            turn.failed_results[event.tool_call_id] = event.content
+            return event
+        if event.type != EventType.MESSAGES_SNAPSHOT or not turn.failed_results:
+            return event
+        return event.model_copy(
+            update={
+                "messages": [
+                    message.model_copy(update={"content": turn.failed_results[message.tool_call_id]})
+                    if getattr(message, "role", None) == "tool"
+                    and getattr(message, "tool_call_id", None) in turn.failed_results
+                    else message
+                    for message in event.messages
+                ]
+            }
+        )
+
     async def _pump(self, input_data, turn):
         try:
             async for event in self._run_query(input_data):
@@ -192,6 +231,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     and event.tool_call_id in turn.offered
                 ):
                     turn.ended.add(event.tool_call_id)
+                event = self._keep_failures(event, turn)
                 await turn.queue.put(event)
         except Exception as error:
             await turn.queue.put(

@@ -83,6 +83,27 @@ export const approvalInboxOptions = () =>
     },
     refetchInterval: 10_000,
   });
+/** Whether a conversation asks before every step, by its thread. Its own root: see below. */
+export const approvalThreadKeys = {
+  all: ["approval-thread"] as const,
+  detail: (threadId: string) => ["approval-thread", threadId] as const,
+};
+/**
+ * Whether this conversation asks before every step, which a task's started from a check-in does, as
+ * the server's gate decides it. Never stale: a conversation is a task's from the moment it exists,
+ * or never. Kept apart from `["approvals"]`, which every decision invalidates.
+ */
+export const threadAsksEveryStepQueryOptions = (threadId: string) =>
+  queryOptions({
+    queryKey: approvalThreadKeys.detail(threadId),
+    queryFn: (): Promise<boolean> =>
+      client(
+        `/api/approvals/threads/${encodeURIComponent(threadId)}`,
+        "asksEveryStep",
+        { fallback: "This conversation's approvals could not be checked." },
+      ),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 export const decideApproval = (id: string, decision: ApprovalDecision) =>
   client(`/api/approvals/${encodeURIComponent(id)}/decision`, {
     method: "POST",

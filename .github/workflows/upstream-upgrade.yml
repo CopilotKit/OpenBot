@@ -1,0 +1,267 @@
+name: Propose upstream upgrade
+
+# Forks explicitly opt in. This creates a candidate and PR; it never deploys or merges one.
+#
+# Two jobs, because the first one runs upstream code nobody has reviewed yet: `bun install`, the
+# test suite and the type checker all execute it. That job can read this repository and nothing
+# more. It hands the candidate over as a git bundle. The second job holds the write token, runs no
+# candidate code, and pushes the bundle only after recomputing the merge itself from trusted inputs,
+# so anything the first job did to its own runner (PATH or environment files, git hooks, a forged
+# report) cannot reach the token or change what is pushed.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact upstream release tag (for example v0.3.0)
+        required: true
+        type: string
+      commit:
+        description: Independently verified 40-character commit of that upstream release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openbot-upstream-upgrade
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    name: integrate and test
+    if: vars.OPENBOT_UPSTREAM_UPGRADES == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    # The same database the CI `test` job has, because the default checks are that job's steps and
+    # the suite includes real database tests. pgvector because the knowledge schema uses it.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: openbot_test
+          POSTGRES_USER: openbot
+          POSTGRES_PASSWORD: openbot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openbot -d openbot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    outputs:
+      status: ${{ steps.status.outputs.status }}
+      baseline: ${{ steps.baseline.outputs.baseline }}
+    env:
+      UPSTREAM_REPOSITORY: ${{ vars.OPENBOT_UPSTREAM_REPOSITORY || 'CopilotKit/openbot' }}
+      UPSTREAM_BASELINE: ${{ vars.OPENBOT_UPSTREAM_COMMIT }}
+      UPSTREAM_TAG: ${{ inputs.tag }}
+      UPSTREAM_COMMIT: ${{ inputs.commit }}
+      # `ci` runs the candidate's own CI `static` and `test` job steps, as CI runs them.
+      UPGRADE_CHECKS: ${{ vars.OPENBOT_UPGRADE_CHECKS || 'ci' }}
+      UPGRADE_BRANCH: upgrade/upstream-${{ github.run_id }}
+      DATABASE_URL: postgres://openbot:openbot@127.0.0.1:5432/openbot_test
+      TEST_DATABASE_URL: postgres://openbot:openbot@127.0.0.1:5432/openbot_test
+    steps:
+      - name: Set isolated candidate path
+        run: |
+          echo "CANDIDATE=$RUNNER_TEMP/openbot-upstream-candidate" >> "$GITHUB_ENV"
+          echo "EVIDENCE=$RUNNER_TEMP/upstream-integration" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - id: baseline
+        name: Resolve recorded upstream baseline
+        run: |
+          set -euo pipefail
+          [[ "$UPSTREAM_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          if [ -z "$UPSTREAM_BASELINE" ] && [ -f .openbot-upstream.json ]; then
+            recorded_repository="$(jq -r .upstreamRepository .openbot-upstream.json)"
+            if [ "$recorded_repository" != "$UPSTREAM_REPOSITORY" ] && [ "$recorded_repository" != "https://github.com/$UPSTREAM_REPOSITORY.git" ]; then
+              echo "::error::Recorded upstream repository differs from configured upstream."
+              exit 1
+            fi
+            UPSTREAM_BASELINE="$(jq -r .upstreamCommit .openbot-upstream.json)"
+          fi
+          [[ "$UPSTREAM_BASELINE" =~ ^[0-9a-f]{40}$ ]]
+          echo "UPSTREAM_BASELINE=$UPSTREAM_BASELINE" >> "$GITHUB_ENV"
+          echo "baseline=$UPSTREAM_BASELINE" >> "$GITHUB_OUTPUT"
+          mkdir -p "$EVIDENCE"
+      - id: integrate
+        name: Integrate in isolated clone and run fork regression commands
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          bun scripts/integrate-upstream.ts \
+            --repository "$GITHUB_WORKSPACE" --output "$CANDIDATE" \
+            --branch "$UPGRADE_BRANCH" --base refs/heads/main \
+            --baseline "$UPSTREAM_BASELINE" \
+            --upstream "https://github.com/$UPSTREAM_REPOSITORY.git" \
+            --tag "refs/tags/$UPSTREAM_TAG" --commit "$UPSTREAM_COMMIT" \
+            --checks "$UPGRADE_CHECKS" --report "$EVIDENCE/report.json" \
+            --bundle "$EVIDENCE/candidate.bundle"
+      # Read after upstream code has run on this runner, so this is a hint for the next job and not
+      # a decision: that job verifies the bundle itself before pushing anything.
+      - id: status
+        name: Record the integration outcome
+        if: always()
+        run: |
+          set -euo pipefail
+          status=failed
+          if [ -f "$EVIDENCE/report.json" ]; then
+            status="$(jq -r .status "$EVIDENCE/report.json")"
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+      - name: Preserve conflict and regression evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f "$EVIDENCE/report.json" ]; then
+            {
+              echo "### Upstream integration: $(jq -r .status "$EVIDENCE/report.json")"
+              echo
+              jq -r '.conflictingPaths[]? | "- conflict: `\(.)`"' "$EVIDENCE/report.json"
+              jq -r '.checks[]? | "- exit \(.exitCode): \(.name // (.command | join(" ")))"' "$EVIDENCE/report.json"
+              echo
+              echo "The full report and the candidate are in the run's upstream-integration artifact."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -d "$CANDIDATE" ]; then
+            tar --exclude=node_modules --exclude=target --exclude='.venv*' \
+              -czf "$RUNNER_TEMP/upstream-candidate.tar.gz" \
+              -C "$RUNNER_TEMP" openbot-upstream-candidate
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: upstream-integration-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/upstream-integration/report.json
+            ${{ runner.temp }}/upstream-candidate.tar.gz
+          if-no-files-found: warn
+          retention-days: 14
+      # The only thing the publishing job takes from this one. It holds objects, not a working tree
+      # or hooks, and is verified there before anything is pushed.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.status.outputs.status == 'ready'
+        with:
+          name: upstream-bundle-${{ github.run_id }}
+          path: ${{ runner.temp }}/upstream-integration/candidate.bundle
+          if-no-files-found: error
+          retention-days: 14
+      - name: Refuse conflicted or failed candidate
+        if: steps.integrate.outcome != 'success'
+        run: |
+          echo "::error::Integration was not accepted. Inspect the retained candidate and report artifact; original main and deployments are unchanged."
+          exit 1
+
+  publish:
+    name: push and propose
+    needs: integrate
+    if: needs.integrate.outputs.status == 'ready'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      UPSTREAM_REPOSITORY: ${{ vars.OPENBOT_UPSTREAM_REPOSITORY || 'CopilotKit/openbot' }}
+      UPSTREAM_BASELINE: ${{ needs.integrate.outputs.baseline }}
+      UPSTREAM_TAG: ${{ inputs.tag }}
+      UPSTREAM_COMMIT: ${{ inputs.commit }}
+      UPGRADE_BRANCH: upgrade/upstream-${{ github.run_id }}
+    steps:
+      # A fresh clone of main. Only main's own reviewed scripts run in this job; the candidate
+      # arrives as objects in a bundle and is never checked out.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: upstream-bundle-${{ github.run_id }}
+          path: ${{ runner.temp }}/upstream-bundle
+      # GITHUB_TOKEN cannot push a change to .github/workflows, and a pull request it opens gets CI
+      # runs that wait for a maintainer's approval. A GitHub App installation token has neither
+      # limit. Configure one with contents, pull requests and workflows write.
+      - id: app-token
+        if: vars.OPENBOT_UPGRADE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.OPENBOT_UPGRADE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENBOT_UPGRADE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      - id: push
+        name: Verify the candidate and push it
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          TOKEN_KIND: ${{ steps.app-token.outputs.token && 'app' || 'github-token' }}
+          # Credentials for this one push, through gh, and no hook can run.
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: credential.helper
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: credential.helper
+          GIT_CONFIG_VALUE_1: "!gh auth git-credential"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+        run: |
+          set -euo pipefail
+          echo "TOKEN_KIND=$TOKEN_KIND" >> "$GITHUB_ENV"
+          bun scripts/integrate-upstream.ts \
+            --publish-bundle "$RUNNER_TEMP/upstream-bundle/candidate.bundle" \
+            --repository "$GITHUB_WORKSPACE" --branch "$UPGRADE_BRANCH" \
+            --base refs/remotes/origin/main --baseline "$UPSTREAM_BASELINE" \
+            --upstream "https://github.com/$UPSTREAM_REPOSITORY.git" \
+            --commit "$UPSTREAM_COMMIT" \
+            --remote "https://github.com/$GITHUB_REPOSITORY.git" \
+            --token-kind "$TOKEN_KIND" --summary "$RUNNER_TEMP/verified.json"
+      - name: Propose the integration
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Everything below comes from this job's own verification, not from the report the
+          # integration job wrote, which upstream code could have changed.
+          {
+            echo "Integrates upstream $UPSTREAM_TAG at $UPSTREAM_COMMIT."
+            echo
+            echo "Previous upstream baseline: $UPSTREAM_BASELINE."
+            echo "Candidate remains unaccepted until review and distribution CI pass. Deployment is a separate action."
+            echo
+            if [ "$TOKEN_KIND" != app ]; then
+              echo "**CI must be started by hand.** This pull request was opened with \`GITHUB_TOKEN\` because no upgrade GitHub App is configured, so its CI runs wait for a maintainer to approve them (\"Approve workflows to run\" on this pull request). \`GITHUB_TOKEN\` also cannot push changes to \`.github/workflows\`, so an upstream release that changes workflows needs the App."
+              echo
+            fi
+            echo "The integration job's regression report and the retained candidate: $RUN_URL"
+            echo
+            echo "Changed paths:"
+            echo
+            echo '~~~~text'
+            jq -r '.changedPaths[]' "$RUNNER_TEMP/verified.json"
+            echo '~~~~'
+            echo
+            echo "Before publishing a release from this, review migration and configuration changes and write that release's version, starting versions, database transition, downtime and recovery into \`release-policy.json\`."
+          } > "$RUNNER_TEMP/upstream-pr.md"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$UPGRADE_BRANCH" \
+            --title "Integrate upstream $UPSTREAM_TAG" --body-file "$RUNNER_TEMP/upstream-pr.md"
+          if [ "$TOKEN_KIND" != app ]; then
+            {
+              echo "### CI must be started by hand"
+              echo
+              echo "No upgrade GitHub App is configured (OPENBOT_UPGRADE_APP_CLIENT_ID and OPENBOT_UPGRADE_APP_PRIVATE_KEY), so the pull request was opened with GITHUB_TOKEN. Its CI runs wait for a maintainer to approve them on the pull request, and this token cannot push changes to .github/workflows."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

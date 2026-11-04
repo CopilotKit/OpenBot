@@ -53,6 +53,7 @@ at `agent-langgraph` on a laptop.
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project, and prefixes the identity a Shared app's account is held under at the vendor. That identity is fixed when the app is made Shared, so changing this later does not move it. |
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
+| `COPILOTKIT_OPENAI_API` | unset                          | Which OpenAI API the built-in Bots call behind an `OPENAI_BASE_URL` that is not OpenAI or Azure: `responses` or `chat`. Unset, the model decides. See [OpenAI-compatible endpoints](#openai-compatible-endpoints). |
 | `BOT_PROVIDER`       | `openai`                           | Provider the framework Bot (`agent-langgraph`) and the picked harness run on: `openai`, `anthropic`, or `google`. The Python Bots read it too; `agent-bot` does not, it is OpenAI only. |
 | `ANTHROPIC_API_KEY`  | unset                              | Anthropic key when `BOT_PROVIDER=anthropic`.                        |
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
@@ -70,8 +71,9 @@ at `agent-langgraph` on a laptop.
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
-| `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
+| `COMPOSIO_API_KEY`   | provisioned during desktop sign-in or local setup when no broker is configured | One project key for the whole deployment. Desktop sign-in saves a provisioned key in native protected storage and supplies it on Start/restart. A key in `.env` or the environment always wins and is never moved. `start.sh` / `bun run setup:composio` uses the existing CLI login; supplied keys and Arcade are preserved. Direct server/container launches still need the prepared key. See [Composio](plugins/composio.md). |
 | `COMPOSIO_<SLUG>_CLIENT_ID`, `COMPOSIO_<SLUG>_CLIENT_SECRET` | unset | This deployment's own OAuth client for one Composio app that connects with a server-to-server grant (`S2S_OAUTH2`), such as `COMPOSIO_SHOPIFY_CLIENT_ID`. Both or neither. Set, the app can be enabled and connected; unset, it stays hidden. See [Composio](plugins/composio.md#the-56-that-are-not-offered). |
+| `OPENBOT_INSTALLATION_ID` | a fresh private UUID in `.env.openbot-installation-id` | Stable Composio provisioning identity, persisted before a request. Optional explicit UUID for first setup; later values must match the saved file. Retain it for retries and restarts, and generate a fresh identity for a new installation. It never falls back to `DEPLOYMENT_ID`. |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
 in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
@@ -241,7 +243,7 @@ Most gateways publish a model list, which is the way to check a name before conf
 
 Two things are worth knowing before pointing a deployment at any gateway. Not every catalogue entry accepts tools, and a Bot without tool calling cannot drive its computer; the model list says which do. And `BOT_RESPONSES_API=true` needs an endpoint that implements the Responses API, not only chat completions.
 
-The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), which every OpenAI-compatible endpoint serves, unless their model takes tools only through the Responses API: `gpt-5.6` and later, the `-pro` models and `gpt-5.3-codex`, under a gateway's `openai/` name too. For those they call `/responses`, which a gateway or a proxy in front of OpenAI also serves. `COPILOTKIT_OPENAI_API=responses` or `chat` picks one API for every model instead.
+The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), which every OpenAI-compatible endpoint serves, unless their model takes tools only through the Responses API: `gpt-5.6` and later, the `-pro` models and `gpt-5.3-codex`, under a gateway's `openai/` name too. For those they call `/responses`, which a gateway or a proxy in front of OpenAI also serves. `COPILOTKIT_OPENAI_API=responses` or `chat` picks one API for every model instead. When OpenBot picks `/responses` itself, the server logs `openai-api` once at start-up, naming the model; a value you set is never changed, `chat` included, and any other value is an error when a built-in Bot runs.
 
 ## Voice dictation
 
@@ -342,6 +344,8 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
 | `MICROSOFT_OAUTH_CLIENT_SECRET` | Microsoft Entra ID client secret.                                                   |
 | `MICROSOFT_OAUTH_TENANT_ID`  | Directory to admit. `common` by default, which admits personal accounts too; a GUID admits one directory. |
+| `MICROSOFT_OAUTH_API_SCOPE`  | OpenBot's own API in Entra, as a scope. `api://<client id>/.default` by default. See [Company systems behind Microsoft Entra](#company-systems-behind-microsoft-entra). |
+| `MICROSOFT_OAUTH_ALLOWED_CLIENTS` | The apps that may call OpenBot with a person's Entra token, as client ids separated by commas. Unset, no app may. See [Company systems behind Microsoft Entra](#company-systems-behind-microsoft-entra). |
 | `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
 | `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
 | `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
@@ -380,6 +384,50 @@ private address is allowed and warned about once at boot, because a home server,
 address and a `.local` name are what this flag is mostly used for, and anybody on that network is
 the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
 it.
+
+**And only to this machine, unless you name more.** The administrator is admitted only for a request
+addressed to one of this machine's own names (`localhost`, `127.0.0.1`, `[::1]`) or the host of a
+configured URL, so a web page whose name was pointed at your machine is not it. Where the server runs
+on your own machine (OpenBot Desktop, `scripts/start.sh`, `bun run dev`) and no address beyond it is
+configured, it is admitted only for a caller on this machine, and the app's own servers
+(`app/serve.ts`, the Vite dev server) answer only this machine too. To open it from another machine
+on your network, set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use. OpenBot's
+container images set `OPENBOT_IN_CONTAINER=true`, because there every caller arrives through the
+container engine; set it yourself only for a container of your own that runs this server. Routes
+that containers and services call back on (Bots' tool calls, the model proxy, the routines worker)
+prove themselves with their own secrets and are not affected.
+
+**A single-user deployment has its own identity at Composio or Arcade.** Both keep accounts apart
+by a user id OpenBot sends, and the one person of every single-user deployment is `dev-local-user`,
+so two of them on the same `COMPOSIO_API_KEY` or `ARCADE_API_KEY` used to share one set of
+connections: one deployment's Gmail, or its consent to Google, was used by the other, and a
+disconnect in one ended it for both. Now each is given its own user id at its broker,
+`dev-local-user:` and a random part, at its first start with that broker's key, and keeps it in its
+database (the `brokered_identities` table, one row per broker), so it is the same after a restart
+and on every replica. Only the name at the broker changes: threads, memory and everything else stay
+with `dev-local-user`.
+
+A deployment that already had connections under `dev-local-user` gets its own id too, at the same
+start, and **connects each of its apps once more**. Neither broker can move a connection to another
+user id: Composio's connected-account update takes no user id, and Arcade's user connections can
+only be listed and deleted. Nor can either say which deployment made a connection under the shared
+id, and before this change one deployment opening an app another had connected recorded that
+account as its own. So at that start the deployment removes its own records of connections under
+`dev-local-user` (its `brokered_connections` rows for the active broker whose `user_id` and
+`vendor_user_id` are both `dev-local-user`), logs the apps it removed as
+`single-user-connections-retired`, and asks the broker nothing. Each app then reads as not connected
+and one Connect files it under the new id. The accounts themselves stay at the broker under
+`dev-local-user`, because another OpenBot on the same key may still be using them. If this was the
+only OpenBot on its key, remove them there: they are Composio's connected accounts for user id
+`dev-local-user`, and Arcade's user connections for `user_id=dev-local-user`
+(`GET /v1/admin/user_connections`).
+
+A consent begun under `dev-local-user` before that start and finished after it is refused, and the
+person is asked to press Connect again; nothing held under `dev-local-user` is confirmed or
+withdrawn. A deployment that signs people in keeps filing each person under their own id. To see
+the id in use, run `select provider, vendor_user_id from brokered_identities`; no row for the
+active broker means the person's own id. That is also the `--user` to give
+`bun run composio:smoke`.
 
 **`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an
 administrator once in. Matching is exact with no wildcards, so `example.com` admits neither
@@ -446,6 +494,64 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 `OPENBOT_APP_URL` is where the callback sends the person afterwards. It is a separate setting because the app and the API are separate addresses: locally the app is Vite on `3010` and the API is `3001`, so a relative redirect would land on the API, which serves no pages. A deployment serving both from one origin can leave it unset.
 
 A [Composio](plugins/composio.md) app needs `OPENBOT_APP_URL` and nothing else of the two: the consent lives at the broker, so no redirect URI of ours is registered anywhere, but the address Composio returns somebody to has to be absolute and this is where it comes from. Connecting a brokered account refuses where it resolves to nothing, rather than sending somebody to a consent screen with no way back.
+
+### Company systems behind Microsoft Entra
+
+A company MCP server protected by Entra can be reached as the signed-in person, so the system sees
+the real person with only their access, never a shared service account. An admin adds it as a
+server by URL and marks it with the system's Entra scope:
+
+```http
+POST /api/plugins/servers/custom
+{ "id": "hr", "title": "HR", "url": "https://hr.example.com/mcp", "entraScope": "api://hr-api/.default" }
+```
+
+Each call then goes out with a token Entra issues for the person asking, through Microsoft's
+on-behalf-of exchange (`requested_token_use=on_behalf_of`) with that scope. The token it exchanges
+is the person's token to OpenBot's own API: the one their app sent, or, for work nobody is watching
+(routines, check-ins), one OpenBot gets from their stored Microsoft sign-in. Tokens are reused until
+a few minutes before they expire. A person who has not signed in with Microsoft, whose sign-in has
+expired, or whose admin has not granted OpenBot access to the system or to OpenBot's own API is told
+so in those words.
+Marking a server this way needs Microsoft sign-in configured. Adding the same server again without
+`entraScope` keeps the mark; send `"entraScope": null` to reach it on a token again. The server's
+page under Plugins shows the mark and its scope.
+
+**Apps can call OpenBot with an Entra token.** An app that signed somebody in with Entra asks for a
+token to `MICROSOFT_OAUTH_API_SCOPE` and sends it as `Authorization: Bearer <token>` on any API or
+agent request. It is checked against the directory's published keys, its issuer (the directory
+`MICROSOFT_OAUTH_TENANT_ID` names, so this needs the GUID rather than `common`), its audience
+(OpenBot's client id or the scope's `api://` identifier) and its expiry, and the request runs as
+that person exactly as a signed-in browser does. Somebody OpenBot has not seen before is signed in
+the way Microsoft sign-in signs them in, under the same SSO, domain and removal rules.
+
+**Only the apps you list can do this.** Entra issues a token for OpenBot's API to any app that a
+person or an admin consents to, including other companies' multi-tenant apps if your tenant lets
+people consent to apps themselves. So OpenBot also checks the token's `azp` claim, the client id of
+the app the token was issued to, against `MICROSOFT_OAUTH_ALLOWED_CLIENTS`. A token from any other
+app is refused, and the server logs `entra-token-client-not-allowed` with that app's client id.
+With the setting unset, no app can call in. Routines and check-ins still reach marked servers from
+each person's stored Microsoft sign-in.
+
+**Routines need a browser sign-in once.** A token from a person's app lasts 60 to 90 minutes and
+is kept in memory only, so it can't stand in for them later. Work nobody is watching (routines,
+check-ins) uses their stored Microsoft sign-in, which only signing in to OpenBot in the browser
+with Microsoft creates. Someone who has only ever used OpenBot through an app is asked to do that
+once, in the message their routine leaves.
+
+In Entra, on OpenBot's app registration:
+
+1. **Expose an API** (an Application ID URI such as `api://<client id>` and a delegated scope such
+   as `access_as_user`), and set `requestedAccessTokenVersion` to `2` in the manifest so its tokens
+   name the directory's v2.0 issuer. Then add that scope to the registration's own API permissions
+   (under My APIs) and grant admin consent: OpenBot asks Entra for a token to its own API from each
+   person's stored sign-in, and without the consent Entra refuses with `AADSTS65001`.
+2. **Add a delegated API permission for each company system** to OpenBot's app registration, and
+   grant admin consent.
+3. **Let the company's apps request tokens for OpenBot's API**: add them as authorized client
+   applications of the scope from step 1, or have them request it with consent.
+4. **List those apps' client ids in `MICROSOFT_OAUTH_ALLOWED_CLIENTS`.** Step 3 decides which apps
+   Entra issues tokens to. This setting decides which of those tokens OpenBot takes.
 
 ### SCIM provisioning
 
@@ -650,7 +756,7 @@ is still the record.
 | Variable                             | Meaning                                                                                   |
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
-| `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
+| `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it. The shared computer holds it as it is. A computer the supervisor or a Sandbox makes for one person or one isolated Bot is given its own token instead, derived from this one and whose computer it is, so a Bot that reads its computer's token cannot open anybody else's. |
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. A person's browser in a native window (OpenBot Desktop) counts toward it and is closed only when no Bot's browser is left to close; a person's cloud browser is ranked by use like a Bot's. |
 | `COMPUTER_SEPARATE_WORKSPACES`       | `on` gives each Bot its own folder of files on a computer many Bots share, with its shell starting there. On for Helm's `shared` computer and the docker-compose `agent-computer`; off elsewhere. Files saved before it was on stay at the root of the volume. Commands can still read other folders: use `computers.mode: sandbox` to keep people apart. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident. A person's cloud browser takes the same rule: the Browser page touches it every second while it is open, so it closes once nobody is on that page. A person's native window (OpenBot Desktop) is never closed for being idle. |

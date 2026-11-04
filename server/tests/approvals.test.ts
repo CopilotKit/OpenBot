@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
+import type { AbstractAgent } from "@ag-ui/client";
+import { LLMock } from "@copilotkit/aimock";
+import { readSubagentResult } from "@openbot/shared/subagent";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import type { RunnerLike } from "@openbot/toolkit/run-turn";
+import { Observable } from "rxjs";
 import { z } from "zod";
+import { createActorAgentResolver } from "../src/agents/agent-resolver";
+import { createSubagents } from "../src/agents/subagent";
 import { createApprovalRoutes } from "../src/approvals/routes";
 import * as serviceModule from "../src/approvals/service";
 import {
@@ -164,6 +171,214 @@ function storeFixture() {
   };
   return store;
 }
+
+/** A real built-in child makes two calls, with the second approval transaction held before commit. */
+async function subagentApprovalFixture(turnTimeoutMs?: number) {
+  const store = storeFixture();
+  const bothStarted = Promise.withResolvers<void>();
+  const releaseLate = Promise.withResolvers<void>();
+  const lateCommitted = Promise.withResolvers<void>();
+  const waiting = Promise.withResolvers<void>();
+  const stopped = Promise.withResolvers<void>();
+  const trace: string[] = [];
+  const parameters = z.object({ text: z.string() });
+  const open = store.open;
+  let started = 0;
+  let child: AbstractAgent | undefined;
+  store.open = async (action) => {
+    const { text } = parameters.parse(action.args);
+    trace.push(`open:${text}`);
+    if (++started === 2) bothStarted.resolve();
+    await bothStarted.promise;
+    if (text === "second") await releaseLate.promise;
+    const row = await open(action);
+    trace.push(`commit:${text}`);
+    if (text === "second") lateCommitted.resolve();
+    return row;
+  };
+  const service = serviceModule.createApprovalService(store);
+  const llm = new LLMock({ host: "127.0.0.1", port: 0 });
+  llm.on({ predicate: () => true }, () => ({
+    toolCalls: ["first", "second"].map((text) => ({
+      name: "post_note",
+      arguments: JSON.stringify({ text }),
+    })),
+  }));
+  const originalBase = process.env.OPENAI_BASE_URL;
+  process.env.OPENAI_BASE_URL = `${await llm.start()}/v1`;
+  const resolver = createActorAgentResolver({
+    loadAgents: async () => [
+      {
+        id: "bot",
+        name: "Notes",
+        type: "built_in",
+        systemPrompt: "Post notes.",
+      },
+    ],
+    model: { provider: "openai", defaultModel: "gpt-5.5" },
+    resolveModelApiKey: async () => "test-key",
+    loadToolsForActor: () => async () => [
+      {
+        name: "post_note",
+        ref: "notes/post",
+        description: "Post a note.",
+        parameters,
+        execute: async (args) => {
+          try {
+            await service.gate({
+              actorId: "owner",
+              botId: "bot",
+              toolRef: "notes/post",
+              effect: "write",
+              scope: "team",
+              args,
+            });
+          } catch (error) {
+            if (error instanceof HeadlessToolSuspension) waiting.resolve();
+            throw error;
+          }
+          throw new Error("The unapproved note must not be posted.");
+        },
+      },
+    ],
+  });
+  const runner: RunnerLike = {
+    run: ({ agent, input }) =>
+      new Observable((observer) => {
+        agent
+          .runAgent(input, {
+            onEvent: ({ event }) => observer.next(event),
+          })
+          .then(
+            () => observer.complete(),
+            (error) => observer.error(error),
+          );
+      }),
+    stop: async () => {
+      trace.push("stop");
+      stopped.resolve();
+      return true;
+    },
+  };
+  const subagents = createSubagents({
+    turn: {
+      admission: async ({ signal }) => signal ?? new AbortController().signal,
+      intelligence: {
+        getOrCreateThread: async () => undefined,
+        getThreadMessages: async () => ({ messages: [] }),
+        ɵacquireThreadLock: async () => undefined,
+        ɵrenewThreadLock: async () => undefined,
+        ɵcleanupThreadLock: async () => undefined,
+      },
+      runner,
+      ...(turnTimeoutMs === undefined
+        ? {}
+        : { turnTimeoutMs, abortGraceMs: 50 }),
+    },
+    buildAgentFor: async ({ ownerUserId, agentId, initiator }) => {
+      child = await resolver.resolveAgentForActor(
+        { id: ownerUserId, role: "user" },
+        agentId,
+        {
+          initiator,
+          subagent: true,
+        },
+      );
+      return child;
+    },
+    withdrawApprovals: async (owner, runId) => {
+      trace.push("withdraw");
+      const pending = (await store.list(owner)).filter(
+        (row) => row.status === "pending" && row.action.runId === runId,
+      );
+      for (const row of pending) await store.decide(owner, row.id, "deny");
+    },
+  });
+  return {
+    store,
+    trace,
+    waiting: waiting.promise,
+    stopped: stopped.promise,
+    releaseLate: () => releaseLate.resolve(),
+    abortChild: () => {
+      if (!child) throw new Error("The child has not started.");
+      child.abortRun();
+    },
+    run: (signal?: AbortSignal) =>
+      subagents
+        .toolForRun({
+          actorId: "owner",
+          botId: "bot",
+          threadId: "conversation",
+          initiator: { kind: "person" },
+        })
+        .execute(
+          { task: "Post the first and second notes.", answer: "Done." },
+          { toolCallId: "subtask", ...(signal ? { signal } : {}) },
+        ),
+    async [Symbol.asyncDispose]() {
+      releaseLate.resolve();
+      if (started === 2) await lateCommitted.promise;
+      await llm.stop();
+      if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBase;
+    },
+  };
+}
+
+test("a subagent withdraws approvals only after its concurrent native calls finish opening them", async () => {
+  await using fixture = await subagentApprovalFixture();
+  const turn = fixture.run();
+  await fixture.waiting;
+  // Drain the already-queued completion microtasks before releasing the transaction. No wall-clock
+  // delay: the old implementation finishes and withdraws the first row in this event-loop turn.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  fixture.releaseLate();
+  const result = readSubagentResult(await turn);
+  expect(result && "handedBack" in result).toBe(true);
+  const rows = await fixture.store.list("owner");
+  expect(rows).toHaveLength(2);
+  expect(rows.map((row) => row.status)).toEqual(["denied", "denied"]);
+  expect(fixture.trace.indexOf("withdraw")).toBeGreaterThan(
+    fixture.trace.indexOf("commit:second"),
+  );
+});
+
+test("aborting a parent still stops a child while another approval call is held", async () => {
+  await using fixture = await subagentApprovalFixture();
+  const controller = new AbortController();
+  const turn = fixture.run(controller.signal);
+  const outcome = turn.catch((error: unknown) => error);
+  await fixture.waiting;
+  controller.abort();
+  expect(await outcome).toMatchObject({
+    message: "The headless turn was cancelled.",
+  });
+  await fixture.stopped;
+});
+
+test("a child's deadline still stops a suspended turn with another approval call held", async () => {
+  await using fixture = await subagentApprovalFixture(1000);
+  const turn = fixture.run();
+  await fixture.waiting;
+  const result = readSubagentResult(await turn);
+  expect(result && "error" in result && result.error).toContain(
+    "turn was stopped after 1s",
+  );
+  await fixture.stopped;
+});
+
+test("directly stopping a child interrupts its approval drain before the deadline", async () => {
+  await using fixture = await subagentApprovalFixture(1000);
+  const turn = fixture.run();
+  await fixture.waiting;
+  // The first suspension's catch has run before Stop reaches the provider's teardown.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  fixture.abortChild();
+  const result = readSubagentResult(await turn);
+  expect(result && "error" in result).toBe(true);
+  expect(fixture.trace).not.toContain("stop");
+});
 
 test("personal approval forwards the exact side effect once and continues its original AG-UI tool result after service restart", async () => {
   expect(typeof serviceModule.createApprovalService).toBe("function");
@@ -563,6 +778,26 @@ test("an approval preview shows what will be typed, written or sent, and still h
     apiToken: "[private value]",
     note: "token=[private value]",
   });
+});
+
+test("an approval preview cuts a long value between characters, not inside an emoji", async () => {
+  const { approvalPreview } = await import("../src/approvals/types");
+  const { approvalFields } = await import("../src/delivery/opentag");
+  const hasLoneSurrogate = (text: string) =>
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+      text,
+    );
+  // Each cut lands between the two halves of the emoji that follows the letters.
+  const long = `${"a".repeat(1998)}😀${"b".repeat(100)}`;
+  const preview = approvalPreview(long) as string;
+  expect(hasLoneSurrogate(preview)).toBe(false);
+  expect(preview).toBe(`${"a".repeat(1998)}…`);
+
+  const field = approvalFields({
+    text: `${"a".repeat(298)}😀${"b".repeat(10)}`,
+  });
+  expect(hasLoneSurrogate(field[0]?.value ?? "")).toBe(false);
+  expect(field[0]?.value).toBe(`${"a".repeat(298)}…`);
 });
 
 test("an approved action interrupted before its result was saved continues the conversation once, without repeating", async () => {

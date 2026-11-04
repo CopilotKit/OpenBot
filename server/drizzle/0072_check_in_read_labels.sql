@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_tools" ADD COLUMN "declared_read" boolean DEFAULT false NOT NULL;

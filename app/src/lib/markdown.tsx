@@ -5,6 +5,7 @@ import {
   IconTable,
 } from "@tabler/icons-react";
 import type { ComponentProps } from "react";
+import type { CodeHighlighterPlugin } from "streamdown";
 
 /**
  * Shared markdown rendering for Bot prose and tool results.
@@ -111,5 +112,69 @@ export const markdownComponents = {
         {children}
       </a>
     );
+  },
+};
+
+type Highlighted = Parameters<
+  NonNullable<Parameters<CodeHighlighterPlugin["highlight"]>[1]>
+>[0];
+
+/** [light, dark]: Streamdown colours each token with both and OpenBot's `.dark` class picks one. */
+const CODE_THEMES: ["github-light", "github-dark"] = [
+  "github-light",
+  "github-dark",
+];
+
+let codePlugin: Promise<CodeHighlighterPlugin> | undefined;
+
+/** Streamdown's code plugin, fetched the first time a code block is drawn and kept from then on. */
+function loadCodePlugin(): Promise<CodeHighlighterPlugin> {
+  codePlugin ??= import("@streamdown/code").then(({ createCodePlugin }) =>
+    createCodePlugin({ themes: CODE_THEMES }),
+  );
+  return codePlugin;
+}
+
+let loadedCodePlugin: CodeHighlighterPlugin | undefined;
+
+/**
+ * Syntax highlighting for fenced code, through Streamdown's own code plugin (Shiki), on every surface
+ * that draws a Bot's markdown, so a code block follows the theme switch without being redrawn.
+ *
+ * LOADED WITH THE FIRST CODE BLOCK, NOT WITH THE CHAT. `@streamdown/code` imports Shiki's full entry
+ * and its JavaScript regex engine at the top, so importing it here statically put Shiki's core in the
+ * chunk every conversation loads, highlighted code or not. Shiki's grammars and themes were already
+ * separate chunks, fetched per language. This stands in for the plugin with the same interface,
+ * answers "not ready yet" to the first code block (Streamdown draws the plain code and waits for the
+ * callback, exactly as it does while a grammar loads) and hands every call on once the plugin is in.
+ */
+export const markdownPlugins: { code: CodeHighlighterPlugin } = {
+  code: {
+    name: "shiki",
+    type: "code-highlighter",
+    getThemes: () => CODE_THEMES,
+    supportsLanguage: (language) =>
+      loadedCodePlugin?.supportsLanguage(language) ?? true,
+    getSupportedLanguages: () =>
+      loadedCodePlugin?.getSupportedLanguages() ?? [],
+    highlight(options, callback) {
+      if (loadedCodePlugin)
+        return loadedCodePlugin.highlight(options, callback);
+      loadCodePlugin()
+        .then((plugin) => {
+          loadedCodePlugin = plugin;
+          const highlighted: Highlighted | null = plugin.highlight(
+            options,
+            callback,
+          );
+          if (highlighted) callback?.(highlighted);
+        })
+        .catch((error: unknown) => {
+          // The code stays drawn, unhighlighted; say why rather than leave it plain for no reason.
+          console.error("Couldn't load syntax highlighting:", error);
+          codePlugin = undefined;
+        });
+      return null;
+    },
   },
 };

@@ -737,6 +737,11 @@ therefore set here instead. See `computers.podSecurityContext` in values.yaml fo
 keeps a folder of its own there, as each keeps a browser profile of its own. The server cuts the
 template for each computer (`podTemplateFor` in server/src/computer/sandbox.ts) and turns it off
 for an isolated Bot's, which keeps its files at the root of the volume it had before.
+
+NO `COMPUTER_TOKEN` HERE. The deployment's computer token opens every computer, and a Bot can read
+whatever its computer's process was started with, so it is never given to a Sandbox. The server
+writes each Sandbox a token of its own, derived from the deployment's and whose computer it is
+(server/src/computer/computer-token.ts), as it cuts the template for it.
 */}}
 {{- define "openbot.sandboxPodTemplate" -}}
 {{- $computerEnv := include "openbot.computerEnv" . | fromJsonArray -}}
@@ -762,10 +767,7 @@ for an isolated Bot's, which keeps its files at the root of the volume it had be
             (dict "name" "PROFILES_DIR" "value" "/profiles")
             (dict "name" "HOME" "value" "/home/pwuser")
             (dict "name" "BUN_INSTALL" "value" "/home/pwuser/.bun")
-            (dict "name" "COMPUTER_SEPARATE_WORKSPACES" "value" "on")
-            (dict "name" "COMPUTER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict
-              "name" (default (include "openbot.secretName" .) .Values.computers.existingTokenSecret)
-              "key" "computer-token"))))
+            (dict "name" "COMPUTER_SEPARATE_WORKSPACES" "value" "on"))
           $computerEnv
           .Values.computers.extraEnv)
         "volumeMounts" (list

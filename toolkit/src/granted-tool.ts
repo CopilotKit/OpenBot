@@ -1,13 +1,36 @@
 import { z } from "zod";
 import type { AuditInitiator } from "./initiator";
 
+/** Where a call came from, for a tool that needs more than its arguments. */
+export type ToolExecution = { toolCallId?: string; signal?: AbortSignal };
+
 /** A tool a Bot holds, as the built-in runtime is handed it and executes it on the server. */
 export type GrantedTool = {
   name: string;
   description: string;
   parameters: z.ZodType;
-  execute: (args: unknown) => Promise<string>;
+  /**
+   * The call's id and its run's abort signal come second, where the runner has them: the AI SDK's
+   * own execute options on a built-in Bot, the headless middleware's context on a remote one. A tool
+   * that only needs its arguments ignores them.
+   */
+  execute: (args: unknown, execution?: ToolExecution) => Promise<string>;
   initiator?: AuditInitiator;
+  /**
+   * May run beside the other calls of its step instead of after them. The AI SDK already runs a
+   * built-in Bot's calls together; this is for the headless middleware, which runs one at a time so
+   * that a browser's clicks keep their order.
+   */
+  concurrent?: true;
+  /**
+   * May wait behind `search_tools` instead of being sent on every model step.
+   *
+   * Set on an app's tools, which are the ones that arrive by the hundred: one Composio approval
+   * granted a Bot 239 Shopify actions. Left off the tools a Bot needs to be itself, such as its
+   * memory, its follow-ups and the card that asks for an app, because a Bot that has to search for
+   * its own memory before using it will not use it. See `server/src/agents/tool-search.ts`.
+   */
+  searchable?: true;
   /**
    * `<serverId>/<toolName>`, carried alongside the name the model is offered.
    *

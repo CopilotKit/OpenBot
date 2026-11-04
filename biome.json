@@ -147,6 +147,26 @@
           }
         }
       }
+    },
+    {
+      "includes": ["mobile/src/check-ins.tsx", "mobile/app/needs-you.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "react-native": {
+                    "importNames": ["Button"],
+                    "message": "Needs you draws its choices as the app's link-coloured text (CardAction in mobile/src/check-ins.tsx). A system Button is a filled, upper-cased bar on Android and the web and looks like no other screen."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

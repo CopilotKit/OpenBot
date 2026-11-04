@@ -236,6 +236,66 @@ export function createTeamBots(options: {
     },
 
     /**
+     * For a check-in, which nobody is watching: which of this Bot's tools go out on the asker's OWN
+     * account without asking them anything. Null when the Bot is theirs or nobody's Team Bot, where
+     * every call already does.
+     *
+     * {@link credentialActorFor}'s answer, read without acting on it. That one spends a one-time
+     * consent and raises a card, and both need a person present. So here the owner's account is no
+     * (it is not what the asker connected), a one-time consent is no (it was for one call they made),
+     * no consent is no, and a standing consent, for this Bot or every Bot, is yes.
+     */
+    async unaskedOwnAccount(
+      actorId: string,
+      botId: string,
+    ): Promise<((ref: string) => Promise<boolean>) | null> {
+      const owner = (await publication(botId))?.ownerUserId;
+      if (!owner || owner === actorId) return null;
+      return async (ref) => {
+        const serverId = ref.split("/")[0] ?? "";
+        const [grant] = await database
+          .select({ grantedAs: pluginGrants.grantedAs })
+          .from(pluginGrants)
+          .where(
+            and(
+              eq(pluginGrants.kind, "mcp"),
+              eq(pluginGrants.ref, ref),
+              eq(pluginGrants.agentId, botId),
+            ),
+          )
+          .limit(1);
+        if (
+          grant?.grantedAs !== "owner" &&
+          (await connectedServers(owner)).has(serverId)
+        )
+          return false;
+        const [consent] = await database
+          .select({ decision: teamBotConsents.decision })
+          .from(teamBotConsents)
+          .where(
+            and(
+              eq(teamBotConsents.userId, actorId),
+              eq(teamBotConsents.agentId, botId),
+              eq(teamBotConsents.serverId, serverId),
+            ),
+          )
+          .limit(1);
+        if (consent?.decision === "always") return true;
+        const [everyBot] = await database
+          .select({ serverId: teamBotConsentDefaults.serverId })
+          .from(teamBotConsentDefaults)
+          .where(
+            and(
+              eq(teamBotConsentDefaults.userId, actorId),
+              eq(teamBotConsentDefaults.serverId, serverId),
+            ),
+          )
+          .limit(1);
+        return everyBot !== undefined;
+      };
+    },
+
+    /**
      * Listen for consent cards this person's turns with this Bot raise, until the returned function
      * is called; it returns them once each.
      */

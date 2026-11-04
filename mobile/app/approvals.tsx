@@ -112,13 +112,16 @@ export default function ApprovalsScreen() {
                 void decide(request.id, "allow_once");
               }}
             />
-            <Button
-              disabled={Boolean(busy)}
-              title="Always allow this scope"
-              onPress={() => {
-                void decide(request.id, "allow_always");
-              }}
-            />
+            {/* Not for a check-in task's approval: tasks ask before every change, rules or not. */}
+            {request.action?.policy?.source === "task" ? null : (
+              <Button
+                disabled={Boolean(busy)}
+                title="Always allow this scope"
+                onPress={() => {
+                  void decide(request.id, "allow_always");
+                }}
+              />
+            )}
             <Button
               disabled={Boolean(busy)}
               title="Deny"

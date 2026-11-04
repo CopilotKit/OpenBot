@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { createPageFrameStore } from "../src/computer/page-frames";
 import { createDatabase } from "../src/db/client";
@@ -207,4 +207,8 @@ describe("kept page frames", () => {
 
     expect(await store.load(id, "")).toBe(null);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

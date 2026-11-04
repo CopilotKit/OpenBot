@@ -272,9 +272,9 @@ function AppConnectionPage() {
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
-    /* The same capability the grant list below is drawn on, read once above and passed to both, so
-       the row's offer and the list's presence cannot come from different facts. */
-    authorizesPerAction: perActionGrants,
+    /* The same capability the grant list below is drawn on: a broker that approves per action takes
+       a consent over the connection that stands. */
+    reconnectsInPlace: perActionGrants,
     brokered,
     configured: plugins.data?.composioConfigured ?? false,
     recorded: connection !== undefined,
@@ -452,10 +452,11 @@ function AppConnectionPage() {
     /* Bound once because the row below is told it twice — once inside the whole disconnected
        sentence and once on its own — and two copies of it would drift. */
     const reassurance = "No Bot can use this as you.";
-    /* Where the next step is. A broker that approves one action at a time has no whole-app Connect,
-       so the sentence points at the action list underneath instead of a button that is not there. */
+    /* Where the next step is. Connect asks for the whole app on every broker. Where the broker also
+       approves one action at a time, the action list underneath is the other way in, and the
+       sentence names both. */
     const trip = perActionGrants
-      ? "Authorize the actions you want below."
+      ? `Connecting takes you to ${server.title} to approve access. You can also authorize only the actions you want below.`
       : `Connecting takes you to ${server.title} to approve access.`;
 
     return (

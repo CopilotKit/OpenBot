@@ -8,7 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Sixteen things change for an existing deployment:
+- Code and markdown in a Bot's interface are drawn the way a reply draws them: highlighted in the light and dark themes, with the same copy and download buttons, tables and Doc links. They were plain monospace before, and nearly unreadable in dark mode.
+- The Computer panel's Activity lists every command the Bot runs and every file it reads, saves or lists, with what it printed, whether the step ran at once, after you allowed it, or before the page was opened. It had stayed empty for anything that went through approval. A step that was not done shows why in your words ("You declined it."), not the sentence the Bot is told, and the line in the conversation says the same. A command you decline on the Bot's own approval card is listed too. A step you did yourself shows as done by you. A step shows the time it ran only when the page saw it run, never the time the page was opened. Resetting a computer from Admin clears the Activity of every Bot that ran on it, and a reload or another tab no longer brings it back.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, the app's port on this machine) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, and the app's port on this machine and on each of those hosts) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+
+- Each person's computer, and each Isolated Bot's, now holds a token of its own, derived from `COMPUTER_TOKEN`, and the server calls it with that token rather than the deployment's. A Bot that reads its own computer's token can open that computer and no other. Existing per-person and per-Bot computers are recreated the first time they are used after upgrading, keeping their files and sign-ins. Helm `sandbox` writes each Sandbox its own token. The one shared computer (no supervisor) is unchanged.
+
+- A Bot's endpoint no longer receives the `Authorization` header, or any `x-*` header, from the request of the person running it. A Bot's own key and the deployment's agent token are still sent. A remote Bot that read a header the person's client sent has to be given it as one of the Bot's own headers instead.
+
+- OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
+
+**Before upgrading.** Twenty things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -77,6 +88,235 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   In the all-in-one image that share counts the database and the API server too.
   `COMPUTER_MEMORY_HIGH_PERCENT=0` and `COMPUTER_TAB_IDLE_MS=0` (Helm: `computers.memoryHighPercent`
   and `computers.tabIdleMs`) keep the old behaviour.
+- Bots now check in on their own and tell a person when something needs them (below). It is on by
+  default for every Bot a person has talked to. Migrations `0071_proactive_check_ins` and
+  `0072_check_in_read_labels` add its tables. Admin → Check-ins turns it off for everyone.
+- Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
+  the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
+  the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
+  affected.
+- Migration `0074_single_user_identity` adds one table, `brokered_identities`, and lets
+  `pending_authorizations.action` be null (an Arcade Connect asks for the whole app, not one
+  action). Every single-user deployment with a Composio or Arcade key gets its own user id there at
+  its next start (below), so it stops seeing and using connections another single-user OpenBot made
+  on the same key. **A single-user deployment connects each of its apps once more after upgrading.**
+  Its connections recorded under `dev-local-user` are removed from OpenBot at that start, because
+  neither broker can move a connection to another user id. Nothing is ended at Composio or Arcade,
+  since other OpenBots on the same key may be using those accounts. Deployments that sign people in
+  keep their ids.
+- On Arcade, a Bot's call now needs the person's connection recorded in OpenBot, as on Composio, on
+  every deployment including those that sign people in. A consent finished through OpenBot was
+  always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
+  the person opens the app under Connections, or presses Connect where Arcade already holds
+  everything the app asks for.
+
+### A Bot can hold hundreds of tools
+
+A Bot that holds more than 50 tools is no longer sent all of them on every step. Its own tools stay
+in front of the model, and an app's tools wait behind one search tool: the model searches in a few
+words and calls what it found from its next step, by the tool's real name. Every call still goes
+through the grant, the approval rules and the audit trail. A Bot holding 279 tools after approving
+Shopify, which stopped answering, now answers. A question that needs an app's tool makes one more
+model call than before. Bots at or under 50 tools are sent exactly what they were.
+
+A run that would still send more than 128 tools at once, counting the room it keeps for a search's
+answer, is refused before the model is called. Chat Completions refuses more than 128 itself, and
+search never sends more. The person is told why, and the audit log records it under Blocked as "Too
+many tools for its model".
+
+### A Bot's shell in the one-container image installs packages and nothing else as root
+
+In the `openbot` image (one container, and Helm's computer pods), a Bot installs a package with
+`sudo openbot-apt update` and `sudo openbot-apt install <package>` (`-y` is accepted and changes
+nothing), which is what its tool description now says. `sudo apt-get`, `sudo dpkg` and the other package commands are refused: with
+any arguments they ran any command as root, and root there reads the deployment's secrets. The
+helper takes package names only. `/app` is no longer owned by the Bot's user, so a Bot cannot change
+the API's code or the page it serves. Computers that run as root keep using `apt-get` directly.
+
+### Bots can install packages on their computers
+
+Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
+with the old permissions are replaced when next used, keeping their saved files and browser profiles.
+
+### Every Bot gives parts of its work to subagents
+
+A Bot, built in or an AG-UI agent somebody brings, can now hand a piece of its work to a subagent: a
+fresh run of the same Bot, as the same person, with the same tools, approval rules and standing
+instructions, that sees none of the conversation and hands back only its answer. Bots are told to
+work this way by default, giving anything that needs many tool calls or a lot of reading to
+subagents (up to five at once for one answer) and keeping the decisions and the answer themselves,
+so a question that needs several lookups makes more model calls than before. A subagent never waits
+on the person: an action that needs approval is handed back, and the Bot asks in the conversation.
+Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
+OpenBot runs the tool itself, so a remote agent needs no change.
+
+### Bots tell you when something needs you
+
+A Bot a person has talked to now checks what that person connected (any app or server they
+connected with their own account), quietly and at most once an hour, and only reads. When it finds
+something that needs the person, it says why and where it came from, and the person hears about it
+at most once an hour, with every Bot's items in one message: in the app (Needs you, a badge and a
+browser notification), by phone push, and on Slack, Teams or SMS where the person already talks to
+a Bot. Nothing is sent when nothing needs them. Start turns an item into a task that asks before
+every send or change; Hide keeps it from coming back for 30 days. A person turns it off in Settings
+→ Notifications and chooses where these go under "Something needs you"; an admin turns it off for
+everyone, changes the daily limit (24 check-ins per Bot) and sees how often items are started under
+Admin → Check-ins.
+
+### Each Bot keeps a fact it formed, even when another Bot formed it first
+
+A memory a Bot forms from what it read was deduplicated per person, but each Bot recalls only the
+memories it formed itself. So when a second Bot formed a fact the first already held, it was told
+the fact was remembered and could then never recall it. Each Bot now keeps its own copy, and
+resetting one Bot leaves the other's alone. Forgetting stays the person's: a fact forgotten from any
+Bot is not formed again by another.
+
+### A Bot made with "Run it here" runs when the deployment's own agent is on a private address
+
+A Bot created in the app with no endpoint is bound to the deployment's own agent,
+`MANAGED_AGENT_AG_UI_URL`. Where that address is private, as on a local deployment that keeps it on
+loopback, the endpoint check refused it like an address a person typed in, and every message to the
+Bot failed with "This deployment will not dial". The deployment's own agent addresses
+(`MANAGED_AGENT_AG_UI_URL`, and `PICKED_HARNESS_URL` when `PICKED_HARNESS_IMAGE` is set) are now
+allowed at exactly those URLs: when a Bot is saved, in Test connection, and on every run. Another
+path on the same host and port, and a redirect onto the agent's own address, are still refused.
+
+### A tool's link and a vendor's refusal are cut between characters
+
+When a tool answers with a link, its title, name and description are each cut to 400 characters
+before the Bot reads them, and the reason a vendor gives for refusing a request is cut to 400 too.
+When the cut landed inside an emoji, the Bot was handed a broken character before the "…". The cut
+now drops the half character instead.
+
+### An approval cuts a long value between characters
+
+An approval shows what a Bot is about to type, write or send, cut to 2,000 characters, and each field
+on the OpenTag card is cut to 300. When the cut landed inside an emoji, the approval showed a "�"
+before the "…". The cut now drops the half character instead.
+
+### A long text message is cut between characters
+
+A message too long for one SMS is cut and ends with "Open OpenBot to read the full message.". When
+the cut landed inside an emoji, the person received a "�" before the "…". The cut now drops the
+half character instead.
+
+### A late conversation title is discarded after deletion
+
+A generated title that arrives after a conversation was deleted is discarded. The naming job is
+settled without changing the deleted row or announcing a new summary, and a missing conversation is
+not reported as successfully named.
+
+### A group reached in two ways can be approved for a shared app
+
+Approving a Bot for a shared app now succeeds when the same group appears in its published audience
+and its assigned groups. Repeated people or groups are stored once; a person and a group with the
+same name remain separate, and no additional audience is approved.
+
+### Concurrent routine edits keep their limit and saved schedule
+
+An update now reads the current routine under the same owner lock used to count and write it. An
+enable queued behind a pause and another create cannot take a person past 20 enabled routines.
+Concurrent cron and timezone edits also calculate the next firing from the schedule actually saved.
+
+### A failed shared-app approval can be tried again
+
+Deciding a shared-app request now commits the decision and the access it grants together. If the
+approval or its audience cannot be saved, the request stays pending instead of disappearing as
+approved without granting access. An administrator can retry after the write failure is resolved.
+Concurrent direct approvals and request decisions take the same Bot/app transaction lock before
+writing either row, so they do not deadlock by acquiring those rows in opposite orders. An owner
+grant that races an administrator now leaves the administrator's approval and audience in place.
+
+### A rule on activation also catches Enter or Space pressed with a modifier
+
+A Bot's `computer_key` call names its key the way Playwright reads it, so `Shift+Enter` is Enter with
+Shift held, and the browser submits the form or clicks the focused button for it just as for Enter.
+The gateway only counted the bare `Enter`, `NumpadEnter` and `Space` as `intent == "activate"`, so the
+same key with a modifier was decided as typing and passed a deny rule on activation. It now judges the
+key a press ends on, so `Shift+Enter`, `Control+Enter` and `Shift+Space` are activations too, and so
+are `\n` and `\r`, which Playwright presses as Enter.
+
+The shipped "Never submit a form" rule (the Boundaries preset and the `AGENT_COMPUTER_POLICY` example
+in `.env.example`) now refuses a keypress on `intent == "activate"` instead of `key == "Enter"`, so it
+catches those spellings too, and Space. A deployment running the old rule keeps the old gap until it
+adds the preset again or changes `key == "Enter"` to `intent == "activate"` in its own copy.
+
+### A boundary rule about a host also covers that host written with a root dot
+
+`page.host` kept the root dot a URL can end its host with, so a navigation to
+`https://intranet.example.com./` was decided as `intranet.example.com.` and walked past a rule such
+as `page.host == "intranet.example.com"`, though DNS, the Bot's browser and the computer's own
+network filter all treat the two as one site. `page.host` now drops the root dot (the port stays),
+so the rule refuses either spelling.
+
+### Allowing a Gmail send always no longer allows it to anybody
+
+A Bot sending or replying through Composio's Gmail (`GMAIL_SEND_EMAIL`, `GMAIL_REPLY_TO_THREAD`)
+names the recipient in `recipient_email` and `extra_recipients`, which the private-share check did
+not read. Every email was filed under the app and the action instead of the person it went to, so
+the approval did not say who would receive it, and "Always allow" given for one email let the Bot
+send any later one to any address without asking. Those emails are now addressed to their
+recipients, and an "Always allow" covers only the people it was given for.
+
+### An allowed site on a non-default port opens
+
+With a network allowlist, a Bot opening an allowed site on a port that is not the scheme's default,
+such as `http://erp.internal:8080`, was refused in the conversation with "erp.internal:8080:8080 is
+not on this deployment's network allowlist", whatever the rule said. The server compared the host
+with its port still attached against the allowlist's domains. It now compares the host and the port
+separately, as the computer's own filter already did, so the rule's domain and ports decide.
+
+### The server image starts again
+
+The `server` image left out `agent-computer/src/egress.ts`, which the server imports to check a
+Bot's navigation against the network policy, so a container built from `server/Dockerfile` exited on
+start with a module-not-found error and restarted in a loop. The image now carries that file. The
+all-in-one `openbot` image was not affected.
+
+### An isolated Bot's computer is reachable with a longer namespace
+
+With the supervisor on a shared network (Compose), the server reaches a computer by its container
+name. Docker's network DNS answers only for names of up to 63 characters, and an isolated Bot's,
+`<namespace>-computer-bot-agent_<uuid>`, is exactly 63 with the default `openbot` namespace. Any
+longer `COMPUTER_NAMESPACE` made every isolated Bot's computer start healthy while the server, unable
+to resolve its name, reported it as not running on every action. The supervisor now gives the server the container's short
+id, which Docker also answers for, whenever the name is too long. Names that fit are used as before.
+
+### Each single-user OpenBot has its own Composio and Arcade identity
+
+Every single-user OpenBot signs its person in as `dev-local-user`, and that was also the user id
+Composio and Arcade filed their connections under. So two single-user OpenBots on one
+`COMPOSIO_API_KEY` were one Composio user: each listed and used the other's Gmail, a disconnect in
+one ended the account in both, and a call that named no account could run in whichever Gmail was
+connected last. On one `ARCADE_API_KEY` one OpenBot's consent to Google was the grant the other's
+Bots ran on. Each single-user deployment now has its own user id at its broker, `dev-local-user:`
+and a random part, given at its first start with that broker and kept in its database, so a
+restart or a second replica uses the same one. Threads and memory stay with `dev-local-user`. A
+deployment that already had connections under `dev-local-user` gets its own id too, and connects
+each app once more: those connections cannot be moved to the new id, and the broker cannot say
+whether one was this deployment's or another's on the same key. See
+[configuration.md](docs/configuration.md#authentication).
+
+### Arcade apps connect with one press, and their connections are recorded like Composio's
+
+An Arcade app now has Connect, under Connections and on a Bot's app card, which asks Arcade for
+everything the app's actions need in one consent. The action list still approves one action at a
+time. Every Arcade connection is recorded in OpenBot when it is made or confirmed and removed when
+it is disconnected, and a Bot's call needs it, exactly as on Composio. A call Arcade refuses shows
+the Reconnect card, instead of a plain error. The connection is cleared only when Arcade holds
+nothing for the app, as a lost Composio account is, so actions already approved go on working. The
+card's Reconnect goes to the app's page under Connections, as on Composio, and the Reconnect there
+adds what was missing in one press. See
+[Arcade](docs/plugins/arcade.md#connect-asks-for-the-whole-app-and-each-action-can-still-be-approved-alone).
+
+### Company systems behind Microsoft Entra, reached as the signed-in person
+
+An admin can mark a server added by URL with an Entra scope, and each call then carries a token
+Entra issues for the person asking through the on-behalf-of exchange, from their app's Entra token
+or, for routines, their stored Microsoft sign-in. Apps listed in `MICROSOFT_OAUTH_ALLOWED_CLIENTS`
+can also call OpenBot's API with a person's Entra token; a token issued to any other app is refused.
+Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
+without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
 ### Shopify and other Composio apps on a server-to-server grant can be connected
 
@@ -96,11 +336,32 @@ transaction, so the trail always says what happened to it, without the authoriza
 link or vendor account. If the audit row cannot be written, nothing changes and the attempt stays
 pending, rather than settling with no record.
 
+### Following a link is judged as opening its address
+
+A Bot's click on a link to another page now opens that page's address instead of clicking, so it is
+judged exactly as `computer_navigate` is: a read, with the same allowlist, policy, approval and
+audit. Before, it was judged as a click, which is a change, so a Bot reading an ordering system was
+handed back to you by the built-in payments requirement for clicking a link on a page at
+`/purchase-orders/...`, while typing the same address went straight through. Buttons, links to a
+spot on the same page (`#`), `javascript:` and `mailto:` links, links inside an iframe, and links
+with no address are still clicked and judged as before. A deny rule about the link itself
+(`element.name`) still refuses it, and a rule about where pages open (`page.url`) now applies to it.
+Snapshots now carry each top-page link's absolute address as `url`. As with a click, Stop cancels a
+followed link, including while it waits for approval, and the computer refuses a link as stale when
+the page has moved on since the snapshot it came from or the link now goes somewhere else.
+
 ### Refunds now go to the person
 
 The built-in safety rules hand paying, purchasing or moving money to you, but a refund action
 (such as `SHOPIFY_CREATE_REFUND`) passed straight through: "refund" was not one of the words the
 rule looked for. It is now, so issuing a refund is handed to you like any other movement of money.
+
+### Empty fields no longer trip the safety rules
+
+The built-in safety rules matched on the names of fields a Bot left empty: writing only a note on a
+Shopify order was handed to you as money-moving because the action has a `billing_address` field the
+Bot never filled in. Field names now only count when the field actually holds something, so that
+note goes straight through.
 
 ### A computer run on a laptop can stay off the local network
 
@@ -109,6 +370,42 @@ laptop with `bun run dev`, that left its token-protected API reachable from the 
 `COMPUTER_BIND` now chooses the address it listens on: set `COMPUTER_BIND=127.0.0.1` to keep it to
 the machine itself. Unset, nothing changes, and a computer driving a native Chrome (OpenBot
 Desktop's) still always listens on loopback.
+
+### A store connection is checked against the store itself
+
+After connecting a key, OpenBot checks it with one argument-free read, preferring an identity read
+and otherwise taking the first safe read alphabetically. For Shopify that was `SHOPIFY_COUNT_BLOGS`,
+which needs the `read_content` scope a store app with only order and product scopes does not have,
+so a working key was reported as rejected. A store's own details now count as an identity read, so
+the check calls `SHOPIFY_GET_SHOP_DETAILS` instead.
+
+### A message naming different Bots' apps stays on the default when routing is unsure
+
+When the router cannot decide and a message names apps held by different Bots, OpenBot keeps the
+default Bot instead of picking whichever app appears first in the roster. A single Bot uniquely
+holding the named apps still receives the message, and a confident routing decision still wins.
+
+### A client read failure does not replace a working app registration
+
+A server that cannot decrypt an app's stored OAuth client now fails that connection attempt without
+registering a replacement. A server with the correct encryption key can keep using the original
+client. Confirmed missing or revoked credentials and malformed stored clients still use the existing
+registration flow. Connect records a safe read-failure audit row for the person and app and returns
+a retryable error, without exposing the vault failure.
+
+### The default look: an inset page, OpenBot's palette and Bots as orbs
+
+Each page now sits in a panel inset from the window, on a darker frame shared with the sidebar,
+with white cards on a light page; admin and settings scroll inside it like the rest of the app.
+The palette leans towards CopilotKit's lilac, with a plum dark mode, and the type is Atkinson
+Hyperlegible. Each Bot appears as an orb in its own colors. The sidebar says "Waiting for you"
+on a conversation that needs you, and orange means nothing else. Home has a subheader and cycles
+through example jobs from your own Bots; a conversation opens with its Bot's orb, name and role.
+Rows show an app's logo or initial instead of the same plug; Home shows Bots as compact cards;
+Connections tiles no longer cut their text off; and the Composio directory shows its rows loading.
+Colors, card edges and shadows are theme tokens in `theme.css`, and empty states carry a faint dot
+pattern whose file, color and strength are tokens too (`--empty-pattern*`), so a deployment can
+restyle or turn them off. Skins keep their own look.
 
 ### A computer closes browsers nobody is using when its memory runs high
 
@@ -236,6 +533,13 @@ mark for what happened, with blocked rows tinted red and actions that did not ha
 The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
 Started by buttons narrow the events already loaded, and the count says how many of them match. A
 row about a Bot (a message routed to it, say) now names it under Bot.
+
+### The desktop app starts OpenBot when it is opened from Finder
+
+Opened from Finder or the Dock, the desktop app stopped at Start with "OpenBot did not start", and
+the app's log said `bun: command not found`. The app part of OpenBot runs as a package script that
+starts `bun` again by name, and an app opened that way has no `bun` on its `PATH`. The desktop now
+hands every process it starts the directory of the Bun it installed.
 
 ### The desktop setup page does not freeze when it loads during an install
 
@@ -413,6 +717,15 @@ The download falls from 537 MB to about 423 MB on arm64 and from 520 MB to about
 Unpacked, the image is about 375 MB smaller on arm64 and 296 MB smaller on amd64. The all-in-one `openbot` image installs the same browser the same way and shrinks by about
 as much. The browser and its behaviour are unchanged. On a desktop install the computer is the
 largest image, so a first install and each upgrade download less.
+
+### The audit trail says which Slack or Teams account a link bound
+
+Linking a Bot to Slack or Teams recorded a `delivery.linked` row filed under the Bot's owner, with
+the transport and workspace but not the chat account that sent the code. Whoever sends a link code
+is the account that then speaks as the owner, so a code redeemed by somebody else read on the trail
+as the owner connecting their own account, and once the link was removed nothing said which account
+it had been. The row now names it, for Slack and Teams only: for SMS and push the same field is a
+phone number or a device token, which stays off a trail every administrator can read.
 
 ### A Bot can send, draft and reply in Gmail
 
@@ -903,6 +1216,15 @@ thing itself — a card naming the app, with a Connect button.
 With `OPENBOT_SINGLE_USER=true`, an address such as `example.com:3010` in `OPENBOT_PUBLIC_URL`,
 `OPENBOT_APP_URL` or `TRUSTED_ORIGINS` now refuses startup. It previously counted as a private
 network address and only warned, even though the missing URL scheme left its host unidentified.
+
+### `setup-learning.ts` runs on Windows
+
+On Windows, `bun scripts/setup-learning.ts` stopped at once with `spawn npx.cmd EINVAL` and wrote
+nothing to `.env`. Since CVE-2024-27980, Node and Bun refuse to start a `.cmd` without a shell, and
+`npx` is one there. The CopilotKit CLI is now started through `cmd.exe` on Windows. An argument the
+shell would run or expand, such as a project id containing `&` or `%`, is refused instead of passed.
+A CLI that outlives its two minutes now has its whole process tree stopped. The server's own
+Learning setup at boot calls the CLI the same way, and is fixed with it.
 
 ### A reply's tool calls fold into one line
 

@@ -151,12 +151,20 @@ export function createHeadlessComputerTools(options: {
     ),
     tool(
       "computer_click",
-      "Click an element using its ref and snapshotId from the latest snapshot.",
+      "Click an element using its ref and snapshotId from the latest snapshot. A link to another page is opened at its address.",
       z.strictObject({ ref, snapshotId }),
-      async (input, { signal }) => ({
-        ok: true,
-        ...(await gateway.click(seat, actor, input, signal)),
-      }),
+      async (input, { signal }) => {
+        const result = await gateway.click(seat, actor, input, signal);
+        // A followed link is a navigation, so a page that wants a person stops here as one does.
+        if (result.challenge)
+          throw new HeadlessToolSuspension(result.challenge.reason, {
+            kind: "computer_handoff",
+            botId,
+            requestId: result.challenge.requestId,
+            source: result.challenge.kind,
+          });
+        return { ok: true, ...result };
+      },
     ),
     tool(
       "computer_type",
@@ -231,7 +239,7 @@ export function createHeadlessComputerTools(options: {
     ),
     tool(
       "computer_run_command",
-      "Run a bash shell command in your workspace. Pipes and && work; long output is truncated and long commands are stopped. For package installation use sudo apt-get; if refused say so rather than retrying.",
+      "Run a bash shell command in your workspace. Pipes and && work; long output is truncated and long commands are stopped. For package installation check id -u first: as root (0), use apt-get directly; otherwise use sudo openbot-apt update && sudo openbot-apt install <package>, which takes package names and nothing else, not sudo apt-get. If installation is refused, say so rather than retrying.",
       z.strictObject({ command: text }),
       async (input, { signal }) => ({
         ok: true,
