@@ -26,15 +26,11 @@ export type ProviderVocabulary = {
   directoryLabel: string;
   /** The environment variable an operator sets to turn the broker on. */
   envVar: string;
-  /**
-   * The route path of the vendor's directory screen.
-   *
-   * A LITERAL UNION AND NEVER `string`, because that union is TanStack Router's generated route
-   * tree: a path that no route file answers stops compiling here rather than 404ing in somebody's
-   * browser. That is exactly how an earlier draft named a screen that did not exist, so a `as const`
-   * cast at the `<Link to=…>` call site would be casting away the only check there is.
+  /*
+   * No route path here. Where the directory screen lives depends on the edition (under Admin, or
+   * under Settings), so `managePaths(...).brokerDirectory(provider)` names it, from the same
+   * generated route tree: a path no route file answers still stops compiling.
    */
-  directoryPath: "/admin/plugins/composio" | "/admin/plugins/arcade";
   /**
    * What the "More apps" row says once the key is set.
    *
@@ -50,7 +46,6 @@ const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
     name: "Composio",
     directoryLabel: "Browse Composio",
     envVar: "COMPOSIO_API_KEY",
-    directoryPath: "/admin/plugins/composio",
     directoryDescription:
       "A few hundred apps. Each person connects their own account.",
   },
@@ -58,7 +53,6 @@ const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
     name: "Arcade",
     directoryLabel: "Browse Arcade",
     envVar: "ARCADE_API_KEY",
-    directoryPath: "/admin/plugins/arcade",
     directoryDescription:
       "Apps nobody here has reviewed. Each person connects their own account.",
   },

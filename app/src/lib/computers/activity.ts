@@ -1,5 +1,6 @@
 import {
   DECLINED_BY_PERSON,
+  declinedByPerson,
   doneByPerson,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
@@ -53,6 +54,8 @@ export type ComputerActivity = {
   exitCode?: number;
   /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
+  /** Refused because the person declined it, so the line says declined rather than what it would have done. */
+  declined?: boolean;
   /**
    * It was handed to the person and they did it themselves. Done, so not drawn as refused, and
    * nothing ran on the computer for it, so not drawn as a command that printed nothing either.
@@ -138,6 +141,7 @@ function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
     entry.output === details.output &&
     entry.exitCode === details.exitCode &&
     entry.refused === details.refused &&
+    entry.declined === details.declined &&
     entry.doneByPerson === details.doneByPerson &&
     entry.truncated === details.truncated &&
     entry.timedOut === details.timedOut
@@ -381,6 +385,8 @@ export function readOutcome(content: unknown): ToolOutcome | null {
     return { ...outcome, ok: outcome.ok !== false };
   }
   if (doneByPerson(text)) return { ok: true, doneByPerson: true, reason: text };
+  if (declinedByPerson(text))
+    return { ok: false, refused: true, declined: true, reason: text };
   return text.startsWith("Error:")
     ? { ok: false, reason: text.slice("Error:".length).trim() }
     : { ok: false, refused: true, reason: text };
@@ -517,6 +523,7 @@ export function detailsOf(
   // Who did it, when the Bot did not: refused, or done by the person.
   const notTheBot = {
     ...(result.refused === true ? { refused: true } : {}),
+    ...(result.declined === true ? { declined: true } : {}),
     ...(result.doneByPerson === true ? { doneByPerson: true } : {}),
   };
   const path = typeof args.path === "string" ? args.path : "";
@@ -608,6 +615,7 @@ function declinedCommand(command: string): ActivityDetails {
     subject: command,
     output: outcomeForPerson(DECLINED_BY_PERSON),
     refused: true,
+    declined: true,
   };
 }
 

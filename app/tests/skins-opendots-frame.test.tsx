@@ -21,7 +21,7 @@ import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { appConfig } from "@/lib/generated/application-config";
-import { NAVIGATION, navigationFor } from "@/lib/navigation";
+import { isNavigationLink, NAVIGATION, navigationFor } from "@/lib/navigation";
 import { queryClient } from "@/query-client";
 import { opendots } from "@/skins/opendots";
 import { DEFAULT_SKIN, setSkin } from "@/skins/store";
@@ -441,7 +441,7 @@ describe("OpenDots frame", () => {
     async (_who, signedIn) => {
       actor = signedIn;
       const { view } = draw("/");
-      const expected = navigationFor(signedIn.role);
+      const expected = navigationFor(signedIn.role).filter(isNavigationLink);
       const rail = await view.findByRole("navigation", {
         name: "Workspace navigation",
       });
@@ -468,7 +468,9 @@ describe("OpenDots frame", () => {
       const railDestinations = within(rail)
         .getAllByRole("link")
         .map((link) => link.getAttribute("href"))
-        .filter((href) => NAVIGATION.some((item) => item.to === href));
+        .filter((href) =>
+          NAVIGATION.filter(isNavigationLink).some((item) => item.to === href),
+        );
       expect(railDestinations).toEqual(expected.map((item) => item.to));
       const sidebar = view.getByRole("complementary", { name: "Sidebar" });
       for (const item of expected) {

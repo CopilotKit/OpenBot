@@ -552,7 +552,7 @@ pub fn compose(
         ModelCredential::Anthropic { api_key } => {
             insert_if_given(&mut env, "ANTHROPIC_API_KEY", api_key);
             env.insert("BOT_PROVIDER".into(), "anthropic".into());
-            env.insert("BOT_MODEL".into(), "claude-sonnet-4-5".into());
+            env.insert("BOT_MODEL".into(), "claude-sonnet-5-5".into());
         }
         ModelCredential::ClaudePlan { token } => {
             insert_if_given(&mut env, "CLAUDE_CODE_OAUTH_TOKEN", token);
@@ -2999,7 +2999,7 @@ mod model_tests {
             Some(&"sk-ant-real".to_string())
         );
         assert_eq!(env.get("BOT_PROVIDER"), Some(&"anthropic".to_string()));
-        assert_eq!(env.get("BOT_MODEL"), Some(&"claude-sonnet-4-5".to_string()));
+        assert_eq!(env.get("BOT_MODEL"), Some(&"claude-sonnet-5-5".to_string()));
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
     }
 

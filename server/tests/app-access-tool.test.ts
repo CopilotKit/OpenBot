@@ -3,6 +3,7 @@ import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
+import { setEdition } from "../src/edition";
 import type { AppAccess, AppAccessState } from "../src/plugins/app-access";
 import { appAccessTools } from "../src/plugins/app-access-tool";
 import type { AppInspection } from "../src/plugins/plugin-store/app-access";
@@ -108,6 +109,23 @@ describe("show_app_access", () => {
       });
       expect(prompt?.message).toMatch(said);
       expect(prompt?.message).toContain("Do not browse to its website");
+    },
+  );
+
+  test.each(["disabled", "not_granted"] as const)(
+    "in the personal edition, %s tells the model the card connects it, not to ask an administrator",
+    async (state) => {
+      setEdition("personal");
+      try {
+        const { tool } = toolOver(access(state));
+        const message =
+          readConnectPrompt(await tool.execute({ app: "gmail" }))?.message ??
+          "";
+        expect(message).toMatch(/offers Connect/);
+        expect(message).not.toMatch(/administrator/);
+      } finally {
+        setEdition("team");
+      }
     },
   );
 

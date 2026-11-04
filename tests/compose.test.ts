@@ -586,6 +586,22 @@ test("carries per-Bot egress into the computer and the supervisor", () => {
   expect(compose).toContain("required: false");
 });
 
+/**
+ * The personal edition's one computer is its one person's (scripts/start.sh sets `COMPUTER_PERSON_ID`), so Record runs
+ * in their Bots' browsers there. Anywhere else it is unset, and the shared computer stays nobody's.
+ */
+test("starts the shared computer as one person's only when told whose it is", () => {
+  expect(
+    runComposeConfig({ COMPUTER_PERSON_ID: "personal" }).services[
+      "agent-computer"
+    ]?.environment.COMPUTER_PERSON_ID,
+  ).toBe("personal");
+  expect(
+    runComposeConfig({}).services["agent-computer"]?.environment
+      .COMPUTER_PERSON_ID,
+  ).toBe("");
+});
+
 test("gives the selected harness the same governed callback as the framework Bot", () => {
   const config = runComposeConfig({
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",

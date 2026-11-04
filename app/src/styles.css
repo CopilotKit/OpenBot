@@ -272,3 +272,72 @@
 .dark .bot-orb-live .agent-orb::before {
   filter: blur(var(--blur-amount)) contrast(1) saturate(0.95) brightness(1.18);
 }
+
+/*
+ * The field behind the OpenBot for Business orb (components/edition/business-orb.tsx). It drifts
+ * up by exactly one tile per loop, so it never jumps. The orb in front is a Bot's live orb, which
+ * animates itself.
+ */
+.business-orb-field {
+  --business-orb-tile: 288px;
+  background-size: 288px var(--business-orb-tile);
+  opacity: 0.3;
+  filter: blur(3px);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 20%,
+    black 80%,
+    transparent
+  );
+  animation: business-orb-drift 18s linear infinite;
+}
+
+@keyframes business-orb-drift {
+  to {
+    background-position: 0 calc(-1 * var(--business-orb-tile));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .business-orb-field {
+    animation: none;
+  }
+}
+
+/*
+ * Teach a Bot's three steps sit on one soft gradient, the way an app's introduction does in other products. The
+ * colours are fixed tints rather than tokens, with a darker set for the dark theme, so the stage reads as a showcase
+ * while the cards on it keep the app's own colours.
+ */
+.teach-stage {
+  background:
+    radial-gradient(120% 90% at 0% 0%, #fbcfe8 0%, transparent 55%),
+    radial-gradient(90% 90% at 100% 100%, #c7d2fe 0%, transparent 60%),
+    linear-gradient(135deg, #fde2e4, #ede9fe);
+}
+.dark .teach-stage {
+  background:
+    radial-gradient(120% 90% at 0% 0%, #5b2147 0%, transparent 55%),
+    radial-gradient(90% 90% at 100% 100%, #2e3170 0%, transparent 60%),
+    linear-gradient(135deg, #2a1622, #1f1b33);
+}
+
+/* The steps the Recorder keeps, appearing one after another beside the window, and the form filling in. */
+@media (prefers-reduced-motion: no-preference) {
+  .teach-step {
+    animation: teach-arrive 0.4s ease-out both;
+  }
+  .teach-type {
+    animation: teach-arrive 0.4s ease-out 0.6s both;
+  }
+  .teach-delay-1 {
+    animation-delay: 1.2s;
+  }
+}
+@keyframes teach-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}

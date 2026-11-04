@@ -10,7 +10,6 @@ import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
-  needsInput,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
 import {
@@ -18,11 +17,8 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import {
-  DoneTasks,
-  NeedsYouRows,
-  useNeedsYou,
-} from "@/components/needs-you/needs-you";
+import { NeedsYouBoard } from "@/components/needs-you/board";
+import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -39,6 +35,7 @@ import {
   type BotAttention,
   botAttentionQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
@@ -52,6 +49,8 @@ import {
  * This replaces three screens (Bots, Agents and Team Bots) that listed the same Bots three ways.
  */
 export function BotRoster() {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const agents = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
   const attention = useQuery(botAttentionQueryOptions());
@@ -67,38 +66,17 @@ export function BotRoster() {
       </p>
     );
   }
-  const { needsYou, pinned, yours, shared } = groupRoster(
-    agents.data,
-    (agentId) => {
-      const state = byId.get(agentId);
-      return state ? needsInput(state) : 0;
-    },
-  );
+  // Every Bot stays in its own section; what it waits on is on the board above, by name.
+  const { pinned, yours, shared } = groupRoster(agents.data);
   const yoursPinned = pinned.some((agent) => agent.mine);
-  const yoursWaiting = needsYou.some((agent) => agent.mine);
 
   return (
     <>
-      {needsYou.length || list.tasks.length || list.items.length ? (
-        <PageSection title="Needs you">
-          {list.error ? (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              {list.error.message}
-            </p>
-          ) : null}
-          <NeedsYouRows
-            items={list.items}
-            lead={needsYou.map((agent) => (
-              <RosterRow
-                agent={agent}
-                key={agent.id}
-                state={byId.get(agent.id)}
-              />
-            ))}
-            tasks={list.tasks}
-          />
-        </PageSection>
-      ) : null}
+      {/*
+       * What waits on the person, each thing under the Bot it came from and decided where it is.
+       * A Bot waiting on them stays in its own section below too, with its badge.
+       */}
+      <NeedsYouBoard />
       {pinned.length ? (
         <PageSection title="Pinned">
           <RosterRows agents={pinned} byId={byId} />
@@ -110,7 +88,7 @@ export function BotRoster() {
         ) : (
           <PageEmpty
             action={
-              yoursPinned || yoursWaiting ? undefined : (
+              yoursPinned ? undefined : (
                 <Button
                   render={(props) => (
                     <Link {...props} search={{ new: true }} to="/bots" />
@@ -124,31 +102,27 @@ export function BotRoster() {
               )
             }
             icon={IconBolt}
-            title={
-              yoursPinned
-                ? "All pinned"
-                : yoursWaiting
-                  ? "All waiting on you"
-                  : "No Bots yet"
-            }
+            title={yoursPinned ? "All pinned" : "No Bots yet"}
           >
             {yoursPinned
               ? "Your Bots are all pinned above."
-              : yoursWaiting
-                ? "Your Bots are all under Needs you."
-                : "Bots you create show up here."}
+              : "Bots you create show up here."}
           </PageEmpty>
         )}
       </PageSection>
-      <PageSection title="Shared with you">
-        {shared.length ? (
-          <RosterRows agents={shared} byId={byId} />
-        ) : (
-          <PageEmpty icon={IconShare} title="Nothing shared yet">
-            Bots somebody shares with you show up here.
-          </PageEmpty>
-        )}
-      </PageSection>
+      {shared.length > 0 || !personal ? (
+        <PageSection
+          title={personal ? "Included with OpenBot" : "Shared with you"}
+        >
+          {shared.length ? (
+            <RosterRows agents={shared} byId={byId} />
+          ) : (
+            <PageEmpty icon={IconShare} title="Nothing shared yet">
+              Bots somebody shares with you show up here.
+            </PageEmpty>
+          )}
+        </PageSection>
+      ) : null}
       <DoneTasks done={list.done} />
       {hidden.data?.length ? (
         <HiddenSection agents={hidden.data} byId={byId} />

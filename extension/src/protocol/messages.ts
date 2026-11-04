@@ -88,6 +88,8 @@ export type RecorderState = {
     stoppedAt?: number;
     actions?: number;
     phrases?: number;
+    /** The person discarded it from the recording mark: nothing it had not sent yet went to Intelligence. */
+    discarded?: boolean;
   };
   draining: number; // stopped recordings still sending
   learning?: LearningSpaceState; // the person's own Learning space at Record (Decision 10)
@@ -151,6 +153,9 @@ const contentToBackgroundSchema = z.discriminatedUnion("type", [
   // The person's click on the recording mark in a tab: leave the site the tab shows out of every recording, or record it
   // again. The service worker takes the site from the tab, never from the page.
   z.object({ type: z.literal("content.site"), recorded: z.boolean() }).strict(),
+  // The person's Stop on the recording mark in a tab, with their answer to whether the recording is saved: saved ends it
+  // as the popup's Stop does; not saved discards it.
+  z.object({ type: z.literal("content.stop"), save: z.boolean() }).strict(),
 ]);
 export type ContentToBackground = z.infer<typeof contentToBackgroundSchema>;
 /**
@@ -188,10 +193,11 @@ export type StreamSession = {
    * no extension API but runtime, so it cannot read storage itself); the offscreen document reads it only inside its e2e branch. */
   e2eHoldRetryMs?: number;
 };
-/** Why a recording ended without the person's Stop, sent to Intelligence with its failed outcome: `disconnected` for a
+/** Why a recording ended without being saved, sent to Intelligence with its failed outcome: `disconnected` for a
  * Disconnect (the person's own, or the organization's policy moving the Recorder), `signed-out` for a connection OpenBot
- * signed out. Events streamed live before it ended are already in Intelligence. */
-export type StopFailure = "disconnected" | "signed-out";
+ * signed out, `discarded` for the person's Stop on the recording mark answered with Discard. Events streamed live before
+ * it ended are already in Intelligence. */
+export type StopFailure = "disconnected" | "signed-out" | "discarded";
 export type BackgroundToOffscreen =
   | { type: "offscreen.start"; session: StreamSession }
   | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox

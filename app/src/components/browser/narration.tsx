@@ -80,19 +80,9 @@ function nativeNarrationSentence(voice: LauncherState["voice"]): string {
   }
 }
 
-/** The narration row on OpenBot Desktop while nothing records: the person's choice, which the next Record passes on. */
-function narrationChoiceSentence(
-  narration: Exclude<NarrationChoice["narration"], undefined>,
-) {
-  switch (narration) {
-    case "on":
-      return "On. The Recorder in your browser listens to your microphone while you record, and turns your speech into text on your computer.";
-    case "off":
-      return "Off. The Recorder doesn't open your microphone.";
-    case null:
-      return "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes.";
-  }
-}
+/** The narration row on OpenBot Desktop while nothing records. The switch says on or off, so the sentence stays the same. */
+export const NARRATION_DESCRIPTION =
+  "Talk through the task as you do it, and what you say is added to the recording.";
 
 /**
  * The narration row on OpenBot Desktop. While nothing records it is the person's choice, a switch that takes effect at
@@ -121,11 +111,9 @@ export function NativeNarrationRow({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>Narration</ItemTitle>
-          {choice.narration !== undefined ? (
-            <ItemDescription className="line-clamp-none">
-              {narrationChoiceSentence(choice.narration)}
-            </ItemDescription>
-          ) : null}
+          <ItemDescription className="line-clamp-none">
+            {NARRATION_DESCRIPTION}
+          </ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch
@@ -268,8 +256,7 @@ function narrationNoticeSentence(
  * always says what narration does, so a person deciding whether to talk knows before Record whether it is heard, and
  * how; and while the page hears them it says Listening, so an open microphone is never something to guess at.
  *
- * `choice` is the person's preference (`useNarrationChoice`), null until they answered the question Record asks first.
- * `onChange` keeps a new one, as the bar's switch does.
+ * `onChange` keeps the person's new choice, as the bar's switch does.
  *
  * `recording` is whether the person's recording is running. Narration that did not reach the Recorder is news only
  * then: a phrase cut off as the wheel went back was refused because the recording had already ended, which the
@@ -277,13 +264,11 @@ function narrationNoticeSentence(
  */
 export function NarrationRow({
   narration,
-  choice,
   language,
   recording,
   onChange,
 }: {
   narration: NarrationControls;
-  choice: NarrationChoice["narration"];
   language: string;
   recording: boolean;
   onChange: (on: boolean) => void;
@@ -296,11 +281,7 @@ export function NarrationRow({
     notice ??
     (listening
       ? "Listening. Say what you're doing as you go."
-      : narration.on
-        ? "On. OpenBot hears your microphone while you record and turns your speech into text on your computer, so say what you're doing as you go."
-        : choice === null
-          ? "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes."
-          : "Off. What you say isn't recorded.");
+      : NARRATION_DESCRIPTION);
   return (
     <Item size="sm">
       <ItemMedia variant="icon">

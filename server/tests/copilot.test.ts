@@ -248,7 +248,7 @@ describe("deployment model selection", () => {
     );
     expect(model.provider).toBe("anthropic");
     expect(model.defaultModel).toBe(defaultModelFor("anthropic"));
-    expect(model.defaultModel).toBe("claude-sonnet-4-5");
+    expect(model.defaultModel).toBe("claude-sonnet-5-5");
   });
 });
 
