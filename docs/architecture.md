@@ -340,6 +340,16 @@ A skill declares the tools it needs (`skill_tools`). Before the run starts, the 
 
 This narrows the offer. It is not a boundary, and it never substitutes for one. The grant, the policy and the audit row decide what may happen; this decides only what the model can see. Every way it can fail — no skills declared, a model that cannot answer, a message that matches nothing, twelve tools or fewer — leaves the whole catalogue offered, because a narrowing that failed closed would remove capability an administrator granted, silently. `mcp.tools_discovered` records what was offered, out of how much, and why.
 
+### Holding more tools than one request carries
+
+Offered is not always sent. One app approval can grant a Bot hundreds of tools (Shopify brought 239), and every tool sent on every step costs context and worsens the model's choice; Chat Completions refuses a request with more than 128, and the Responses API caps the compiled size of the strict schemas in one request. So past fifty tools, an app's offered tools wait behind one ordinary tool, `search_tools` (`server/src/agents/tool-search.ts`), unless a chosen skill asked for them or they find sources on the web. The Bot's own tools stay in front of the model on every step.
+
+The model searches in a few words, and the tools a search names are sent from its next step on, under their real names, for the next few turns. Which tools those are is read back from the search answers in the conversation itself, so nothing is held between steps or on any one replica. The runtime fixes a run's tools when it starts, so this is done by wrapping the model (`withToolSearch`): every step passes through it, and it decides which tool definitions go up.
+
+Like narrowing, this is not a boundary. Every granted tool stays registered with the runtime and executes through the plugin store's `callTool`, so a waiting tool is checked, evaluated and audited exactly as a shown one is, and a search ranks only what the Bot was granted. The providers' own tool search (`tool_search`, `defer_loading`) is not used: replayed through the runtime it breaks a conversation from its second turn, and it exists only on some models and APIs.
+
+Before the model call, a run is counted (`toolNamesSent`, without what waits). A run that would still send more than Chat Completions accepts, or more than search allows, is refused with a sentence, and the audit trail records `agent.tool_limit_refused`.
+
 ## Personal memory
 
 A person's memory is kept in CopilotKit Intelligence when the deployment is entitled to Intelligence

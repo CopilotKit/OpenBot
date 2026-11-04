@@ -95,6 +95,15 @@ beforeAll(() => {
         return NativeResponse.json({ agents: [] });
       if (url.pathname === "/api/plugins/for/waiting-bot")
         return NativeResponse.json({ skills: [], tools: [] });
+      // What the Bot's runs are offered is read from these, as the server answers them.
+      if (url.pathname === "/api/agents/waiting-bot")
+        return NativeResponse.json({
+          agent: { id: "waiting-bot", visibility: "public", canManage: true },
+        });
+      if (url.pathname === "/api/components/for-agent/waiting-bot")
+        return NativeResponse.json({ components: [] });
+      if (url.pathname === "/api/admin/enterprise/me")
+        return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
           version: "fixture",

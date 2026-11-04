@@ -98,8 +98,13 @@ describe("audit payload redaction", () => {
     let stored: unknown;
     const store = createAuditStore({
       insert: () => ({
-        values: async (event: unknown) => {
+        values: (event: unknown) => {
           stored = event;
+          return {
+            returning: async () => [
+              { id: "synthetic-audit-id", createdAt: new Date(0) },
+            ],
+          };
         },
       }),
     } as never);

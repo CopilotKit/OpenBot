@@ -146,22 +146,35 @@ test("an earlier call keeps drawing after a revoke while a new call is refused",
   expect(view.getByText(/just switched off/)).toBeTruthy();
 });
 
-test("a decision waits disabled, then enables in place", () => {
+test("a decision waits disabled, then enables in place", async () => {
   const store = createGrantStore();
-  const respond = async () => {};
+  const answered: unknown[][] = [];
+  const respond = async (...args: unknown[]) => {
+    answered.push(args);
+  };
   const Render = makeDecisionRender(spec(CountedDecision), store, respond);
   const view = render(
-    <Render args={{ title: "Approve" }} respond={respond} status="executing" />,
+    <Render
+      args={{ title: "Approve" }}
+      status="executing"
+      toolCallId="call-1"
+    />,
   );
 
   expect(lastRespond).toBeUndefined();
   act(() => store.set({ grants: heldGrants }));
   view.rerender(
-    <Render args={{ title: "Approve" }} respond={respond} status="executing" />,
+    <Render
+      args={{ title: "Approve" }}
+      status="executing"
+      toolCallId="call-1"
+    />,
   );
 
-  expect(lastRespond).toBe(respond);
+  // Enabled in place, answering the call it was drawn for.
   expect(mounts).toBe(1);
+  await (lastRespond as (result: unknown) => Promise<void>)("approved");
+  expect(answered).toEqual([["approved", "call-1"]]);
 });
 
 function ShowsValue(props: { title?: string; value?: number }) {

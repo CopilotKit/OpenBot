@@ -301,6 +301,7 @@ Settings worth knowing:
 | ------------------------------------ | ------------------------------------------------------------------------- |
 | `OPENBOT_SINGLE_USER`                | Admits every request as one administrator. Required when no identity provider is configured; `.env.example` ships it on. |
 | `OPENAI_BASE_URL`                    | Answers the OpenAI-shaped calls from somewhere else: a gateway, a proxy.  |
+| `COPILOTKIT_OPENAI_API`              | `responses` or `chat`: the OpenAI API the built-in Bots call behind that `OPENAI_BASE_URL`. Unset, models that take tools only through the Responses API (`gpt-5.6` and later) get `responses` and the rest get `chat`. |
 | `ANTHROPIC_BASE_URL`, `GOOGLE_GENERATIVE_AI_BASE_URL` | The same, for those two APIs.            |
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` falls back to a fixed dev value. |
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` falls back to a fixed dev value. |
