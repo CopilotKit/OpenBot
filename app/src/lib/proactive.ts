@@ -26,6 +26,9 @@ export type ProactiveSetting = {
   agentId: string;
   channelId: string;
   focus: string;
+  /** What it watches, in the person's words. Empty on one that watches everything the Bot reads. */
+  subject?: string;
+  sourceLink?: string | null;
   enabled: boolean;
   intervalMinutes: number;
   nextRunAt: string;
@@ -65,6 +68,8 @@ type ProactiveSettingsBody = {
 export type ProactiveSuggestion = {
   id: string;
   agentId: string;
+  /** The check-in that found it. */
+  settingId?: string | null;
   title: string;
   detail: string;
   sourceApp: string | null;
@@ -136,6 +141,8 @@ export const createProactiveSetting = (input: {
   agentId: string;
   channelId: string;
   focus: string;
+  subject?: string;
+  sourceLink?: string;
   intervalMinutes: number;
 }) =>
   client("/api/proactive/settings", {

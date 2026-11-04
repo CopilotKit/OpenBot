@@ -559,7 +559,8 @@ type Live = {
 type StopMode =
   | { kind: "person" } // Stop: the outcome is queued, then the outbox drains
   | { kind: "signed-out"; reason: LostReason; forgot: boolean } // kept for the person (only this recording when the connection was not forgotten)
-  | { kind: "disconnect" }; // the person's Disconnect: discarded right after
+  | { kind: "disconnect" } // the person's Disconnect: discarded right after
+  | { kind: "discard" }; // the person's Stop on the recording mark, answered Discard: discarded right after
 
 const signedOutReason = (error: unknown): SignedOutReason | null =>
   error instanceof OpenBotError && error.signedOut
@@ -1820,8 +1821,10 @@ export function installRecording(
     // A stop this service worker finishes for one before it: what that one held is sent as this one's would be.
     const restored = steps ? undefined : takeRestored(recordingId);
     if (restored) openSteps(recordingId, restored);
-    // The phrase being said is placed among the held steps, before they go (not for a Disconnect, which discards it).
-    if (mode.kind !== "disconnect") await endVoiceFirst(recordingId);
+    // The phrase being said is placed among the held steps, before they go (not for a Disconnect or a discard, which
+    // throw it away).
+    if (mode.kind !== "disconnect" && mode.kind !== "discard")
+      await endVoiceFirst(recordingId);
     // The steps still held go before the outcome, with the saves they have; storage forgets them at once.
     closeSteps();
     // The recording's voice has ended with it: a phrase it was hearing holds nothing of the next recording, and a phrase
@@ -1829,8 +1832,8 @@ export function installRecording(
     speechHold = null;
     external = null;
     await writeHeld();
-    // Only the person's Stop succeeds. A Disconnect or a sign-out ends the recording midway: what it streamed live is in
-    // Intelligence already, and its outcome says why it ended.
+    // Only the person's Stop succeeds. A Disconnect, a discard or a sign-out ends the recording midway: what it streamed
+    // live is in Intelligence already, and its outcome says why it ended.
     const message: BackgroundToOffscreen =
       mode.kind === "person"
         ? { type: "offscreen.stop", outcome: "succeeded" }
@@ -1839,11 +1842,13 @@ export function installRecording(
             outcome: "failed",
             // Only OpenBot signs a connection out; a policy move and a replaced connection disconnect it here.
             reason:
-              mode.kind === "disconnect" ||
-              mode.reason === "policy" ||
-              mode.reason === "replaced"
-                ? "disconnected"
-                : "signed-out",
+              mode.kind === "discard"
+                ? "discarded"
+                : mode.kind === "disconnect" ||
+                    mode.reason === "policy" ||
+                    mode.reason === "replaced"
+                  ? "disconnected"
+                  : "signed-out",
           };
     // The document went away (with the service worker, or on its own): the person's Stop reopens it on the stored
     // session, however long ago the stop began, so the outcome is queued and the rest is sent now rather than at the
@@ -1888,12 +1893,19 @@ export function installRecording(
     await moveIntoDrains(recordingId);
     await removeSession("stream");
     const failed = failedSends.get(recordingId);
+    // The person's discard: what it had not sent yet is cleared now, and never goes to Intelligence.
+    if (mode.kind === "discard")
+      await discardDrains([recordingId]).catch(
+        report("discarding a recording"),
+      );
     dispatch({
       type: "finished",
       // A recording a Disconnect stops is discarded right after: what it had not sent yet never goes to Intelligence, so
-      // the popup does not say it was sent (what it streamed live is there, ended with a failed outcome).
+      // the popup does not say it was sent (what it streamed live is there, ended with a failed outcome). One the person
+      // discarded is named, so OpenBot can say it was discarded.
       lastStopped:
-        mode.kind === "disconnect" || failed !== undefined
+        mode.kind === "disconnect" ||
+        (failed !== undefined && mode.kind !== "discard")
           ? undefined
           : {
               recordingId,
@@ -1902,8 +1914,13 @@ export function installRecording(
               // What it held, for OpenBot to say: the badge's count and the phrases placed, both final now.
               actions: state.actions,
               phrases: state.phrases ?? 0,
+              ...(mode.kind === "discard" ? { discarded: true } : {}),
             },
-      error: signedOut ? stoppedSentence(signedOut) : failed,
+      error: signedOut
+        ? stoppedSentence(signedOut)
+        : mode.kind === "discard"
+          ? undefined
+          : failed,
     });
     if (signedOut)
       // A sign-out that forgot nothing (the person connected again) leaves their other drains to the new connection.
@@ -2824,6 +2841,13 @@ export function installRecording(
         return;
       case "content.notice":
         void noticeChoice(message.choice).catch(report("the notice choice"));
+        return;
+      case "content.stop":
+        // The mark is drawn in the top frame alone; a frame inside the page cannot stop the recording.
+        if (port.sender?.frameId !== 0) return;
+        void stopRecording(
+          message.save ? { kind: "person" } : { kind: "discard" },
+        ).catch(report("stopping from the recording mark"));
         return;
     }
   }

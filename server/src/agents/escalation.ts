@@ -51,7 +51,37 @@ export type EscalationRoute = (input: {
   initiator?: AuditInitiator;
   question: string;
   why?: string;
+  /** The separate decisions inside the question, when there are several. */
+  parts?: QuestionPart[];
 }) => Promise<{ reached: string } | { refusal: string }>;
+
+/**
+ * One decision inside a question, with the answers the Bot expects when it can name them. The person
+ * can always answer in their own words instead, so `options` are a shortcut, never a limit.
+ */
+export const questionPartSchema = z.object({
+  header: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .describe("A short label for this decision, two or three words"),
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .describe("This one decision, as a question"),
+  options: z
+    .array(z.string().trim().min(1).max(120))
+    .min(2)
+    .max(6)
+    .optional()
+    .describe(
+      "The likely answers, when you can name them; leave out when you cannot",
+    ),
+});
+export type QuestionPart = z.infer<typeof questionPartSchema>;
 
 /**
  * The route this template ships with: the person who is already here.
@@ -74,6 +104,15 @@ const parameters = z.object({
     .optional()
     .describe(
       "Why this needs a person rather than you: what you cannot settle on your own",
+    ),
+  parts: z
+    .array(questionPartSchema)
+    .min(2)
+    .max(6)
+    .optional()
+    .describe(
+      "When you need several separate decisions, one entry per decision. `question` then sums " +
+        "them up in a sentence",
     ),
 });
 
@@ -100,7 +139,9 @@ export function escalationTool(options: {
       "Put a question to a person when the work needs judgement you do not have: a decision only " +
       "they can make, a fact only they know, permission you do not hold. Prefer this to guessing, " +
       "and prefer it to asking another Bot when no other Bot could settle it either. Say what you " +
-      "need and why, then stop and wait for their answer.",
+      "need and why, then stop and wait for their answer. Several decisions go in `parts`, one " +
+      "each, with `options` when you can name the likely answers, rather than numbered inside " +
+      "one sentence.",
     parameters,
     execute: async (args: unknown) => {
       const parsed = parameters.safeParse(args);
@@ -160,6 +201,7 @@ export function escalationTool(options: {
           ...(from.initiator ? { initiator: from.initiator } : {}),
           question,
           ...(parsed.data.why ? { why: parsed.data.why } : {}),
+          ...(parsed.data.parts ? { parts: parsed.data.parts } : {}),
         });
       } catch (error) {
         /*

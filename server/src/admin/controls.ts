@@ -43,6 +43,7 @@ import {
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
 import { agentProfiles, agents } from "../db/schema";
+import { isAlwaysOn } from "../plugins/personal-defaults";
 import type { ProactiveAdmin } from "../proactive/contracts";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
@@ -209,7 +210,16 @@ export function decideFromSnapshot(
 
   if (context.mcp?.server) {
     const allowlist = snapshot.settings.mcpAllowlist;
-    if (allowlist.enabled && !allowlist.servers.includes(context.mcp.server)) {
+    /*
+     * Routines is OpenBot's own, built in and always on for every Bot (plugins/personal-defaults.ts),
+     * not an outside server for the allowlist to approve. Holding it to the list would leave every
+     * Bot offered tools refused on every call, which nobody could remove.
+     */
+    if (
+      allowlist.enabled &&
+      !isAlwaysOn(context.mcp.server) &&
+      !allowlist.servers.includes(context.mcp.server)
+    ) {
       return refusal(
         "mcp_allowlist",
         `The MCP server "${context.mcp.server}" is not on this deployment's approved list, so ${context.mcp.tool} was not called.`,

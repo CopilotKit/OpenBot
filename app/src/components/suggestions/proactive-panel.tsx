@@ -200,7 +200,7 @@ export function ProactiveResearchSettings({
           </Button>
         ) : null
       }
-      description="On by default once you message just this Bot. It reads the apps it can use and tells you when something needs you, at most once an hour. It also forms memories for you to review. It can only read: it can't send messages, change anything in an app, or use a browser or computer. If you turn it off or remove it, it stays that way."
+      description="A Bot offers a check-in when you look at something together that keeps changing, like a document or your inbox. It reads that once a day, or as often as you choose, and tells you when something there needs you. It can only read: it can't send messages, change anything in an app, or use a browser or computer."
       title="Check-ins"
     >
       {blocked ? (
@@ -234,7 +234,7 @@ export function ProactiveResearchSettings({
             </Button>
           }
           icon={IconRadar}
-          title="Check-ins are off"
+          title="No check-ins yet"
         />
       ) : (
         <PageRows>
@@ -526,8 +526,11 @@ function SettingRow({
           <IconRadar />
         </ItemMedia>
         <ItemContent>
-          <ItemTitle>{botName}</ItemTitle>
-          <ItemDescription>{summary}</ItemDescription>
+          {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
+          <ItemTitle>{setting.subject || botName}</ItemTitle>
+          <ItemDescription>
+            {setting.subject ? `${botName} · ${summary}` : summary}
+          </ItemDescription>
           {last && (outcome === "skipped" || outcome === "failed") ? (
             <ItemDescription
               className={outcome === "failed" ? "text-destructive" : undefined}
@@ -550,7 +553,9 @@ function SettingRow({
           <DialogHeader>
             <DialogTitle>Check-ins</DialogTitle>
             <DialogDescription>
-              {setting.focus ? `${botName} · ${setting.focus}` : botName}
+              {[botName, setting.subject, setting.focus]
+                .filter(Boolean)
+                .join(" · ")}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">

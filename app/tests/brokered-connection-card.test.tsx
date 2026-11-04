@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { connectionKindFor } from "@/routes/_authed/admin/plugins/$key";
+import { connectionKindFor } from "@/components/manage/plugin-page";
 
 /**
  * Which shape the connector page draws, decided from the row rather than guessed.

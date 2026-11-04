@@ -42,10 +42,12 @@ function show(
   view: IndicatorView,
   choose: (recorded: boolean) => void = () => {},
   trusted = true,
+  stop: (save: boolean) => void = () => {},
 ) {
   const mark = showIndicator({
     view,
     choose,
+    stop,
     ...(trusted ? { isTrusted: () => true } : {}),
   });
   shown = mark;
@@ -79,7 +81,7 @@ test("a recorded tab says OpenBot is recording it, with one button that leaves i
   const mark = show(RECORDING, (recorded) => choices.push(recorded));
   expect(document.querySelector(INDICATOR_TAG)).toBe(mark.host);
   expect(text(mark)).toBe(
-    "OpenBot is recording this tab Don't record example.test",
+    "OpenBot is recording this tab Don't record example.test Stop",
   );
   expect(mark.root.querySelector("[role=status]")?.textContent).toContain(
     "OpenBot is recording this tab",
@@ -91,11 +93,11 @@ test("a recorded tab says OpenBot is recording it, with one button that leaves i
 test("while the Recorder hears the person, the mark says so", () => {
   const mark = show({ ...RECORDING, narrating: true });
   expect(text(mark)).toBe(
-    "OpenBot is recording this tab · Listening to you Don't record example.test",
+    "OpenBot is recording this tab · Listening to you Don't record example.test Stop",
   );
   mark.update({ ...RECORDING, narrating: false });
   expect(text(mark)).toBe(
-    "OpenBot is recording this tab Don't record example.test",
+    "OpenBot is recording this tab Don't record example.test Stop",
   );
 });
 
@@ -110,17 +112,80 @@ test("a site left out says it is not recorded, and its button records it again",
   // The same mark turns back when the background says the site is recorded again.
   mark.update(RECORDING);
   expect(text(mark)).toBe(
-    "OpenBot is recording this tab Don't record example.test",
+    "OpenBot is recording this tab Don't record example.test Stop",
   );
   buttonOf(mark).click();
   expect(choices).toEqual([true, false]);
 });
 
+const actionOf = (mark: Shown, action: string) =>
+  mark.root.querySelector(`[data-action=${action}]`) as HTMLButtonElement;
+
+test("Stop on the mark asks whether to save the recording, and Save or Discard answers it once", () => {
+  for (const [answer, save] of [
+    ["save", true],
+    ["discard", false],
+  ] as const) {
+    const stops: boolean[] = [];
+    const mark = show(
+      RECORDING,
+      () => {},
+      true,
+      (saved) => stops.push(saved),
+    );
+    actionOf(mark, "stop").click();
+    expect(text(mark)).toBe("Save this recording? Save Discard Keep recording");
+    // Asked, not stopped: nothing ends until the person answers.
+    expect(stops).toEqual([]);
+    actionOf(mark, answer).click();
+    expect(stops).toEqual([save]);
+    // One answer: a second click while the recording ends sends nothing more.
+    actionOf(mark, "save").click();
+    actionOf(mark, "discard").click();
+    expect(stops).toEqual([save]);
+    mark.remove();
+  }
+});
+
+test("Keep recording takes the question away, and the mark is as it was", () => {
+  const stops: boolean[] = [];
+  const mark = show(
+    RECORDING,
+    () => {},
+    true,
+    (saved) => stops.push(saved),
+  );
+  actionOf(mark, "stop").click();
+  actionOf(mark, "back").click();
+  expect(text(mark)).toBe(
+    "OpenBot is recording this tab Don't record example.test Stop",
+  );
+  expect(stops).toEqual([]);
+});
+
+test("a site left out has no Stop: nothing there is being recorded", () => {
+  const mark = show({ site: "example.test", excluded: true });
+  expect(actionOf(mark, "stop").hidden).toBe(true);
+});
+
 test("a page script clicking the mark does nothing", () => {
   const choices: boolean[] = [];
-  const mark = show(RECORDING, (recorded) => choices.push(recorded), false);
+  const stops: boolean[] = [];
+  const mark = show(
+    RECORDING,
+    (recorded) => choices.push(recorded),
+    false,
+    (saved) => stops.push(saved),
+  );
   buttonOf(mark).click();
   expect(choices).toEqual([]);
+  // Nor can it stop the recording, or answer for the person.
+  actionOf(mark, "stop").click();
+  expect(text(mark)).toBe(
+    "OpenBot is recording this tab Don't record example.test Stop",
+  );
+  actionOf(mark, "discard").click();
+  expect(stops).toEqual([]);
 });
 
 test("a click on the mark is never one of the person's steps", () => {
@@ -414,6 +479,7 @@ test("the shown mark takes the spot the page leaves clear, hangs from that edge,
     const mark = showIndicator({
       view: RECORDING,
       choose: () => {},
+      stop: () => {},
       isTrusted: () => true,
       under: (x, y) => pageOf(usable)(x, y),
       timers: { set: (fn) => looks.push(fn), clear: () => {} },

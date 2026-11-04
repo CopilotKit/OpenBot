@@ -10,6 +10,7 @@ import { agentQueryOptions } from "@/lib/agents/queries";
 import { type AppAccess, botAppQueryOptions } from "@/lib/app-access/queries";
 import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { ConnectAppCard } from "./connect-app-card";
 
 /**
@@ -79,6 +80,8 @@ function LiveAppAccessCard({
   const name = access?.displayName ?? prompt.title;
   // Only asked for by "Let Research Bot use your Gmail?", the one sentence that names the Bot.
   const bot = useQuery(agentQueryOptions(agentId)).data?.name;
+  const edition =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   const { carried, offer } = useCarryOn({
     place,
     ready: access ? access.state === "ready" : null,
@@ -114,12 +117,12 @@ function LiveAppAccessCard({
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
-                ? refusedSentence(access, prompt, bot)
+                ? refusedSentence(access, prompt, bot, edition)
                 : carried || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`
-                    : refusedSentence(access, prompt, bot)}
+                    : refusedSentence(access, prompt, bot, edition)}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
@@ -184,7 +187,8 @@ function asRefused(live: AppAccess, prompt: ConnectPrompt): AppAccess {
 function refusedSentence(
   access: AppAccess,
   prompt: ConnectPrompt,
-  bot?: string,
+  bot: string | undefined,
+  edition: "team" | "personal",
 ): string {
   if (
     access.state === "shared_not_connected" &&
@@ -192,5 +196,5 @@ function refusedSentence(
     !access.requestKind
   )
     return `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
-  return appAccessSentence(access, bot);
+  return appAccessSentence(access, bot, edition);
 }

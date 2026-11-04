@@ -342,6 +342,11 @@ export async function readTaskStates(
   ) => {
     const entry = entryOfChannel(channelId);
     if (!entry) return;
+    /*
+     * Marked done after it was asked: the person is done with the task, so what it waited on then
+     * no longer holds it open, as the turns accepted by then no longer do. A later ask reopens it.
+     */
+    if (entry.resolvedAt && at <= entry.resolvedAt) return;
     entry.needsInput = true;
     const known = waitingFor.get(entry);
     if (!known || at > known.at) waitingFor.set(entry, { at, line });

@@ -5,6 +5,7 @@ import {
   type BrowserOpenResponse,
   type BrowserTabsRequest,
   browserApiPaths,
+  type RealBrowser,
   type RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
@@ -25,43 +26,100 @@ function invalidateBrowser(queryClient: QueryClient) {
  */
 export function openBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (): Promise<
-      BrowserOpenResponse | RealBrowserOpenResponse
-    > =>
-      (
-        await client(browserApiPaths.open, {
-          method: "POST",
-          fallback: "Couldn't open your browser. Try again.",
-        })
-      ).json(),
+    mutationFn: openBrowser,
     onSuccess: () => invalidateBrowser(queryClient),
   });
+}
+
+async function openBrowser(): Promise<
+  BrowserOpenResponse | RealBrowserOpenResponse
+> {
+  return (
+    await client(browserApiPaths.open, {
+      method: "POST",
+      fallback: "Couldn't open your browser. Try again.",
+    })
+  ).json();
+}
+
+export type BrowserRecordingStart = {
+  title: string;
+  language?: string;
+  /** Whether the person narrates this recording, as they chose: the Recorder opens a microphone only when true. */
+  narrate?: boolean;
+};
+
+async function startBrowserRecording(
+  variables: BrowserRecordingStart,
+): Promise<BrowserApiState> {
+  return (
+    await client(browserApiPaths.recording, {
+      method: "POST",
+      body: {
+        action: "start",
+        title: variables.title,
+        ...(variables.language ? { language: variables.language } : {}),
+        ...(variables.narrate !== undefined
+          ? { narrate: variables.narrate }
+          : {}),
+      },
+      fallback: "Couldn't start recording. Try again.",
+    })
+  ).json();
 }
 
 /** Starts recording the tab the person is on, named for the task. `language` is the one narration is heard in. */
 export function startBrowserRecordingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (variables: {
-      title: string;
-      language?: string;
-      /** Whether the person narrates this recording, as they chose: the Recorder opens a microphone only when true. */
-      narrate?: boolean;
-    }): Promise<BrowserApiState> =>
-      (
-        await client(browserApiPaths.recording, {
-          method: "POST",
-          body: {
-            action: "start",
-            title: variables.title,
-            ...(variables.language ? { language: variables.language } : {}),
-            ...(variables.narrate !== undefined
-              ? { narrate: variables.narrate }
-              : {}),
-          },
-          fallback: "Couldn't start recording. Try again.",
-        })
-      ).json(),
+    mutationFn: startBrowserRecording,
     onSuccess: () => invalidateBrowser(queryClient),
+  });
+}
+
+const REAL_BROWSER_NAMES: Record<RealBrowser, string> = {
+  chrome: "Google Chrome",
+  msedge: "Microsoft Edge",
+};
+
+/**
+ * What the person is told when Open put the Recorder's page in the store of their own browser, rather than opening a
+ * browser with the Recorder in it: the page is there, in the browser named, and adding it is what lets them record in
+ * that browser.
+ */
+export function storeOpenedSentence(browser: RealBrowser): string {
+  return `The OpenBot Recorder's page is open in ${REAL_BROWSER_NAMES[browser]}. Add it there to record in your own browser.`;
+}
+
+/** What the person is told when Start recording found their own everyday browser rather than the one OpenBot opens:
+ * OpenBot cannot start the Recorder there, so they start it with its own button. */
+export const RECORD_THERE =
+  "Your browser is open. Start recording with the Recorder's button in its toolbar.";
+
+/**
+ * Start recording on OpenBot Desktop: opens the person's browser as a window on their desktop, or brings it forward,
+ * and starts recording in it, so the person is doing the task as soon as the window is in front of them. Open answers
+ * once the Recorder in it is connected, so the start that follows finds it ready.
+ *
+ * Where Open brought forward the person's own everyday Chrome or Edge instead (`opened`), OpenBot cannot start the
+ * Recorder in it: the person is told to press its button there.
+ */
+export function openAndStartBrowserRecordingMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (
+      variables: BrowserRecordingStart,
+    ): Promise<BrowserApiState> => {
+      const opened = await openBrowser();
+      if ("opened" in opened)
+        throw new Error(
+          opened.opened === "store"
+            ? storeOpenedSentence(opened.browser)
+            : RECORD_THERE,
+        );
+      return startBrowserRecording(variables);
+    },
+    onSettled: () => invalidateBrowser(queryClient),
   });
 }
 

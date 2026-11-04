@@ -12,6 +12,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - OpenBot's product run counts no longer include the run the CopilotKit runtime makes to name each new conversation, or its suggestion runs: only work a person, routine, subagent or hop started is counted. A subagent's runs now report the surface of the run that started it instead of `unknown`.
 - A headless turn or a Bot-to-Bot hop that OpenBot stops (a cancel, a pause, the turn's deadline) is recorded with Intelligence as stopped before its run ends, so Intelligence reports it as cancelled rather than finished. This takes a CopilotKit runtime that can record a stop; on `@copilotkit/runtime` 1.83.0 nothing is recorded and stops work as before. A paused hop now waits for its run to close on the platform before it gives up, where it used to leave that run without an end.
 - With product telemetry on, each run now also tells Intelligence which OpenBot deployment, scoped user, trigger, surface and task it belongs to, as the shared analytics context (version 1) on the run's thread lock. It reaches Intelligence once OpenBot runs a CopilotKit runtime that forwards it; `@copilotkit/runtime` 1.83.0 drops it. With telemetry off nothing is sent, and a value a browser sent under the same key is removed.
+- The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
+  CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
+  instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;
+  sign-in itself is unchanged, and an older hosted page ignores the mode.
 - Choosing Anthropic in the Desktop setup screen, or setting `BOT_PROVIDER=anthropic` without a `BOT_MODEL`, now runs `claude-sonnet-5-5` instead of `claude-sonnet-4-5`, which Anthropic retires on 2026-11-30. A deployment that pins `BOT_MODEL` is unaffected.
 - Code and markdown in a Bot's interface are drawn the way a reply draws them: highlighted in the light and dark themes, with the same copy and download buttons, tables and Doc links. They were plain monospace before, and nearly unreadable in dark mode.
 - The Computer panel's Activity lists every command the Bot runs and every file it reads, saves or lists, with what it printed, whether the step ran at once, after you allowed it, or before the page was opened. It had stayed empty for anything that went through approval. A step that was not done shows why in your words ("You declined it."), not the sentence the Bot is told, and the line in the conversation says the same. A command you decline on the Bot's own approval card is listed too. A step you did yourself shows as done by you. A step shows the time it ran only when the page saw it run, never the time the page was opened. Resetting a computer from Admin clears the Activity of every Bot that ran on it, and a reload or another tab no longer brings it back.
@@ -24,7 +28,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
 
-**Before upgrading.** Twenty things change for an existing deployment:
+**Before upgrading.** Twenty-two things change for an existing deployment:
+- Check-ins are asked for, not switched on. A Bot no longer turns on an hourly check-in the first
+  time you talk to it alone. Instead, after it reads something that keeps changing (a document, your
+  inbox), it offers a check-in on that one thing, with Turn on and Not now, daily unless you pick
+  more often. A Bot can now watch several things, each listed by name on its check-ins. Migration
+  `0075_individual_check_ins` adds `proactive_settings.subject` and `source_link` and lets a Bot hold
+  more than one check-in. Check-ins that already exist keep running. Set
+  `OPENBOT_PROACTIVE_DEFAULTS=true` to keep switching them on as before.
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -114,6 +125,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
+- Routines is now always on. At start, OpenBot adds the Routines app if it is missing and gives
+  its tools to every Bot, including Bots made later. It can no longer be removed, and a Bot's
+  Routines tools can no longer be taken away.
+
+### A personal edition for one person on one computer
+
+Set `OPENBOT_EDITION=personal`, with single-user mode and one computer, for an OpenBot without the
+team features. It starts with one Personal Assistant and asks before acting by default. Connections
+is the one place for apps, saved logins and keys, and every Bot can use every app you connect.
+Admin is replaced by a short list of what OpenBot for Business adds. See `docs/personal-edition.md`.
+Deployments that do not set it behave as before.
+
+`scripts/start.sh` starts your own browser in the personal edition: your installed Chrome or Edge,
+as a window on your desktop with the Recorder in it, as OpenBot Desktop does for the team edition.
+**Teach a Bot** in the sidebar takes you to the page where Open opens it. `scripts/stop.sh` stops it.
+
+The sidebar's **Browser** button is now **Teach a Bot**, in every edition. It always takes you to
+its page, and a browser that opens as a window on your desktop opens only when you press Open
+there. The popover that recorded in the browser OpenBot is open in is gone: record with the
+Recorder's own button in that browser.
+
+You can also record a task in a Bot's browser in the personal edition: take control of its screen and
+press Record. Its one computer carries only your Bots, so `scripts/start.sh` starts it as yours
+(`COMPUTER_PERSON_ID`), and the server allows Record there. Every other OpenBot whose Bots share one
+computer still refuses it.
 
 ### A responsibility hears about large pull requests
 
@@ -341,6 +377,20 @@ or, for routines, their stored Microsoft sign-in. Apps listed in `MICROSOFT_OAUT
 can also call OpenBot's API with a person's Entra token; a token issued to any other app is refused.
 Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
+
+### Shopify and other Composio apps on a server-to-server grant can be connected
+
+Composio publishes some apps, Shopify among them, with only `OAUTH2` and `S2S_OAUTH2` and nothing
+it manages, so they were hidden from the picker and refused at enable. Set
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` (for Shopify,
+`COMPOSIO_SHOPIFY_CLIENT_ID` and `COMPOSIO_SHOPIFY_CLIENT_SECRET`) to the OAuth client you
+registered with the vendor, and the app can be enabled and connected: Composio exchanges that client
+for the token, and the connect form asks only for what the connection needs, such as the store
+subdomain. Because the credential is the deployment's, such an app connects only as one shared
+account: an administrator makes it shared, connects it and grants it to Bots, and a personal
+Connect is refused and not offered. The client is saved on the app's config at Composio when it is
+enabled; see [rotating the client](docs/configuration.md#rotating-a-composio-apps-own-client).
+Unset, nothing changes.
 
 ### A Bot sees the images its tools return
 

@@ -6,6 +6,7 @@ import { generativeUiProviderOptions } from "./a2ui";
 import { ActiveBotProvider } from "./active-bot";
 import { BotOffers } from "./bot-offer";
 import { BotTools } from "./bot-tools";
+import { CheckInOfferTool } from "./check-in-offer-tool";
 import { CodingTools } from "./coding-tools";
 import { ComputerTools } from "./computer-tools";
 import { EscalationTool } from "./escalation-tool";
@@ -73,6 +74,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         {/* A Bot's own subtasks: their steps as they happen, then their answers. Runs on the server. */}
         <SubagentTool />
         <EscalationTool />
+        {/* A Bot offering a check-in on what the two of them just looked at. Runs on the server. */}
+        <CheckInOfferTool />
         {/* A coding harness Bot's own tools, which it runs itself: commands, diffs and its plan. */}
         <CodingTools />
         {/* Gallery tools are registered once; their handlers ask about the Bot that made the call (see botOfCall). */}
