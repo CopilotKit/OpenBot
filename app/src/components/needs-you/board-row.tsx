@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils";
  * One row of the Needs you board, whatever it holds: a question, an action to allow, a task, or
  * something a check-in found. One shape for all of them, so the board reads as one list.
  *
- * An icon in a small square (tinted where a Bot is stopped on the person), the title, one line of
- * detail that opens on a click, a quiet line of where and when, and the row's actions on the right.
- * `more` is what opens under the row: the rest of an approval, an answer box.
+ * An icon in a small square (tinted where a Bot is stopped on the person), the title and one line
+ * of detail, each cut to a line until the row is opened with a click, a quiet line of where and
+ * when, and the row's actions on the right. `more` is what opens under the row; `onSelect` opens
+ * something else instead (a question's answer dialog).
  */
 export function BoardRow({
   icon,
@@ -19,6 +20,7 @@ export function BoardRow({
   more,
   open: openFromParent,
   wholeDetail = false,
+  onSelect,
 }: {
   icon: ReactNode;
   /** A Bot is stopped on this: the icon's square is tinted. */
@@ -37,10 +39,12 @@ export function BoardRow({
    * long, and broken anywhere rather than run off the row.
    */
   wholeDetail?: boolean;
+  /** A click on the text does this instead of opening the row in place. */
+  onSelect?: () => void;
 }) {
   const [opened, setOpened] = useState(false);
   const open = opened || openFromParent === true;
-  const opens = Boolean((detail && !wholeDetail) || more);
+  const opens = Boolean(onSelect || (detail && !wholeDetail) || more || title);
   const shownMeta = meta.filter(Boolean);
   return (
     <div className="flex flex-col gap-2 px-3.5 py-3" data-slot="item">
@@ -59,7 +63,7 @@ export function BoardRow({
             <button
               aria-expanded={open}
               className="block w-full min-w-0 cursor-pointer text-left"
-              onClick={() => setOpened(!opened)}
+              onClick={() => (onSelect ? onSelect() : setOpened(!opened))}
               type="button"
             >
               <RowText
@@ -112,7 +116,10 @@ function RowText({
   return (
     <>
       <span
-        className="block font-medium text-sm leading-snug"
+        className={cn(
+          "block font-medium text-sm leading-snug",
+          open ? "line-clamp-none" : "line-clamp-1",
+        )}
         data-slot="item-title"
       >
         {title}

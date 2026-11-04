@@ -11,6 +11,15 @@ import { PageRows } from "@/components/layout/page-shell";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -240,58 +249,104 @@ export function useWaitingByBot(agentId: string | undefined) {
   return { error: waiting.error, byBot };
 }
 
-/** A question on the board: one line, and Answer opens the box to reply in under it. */
+/**
+ * A question on the board: one line, and Answer (or a click on it) opens a dialog with the whole
+ * question, why the Bot stopped, and the box to answer in. A question can run to a paragraph, and a
+ * dialog gives it room without stretching the list.
+ */
 function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   const [answering, setAnswering] = useState(false);
-  const [text, setText] = useState("");
-  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   return (
-    <BoardRow
-      actions={
-        answering ? null : (
+    <>
+      <BoardRow
+        actions={
           <Button onClick={() => setAnswering(true)} size="sm">
             Answer
           </Button>
-        )
-      }
-      detail={question.why}
-      icon={<IconMessageQuestion />}
-      more={
-        <div className="flex flex-col items-start gap-2">
+        }
+        detail={question.why}
+        icon={<IconMessageQuestion />}
+        onSelect={() => setAnswering(true)}
+        title={question.question}
+        waiting
+      />
+      <AnswerDialog
+        onOpenChange={setAnswering}
+        open={answering}
+        question={question}
+      />
+    </>
+  );
+}
+
+function AnswerDialog({
+  question,
+  open,
+  onOpenChange,
+}: {
+  question: WaitingQuestion;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [text, setText] = useState("");
+  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
+  const agents = useQuery(agentListQueryOptions());
+  const asker = question.conversationBotId ?? question.botId;
+  const name =
+    agents.data?.find((agent) => agent.id === asker)?.name ?? "Your Bot";
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{name} asks</DialogTitle>
+          <DialogDescription>
+            It stopped until you answer, and carries on with what you say.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-3">
+          <p className="whitespace-pre-wrap text-sm">{question.question}</p>
+          {question.why ? (
+            <p className="whitespace-pre-wrap text-muted-foreground text-sm">
+              {question.why}
+            </p>
+          ) : null}
           <Textarea
             aria-label="Your answer"
             autoFocus
             onChange={(event) => setText(event.target.value)}
             placeholder="Your answer"
+            rows={4}
             value={text}
           />
-          <div className="flex gap-1.5">
-            <Button
-              disabled={answer.isPending || !text.trim()}
-              onClick={() => answer.mutate({ id: question.id, response: text })}
-              size="sm"
-            >
-              {answer.isPending ? "Sending…" : "Send answer"}
-            </Button>
-            <Button
-              onClick={() => setAnswering(false)}
-              size="sm"
-              variant="ghost"
-            >
-              Cancel
-            </Button>
-          </div>
           {answer.error ? (
             <p className="text-destructive text-sm" role="alert">
               {answer.error.message}
             </p>
           ) : null}
-        </div>
-      }
-      open={answering}
-      title={question.question}
-      waiting
-    />
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            onClick={() => onOpenChange(false)}
+            size="sm"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            disabled={answer.isPending || !text.trim()}
+            onClick={() =>
+              answer.mutate(
+                { id: question.id, response: text },
+                { onSuccess: () => onOpenChange(false) },
+              )
+            }
+            size="sm"
+          >
+            {answer.isPending ? "Sending…" : "Send answer"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

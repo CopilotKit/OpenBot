@@ -1,7 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
@@ -156,9 +162,6 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
   // Always allow here waits in the row's menu.
   expect(view.getByRole("button", { name: /^More for / })).toBeTruthy();
   expect(view.getByRole("button", { name: "Deny" })).toBeTruthy();
-  // A question opens its answer box on Answer.
-  fireEvent.click(view.getByRole("button", { name: "Answer" }));
-  expect(view.getByRole("button", { name: "Send answer" })).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Allow" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
@@ -167,6 +170,13 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
       body: { decision: "allow_once" },
     }),
   );
+  // A question is answered in a dialog with the whole question in it.
+  fireEvent.click(view.getByRole("button", { name: "Answer" }));
+  const dialog = await view.findByRole("dialog");
+  expect(within(dialog).getByText("Which card?")).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", { name: "Send answer" }),
+  ).toBeTruthy();
 });
 
 test("a hand-off is marked done by the person, never allowed on their behalf", async () => {
