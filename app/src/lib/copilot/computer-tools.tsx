@@ -738,8 +738,9 @@ export function ComputerTools() {
       "truncated from the start, and a command that runs too long is stopped. " +
       "For package installation, check `id -u` first. As root (0), use " +
       "`apt-get update && apt-get install -y <package>` directly; otherwise use " +
-      "`sudo apt-get update && sudo apt-get install -y <package>`. If installation is refused, " +
-      "say so rather than retrying.",
+      "`sudo openbot-apt update && sudo openbot-apt install <package>`, which takes package " +
+      "names and nothing else, not `sudo apt-get`. If installation is refused, say so rather " +
+      "than retrying.",
     parameters: z.object({
       command: z
         .string()
