@@ -160,10 +160,11 @@ function BotGroup({
   const name = bot?.name ?? "Your Bot";
   return (
     <div
-      className="overflow-hidden rounded-xl border border-border"
+      // The page's own card: white on the off-white page, borderless in the dark, as PageRows is.
+      className="overflow-hidden rounded-lg border border-border bg-card dark:border-transparent"
       data-needs-you-bot={botId}
     >
-      <div className="flex items-center gap-2.5 border-border border-b bg-muted/60 px-3.5 py-2.5">
+      <div className="flex items-center gap-2.5 border-border border-b bg-muted px-3.5 py-2.5">
         <BotOrb name={name} seed={bot?.avatarSeed || botId} size={22} />
         <span className="font-semibold text-[13px]">{name}</span>
         <span className="truncate text-muted-foreground text-xs">· {note}</span>
@@ -172,7 +173,8 @@ function BotGroup({
         {children.map((row, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: rows carry their own keys inside.
           <Fragment key={index}>
-            {index > 0 ? <Separator /> : null}
+            {/* Short of each edge, lined up with the rows' text, as PageRows draws them. */}
+            {index > 0 ? <Separator className="mx-4 w-auto" /> : null}
             {row}
           </Fragment>
         ))}
@@ -210,7 +212,7 @@ function FoundGroup({
   if (folded)
     rows.push(
       <button
-        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-[13px] hover:bg-muted/50"
+        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-[13px] hover:bg-muted"
         key="more"
         onClick={() => setExpanded(true)}
         type="button"

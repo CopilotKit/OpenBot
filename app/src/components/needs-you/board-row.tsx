@@ -48,7 +48,8 @@ export function BoardRow({
         <span
           className={cn(
             "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-[13px] [&_svg]:size-4",
-            waiting && "border-amber-500/40 bg-amber-500/15",
+            waiting &&
+              "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950",
           )}
         >
           {icon}
