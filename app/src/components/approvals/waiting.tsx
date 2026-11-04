@@ -310,16 +310,16 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   );
 }
 
-/**
- * Answering a Bot's question, laid out as a reply: who asked and when, the question itself as the
- * heading with the Bot's reason under it, and one box to answer in with Send in its corner. ⌘↵ or
- * Ctrl↵ sends; Escape or the close button puts it away with nothing sent.
- */
 /** Whether the send shortcut is ⌘ or Ctrl, as the person's keyboard says it. */
 const MAC =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/.test(navigator.platform);
 
+/**
+ * Answering a Bot's question, laid out as a reply: who asked and when, the question itself as the
+ * heading with the Bot's reason under it, and one box to answer in with Send in its corner. ⌘↵ or
+ * Ctrl↵ sends; Escape or the close button puts it away with nothing sent.
+ */
 function AnswerDialog({
   question,
   open,
@@ -382,15 +382,24 @@ function AnswerDialog({
             value={text}
           />
           <InputGroupAddon align="block-end">
-            <InputGroupText className="text-xs">
-              {answer.error ? (
-                <span className="text-destructive" role="alert">
-                  {answer.error.message}
-                </span>
-              ) : (
-                `${MAC ? "⌘" : "Ctrl"}↵ to send`
-              )}
-            </InputGroupText>
+            {answer.error ? (
+              <InputGroupText className="text-destructive text-xs" role="alert">
+                {answer.error.message}
+              </InputGroupText>
+            ) : (
+              <InputGroupText className="gap-1 font-normal text-xs">
+                {/* Keys drawn as the Settings shortcuts are, so the glyphs sit centred on the row. */}
+                {[MAC ? "⌘" : "Ctrl", "↵"].map((key) => (
+                  <kbd
+                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-md border bg-muted px-1 font-sans text-[11px] text-muted-foreground leading-none"
+                    key={key}
+                  >
+                    {key}
+                  </kbd>
+                ))}
+                <span className="ml-0.5">to send</span>
+              </InputGroupText>
+            )}
             <InputGroupButton
               className="ml-auto"
               disabled={!ready}
