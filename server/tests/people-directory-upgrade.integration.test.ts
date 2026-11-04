@@ -11,15 +11,16 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq, inArray, sql } from "drizzle-orm";
+import { registerScimConnection } from "../src/auth/scim";
 import { createDatabase } from "../src/db/client";
 import {
   directoryRemovalReactions,
   identityLinks,
   intelligenceCopies,
+  revokedAccess,
   scimGroupMembers,
   scimGroups,
   scimUsers,
-  revokedAccess,
   ssoProviders,
   userRoles,
   users,
@@ -33,7 +34,6 @@ import {
   copyLocalPeopleToIntelligence,
   PEOPLE_COPY_NAME,
 } from "../src/people/directory/upgrade";
-import { registerScimConnection } from "../src/auth/scim";
 import { secondTestProject, testIntelligence } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { uniqueEmail } from "./support/directory";
@@ -184,12 +184,16 @@ async function seedPreviousRelease() {
     membershipKey: `directory:${scimGroupId}:${scimUserId}`,
     createdAt: new Date("2026-09-03T08:00:00Z"),
   });
-  // The migration's own backfill, as a deployment runs it.
+  // The migration's own role backfill, as a deployment runs it.
   const migration = readFileSync(
-    join(import.meta.dir, "..", "drizzle", "0076_people_in_intelligence.sql"),
+    join(import.meta.dir, "..", "drizzle", "0076_data_in_intelligence.sql"),
     "utf8",
   );
-  const backfill = migration.slice(migration.indexOf("UPDATE"));
+  const start = migration.indexOf('UPDATE "users"');
+  const backfill = migration.slice(
+    start,
+    migration.indexOf("--> statement-breakpoint", start),
+  );
   await database.execute(sql.raw(backfill));
 }
 
