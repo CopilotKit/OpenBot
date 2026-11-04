@@ -837,6 +837,8 @@ function Setup() {
             setSteps([]);
             setStep("connect");
             local.start();
+            // A Start the previous model was refused at stopped there: try it again with this one.
+            if (local.stopped && local.at === "start") local.retry();
           }}
           // A first run has nothing behind this screen to go back to.
           onBack={
