@@ -61,7 +61,7 @@ function Entry({ entry }: { entry: ComputerActivity }) {
           }`}
         />
         <span className="shrink-0 text-muted-foreground text-xs">
-          {LABELS[entry.kind]}
+          {entry.declined === true ? "Declined" : LABELS[entry.kind]}
         </span>
         {/*
           The command wraps rather than truncating. In the transcript one line per call is what keeps
