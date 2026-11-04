@@ -248,10 +248,6 @@ export type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
 const WHAT_IT_RECORDS =
   "The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out.";
 
-/** What Record does, said before it is pressed: everything a recording holds, as the disclosure says it. */
-export const RECORDING_DESCRIPTION =
-  "Do the task in your browser as you always would. The Recorder records every tab you use until you stop, and each tab shows that it is: the pages and what is on them, your clicks and typing, what each step saves, AI assistant conversations, and your narration when it's on. Passwords, card numbers, email addresses and tokens are masked first.";
-
 /** What a saved recording held: its actions, and its narrated phrases when there were any. */
 function heldIn(stopped: Stopped): string {
   return stopped.phrases > 0

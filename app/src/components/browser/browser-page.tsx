@@ -5,27 +5,14 @@ import type {
 } from "@openbot/shared/openbot-browser";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import {
-  PageEmpty,
-  PageRows,
-  PageSection,
-  PageShell,
-} from "@/components/layout/page-shell";
+import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
 import { ScreenBrowser } from "./browser-screen";
-import { NativeNarrationRow } from "./narration";
-import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
-import {
-  RECORDING_DESCRIPTION,
-  RecordingRow,
-  StoppedRow,
-  useRecording,
-} from "./recording";
+import { TeachSteps } from "./teach-steps";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
@@ -126,53 +113,14 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
 
 /**
  * THE PERSON'S BROWSER AS A WINDOW ON THEIR DESKTOP (OpenBot Desktop): their own Chrome, or Edge, in a profile of its
- * own. The person names the task, chooses whether to narrate, and presses Start recording: their browser opens, or
- * comes forward, already recording. They stop in the browser, from the Recorder's mark at the top of each page, which
- * asks whether to save the recording, or here with Stop, which saves it.
+ * own. The page walks the person through it in three steps (`TeachSteps`): what it does, naming the task, and opening
+ * the browser already recording. They stop in the browser, from the Recorder's mark at the top of each page, which asks
+ * whether to save the recording, or here with Stop, which saves it.
  */
 function NativeBrowser({ state }: { state: BrowserApiState }) {
-  const choice = useNarrationChoice();
-  const recording = useRecording(state, choice, {}, { opens: true });
-  const show = useMutation(openBrowserMutationOptions(queryClient));
-  const error = state.problem ?? (show.error ?? recording.error)?.message;
   return (
-    <PageShell title={TITLE} description={DESCRIPTION}>
-      <PageSection title="Record a task" description={RECORDING_DESCRIPTION}>
-        <PageRows>
-          <RecordingRow
-            recording={recording}
-            recordLabel="Start recording"
-            whileRecording={
-              <Button
-                disabled={show.isPending}
-                onClick={() => show.mutate()}
-                size="sm"
-                variant="outline"
-              >
-                Show browser
-              </Button>
-            }
-          />
-          <Separator />
-          <NativeNarrationRow
-            voice={state.recorder?.voice}
-            choice={choice}
-            recording={recording.phase !== "idle"}
-          />
-          {recording.stopped ? (
-            <>
-              <Separator />
-              <StoppedRow stopped={recording.stopped} />
-            </>
-          ) : null}
-        </PageRows>
-        {error ? (
-          <p className="mt-2 text-destructive text-sm" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </PageSection>
-      <NarrationChoiceDialog {...recording.question} />
+    <PageShell title={TITLE}>
+      <TeachSteps state={state} />
     </PageShell>
   );
 }
