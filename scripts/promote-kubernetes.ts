@@ -10,14 +10,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { isMap, isScalar, isSeq, parseAllDocuments } from "yaml";
+import { isMap, isScalar, isSeq, parse, parseAllDocuments } from "yaml";
 import {
   parseReleaseManifest,
   planUpgrade,
   type ReleaseManifest,
   type UpgradePolicy,
 } from "../shared/release-manifest";
-import { atomicJson, type CommandRunner, runCommand } from "./update-local";
+import {
+  atomicJson,
+  type CommandRunner,
+  RELEASE_FROM_INSIDE,
+  runCommand,
+} from "./update-local";
 
 export interface KubernetesPromotionOptions {
   current: ReleaseManifest;
@@ -70,6 +75,7 @@ interface PromotionJournal {
     | "promoting"
     | "verifying"
     | "accepted"
+    | "failed"
     | "recovery-required";
   fromVersion: string;
   toVersion: string;
@@ -78,6 +84,8 @@ interface PromotionJournal {
   backupReference: string;
   databaseMayHaveChanged: boolean;
   previousReplicas?: number;
+  /** Every release CronJob as it was before quiescing. Only those with `wasSuspended: false` were
+   * suspended by this operation, and only those are put back. */
   pausedCronJobs?: { name: string; wasSuspended: boolean }[];
   error?: string;
   recovery: string;
@@ -108,11 +116,14 @@ function imageParts(reference: string) {
 async function requireRenderedMigration(
   options: KubernetesPromotionOptions,
   values: PromotionValues,
+  previousValues: Record<string, unknown> | undefined,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "openbot-migration-preflight-"));
   try {
     const file = join(directory, "release-values.json");
     atomicJson(file, values);
+    const previous = join(directory, "previous-values.json");
+    if (previousValues) atomicJson(previous, previousValues);
     const rendered = await (options.run ?? runCommand)(
       [
         "helm",
@@ -122,6 +133,7 @@ async function requireRenderedMigration(
         "--namespace",
         options.namespace,
         "--is-upgrade",
+        ...(previousValues ? ["--values", previous] : []),
         ...options.customerValues.flatMap((path) => [
           "--values",
           resolve(path),
@@ -131,7 +143,10 @@ async function requireRenderedMigration(
       ],
       { cwd: directory, timeoutMs: (options.timeoutSeconds ?? 300) * 1000 },
     );
-    const expected = imageParts(selectedImage(options.candidate));
+    const expected = {
+      repository: values.image.repository,
+      digest: values.image.digest,
+    };
     const guarded = parseAllDocuments(rendered).some((document) => {
       if (document.errors.length)
         throw new Error(
@@ -195,8 +210,42 @@ async function requireRenderedMigration(
     rmSync(directory, { recursive: true, force: true });
   }
 }
+/** The image repository the customer chose, if any: a registry mirror set in a values file, or
+ * one set at install (`--set`) that `helm get values` still reports. A repository the previous
+ * promotion pinned from the accepted manifest is this tool's own choice, not the customer's. The
+ * digest stays pinned whichever registry serves it, so a mirror cannot change the bytes. */
+function customerRepository(
+  options: KubernetesPromotionOptions,
+  current: ReleaseManifest,
+  previousValues: Record<string, unknown> | undefined,
+) {
+  const repositoryOf = (values: unknown) => {
+    const image =
+      values && typeof values === "object"
+        ? (values as { image?: unknown }).image
+        : undefined;
+    const repository =
+      image && typeof image === "object"
+        ? (image as { repository?: unknown }).repository
+        : undefined;
+    return typeof repository === "string" && repository.trim()
+      ? repository.trim()
+      : undefined;
+  };
+  let chosen = repositoryOf(previousValues);
+  if (chosen === imageParts(selectedImage(current)).repository)
+    chosen = undefined;
+  for (const path of options.customerValues) {
+    const value = repositoryOf(parse(readFileSync(path, "utf8")));
+    if (value) chosen = value;
+  }
+  return chosen;
+}
+/** `previousValues` is what `helm get values` reports for the live release. Plan and check read no
+ * cluster state, so they leave it out; apply reads it first and plans with it. */
 export async function planKubernetesPromotion(
   options: KubernetesPromotionOptions,
+  previousValues?: Record<string, unknown>,
 ) {
   const current = parseReleaseManifest(options.current);
   const candidate = parseReleaseManifest(options.candidate);
@@ -216,9 +265,14 @@ export async function planKubernetesPromotion(
   );
   const reasons = [...common.reasons];
   let image = { repository: "", tag: candidate.version, digest: "" };
+  let mirror: string | undefined;
   try {
     image = { ...imageParts(selectedImage(candidate)), tag: candidate.version };
     selectedImage(current);
+    if (options.customerValues.every((path) => existsSync(path))) {
+      mirror = customerRepository(options, current, previousValues);
+      if (mirror) image.repository = mirror;
+    }
   } catch (error) {
     reasons.push(error instanceof Error ? error.message : String(error));
   }
@@ -278,12 +332,12 @@ export async function planKubernetesPromotion(
     current.compatibility.database.to !== candidate.compatibility.database.to
   ) {
     try {
-      await requireRenderedMigration(options, values);
+      await requireRenderedMigration(options, values, previousValues);
     } catch (error) {
       reasons.push(error instanceof Error ? error.message : String(error));
     }
   }
-  return { ...common, allowed: reasons.length === 0, reasons, values };
+  return { ...common, allowed: reasons.length === 0, reasons, values, mirror };
 }
 function selector(release: string) {
   return `app.kubernetes.io/instance=${release},app.kubernetes.io/component=server`;
@@ -291,6 +345,7 @@ function selector(release: string) {
 async function deployments(
   options: KubernetesPromotionOptions,
   run: CommandRunner,
+  cwd = options.outputDirectory,
 ) {
   const text = await run(
     [
@@ -304,7 +359,7 @@ async function deployments(
       "--output",
       "json",
     ],
-    { cwd: options.outputDirectory },
+    { cwd },
   );
   const result: DeploymentList = JSON.parse(text);
   if (!Array.isArray(result.items) || result.items.length !== 1)
@@ -319,14 +374,15 @@ function verifyDeployment(
   deployment: Deployment,
   manifest: ReleaseManifest,
   requireIdentity: boolean,
+  mirror?: string,
 ) {
   const server = deployment.spec.template.spec.containers.find(
     (container) => container.name === "server",
   );
+  const declared = imageParts(selectedImage(manifest));
   if (
-    !server?.image.endsWith(`@${imageParts(selectedImage(manifest)).digest}`) ||
-    imageParts(server.image).repository !==
-      imageParts(selectedImage(manifest)).repository
+    !server?.image.endsWith(`@${declared.digest}`) ||
+    ![declared.repository, mirror].includes(imageParts(server.image).repository)
   )
     throw new Error(
       "Server Deployment image does not match the declared release artifact",
@@ -356,28 +412,208 @@ function pendingJournal(options: KubernetesPromotionOptions) {
   const path = join(options.outputDirectory, "promotion-journal.json");
   if (existsSync(path)) {
     const previous: { phase?: string } = JSON.parse(readFileSync(path, "utf8"));
-    if (previous.phase !== "accepted")
+    // `failed` means the release was put back exactly as it was before this tool changed it.
+    if (previous.phase !== "accepted" && previous.phase !== "failed")
       throw new Error(
         "An interrupted promotion requires operator recovery; inspect promotion-journal.json",
       );
   }
 }
+/** The release's user-supplied values, as `helm get values` reports them (`null` when none). */
+async function releaseValues(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  cwd: string,
+) {
+  const value: unknown = JSON.parse(
+    await run(
+      [
+        "helm",
+        "get",
+        "values",
+        options.release,
+        "--namespace",
+        options.namespace,
+        "--output",
+        "json",
+      ],
+      { cwd },
+    ),
+  );
+  if (value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("helm get values did not return a values object");
+  return value as Record<string, unknown>;
+}
+/** Whether Helm applies this release server-side. Helm 4 records `applyMethod: "ssa"` for releases
+ * it installed that way; Helm 3 has only client-side apply. Under server-side apply, the CronJob
+ * suspension and scale-to-zero this tool makes are owned by kubectl, and an upgrade that declares
+ * those fields stops on a field-manager conflict after the pre-upgrade migration has run. */
+async function appliesServerSide(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  cwd: string,
+) {
+  const version = (
+    await run(["helm", "version", "--template", "{{.Version}}"], { cwd })
+  ).trim();
+  if (Number(version.match(/^v(\d+)\./)?.[1] ?? 0) < 4) return false;
+  const metadata: { applyMethod?: string } = JSON.parse(
+    await run(
+      [
+        "helm",
+        "get",
+        "metadata",
+        options.release,
+        "--namespace",
+        options.namespace,
+        "--output",
+        "json",
+      ],
+      { cwd },
+    ),
+  );
+  return metadata.applyMethod === "ssa";
+}
+/** CronJobs whose `spec.suspend` the release's own manifest declares. Helm sets those from values
+ * on every upgrade (`routines.suspend`); every other CronJob keeps whatever the cluster holds. */
+async function declaredSuspension(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+) {
+  const manifest = await run(
+    [
+      "helm",
+      "get",
+      "manifest",
+      options.release,
+      "--namespace",
+      options.namespace,
+    ],
+    { cwd: options.outputDirectory },
+  );
+  const names = new Set<string>();
+  for (const document of parseAllDocuments(manifest)) {
+    if (document.errors.length)
+      throw new Error("Helm release manifest is not valid YAML");
+    const spec = document.get("spec");
+    const name = document.getIn(["metadata", "name"]);
+    if (
+      document.get("kind") === "CronJob" &&
+      typeof name === "string" &&
+      isMap(spec) &&
+      spec.has("suspend")
+    )
+      names.add(name);
+  }
+  return names;
+}
+async function listCronJobs(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+): Promise<CronJobList> {
+  return JSON.parse(
+    await run(
+      [
+        "kubectl",
+        "--namespace",
+        options.namespace,
+        "get",
+        "cronjob",
+        "--selector",
+        `app.kubernetes.io/instance=${options.release}`,
+        "--output",
+        "json",
+      ],
+      { cwd: options.outputDirectory },
+    ),
+  );
+}
+function setSuspended(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  name: string,
+  suspend: boolean,
+) {
+  return run(
+    [
+      "kubectl",
+      "--namespace",
+      options.namespace,
+      "patch",
+      "cronjob",
+      name,
+      "--type=merge",
+      "--patch",
+      JSON.stringify({ spec: { suspend } }),
+    ],
+    { cwd: options.outputDirectory },
+  );
+}
+function scaleServer(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  replicas: number,
+) {
+  return run(
+    [
+      "kubectl",
+      "--namespace",
+      options.namespace,
+      "scale",
+      "deployment",
+      "--selector",
+      selector(options.release),
+      `--replicas=${replicas}`,
+    ],
+    { cwd: options.outputDirectory },
+  );
+}
+/** Puts back every CronJob this operation suspended, except one whose suspension the release now
+ * declares, which Helm has already set to the customer's value. One the target removed is skipped. */
+async function resumeCronJobs(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  journal: PromotionJournal,
+  declared: Set<string>,
+) {
+  const paused = (journal.pausedCronJobs ?? []).filter(
+    (job) => !job.wasSuspended && !declared.has(job.name),
+  );
+  if (!paused.length) return;
+  const present = new Set(
+    (await listCronJobs(options, run)).items.map((job) => job.metadata.name),
+  );
+  for (const job of paused)
+    if (present.has(job.name))
+      await setSuspended(options, run, job.name, false);
+}
 export async function promoteKubernetes(
   options: KubernetesPromotionOptions,
 ): Promise<PromotionJournal> {
-  const plan = await planKubernetesPromotion(options);
-  if (!plan.allowed) throw new Error(plan.reasons.join("; "));
   if (!options.acknowledgeInterruption)
     throw new Error(
       "Explicitly acknowledge interruption before live promotion",
     );
-  prepareOutput(options);
+  const run = options.run ?? runCommand;
+  // Reads only, up to the lock. A refusal here changes nothing and records nothing, so it leaves no
+  // journal behind to block the next attempt.
   pendingJournal(options);
+  const previousValues = await releaseValues(options, run, process.cwd());
+  const plan = await planKubernetesPromotion(options, previousValues);
+  if (!plan.allowed) throw new Error(plan.reasons.join("; "));
+  const before = await deployments(options, run, process.cwd());
+  verifyDeployment(before, options.current, false, plan.mirror);
+  const serverSide = await appliesServerSide(options, run, process.cwd());
+  prepareOutput(options);
   const lock = join(options.outputDirectory, ".promotion.lock");
   mkdirSync(lock, { mode: 0o700 });
-  const run = options.run ?? runCommand;
-  let mutationStarted = false;
   const timeout = `${options.timeoutSeconds ?? 300}s`;
+  const downtime =
+    options.candidate.upgrade.requiresDowntime ||
+    !options.candidate.compatibility.database.rollbackCompatible;
+  let scaledDown = false;
+  let verified = false;
   const journal: PromotionJournal = {
     operation: randomUUID(),
     phase: "prepared",
@@ -397,61 +633,30 @@ export async function promoteKubernetes(
       journal,
     );
   };
+  const valuesFile = join(options.outputDirectory, "release-values.json");
+  const previousValuesFile = join(
+    options.outputDirectory,
+    "previous-values.json",
+  );
   try {
-    const before = await deployments(options, run);
-    verifyDeployment(before, options.current, false);
     atomicJson(
       join(options.outputDirectory, "previous-release.json"),
       options.current,
     );
-    atomicJson(
-      join(options.outputDirectory, "release-values.json"),
-      plan.values,
-    );
+    atomicJson(previousValuesFile, previousValues);
+    atomicJson(valuesFile, plan.values);
     phase("prepared");
-    if (
-      options.candidate.upgrade.requiresDowntime ||
-      !options.candidate.compatibility.database.rollbackCompatible
-    ) {
-      phase("quiescing");
+    if (downtime) {
       journal.previousReplicas = before.spec.replicas ?? 1;
-      const cronJobs: CronJobList = JSON.parse(
-        await run(
-          [
-            "kubectl",
-            "--namespace",
-            options.namespace,
-            "get",
-            "cronjob",
-            "--selector",
-            `app.kubernetes.io/instance=${options.release}`,
-            "--output",
-            "json",
-          ],
-          { cwd: options.outputDirectory },
-        ),
-      );
+      const cronJobs = await listCronJobs(options, run);
       journal.pausedCronJobs = cronJobs.items.map((job) => ({
         name: job.metadata.name,
         wasSuspended: job.spec.suspend ?? false,
       }));
       phase("quiescing");
-      mutationStarted = true;
       for (const job of cronJobs.items) {
-        await run(
-          [
-            "kubectl",
-            "--namespace",
-            options.namespace,
-            "patch",
-            "cronjob",
-            job.metadata.name,
-            "--type=merge",
-            "--patch",
-            '{"spec":{"suspend":true}}',
-          ],
-          { cwd: options.outputDirectory },
-        );
+        if (!(job.spec.suspend ?? false))
+          await setSuspended(options, run, job.metadata.name, true);
         for (const active of job.status?.active ?? [])
           await run(
             [
@@ -466,19 +671,8 @@ export async function promoteKubernetes(
             { cwd: options.outputDirectory },
           );
       }
-      await run(
-        [
-          "kubectl",
-          "--namespace",
-          options.namespace,
-          "scale",
-          "deployment",
-          "--selector",
-          selector(options.release),
-          "--replicas=0",
-        ],
-        { cwd: options.outputDirectory },
-      );
+      scaledDown = true;
+      await scaleServer(options, run, 0);
       await run(
         [
           "kubectl",
@@ -493,8 +687,6 @@ export async function promoteKubernetes(
         ],
         { cwd: options.outputDirectory },
       );
-      // Target CronJobs are reconciled by Helm after the guarded pre-upgrade migration. Their
-      // declared target/customer suspension policy takes effect with the target workloads.
       phase("backing-up");
       if (!options.backupCommand?.length)
         throw new Error("Missing backup command after quiescence");
@@ -504,8 +696,10 @@ export async function promoteKubernetes(
       });
     }
     journal.databaseMayHaveChanged = true;
-    mutationStarted = true;
     phase("promoting");
+    // Later files win: the release's current values, then the customer's files, then the pinned
+    // image and identity. So a value set with `--set` at install survives, and the new chart's own
+    // defaults still apply to anything nobody set (what `--reset-then-reuse-values` does).
     await run(
       [
         "helm",
@@ -514,12 +708,17 @@ export async function promoteKubernetes(
         resolve(options.chart),
         "--namespace",
         options.namespace,
+        "--values",
+        previousValuesFile,
         ...options.customerValues.flatMap((path) => [
           "--values",
           resolve(path),
         ]),
         "--values",
-        join(options.outputDirectory, "release-values.json"),
+        valuesFile,
+        // What client-side apply does anyway: the chart's declared values win over this tool's own
+        // maintenance changes (suspension, scale to zero) and anything else that edited them.
+        ...(serverSide ? ["--force-conflicts"] : []),
         "--wait",
         "--wait-for-jobs",
         "--timeout",
@@ -539,19 +738,7 @@ export async function promoteKubernetes(
         );
       // HPA-owned Deployments omit replicas in the chart; explicitly leave the maintenance
       // scale-to-zero state before waiting for the existing autoscaler to resume.
-      await run(
-        [
-          "kubectl",
-          "--namespace",
-          options.namespace,
-          "scale",
-          "deployment",
-          "--selector",
-          selector(options.release),
-          `--replicas=${journal.previousReplicas}`,
-        ],
-        { cwd: options.outputDirectory },
-      );
+      await scaleServer(options, run, journal.previousReplicas);
     }
     await run(
       [
@@ -567,7 +754,12 @@ export async function promoteKubernetes(
       ],
       { cwd: options.outputDirectory },
     );
-    verifyDeployment(await deployments(options, run), options.candidate, true);
+    verifyDeployment(
+      await deployments(options, run),
+      options.candidate,
+      true,
+      plan.mirror,
+    );
     const deployment = await deployments(options, run);
     const identityText = await run(
       [
@@ -579,9 +771,7 @@ export async function promoteKubernetes(
         "--container",
         "server",
         "--",
-        "bun",
-        "-e",
-        "const r=await fetch('http://127.0.0.1:'+(process.env.PORT||process.env.SERVER_PORT||3001)+'/release'); if(!r.ok)process.exit(1); console.log(JSON.stringify(await r.json()));",
+        ...RELEASE_FROM_INSIDE,
       ],
       { cwd: options.outputDirectory, timeoutMs: 15_000 },
     );
@@ -603,6 +793,14 @@ export async function promoteKubernetes(
       throw new Error(
         "Running server release identity does not match the candidate",
       );
+    verified = true;
+    // The candidate is serving. Scheduled work goes back to exactly how it was before quiescing.
+    await resumeCronJobs(
+      options,
+      run,
+      journal,
+      await declaredSuspension(options, run),
+    );
     // Helm --wait waits for chart workload readiness and migration Jobs. Additional customer
     // workflow acceptance remains the operator's responsibility and is not implied by this record.
     atomicJson(
@@ -613,59 +811,34 @@ export async function promoteKubernetes(
     return journal;
   } catch (error) {
     journal.error = error instanceof Error ? error.message : String(error);
-    if (mutationStarted) {
+    if (!journal.databaseMayHaveChanged) {
+      // Helm never ran, so the database is as it was. Undo the quiescing exactly; the release is
+      // then as this tool found it, and another attempt may follow.
       try {
-        await run(
-          [
-            "kubectl",
-            "--namespace",
-            options.namespace,
-            "scale",
-            "deployment",
-            "--selector",
-            selector(options.release),
-            "--replicas=0",
-          ],
-          { cwd: options.outputDirectory },
-        );
-        const jobs: CronJobList = JSON.parse(
-          await run(
-            [
-              "kubectl",
-              "--namespace",
-              options.namespace,
-              "get",
-              "cronjob",
-              "--selector",
-              `app.kubernetes.io/instance=${options.release}`,
-              "--output",
-              "json",
-            ],
-            { cwd: options.outputDirectory },
-          ),
-        );
-        for (const job of jobs.items)
-          await run(
-            [
-              "kubectl",
-              "--namespace",
-              options.namespace,
-              "patch",
-              "cronjob",
-              job.metadata.name,
-              "--type=merge",
-              "--patch",
-              '{"spec":{"suspend":true}}',
-            ],
-            { cwd: options.outputDirectory },
-          );
-      } catch (stopError) {
-        journal.error += `; maintenance shutdown failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`;
+        if (scaledDown && journal.previousReplicas !== undefined)
+          await scaleServer(options, run, journal.previousReplicas);
+        await resumeCronJobs(options, run, journal, new Set());
+        phase("failed");
+      } catch (restoreError) {
+        journal.error += `; putting the release back after quiescing failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`;
+        phase("recovery-required");
       }
+    } else {
+      // Only a maintenance transition that has not verified needs writes held off. A rollback-
+      // compatible transition is left serving: the previous code accepts the resulting schema.
+      if (downtime && !verified) {
+        try {
+          await scaleServer(options, run, 0);
+          for (const job of (await listCronJobs(options, run)).items)
+            await setSuspended(options, run, job.metadata.name, true);
+        } catch (stopError) {
+          journal.error += `; maintenance shutdown failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`;
+        }
+      }
+      phase("recovery-required");
     }
-    phase("recovery-required");
     throw new Error(
-      `${journal.error}. Promotion requires operator recovery; see ${join(options.outputDirectory, "promotion-journal.json")}`,
+      `${journal.error}. Promotion ${journal.phase === "failed" ? "was undone; the release is as it was before" : "requires operator recovery"}; see ${join(options.outputDirectory, "promotion-journal.json")}`,
     );
   } finally {
     rmSync(lock, { recursive: true });

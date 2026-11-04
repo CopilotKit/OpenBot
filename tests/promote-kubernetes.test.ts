@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +9,7 @@ import {
   promoteKubernetes,
   writeGitOpsPromotion,
 } from "../scripts/promote-kubernetes";
-import type { CommandRunner } from "../scripts/update-local";
+import { type CommandRunner, runCommand } from "../scripts/update-local";
 import targetFixture from "../shared/fixtures/releases/candidate.json";
 import currentFixture from "../shared/fixtures/releases/installed.json";
 import { parseReleaseManifest } from "../shared/release-manifest";
@@ -45,6 +45,14 @@ function fixture() {
   const calls: string[][] = [];
   const run: CommandRunner = async (command) => {
     calls.push([...command]);
+    if (
+      command[0] === "helm" &&
+      command[1] === "get" &&
+      command[2] === "values"
+    )
+      return "null\n";
+    if (command[0] === "helm" && command[1] === "version") return "v3.19.0";
+    if (command[0] === "helm" && command[1] === "get") return "";
     if (command[0] === "kubectl" && command.includes("exec"))
       return JSON.stringify({
         version: candidate.version,
@@ -237,4 +245,55 @@ test("schema-transition preflight uses the pinned chart and customer files and a
   expect(render).toContain(f.options.customerValues[0] ?? "");
   expect(render).toContain("--is-upgrade");
   expect(f.calls.some((command) => command[0] === "kubectl")).toBe(false);
+});
+
+test("kubectl waits and rollout status are never killed before the operator's --timeout", async () => {
+  const f = fixture();
+  const spawn = spyOn(Bun, "spawn");
+  const deadlines: [string, number | undefined][] = [];
+  const run: CommandRunner = async (command, options) => {
+    if (
+      command[0] === "kubectl" &&
+      command.includes("cronjob") &&
+      command.includes("get")
+    )
+      return JSON.stringify({
+        items: [
+          {
+            metadata: { name: "openbot-routines" },
+            spec: { suspend: false },
+            status: { active: [{ name: "openbot-routines-1" }] },
+          },
+        ],
+      });
+    if (
+      command[0] === "kubectl" &&
+      (command.includes("wait") || command.includes("rollout"))
+    ) {
+      // The real runner, with the options this step gets, on a stand-in command.
+      await runCommand(["true"], options);
+      deadlines.push([
+        command.find((part) => part.startsWith("--for") || part === "status") ??
+          "",
+        (spawn.mock.lastCall?.[1] as { timeout?: number } | undefined)?.timeout,
+      ]);
+      return "";
+    }
+    return f.options.run?.(command, options) ?? "";
+  };
+  try {
+    await promoteKubernetes({ ...f.options, run, timeoutSeconds: 900 });
+  } finally {
+    spawn.mockRestore();
+  }
+  expect(deadlines.map(([step]) => step)).toEqual([
+    "--for=condition=complete",
+    "--for=delete",
+    "status",
+  ]);
+  for (const [step, deadline] of deadlines)
+    expect([step, deadline === undefined || deadline >= 900_000]).toEqual([
+      step,
+      true,
+    ]);
 });
