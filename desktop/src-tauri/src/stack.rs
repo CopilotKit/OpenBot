@@ -2790,11 +2790,13 @@ fn windows_process_output(output: &[u8]) -> Result<Vec<WindowsProcess>, Problem>
     // Windows PowerShell redirection can produce UTF-16LE, even though the script requests UTF-8.
     if output.starts_with(&[0xff, 0xfe]) || output.get(1) == Some(&0) {
         let bytes = output.strip_prefix(&[0xff, 0xfe]).unwrap_or(output);
-        if bytes.len() % 2 != 0 {
+        if !bytes.len().is_multiple_of(2) {
             return Err(invalid_encoding());
         }
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         let text = String::from_utf16(&units).map_err(|_| invalid_encoding())?;
