@@ -355,7 +355,7 @@ test("Work on it takes the item off and shows its task, Working, opening its own
   const { view, region } = await drawAll();
   const bots = region("Bots page");
   fireEvent.click(await bots.findByRole("button", { name: "Work on it" }));
-  await waitFor(() => expect(bots.getByText(/^Working · /)).toBeTruthy());
+  await waitFor(() => expect(bots.getByText("Working")).toBeTruthy());
   expect(sent).toEqual([
     { method: "POST", path: "/api/proactive/suggestions/s1/start" },
   ]);
@@ -369,7 +369,7 @@ test("Work on it takes the item off and shows its task, Working, opening its own
     within(row).getByRole("button", { name: "Open" }).getAttribute("href"),
   ).toBe("/channel/c-task-s1");
   // The Bot's own page lists it too.
-  expect(region("Bot page").getByText(/^Working · /)).toBeTruthy();
+  expect(region("Bot page").getByText("Working")).toBeTruthy();
 });
 
 test("tasks list what to read, answer and retry first, and each acts from its row", async () => {
@@ -447,7 +447,7 @@ test("a task whose conversation is running a turn reads Working, whatever the se
   serving();
   const { region } = await drawAll();
   const bots = region("Bots page");
-  await waitFor(() => expect(bots.getByText(/^Working · /)).toBeTruthy());
+  await waitFor(() => expect(bots.getByText("Working")).toBeTruthy());
 });
 
 test("OpenDuet's Active lists the tasks under OpenDuet's headings, in its order", async () => {

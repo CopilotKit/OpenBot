@@ -152,11 +152,14 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
   expect(await view.findByText("Needs you")).toBeTruthy();
   expect(view.getByText(/Which card\?/)).toBeTruthy();
   expect(view.queryByText(/Which wiki\?/)).toBeNull();
-  expect(view.getAllByRole("button", { name: "Allow once" })).toHaveLength(1);
-  expect(view.getByRole("button", { name: "Always allow here" })).toBeTruthy();
+  expect(view.getAllByRole("button", { name: "Allow" })).toHaveLength(1);
+  // Always allow here waits in the row's menu.
+  expect(view.getByRole("button", { name: /^More for / })).toBeTruthy();
   expect(view.getByRole("button", { name: "Deny" })).toBeTruthy();
+  // A question opens its answer box on Answer.
+  fireEvent.click(view.getByRole("button", { name: "Answer" }));
   expect(view.getByRole("button", { name: "Send answer" })).toBeTruthy();
-  fireEvent.click(view.getByRole("button", { name: "Allow once" }));
+  fireEvent.click(view.getByRole("button", { name: "Allow" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
       path: "/api/approvals/r1/decision",

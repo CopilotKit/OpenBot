@@ -863,8 +863,9 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
   test("Activity shows what the Bot waits on you for, and its work", async () => {
     serve();
     renderAt("/s/activity");
-    // OpenBot's Needs you section, with OpenBot's own approval and its details always shown.
-    expect(await page().findByText("Muse wants to open url")).toBeTruthy();
+    // OpenBot's Needs you section, under the Bot's name, with its approval's details always shown.
+    expect(await page().findByText("Open url")).toBeTruthy();
+    expect(page().getAllByText("Muse").length).toBeGreaterThan(0);
     expect(page().getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();

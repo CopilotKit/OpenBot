@@ -5,13 +5,14 @@ import { BotOrb } from "@/components/agents/bot-orb";
 import { useWaitingByBot } from "@/components/approvals/waiting";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
-import { TaskRow } from "@/components/tasks/task-row";
+import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
+import { relativeTime } from "@/lib/relative-time";
 import { useNeedsYou } from "./needs-you";
 
 /** How many of one Bot's finds show before the rest open in place. */
@@ -27,20 +28,23 @@ const FINDS_SHOWN = 3;
  *
  * BOT FIRST. A row used to name its Bot in the faintest line at its foot, and with two Bots nobody
  * could tell who was asking. Each group now opens with the Bot's orb and name, and for finds, what
- * its check-ins watch. Given a Bot (its own page), there is one group and no header.
+ * its check-ins watch. Given a Bot (its own page), there is one group of each.
  */
 export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const agents = useQuery(agentListQueryOptions());
   const settings = useQuery(proactiveSettingsQueryOptions());
-  const waiting = useWaitingByBot(agentId, agentId === undefined);
+  const waiting = useWaitingByBot(agentId);
   const list = useNeedsYou(agentId);
 
   const blocked = new Map(waiting.byBot);
-  for (const listed of list.tasks)
-    blocked.set(listed.task.agentId, [
-      ...(blocked.get(listed.task.agentId) ?? []),
-      <TaskRow botName="" key={`task-${listed.task.id}`} listed={listed} />,
-    ]);
+  for (const listed of list.tasks) {
+    const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
+    group.rows.push(
+      <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
+    );
+    group.times.push(listed.task.updatedAt);
+    blocked.set(listed.task.agentId, group);
+  }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)
     found.set(item.agentId, [...(found.get(item.agentId) ?? []), item]);
@@ -60,7 +64,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const settingOf = (id: string | null | undefined) =>
     id ? settings.data?.find((setting) => setting.id === id) : undefined;
   const waitingCount = [...blocked.values()].reduce(
-    (total, rows) => total + rows.length,
+    (total, group) => total + group.rows.length,
     0,
   );
   const foundCount = list.items.length;
@@ -82,15 +86,18 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
       <div className="flex flex-col gap-5">
         {blocked.size ? (
           <Half title="Waiting on you">
-            {[...blocked].map(([botId, rows]) => (
+            {[...blocked].map(([botId, group]) => (
               <BotGroup
                 bot={bot(botId)}
                 botId={botId}
-                header={agentId === undefined}
                 key={botId}
-                note={`${rows.length} waiting`}
+                note={`waiting since ${relativeTime(
+                  group.times.reduce((first, at) =>
+                    Date.parse(at) < Date.parse(first) ? at : first,
+                  ),
+                )}`}
               >
-                {rows}
+                {group.rows}
               </BotGroup>
             ))}
           </Half>
@@ -109,7 +116,6 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                 <FoundGroup
                   bot={bot(botId)}
                   botId={botId}
-                  header={agentId === undefined}
                   items={items}
                   key={botId}
                   note={
@@ -131,7 +137,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
 function Half({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="font-medium text-muted-foreground text-xs">{title}</h3>
+      <h3 className="font-semibold text-muted-foreground text-xs">{title}</h3>
       <div className="flex flex-col gap-3">{children}</div>
     </div>
   );
@@ -143,13 +149,11 @@ type GroupBot = { name: string; avatarSeed: string } | undefined;
 function BotGroup({
   bot,
   botId,
-  header,
   note,
   children,
 }: {
   bot: GroupBot;
   botId: string;
-  header: boolean;
   note: string;
   children: ReactNode[];
 }) {
@@ -159,15 +163,11 @@ function BotGroup({
       className="overflow-hidden rounded-xl border border-border"
       data-needs-you-bot={botId}
     >
-      {header ? (
-        <div className="flex items-center gap-2.5 border-border border-b bg-muted/50 px-3 py-2">
-          <BotOrb name={name} seed={bot?.avatarSeed || botId} size={22} />
-          <span className="font-medium text-sm">{name}</span>
-          <span className="truncate text-muted-foreground text-xs">
-            · {note}
-          </span>
-        </div>
-      ) : null}
+      <div className="flex items-center gap-2.5 border-border border-b bg-muted/60 px-3.5 py-2.5">
+        <BotOrb name={name} seed={bot?.avatarSeed || botId} size={22} />
+        <span className="font-semibold text-[13px]">{name}</span>
+        <span className="truncate text-muted-foreground text-xs">· {note}</span>
+      </div>
       <div className="flex flex-col">
         {children.map((row, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: rows carry their own keys inside.
@@ -185,14 +185,12 @@ function BotGroup({
 function FoundGroup({
   bot,
   botId,
-  header,
   note,
   items,
   settingOf,
 }: {
   bot: GroupBot;
   botId: string;
-  header: boolean;
   note: string;
   items: ReturnType<typeof useNeedsYou>["items"];
   settingOf: (id: string | null | undefined) => ProactiveSetting | undefined;
@@ -203,7 +201,7 @@ function FoundGroup({
   const rows: ReactNode[] = shown.map((item) => (
     <SuggestionRow
       botName={bot?.name ?? "Your Bot"}
-      inGroup={header}
+      inGroup
       key={item.id}
       setting={settingOf(item.settingId)}
       suggestion={item}
@@ -212,7 +210,7 @@ function FoundGroup({
   if (folded)
     rows.push(
       <button
-        className="flex w-full items-center justify-between px-3 py-2 text-left text-muted-foreground text-sm hover:bg-muted/50"
+        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-[13px] hover:bg-muted/50"
         key="more"
         onClick={() => setExpanded(true)}
         type="button"
@@ -222,7 +220,7 @@ function FoundGroup({
       </button>,
     );
   return (
-    <BotGroup bot={bot} botId={botId} header={header} note={note}>
+    <BotGroup bot={bot} botId={botId} note={note}>
       {rows}
     </BotGroup>
   );

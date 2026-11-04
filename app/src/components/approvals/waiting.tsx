@@ -1,10 +1,21 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { approvalWords } from "@openbot/shared/tool-name";
-import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
+import {
+  IconDots,
+  IconHandStop,
+  IconMessageQuestion,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
+import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Item,
   ItemContent,
@@ -50,12 +61,9 @@ function useWaiting(agentId: string | undefined) {
 function QuestionRow({
   question,
   botName,
-  inGroup = false,
 }: {
   question: WaitingQuestion;
   botName: string;
-  /** Under its Bot's header, which already names who asks. */
-  inGroup?: boolean;
 }) {
   const [text, setText] = useState("");
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
@@ -66,9 +74,7 @@ function QuestionRow({
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="line-clamp-none">
-          {inGroup
-            ? question.question
-            : `${botName} asks: ${question.question}`}
+          {botName} asks: {question.question}
         </ItemTitle>
         {question.why ? (
           <ItemDescription className="line-clamp-none">
@@ -108,12 +114,9 @@ function QuestionRow({
 function RequestRow({
   request,
   botName,
-  inGroup = false,
 }: {
   request: WaitingRequest;
   botName: string;
-  /** Under its Bot's header, which already names who wants it. */
-  inGroup?: boolean;
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
@@ -124,9 +127,7 @@ function RequestRow({
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="line-clamp-none">
-          {inGroup
-            ? `Wants to ${words.action}`
-            : `${botName} wants to ${words.action}`}
+          {botName} wants to {words.action}
         </ItemTitle>
         <ItemDescription className="line-clamp-none break-all">
           {words.place}
@@ -212,42 +213,190 @@ function RequestRow({
 }
 
 /**
- * The waiting questions and actions as rows under each Bot's header, questions first: the Needs you
- * board's half that is blocked on the person (`components/needs-you/board.tsx`).
+ * The waiting questions and actions under each Bot's header on the Needs you board, questions first,
+ * each with when it was asked so the header can say how long it has waited.
  */
-export function useWaitingByBot(
-  agentId: string | undefined,
-  /** Under a header naming each Bot; a Bot's own page has none, so its rows name it. */
-  grouped: boolean,
-) {
+export function useWaitingByBot(agentId: string | undefined) {
   const waiting = useWaiting(agentId);
-  const agents = useQuery(agentListQueryOptions());
-  const botName = (id: string) =>
-    agents.data?.find((agent) => agent.id === id)?.name ?? id;
-  const byBot = new Map<string, ReactNode[]>();
-  const add = (botId: string, row: ReactNode) =>
-    byBot.set(botId, [...(byBot.get(botId) ?? []), row]);
+  const byBot = new Map<string, { rows: ReactNode[]; times: string[] }>();
+  const add = (botId: string, row: ReactNode, at: string) => {
+    const group = byBot.get(botId) ?? { rows: [], times: [] };
+    group.rows.push(row);
+    group.times.push(at);
+    byBot.set(botId, group);
+  };
   for (const question of waiting.questions)
     add(
       question.conversationBotId ?? question.botId,
-      <QuestionRow
-        botName={botName(question.botId)}
-        inGroup={grouped}
-        key={`question-${question.id}`}
-        question={question}
-      />,
+      <QuestionBoardRow key={`question-${question.id}`} question={question} />,
+      question.createdAt,
     );
   for (const request of waiting.pending)
     add(
       request.action.botId,
-      <RequestRow
-        botName={botName(request.action.botId)}
-        inGroup={grouped}
-        key={`request-${request.id}`}
-        request={request}
-      />,
+      <RequestBoardRow key={`request-${request.id}`} request={request} />,
+      request.createdAt,
     );
   return { error: waiting.error, byBot };
+}
+
+/** A question on the board: one line, and Answer opens the box to reply in under it. */
+function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
+  const [answering, setAnswering] = useState(false);
+  const [text, setText] = useState("");
+  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
+  return (
+    <BoardRow
+      actions={
+        answering ? null : (
+          <Button onClick={() => setAnswering(true)} size="sm">
+            Answer
+          </Button>
+        )
+      }
+      detail={question.why}
+      icon={<IconMessageQuestion />}
+      more={
+        <div className="flex flex-col items-start gap-2">
+          <Textarea
+            aria-label="Your answer"
+            autoFocus
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Your answer"
+            value={text}
+          />
+          <div className="flex gap-1.5">
+            <Button
+              disabled={answer.isPending || !text.trim()}
+              onClick={() => answer.mutate({ id: question.id, response: text })}
+              size="sm"
+            >
+              {answer.isPending ? "Sending…" : "Send answer"}
+            </Button>
+            <Button
+              onClick={() => setAnswering(false)}
+              size="sm"
+              variant="ghost"
+            >
+              Cancel
+            </Button>
+          </div>
+          {answer.error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {answer.error.message}
+            </p>
+          ) : null}
+        </div>
+      }
+      open={answering}
+      title={question.question}
+      waiting
+    />
+  );
+}
+
+/**
+ * An action on the board: what it wants to do and where, with Deny and Allow on the right, and
+ * Always allow here in the menu. Where it acts and what it would send are always on screen, whole:
+ * nobody allows something they were not shown.
+ */
+function RequestBoardRow({ request }: { request: WaitingRequest }) {
+  const decision = useMutation(decideApprovalMutationOptions(queryClient));
+  const words = approvalWords(request.action);
+  const handOff = request.action.policy?.behaviour === "hand_off";
+  const decide = (choice: "allow_once" | "allow_always" | "deny" | "handled") =>
+    decision.mutate({ id: request.id, choice });
+  const action = words.action.charAt(0).toUpperCase() + words.action.slice(1);
+  return (
+    <BoardRow
+      actions={
+        handOff ? (
+          <>
+            <Button
+              disabled={decision.isPending}
+              onClick={() => decide("deny")}
+              size="sm"
+              variant="outline"
+            >
+              Don't do it
+            </Button>
+            <Button
+              disabled={decision.isPending}
+              onClick={() => decide("handled")}
+              size="sm"
+            >
+              I did it myself
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              disabled={decision.isPending}
+              onClick={() => decide("deny")}
+              size="sm"
+              variant="outline"
+            >
+              Deny
+            </Button>
+            <Button
+              disabled={decision.isPending}
+              onClick={() => decide("allow_once")}
+              size="sm"
+            >
+              Allow
+            </Button>
+            {offersStandingRule(request.action) ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      aria-label={`More for ${words.action}`}
+                      size="icon-sm"
+                      variant="ghost"
+                    />
+                  }
+                >
+                  <IconDots />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={decision.isPending}
+                    onClick={() => decide("allow_always")}
+                  >
+                    Always allow here
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </>
+        )
+      }
+      detail={words.place}
+      icon={<IconHandStop />}
+      meta={[
+        request.action.policy ? (
+          <span key="why">
+            {handOff ? "Handed to you: " : ""}
+            {request.action.policy.reason}
+          </span>
+        ) : null,
+        decision.error ? (
+          <span className="text-destructive" key="error" role="alert">
+            {decision.error.message}
+          </span>
+        ) : null,
+      ]}
+      more={
+        <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
+          {JSON.stringify(request.action.args, null, 2)}
+        </pre>
+      }
+      open
+      title={action}
+      waiting
+      wholeDetail
+    />
+  );
 }
 
 /** The waiting questions and actions as rows, questions first, for a card that may hold more. */
