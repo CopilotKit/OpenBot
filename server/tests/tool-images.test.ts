@@ -1,8 +1,16 @@
 import { expect, test } from "bun:test";
+import { createServer } from "node:net";
 import type { Message } from "@ag-ui/client";
 import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
-import { inlineToolImages, toolImageLinks } from "../src/tool-images";
+import {
+  inlineToolImages,
+  type ToolImageDownload,
+  toolImageLinks,
+} from "../src/tool-images";
 import { markUntrusted } from "../src/untrusted-content";
+
+/** Where Composio stages a tool's file; the one host a tool's image link may be on. */
+const STORAGE = "https://storage.composio.dev/projects/pr_test/requests/gmail";
 
 /** Gmail's attachment, as Composio answers it and OpenBot hands it to the model. */
 function attachmentResult(url: string, mimetype = "image/jpeg"): string {
@@ -18,14 +26,14 @@ function attachmentResult(url: string, mimetype = "image/jpeg"): string {
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-/** A fetch that records what it was asked for and answers `body`. */
-function fakeFetch(body: Uint8Array<ArrayBuffer> = PNG) {
+/** A download that records what it was asked for and answers `body`. */
+function fakeDownload(body: Uint8Array = PNG) {
   const asked: string[] = [];
-  const impl = (async (input: URL | string) => {
-    asked.push(String(input));
-    return new Response(body, { status: 200 });
-  }) as typeof fetch;
-  return { asked, impl };
+  const download: ToolImageDownload = async (url) => {
+    asked.push(url.href);
+    return { data: body };
+  };
+  return { asked, download };
 }
 
 function history(...results: string[]): Message[] {
@@ -56,31 +64,21 @@ type Part = {
 };
 
 test("an image link in a tool result is found, a non-image one is not", () => {
-  expect(
-    toolImageLinks(attachmentResult("https://bucket.s3.amazonaws.com/a.jpg")),
-  ).toEqual([
-    {
-      url: "https://bucket.s3.amazonaws.com/a.jpg",
-      mimeType: "image/jpeg",
-      name: "mug.jpg",
-    },
+  expect(toolImageLinks(attachmentResult(`${STORAGE}/a.jpg`))).toEqual([
+    { url: `${STORAGE}/a.jpg`, mimeType: "image/jpeg", name: "mug.jpg" },
   ]);
   expect(
-    toolImageLinks(
-      attachmentResult(
-        "https://bucket.s3.amazonaws.com/a.pdf",
-        "application/pdf",
-      ),
-    ),
+    toolImageLinks(attachmentResult(`${STORAGE}/a.pdf`, "application/pdf")),
   ).toEqual([]);
 });
 
 test("the image is added straight after the tool result as a picture, typed by its bytes", async () => {
-  const { impl } = fakeFetch();
+  const { asked, download } = fakeDownload();
   const out = await inlineToolImages(
-    history(attachmentResult("https://bucket.s3.amazonaws.com/b.jpg")),
-    impl,
+    history(attachmentResult(`${STORAGE}/b.jpg?X-Amz-Signature=s`)),
+    { download },
   );
+  expect(asked).toEqual([`${STORAGE}/b.jpg?X-Amz-Signature=s`]);
   expect(out.map((message) => message.id)).toEqual([
     "u1",
     "a0",
@@ -101,17 +99,22 @@ test("the image is added straight after the tool result as a picture, typed by i
   });
 });
 
-test("a link to a private address, or over http, is never fetched, and says so", async () => {
+test("a link off Composio's storage host, or over http, is never fetched, and says so", async () => {
   for (const url of [
+    // Any text a tool returns can carry this shape: an email body, a web page.
+    "https://attacker.example/a.png",
+    "https://169.254.169.254.nip.io/latest/meta-data",
+    "https://bucket.s3.amazonaws.com/a.png",
+    "https://storage.composio.dev.attacker.example/a.png",
     "https://127.0.0.1/secret.png",
     "https://169.254.169.254/latest/meta-data",
     "https://localhost/a.png",
-    "http://bucket.s3.amazonaws.com/a.png",
+    `${STORAGE.replace("https:", "http:")}/a.png`,
   ]) {
-    const { asked, impl } = fakeFetch();
+    const { asked, download } = fakeDownload();
     const out = await inlineToolImages(
       history(attachmentResult(url, "image/png")),
-      impl,
+      { download },
     );
     expect(asked).toEqual([]);
     const parts = out[3]?.content as Part[];
@@ -120,16 +123,44 @@ test("a link to a private address, or over http, is never fetched, and says so",
   }
 });
 
+test("a name that resolves to a non-public address is refused before any connection, even on an allowed host", async () => {
+  // A listener on the address `localhost` resolves to, counting whoever reaches it.
+  let connections = 0;
+  const listener = createServer((socket) => {
+    connections++;
+    socket.destroy();
+  });
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  const { port } = listener.address() as { port: number };
+  try {
+    // The real downloader, with the name allowed, so only its address check stands in the way.
+    const out = await inlineToolImages(
+      history(
+        attachmentResult(`https://localhost:${port}/rebind.png`, "image/png"),
+      ),
+      { allowedHosts: ["localhost"] },
+    );
+    const parts = out[3]?.content as Part[];
+    expect(parts).toHaveLength(1);
+    expect(parts[0]?.text).toContain(
+      "could not be loaded (its address is not one this server may fetch)",
+    );
+    expect(connections).toBe(0);
+  } finally {
+    listener.close();
+  }
+});
+
 test("a download that is not an image, or is too large, is not put in front of the model", async () => {
-  const notImage = fakeFetch(new TextEncoder().encode("<html>expired</html>"));
-  const tooLarge = fakeFetch(new Uint8Array(MAX_IMAGE_BYTES + 1));
-  for (const [url, impl] of [
-    ["https://bucket.s3.amazonaws.com/html.png", notImage.impl],
-    ["https://bucket.s3.amazonaws.com/huge.png", tooLarge.impl],
+  for (const [url, body] of [
+    [`${STORAGE}/html.png`, new TextEncoder().encode("<html>expired</html>")],
+    [`${STORAGE}/huge.png`, new Uint8Array(MAX_IMAGE_BYTES + 1)],
   ] as const) {
     const out = await inlineToolImages(
       history(attachmentResult(url, "image/png")),
-      impl,
+      fakeDownload(body),
     );
     const parts = out[3]?.content as Part[];
     expect(parts.map((part) => part.type)).toEqual(["text"]);
@@ -137,14 +168,30 @@ test("a download that is not an image, or is too large, is not put in front of t
   }
 });
 
-test("only the newest four images in a run are fetched", async () => {
-  const { asked, impl } = fakeFetch();
-  const urls = [1, 2, 3, 4, 5].map(
-    (n) => `https://bucket.s3.amazonaws.com/newest-${n}.png`,
+test("a download that answers an error status says which, and never the link", async () => {
+  const download: ToolImageDownload = async () => {
+    throw Object.assign(
+      new Error("The server answered with HTTP status 403."),
+      {
+        statusCode: 403,
+      },
+    );
+  };
+  const out = await inlineToolImages(
+    history(attachmentResult(`${STORAGE}/expired.png?X-Amz-Signature=s`)),
+    { download },
   );
+  const text = (out[3]?.content as Part[] | undefined)?.[0]?.text ?? "";
+  expect(text).toContain("(the download answered 403)");
+  expect(text).not.toContain("X-Amz-Signature");
+});
+
+test("only the newest four images in a run are fetched", async () => {
+  const { asked, download } = fakeDownload();
+  const urls = [1, 2, 3, 4, 5].map((n) => `${STORAGE}/newest-${n}.png`);
   const out = await inlineToolImages(
     history(...urls.map((url) => attachmentResult(url, "image/png"))),
-    impl,
+    { download },
   );
   expect(asked.sort()).toEqual(urls.slice(1).sort());
   expect(out.some((message) => message.id === "t0-images")).toBe(false);
@@ -152,7 +199,6 @@ test("only the newest four images in a run are fetched", async () => {
 });
 
 test("the picture waits until every result of the same batch of calls is in", async () => {
-  const { impl } = fakeFetch();
   const input = [
     { id: "u1", role: "user", content: "Handle the claim" },
     {
@@ -169,11 +215,11 @@ test("the picture waits until every result of the same batch of calls is in", as
       id: "t0",
       role: "tool",
       toolCallId: "call_0",
-      content: attachmentResult("https://bucket.s3.amazonaws.com/batch.png"),
+      content: attachmentResult(`${STORAGE}/batch.png`),
     },
     { id: "t1", role: "tool", toolCallId: "call_1", content: "{}" },
   ] as Message[];
-  const out = await inlineToolImages(input, impl);
+  const out = await inlineToolImages(input, fakeDownload());
   expect(out.map((message) => message.id)).toEqual([
     "u1",
     "a0",
@@ -185,5 +231,5 @@ test("the picture waits until every result of the same batch of calls is in", as
 
 test("a history with no tool images comes back as it was", async () => {
   const input = history('{"messages": []}');
-  expect(await inlineToolImages(input, fakeFetch().impl)).toBe(input);
+  expect(await inlineToolImages(input, fakeDownload())).toBe(input);
 });
