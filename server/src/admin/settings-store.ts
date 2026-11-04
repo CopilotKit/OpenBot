@@ -11,13 +11,8 @@
  */
 import { desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
-import {
-  actionRecords,
-  modelUsage,
-  scimGroups,
-  userRoles,
-  users,
-} from "../db/schema";
+import { people } from "../people/directory/directory";
+import { actionRecords, modelUsage, users } from "../db/schema";
 import { policy } from "../policy/cache";
 import type { PolicySettings, PolicySettingsPatch } from "../policy/types";
 import type { CapabilityRow, Member } from "./capabilities";
@@ -164,26 +159,23 @@ export function createEnterpriseStore(database: Database) {
 
     /** One person as the capability rules see them. Unknown means a plain user in no group. */
     async member(userId: string): Promise<Member> {
-      const roles = await database
-        .select({ role: userRoles.role })
-        .from(userRoles)
-        .where(eq(userRoles.userId, userId));
+      // The role and groups on the person's row: this deployment's copy of the directory's person.
       const person = await database
-        .select({ groups: users.groups })
+        .select({ role: users.role, groups: users.groups })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
       return {
-        role: roles.some((row) => row.role === "admin") ? "admin" : "user",
+        role: person[0]?.role === "admin" ? "admin" : "user",
         groups: person[0]?.groups ?? [],
       };
     },
 
     async adminIds(): Promise<Set<string>> {
       const rows = await database
-        .select({ userId: userRoles.userId })
-        .from(userRoles)
-        .where(eq(userRoles.role, "admin"));
+        .select({ userId: users.id })
+        .from(users)
+        .where(eq(users.role, "admin"));
       return new Set(rows.map((row) => row.userId));
     },
 
@@ -209,14 +201,13 @@ export function createEnterpriseStore(database: Database) {
       const fromPeople = await database.execute(
         sql`select distinct unnest(${users.groups}) as name from ${users} order by 1`,
       );
-      const provisioned = await database
-        .select({ name: scimGroups.displayName })
-        .from(scimGroups);
+      // Groups the company's directory provisioned, members or not: Intelligence's directory holds them.
+      const provisioned = await people().client.groupNames();
       const names = new Set<string>();
       for (const row of fromPeople as unknown as { name: string }[]) {
         if (row.name) names.add(row.name);
       }
-      for (const row of provisioned) names.add(row.name);
+      for (const name of provisioned) names.add(name);
       return [...names].sort((a, b) => a.localeCompare(b));
     },
 

@@ -2,11 +2,14 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import { stampSignIn } from "../src/auth";
 import { createDatabase } from "../src/db/client";
-import { revokedAccess, sessions, users } from "../src/db/schema";
+import { sessions, users } from "../src/db/schema";
 import { createPeopleStore } from "../src/people/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { liftRemovals, useTestPeople } from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// People, and who was removed, live in Intelligence's organization directory.
+useTestPeople();
 
 const store = createPeopleStore(database, []);
 const PREFIX = "last-sign-in-test-";
@@ -43,12 +46,7 @@ afterEach(async () => {
   if (ids.length === 0) return;
   await database.delete(sessions).where(inArray(sessions.userId, ids));
   await database.delete(users).where(inArray(users.id, ids));
-  await database.delete(revokedAccess).where(
-    inArray(
-      revokedAccess.email,
-      ids.map((id) => `${id}@openbot.test`),
-    ),
-  );
+  await liftRemovals(ids.map((id) => `${id}@openbot.test`));
   ids.length = 0;
 });
 

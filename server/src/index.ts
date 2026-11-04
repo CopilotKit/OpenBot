@@ -107,6 +107,8 @@ import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
+import { roleForEmail } from "./auth/roles";
+import { registerScimConnection } from "./auth/scim";
 import { openbotAddress } from "./browser/address";
 import { botBrowserNetwork } from "./browser/bot-browser";
 import { personBrowserEgressPolicy } from "./browser/egress";
@@ -263,6 +265,17 @@ import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
+import { createDirectoryClient } from "./people/directory/client";
+import {
+  createPeopleDirectory,
+  installPeopleDirectory,
+} from "./people/directory/directory";
+import {
+  createScimReactions,
+  installScimReactions,
+  scimReactions,
+} from "./people/directory/scim-reactions";
+import { copyLocalPeopleToIntelligence } from "./people/directory/upgrade";
 import { createOnboardingStore } from "./people/onboarding";
 import { createProfileStore } from "./people/profile";
 import { createPeopleStore } from "./people/store";
@@ -486,6 +499,44 @@ learningChanges.start();
 await learningSettingsStore.start(learningChanges);
 openSkillIndex.start(learningChanges);
 learningAutoAssign.start();
+/*
+ * Every person, from Intelligence's organization directory, projected into `users` and kept fresh by
+ * the directory's change announcements (people/directory/directory.ts). Started before anything signs
+ * anybody in or names a person, and fatal when Intelligence cannot answer.
+ */
+const peopleDirectory = installPeopleDirectory(
+  createPeopleDirectory({
+    client: createDirectoryClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    database,
+    defaultRole: (email) =>
+      roleForEmail(email, config.auth?.initialAdminEmails ?? []),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+    // What SCIM changes reach this deployment as (people/directory/scim-reactions.ts), once those exist.
+    onArrived: async (person) => {
+      await scimReactions()?.arrived(person);
+    },
+    onChange: (change) => {
+      if (change.kind !== "removal") return;
+      scimReactions()
+        ?.reconcile()
+        .catch((error: unknown) =>
+          console.warn(
+            JSON.stringify({
+              type: "scim-reconcile-failed",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          ),
+        );
+    },
+  }),
+);
+await peopleDirectory.start();
+// An upgraded deployment's people, removals, linked accounts and identity providers, copied once
+// (people/directory/upgrade.ts).
+await copyLocalPeopleToIntelligence(database, peopleDirectory);
 await initializeDevActorUser(database, config.singleUser);
 /*
  * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
@@ -2828,6 +2879,42 @@ await installEnterpriseControls({
     signOut: signOutRecorders,
   },
 });
+/*
+ * SCIM, served by Intelligence's organization directory (auth/scim.ts): its connection accepts this
+ * deployment's tokens, by their hashes; and what a provisioning, deprovisioning or reprovisioning
+ * means here (the admin floor, ended sessions, retired connections, stopped computers, the trail)
+ * happens once, on one replica (people/directory/scim-reactions.ts). Fatal when Intelligence will not
+ * take the connection: a directory the customer set up would otherwise be refused with no word why.
+ */
+await registerScimConnection(peopleDirectory.client);
+const scimReactionsRunner = installScimReactions(
+  createScimReactions({
+    database,
+    client: peopleDirectory.client,
+    initialAdminEmails: config.auth?.initialAdminEmails ?? [],
+    endSessions: async (userId) => {
+      if (!betterAuth) return;
+      // Through Better Auth, so its session hooks end the person's Recorders as well.
+      await (await betterAuth.$context).internalAdapter.deleteUserSessions(
+        userId,
+      );
+    },
+    offboard: async (userId, by) => {
+      await enterpriseControls()?.offboard(userId, by);
+    },
+    auditStore: bootAuditStore,
+  }),
+);
+scimReactionsRunner.start();
+await scimReactionsRunner.reconcile().catch((error: unknown) =>
+  console.warn(
+    JSON.stringify({
+      type: "scim-reconcile-failed",
+      note: "Tried again on the next tick.",
+      error: error instanceof Error ? error.message : String(error),
+    }),
+  ),
+);
 guardDeliveryStore(
   deliveryStore,
   bootAuditStore,
@@ -3159,6 +3246,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     policyCache.stop();
     conversationDirectory.stop();
     deliveryDirectory.stop();
+    peopleDirectory.stop();
+    scimReactionsRunner.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();

@@ -40,6 +40,7 @@ import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/composio-file-actions.json";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { directoryFor } from "./support/directory";
 
 /**
  * EVERY SINGLE-USER OPENBOT ON ONE COMPOSIO KEY WAS ONE COMPOSIO USER.
@@ -343,7 +344,7 @@ async function boot(
   { named = true }: { named?: boolean } = {},
 ) {
   const database = open(url);
-  await initializeDevActorUser(database, true);
+  await initializeDevActorUser(database, true, directoryFor(database));
   const identity = named
     ? await ensureSingleUserIdentity(database, {
         singleUser: true,

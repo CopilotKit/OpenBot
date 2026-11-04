@@ -13,8 +13,11 @@ import {
 } from "./support/conversations";
 import { changePreferences, storedPreferences } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// People live in Intelligence's organization directory; these rows are its projection.
+const directory = useTestPeople();
 afterAll(async () => {
   await database.$client.close();
 });
@@ -90,14 +93,16 @@ test("verified employee keeps the same-email local account and history identity 
     expect(conversation.lastMessage).toBe("Existing graphical Bot result");
     expect(saved?.onboardingStep).toBe(4);
     expect(saved?.onboardingCompletedAt).not.toBeNull();
+    // The authority's current role, held by Intelligence's directory and on the row the guard reads;
+    // nothing in the old role set.
+    expect(saved?.role).toBe("user");
+    expect((await directory.client.getPerson(localId))?.role).toBe("user");
     expect(
-      (
-        await database
-          .select()
-          .from(userRoles)
-          .where(eq(userRoles.userId, localId))
-      ).map((row) => row.role),
-    ).toEqual(["user"]);
+      await database
+        .select()
+        .from(userRoles)
+        .where(eq(userRoles.userId, localId)),
+    ).toEqual([]);
     expect(
       (await auth.api.getSession({ headers: new Headers({ cookie }) }))?.user
         .id,

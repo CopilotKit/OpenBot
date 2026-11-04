@@ -1,6 +1,9 @@
 import type { MiddlewareHandler } from "hono";
-import type { Database } from "../db/client";
-import { users } from "../db/schema";
+import {
+  idempotencyKey,
+  PersonAlreadyExistsError,
+} from "../people/directory/client";
+import { type PeopleDirectory, people } from "../people/directory/directory";
 import type { AppVariables, AuthenticatedActor } from "./guards";
 
 /**
@@ -27,35 +30,47 @@ export const DEV_ACTOR: AuthenticatedActor = {
   role: "admin",
 };
 
-type UserWriter = Pick<Database, "insert">;
-
+/**
+ * Make sure the single-user administrator is a person in Intelligence's directory (people/directory),
+ * and so has a row here for everything that names them. Their id never changes.
+ */
 export async function initializeDevActorUser(
-  database: UserWriter,
+  _database: unknown,
   enabled: boolean,
+  /** The deployment's people directory; the process's own unless a test runs several deployments. */
+  directory?: PeopleDirectory,
 ): Promise<boolean> {
   if (!enabled) return false;
 
   const name = DEV_ACTOR.name ?? DEV_ACTOR.email;
-  await database
-    .insert(users)
-    .values({
-      id: DEV_ACTOR.id,
-      email: DEV_ACTOR.email,
-      name,
-      emailVerified: false,
-    })
-    .onConflictDoUpdate({
-      target: users.id,
-      set: {
-        email: DEV_ACTOR.email,
-        updatedAt: new Date(),
-      },
-    });
+  directory ??= people();
+  const held = await directory.client.getPerson(DEV_ACTOR.id);
+  if (!held) {
+    try {
+      await directory.create(
+        {
+          id: DEV_ACTOR.id,
+          email: DEV_ACTOR.email,
+          name,
+          image: null,
+          emailVerified: false,
+          role: "admin",
+        },
+        // Replicas starting at once each try; all but one are told the person already exists.
+        idempotencyKey("dev-actor"),
+      );
+      return true;
+    } catch (error) {
+      if (!(error instanceof PersonAlreadyExistsError)) throw error;
+    }
+  }
+  await directory.update(DEV_ACTOR.id, (current) =>
+    current.email === DEV_ACTOR.email ? null : { email: DEV_ACTOR.email },
+  );
 
   return true;
 }
 
-/** Whether the environment asks for single-user mode, by its current name or its former one. */
 export function singleUserRequested(
   environment: Record<string, string | undefined>,
 ): boolean {

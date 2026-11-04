@@ -20,6 +20,8 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { ssoProviders } from "../db/schema";
+import { idempotencyKey } from "../people/directory/client";
+import { people } from "../people/directory/directory";
 
 /**
  * A registered provider, as an administrator screen may see it.
@@ -53,7 +55,14 @@ export function createIdentityProviderStore(
   database: Database,
 ): IdentityProviderStore {
   return {
+    /*
+     * From Intelligence's directory, which holds what describes each provider for the whole
+     * organization. A provider registered here whose description has not reached the directory yet
+     * (its write after registration failed) is described to it now, so the screen and the directory
+     * never disagree for long.
+     */
     list: async () => {
+      const directory = people();
       const rows = await database
         .select({
           providerId: ssoProviders.providerId,
@@ -62,26 +71,54 @@ export function createIdentityProviderStore(
           samlConfig: ssoProviders.samlConfig,
           userId: ssoProviders.userId,
         })
-        .from(ssoProviders)
-        .orderBy(ssoProviders.domain);
+        .from(ssoProviders);
+      let held = await directory.client.allIdentityProviders();
+      const known = new Set(held.map((provider) => provider.providerId));
+      const missing = rows.filter((row) => !known.has(row.providerId));
+      for (const row of missing)
+        await directory.client.putIdentityProvider(
+          {
+            providerId: row.providerId,
+            issuer: row.issuer,
+            domain: row.domain.toLowerCase(),
+            protocol: row.samlConfig ? "saml" : "oidc",
+            registeredBy: row.userId,
+          },
+          idempotencyKey("describe-identity-provider"),
+        );
+      if (missing.length > 0)
+        held = await directory.client.allIdentityProviders();
 
-      return rows.map((row) => ({
-        providerId: row.providerId,
-        issuer: row.issuer,
-        domain: row.domain,
-        // A row carries one config or the other, and which one is the protocol.
-        protocol: row.samlConfig ? "saml" : "oidc",
-        registeredBy: row.userId,
-      }));
+      // Only providers this deployment can sign people in with: one whose secret is here.
+      const local = new Set(rows.map((row) => row.providerId));
+      return held
+        .filter((provider) => local.has(provider.providerId))
+        .sort((a, b) => a.domain.localeCompare(b.domain))
+        .map((provider) => ({
+          providerId: provider.providerId,
+          issuer: provider.issuer,
+          domain: provider.domain,
+          protocol: provider.protocol,
+          registeredBy: provider.registeredBy,
+        }));
     },
 
+    /*
+     * The directory first, then the row holding the secret: a provider the directory no longer
+     * describes but whose secret is still here is put back in the directory by the next listing,
+     * never left signing people in unseen.
+     */
     remove: async (providerId) => {
+      const described = await people().client.deleteIdentityProvider(
+        providerId,
+        idempotencyKey("remove-identity-provider"),
+      );
       const removed = await database
         .delete(ssoProviders)
         .where(eq(ssoProviders.providerId, providerId))
         .returning({ providerId: ssoProviders.providerId });
 
-      return removed.length > 0;
+      return removed.length > 0 || described;
     },
   };
 }

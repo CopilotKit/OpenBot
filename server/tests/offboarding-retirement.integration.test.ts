@@ -4,12 +4,19 @@ import { eq, inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { revokedAccess, sessions, users } from "../src/db/schema";
+import { sessions, users } from "../src/db/schema";
 import { createPeopleStore } from "../src/people/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  liftRemovals,
+  purgeDirectoryPeople,
+  useTestPeople,
+} from "./support/directory";
 import { testEnvironment } from "./support/environment";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// Who was removed lives in Intelligence's organization directory.
+const directory = useTestPeople();
 
 const suite = randomUUID().slice(0, 8);
 const adminId = `offboarding-admin-${suite}`;
@@ -24,10 +31,9 @@ const ADMIN = {
 };
 
 afterAll(async () => {
-  await database
-    .delete(revokedAccess)
-    .where(eq(revokedAccess.email, memberEmail));
+  await liftRemovals([memberEmail]);
   await database.delete(sessions).where(eq(sessions.userId, memberId));
+  await purgeDirectoryPeople([adminId, memberId]);
   await database.delete(users).where(inArray(users.id, [adminId, memberId]));
 });
 
@@ -100,11 +106,10 @@ test("a broker that will not answer still leaves the removal on the trail, and a
 
   expect((await remove()).status).toBe(500);
 
-  const denied = await database
-    .select({ email: revokedAccess.email })
-    .from(revokedAccess)
-    .where(eq(revokedAccess.email, memberEmail));
-  expect(denied).toHaveLength(1);
+  // The removal is Intelligence's, and it stands although retiring what they connected failed.
+  expect((await directory.client.getRemoval(memberEmail))?.removedBy).toBe(
+    adminId,
+  );
   expect(
     await database
       .select({ id: sessions.id })

@@ -40,7 +40,6 @@ import {
   proactiveRuns,
   proactiveSettings,
   proactiveSuggestions,
-  userRoles,
   users,
   workItems,
 } from "../src/db/schema";
@@ -70,6 +69,7 @@ import {
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
 import { testMemory } from "./support/memory";
+import { useTestPeople } from "./support/directory";
 
 /*
  * The admin's say over check-ins, through the real path: real Postgres, the real enterprise controls
@@ -79,6 +79,8 @@ import { testMemory } from "./support/memory";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// The groups a directory provisioned are Intelligence's organization directory's.
+useTestPeople();
 const auditStore = createAuditStore(database);
 const suite = randomUUID().slice(0, 8);
 const admin = { id: `ci-admin-${suite}`, email: `ci-admin-${suite}@acme.test` };
@@ -123,7 +125,11 @@ beforeAll(async () => {
     { ...seller, name: "Seller", groups: [`sales-${suite}`] },
     { ...member, name: "Member" },
   ]);
-  await database.insert(userRoles).values({ userId: admin.id, role: "admin" });
+  // The role is on the person's row, this deployment's copy of Intelligence's directory.
+  await database
+    .update(users)
+    .set({ role: "admin" })
+    .where(eq(users.id, admin.id));
   await seedBot({
     id: inboxBot,
     name: "Inbox Bot",

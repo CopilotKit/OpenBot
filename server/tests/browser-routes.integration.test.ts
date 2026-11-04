@@ -73,6 +73,7 @@ import { createRecorderConnectionStore } from "../src/recorder/connections";
 import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { directoryFor } from "./support/directory";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
 import { testLearningIntelligence } from "./support/learning";
 
@@ -2791,7 +2792,7 @@ describe("a single-user OpenBot, where the person is its admin", () => {
   const WINDOW = { origin: "http://127.0.0.1:3010" };
 
   beforeAll(async () => {
-    await initializeDevActorUser(database, true);
+    await initializeDevActorUser(database, true, directoryFor(database));
   });
   afterAll(async () => {
     await database

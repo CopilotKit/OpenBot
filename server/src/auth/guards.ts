@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import type { Database } from "../db/client";
-import { userRoles } from "../db/schema";
+import { users } from "../db/schema";
 import type { OpenBotRole } from "./roles";
 
 export type AuthenticatedActor = {
@@ -24,8 +24,11 @@ export type AuthService = {
         email: string;
         name?: string | null;
         image?: string | null;
-        /** Set only by a server-verified organization authority. */
-        role?: OpenBotRole;
+        /**
+         * Set by a server-verified organization authority, or read by Better Auth from the person's
+         * row here (never from a request). Anything but a known role is ignored.
+         */
+        role?: OpenBotRole | string | null;
       };
     } | null>;
   };
@@ -42,12 +45,15 @@ export type AppVariables = {
 export function createRoleRepository(database: Database): RoleRepository {
   return {
     rolesForUser: async (userId) => {
-      const records = await database
-        .select({ role: userRoles.role })
-        .from(userRoles)
-        .where(eq(userRoles.userId, userId));
+      // The role on the person's row here, this deployment's copy of the directory's person: one
+      // indexed read, as before, and never a request to Intelligence.
+      const [record] = await database
+        .select({ role: users.role })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
 
-      return records.map((record) => record.role);
+      return record?.role ? [record.role] : [];
     },
   };
 }
@@ -66,8 +72,12 @@ export function createRequireUser(
       return context.json({ error: "Authentication required." }, 401);
     }
 
-    const roles = session.user.role
-      ? [session.user.role]
+    const sessionRole =
+      session.user.role === "admin" || session.user.role === "user"
+        ? session.user.role
+        : undefined;
+    const roles = sessionRole
+      ? [sessionRole]
       : await roleRepository.rolesForUser(session.user.id);
     const role = roles.includes("admin")
       ? "admin"

@@ -35,7 +35,7 @@ import { z } from "zod";
 import type { AuditEventInput } from "../audit";
 import type { CopilotKitSignInConfig } from "../config";
 import type { Database } from "../db/client";
-import { userRoles } from "../db/schema";
+import { users } from "../db/schema";
 import { type OpenBotRole, setRole } from "./roles";
 
 /** The account provider id a CopilotKit sign-in is filed under, beside `google` and `okta`. */
@@ -198,16 +198,12 @@ async function currentRole(
   database: Database,
   userId: string,
 ): Promise<OpenBotRole | undefined> {
-  const rows = await database
-    .select({ role: userRoles.role })
-    .from(userRoles)
-    .where(eq(userRoles.userId, userId));
-  const roles = rows.map((row) => row.role);
-  return roles.includes("admin")
-    ? "admin"
-    : roles.includes("user")
-      ? "user"
-      : undefined;
+  const [row] = await database
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return row?.role ?? undefined;
 }
 
 /** Whether a Better Auth refusal is the deny list's, by the message the hooks in auth/index.ts throw. */

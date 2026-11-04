@@ -1,9 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import { users } from "../db/schema";
+import { people } from "./directory/directory";
 
 export type Profile = { name: string; needsName: boolean };
 export type ProfileStore = {
@@ -35,15 +36,12 @@ export function createProfileStore(
   return {
     read,
     async save(userId, name) {
-      // Display name only: identity, permissions and conversation ownership never change.
-      await database
-        .update(users)
-        .set({
-          name,
-          updatedAt: new Date(),
-          preferences: sql`coalesce(${users.preferences}, '{}'::jsonb) || '{"profileNameSet":true}'::jsonb`,
-        })
-        .where(eq(users.id, userId));
+      // Display name only: identity, permissions and conversation ownership never change. Written
+      // to the person in Intelligence's directory, and from there to their row here.
+      await people().update(userId, (current) => ({
+        name,
+        preferences: { ...current.preferences, profileNameSet: true },
+      }));
       return read(userId);
     },
   };

@@ -7,6 +7,7 @@ import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { accounts, sessions, userRoles, users } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeDirectoryPeople, useTestPeople } from "./support/directory";
 
 /*
  * Signing in through a CopilotKit organization, through the real routes: Better Auth's handler, the
@@ -126,6 +127,9 @@ function startOps() {
 
 const ops = startOps();
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// People live in Intelligence's organization directory; sign-in writes them there through Better Auth.
+const directory = useTestPeople();
+const signedIn = new Set<string>();
 const revoked = new Set<string>();
 let auth: ReturnType<typeof createAuth>;
 
@@ -149,6 +153,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   ops.stop();
+  await purgeDirectoryPeople([...signedIn]);
   await database.$client.end({ timeout: 5 });
 });
 
@@ -211,17 +216,25 @@ function person() {
   };
 }
 
+/**
+ * The person's role: the one the request guard reads from their row, which must be the one
+ * Intelligence's directory holds. Nothing is written to the old `user_roles` set.
+ */
 async function roleOf(email: string) {
   const [user] = await database
-    .select({ id: users.id })
+    .select({ id: users.id, role: users.role })
     .from(users)
     .where(eq(users.email, email));
   if (!user) return undefined;
-  const rows = await database
+  signedIn.add(user.id);
+  const legacy = await database
     .select({ role: userRoles.role })
     .from(userRoles)
     .where(eq(userRoles.userId, user.id));
-  return rows.map((row) => row.role).sort();
+  expect(legacy).toEqual([]);
+  const held = await directory.client.getPerson(user.id);
+  expect(held?.role).toBe(user.role ?? undefined);
+  return user.role ? [user.role] : [];
 }
 
 async function sessionFor(response: Response) {
@@ -252,6 +265,20 @@ test("an admin of the bound organization signs in as an OpenBot admin", async ()
       ),
     );
   expect(account).toEqual({ providerId: "copilotkit", issuer: ops.url });
+
+  // The person Better Auth made is in Intelligence's directory, known by their Clerk identity.
+  const held = await directory.client.getPerson(session?.user.id ?? "");
+  expect(held).toMatchObject({
+    email: admin.email,
+    name: "Test Person",
+    role: "admin",
+    signInIdentities: [{ issuer: "clerk", subject: admin.subjectId }],
+  });
+  const [row] = await database
+    .select({ directoryVersion: users.directoryVersion })
+    .from(users)
+    .where(eq(users.email, admin.email));
+  expect(row?.directoryVersion).toBe(held?.version ?? -1);
 });
 
 test("a plain member of the bound organization signs in as a user", async () => {

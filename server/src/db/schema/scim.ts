@@ -7,8 +7,10 @@
  * like every other table. Field list and flags copied from the plugin's `schema` block in
  * `@better-auth/scim@1.7.1` (`dist/index.mjs`); `returned: false` there has no storage meaning.
  *
- * Owned by the plugin: nothing in OpenBot writes these directly. Deprovisioning is reacted to through
- * the plugin's `identity.reconcileUser` hook in `auth/scim.ts`, never by reading these rows.
+ * NO LONGER WRITTEN. SCIM is served by Intelligence's organization directory now (auth/scim.ts), and
+ * the plugin is no longer mounted. The tables stay for one release so an upgrading deployment's SCIM
+ * users and groups can be handed to Intelligence under the ids its directory holds
+ * (people/directory/upgrade.ts), which is the only code that reads them.
  */
 import {
   boolean,
