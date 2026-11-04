@@ -21,7 +21,8 @@
 #   INTELLIGENCE_IMAGE               the image, instead of the one pinned below: one built from an
 #                                    Intelligence checkout, say (`docker build -f Dockerfile.composite`).
 #   TEST_INTELLIGENCE_PORT           the first of the four loopback ports it binds, in order
-#                                    Postgres, Redis, the API, the realtime gateway (default 7480).
+#                                    Postgres, Redis, the API, the realtime gateway (default 7860,
+#                                    clear of the fixed ports the tests bind, 7483 and 7484 among them).
 #   TEST_INTELLIGENCE_API_KEY(_2)    the two projects' keys. When CI's job sets them, as it sets
 #                                    DATABASE_URL, they are made to work; unset, they are made up.
 #   TEST_INTELLIGENCE_API_URL, _GATEWAY_WS_URL, _DATABASE_URL, _REDIS_URL
@@ -41,7 +42,7 @@ set -euo pipefail
 DEFAULT_IMAGE="ghcr.io/copilotkit/intelligence/composite:0.15.2-validation.c2e70fa5fda4@sha256:3659cf2c3a5c481e571484931203c390f5e8115ea07879a14eb4c98c8c69a098"
 INTELLIGENCE_IMAGE="${INTELLIGENCE_IMAGE:-$DEFAULT_IMAGE}"
 NAME="${TEST_INTELLIGENCE_NAME:-openbot-test-intelligence}"
-PORT="${TEST_INTELLIGENCE_PORT:-7480}"
+PORT="${TEST_INTELLIGENCE_PORT:-7860}"
 PG="$NAME-postgres"
 REDIS="$NAME-redis"
 APP="$NAME"

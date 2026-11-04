@@ -344,12 +344,12 @@ jobs:
       # schedules, conversations and people. The step before the suite starts it on these ports and
       # makes these two keys work, for a throwaway organization in its own database: literals like
       # the database password above, not secrets, so a fork's pull request runs every test too.
-      TEST_INTELLIGENCE_API_URL: http://127.0.0.1:7482
-      TEST_INTELLIGENCE_GATEWAY_WS_URL: ws://127.0.0.1:7483
+      TEST_INTELLIGENCE_API_URL: http://127.0.0.1:7862
+      TEST_INTELLIGENCE_GATEWAY_WS_URL: ws://127.0.0.1:7863
       TEST_INTELLIGENCE_API_KEY: cpk_sOBTEST1_openbottestsfirstproject
       TEST_INTELLIGENCE_API_KEY_2: cpk_sOBTEST2_openbottestssecondproject
-      TEST_INTELLIGENCE_DATABASE_URL: postgresql://intelligence:intelligence@127.0.0.1:7480/intelligence_app
-      TEST_INTELLIGENCE_REDIS_URL: redis://127.0.0.1:7481
+      TEST_INTELLIGENCE_DATABASE_URL: postgresql://intelligence:intelligence@127.0.0.1:7860/intelligence_app
+      TEST_INTELLIGENCE_REDIS_URL: redis://127.0.0.1:7861
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
