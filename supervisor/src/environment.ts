@@ -1,3 +1,4 @@
+import { computerTokenFor } from "../../shared/computer-token";
 import type { ComputerNames } from "./names";
 
 /**
@@ -14,7 +15,20 @@ export function environmentFor(
   const passthrough = Object.entries(env).filter(([key]) =>
     key.startsWith("EGRESS_PROXY"),
   );
-  const computerToken = env.COMPUTER_TOKEN?.trim() || undefined;
+  const deploymentToken = env.COMPUTER_TOKEN?.trim() || undefined;
+  /*
+   * Its own token, never the deployment's.
+   *
+   * A Bot can read whatever its computer's process was started with (`/proc/1/environ`), so whatever
+   * is put here is the Bot's. The deployment's token opens every computer; this one opens only the
+   * computer it is in, which the Bot is already on. The server derives the same value for the same
+   * computer when it calls it (shared/computer-token.ts). And since `ensure` replaces a computer
+   * holding any token but this one (`holdsCurrentToken`), a computer created before this holding the
+   * deployment's token is replaced, volumes kept, the next time it is asked for.
+   */
+  const computerToken = deploymentToken
+    ? computerTokenFor(deploymentToken, { kind: names.kind, id: names.id })
+    : undefined;
   const spireSocketVolume = env.SPIRE_AGENT_SOCKET_VOLUME;
   // Fail fast here rather than forwarding an invalid mode that crashes the child at
   // `browserModeFromEnv`: whitespace-only is falsy after trim, anything else must be headless

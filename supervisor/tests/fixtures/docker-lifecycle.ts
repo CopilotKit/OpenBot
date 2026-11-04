@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import type Docker from "dockerode";
+import { environmentFor } from "../../src/environment";
 import { legacyNamesFor, NAMESPACE, namesFor } from "../../src/names";
 
 // Launched by docker.integration.test.ts in a fresh process: names.ts reads its namespace once.
@@ -434,6 +435,65 @@ describe("a computer built from an older image", () => {
     expect(after.Id).not.toBe(before.Id);
     expect(after.Config.Env).toContain("COMPUTER_TOKEN=new-token");
     expect(after.State.Health?.Status).toBe("healthy");
+  }, 180_000);
+
+  /*
+   * The upgrade that takes the deployment's token off every computer.
+   *
+   * Every computer used to be handed the deployment's `COMPUTER_TOKEN` itself, which a Bot could read off its own
+   * computer's process and use on every other computer it could reach. Now each is given its own (environment.ts), so a
+   * computer from before holds a token this supervisor no longer hands out. It is replaced the next time it is asked
+   * for, with the volumes holding the person's sign-ins and files kept, as any other upgrade replaces one.
+   */
+  test("made before computers had their own token is replaced onto its own, keeping its files and sign-ins", async () => {
+    const deployment = `deployment-${crypto.randomUUID()}`;
+    // As the supervisor before this made it: the deployment's token, unchanged.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [`COMPUTER_TOKEN=${deployment}`],
+    });
+    const before = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(before.Config.Env).toContain(`COMPUTER_TOKEN=${deployment}`);
+    await inComputer(
+      "echo saved-login > /profiles/keep; echo saved-work > /workspace/keep",
+    );
+
+    // Asked for again by today's supervisor, whose environment for it is `environmentFor`'s.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: environmentFor(names, { COMPUTER_TOKEN: deployment }),
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    expect(after.Id).not.toBe(before.Id);
+    expect(after.State.Health?.Status).toBe("healthy");
+    const tokens = (after.Config.Env ?? []).filter((line) =>
+      line.startsWith("COMPUTER_TOKEN="),
+    );
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).not.toContain(deployment);
+    expect(tokens).toEqual(
+      environmentFor(names, { COMPUTER_TOKEN: deployment }).filter((line) =>
+        line.startsWith("COMPUTER_TOKEN="),
+      ),
+    );
+    expect(await inComputer("cat /profiles/keep /workspace/keep")).toBe(
+      "saved-login\r\nsaved-work",
+    );
+
+    // And once it holds its own, it is kept.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: environmentFor(names, { COMPUTER_TOKEN: deployment }),
+    });
+    const kept = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(kept.Id).toBe(after.Id);
   }, 180_000);
 
   test("is left alone when it holds the token asked for", async () => {
