@@ -281,11 +281,7 @@ test("consumption forwards bounded references without claiming execution success
     message_id: "message",
     consumption_surface: "web",
   });
-  const firstEvent = f.sent[0];
-  expect(firstEvent).toBeDefined();
-  const properties = firstEvent?.properties;
-  expect(properties).toBeDefined();
-  expect(properties).not.toHaveProperty("outcome");
+  expect(f.sent[0]?.properties).not.toHaveProperty("outcome");
 });
 test("transport failures are observed and do not reject product flows", async () => {
   const warnings: string[] = [];

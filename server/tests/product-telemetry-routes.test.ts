@@ -61,11 +61,10 @@ test("authenticated telemetry uses server actor and stable analytics IDs without
   expect(f.sent[0]?.properties?.user_id).not.toBe(
     f.sent[2]?.properties?.user_id,
   );
-  const firstEvent = f.sent[0];
-  expect(firstEvent).toBeDefined();
-  const properties = firstEvent?.properties;
-  expect(properties).toBeDefined();
-  expect(properties).not.toHaveProperty("outcome");
+  expect(f.sent[0]?.properties).toMatchObject({
+    event_id: expect.any(String),
+  });
+  expect(f.sent[0]?.properties).not.toHaveProperty("outcome");
 });
 test("endpoint rejects unauthenticated, raw/extra fields and oversized payloads", async () => {
   const f = await fixture();
