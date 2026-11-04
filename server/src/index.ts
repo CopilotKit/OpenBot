@@ -215,6 +215,7 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
+import { createModelCatalogue } from "./model-catalogue";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
@@ -1409,6 +1410,16 @@ const resolveRuntimeModelApiKey = () =>
     environment: process.env,
   });
 
+/**
+ * The models a person may pick for a built-in Bot's run, asked of whatever serves the model: the
+ * provider, or the gateway in OPENAI_BASE_URL. Narrowed by the admin's allowlist when it is on.
+ */
+const modelCatalogue = createModelCatalogue({
+  model: runtimeModel,
+  apiKey: resolveRuntimeModelApiKey,
+  allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
+});
+
 const hostAccessBroker = createHostAccessBroker(Date.now, {
   approvalGate: approvalService.gate,
   commandPolicy: (actorId) => approvalService.hostCommandPolicy(actorId),
@@ -1964,6 +1975,7 @@ const actorAgentResolver = createActorAgentResolver({
   loadAgents: loadAgentsForActor,
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
+  allowsModel: (id) => modelCatalogue.allows(id),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>
     restrictToolsForRun(
@@ -2961,6 +2973,7 @@ const app = createApp(
       tasks: taskRunner,
       auditStore: bootAuditStore,
     },
+    models: modelCatalogue,
     // The checklist onboarding ends on. Facts and verdicts about this configuration, never values.
     setup: createSetupSources({
       productName: tenantPackage.productName,

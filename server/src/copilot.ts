@@ -73,8 +73,6 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
-import type { ProductTelemetry } from "./telemetry/product";
-import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
@@ -90,6 +88,7 @@ import {
   type LoadPersonalMemory,
   PersonalMemoryMiddleware,
 } from "./memory/tools";
+import { requestedModel } from "./model-catalogue";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -98,6 +97,8 @@ import {
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
+import type { ProductTelemetry } from "./telemetry/product";
+import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -703,6 +704,11 @@ export async function buildAgents(
   loadPersonalMemory?: LoadPersonalMemory,
   /** How a run refused for holding too many tools is put on record. Absent writes no row. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
+  /**
+   * Whether a run may use the model it asks for (`forwardedProps.openbotModel`). Appended last for the
+   * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
+   */
+  allowsModel?: AllowsModel,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -760,6 +766,7 @@ export async function buildAgents(
           markAttachmentsSent,
           acquireLearnedSkills,
           recordToolLimitRefusal,
+          allowsModel,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1024,6 +1031,8 @@ async function buildAgent(
   acquireLearnedSkills?: AcquireLearnedSkills,
   /** How a run refused by `admitTools` below is put on record. See {@link buildAgents}. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
+  /** Whether a run may use the model it asks for. See {@link buildAgents}. */
+  allowsModel?: AllowsModel,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1157,10 +1166,11 @@ async function buildAgent(
    * over the limit fails on every message until somebody looks, and nobody looks at what they cannot
    * see. Ported from #948, with the limit read from the API the runtime resolves.
    */
-  const limit = model.plan ? null : toolLimitFor(model, apiKey ?? undefined);
-  const admitTools = (waiting: ReadonlySet<string>) => {
+  const limitFor = (runModel: RuntimeModel) =>
+    runModel.plan ? null : toolLimitFor(runModel, apiKey ?? undefined);
+  const admitTools = (waiting: ReadonlySet<string>, runModel: RuntimeModel) => {
     const capacity =
-      limit ??
+      limitFor(runModel) ??
       (waiting.size > 0
         ? { provider: OPENBOT_TOOL_LIMIT, limit: MODEL_TOOL_LIMIT }
         : null);
@@ -1202,6 +1212,8 @@ async function buildAgent(
     signal?: AbortSignal,
     learnedSkills?: LearnedSkillInvocation,
     pinned?: ReadonlySet<string>,
+    /** The model this run asked for and was allowed, or the deployment's. */
+    runModel: RuntimeModel = model,
   ) => {
     /*
      * What waits behind a search, decided where the run's tools are final. The count includes what
@@ -1217,7 +1229,7 @@ async function buildAgent(
     });
     const configuration = builtInAgentConfiguration(
       agent,
-      model,
+      runModel,
       apiKey,
       tools,
       computerGuidance,
@@ -1241,7 +1253,7 @@ async function buildAgent(
     )
       ? waiting
       : new Set<string>();
-    const admit = admitTools(held);
+    const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
       observe: observeModelConnection,
       ...(admit ? { admitTools: admit } : {}),
@@ -1268,6 +1280,7 @@ async function buildAgent(
   const whole = withTools(granted);
   // Even a small app grant may need search once the client's tools arrive with the run.
   if (
+    !allowsModel &&
     !narrowing &&
     !handoff &&
     !model.plan &&
@@ -1280,6 +1293,8 @@ async function buildAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input, signal) => {
+      const runModel = await modelForRun(model, input, allowsModel);
+      signal.throwIfAborted();
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
       if (
@@ -1310,13 +1325,14 @@ async function buildAgent(
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
       // built for this request keeps that path allocation-for-allocation what it was.
       return !model.plan &&
+        runModel === model &&
         !learnedSkills &&
         tools.length === granted.length &&
         passing.length === 0 &&
         pinned.size === 0 &&
         input.tools.length === 0
         ? whole
-        : withTools(tools, input, signal, learnedSkills, pinned);
+        : withTools(tools, input, signal, learnedSkills, pinned, runModel);
     },
   );
 }
@@ -1874,6 +1890,11 @@ export async function resolveRuntimeAgents(
   loadPersonalMemory?: LoadPersonalMemory,
   /** Appended after `loadPersonalMemory`, for the positional reason `loadInstructions` gives. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
+  /**
+   * Whether a run may use the model it asks for (`forwardedProps.openbotModel`). Appended last for the
+   * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
+   */
+  allowsModel?: AllowsModel,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1911,7 +1932,43 @@ export async function resolveRuntimeAgents(
     acquireLearnedSkills,
     loadPersonalMemory,
     recordToolLimitRefusal,
+    allowsModel,
   );
+}
+
+/** Whether a run may use this model id, as the provider or gateway in front names it. */
+export type AllowsModel = (id: string) => Promise<boolean>;
+
+/** A person asked for a model this deployment does not offer them. Said to them as it is. */
+export class ModelNotOfferedError extends Error {
+  constructor(id: string) {
+    super(`${id} isn't available here. Pick another model and send again.`);
+    this.name = "ModelNotOfferedError";
+  }
+}
+
+/**
+ * The model one run of a built-in Bot uses: the one it asked for, when this deployment offers it,
+ * and otherwise the deployment's own.
+ *
+ * Decided here, on the server, and never by the runtime's own `forwardedProps.model` override. That
+ * one takes any `provider/model` string from the browser and sends it with this deployment's key,
+ * past the allowlist and past the tool-search wrapper this file puts around the model. Here the id
+ * must be one the catalogue offers, and it is sent through the same configuration as the default.
+ *
+ * A plan's harness picks its own model and is sent none, so a plan ignores the request. Asking for
+ * the deployment's own model is the same as asking for nothing.
+ */
+export async function modelForRun(
+  model: RuntimeModel,
+  input: RunAgentInput,
+  allowsModel: AllowsModel | undefined,
+): Promise<RuntimeModel> {
+  const asked = requestedModel(input.forwardedProps);
+  if (!asked || !allowsModel || model.plan || asked === model.defaultModel)
+    return model;
+  if (!(await allowsModel(asked))) throw new ModelNotOfferedError(asked);
+  return { ...model, defaultModel: asked };
 }
 
 /** What one Bot may call, for the person whose request this is. */

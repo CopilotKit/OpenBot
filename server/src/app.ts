@@ -107,6 +107,10 @@ import {
 import type { MemoryIngestion } from "./memory/ingestion";
 import { createMemoryRoutes } from "./memory/routes";
 import type { MemoryStore } from "./memory/store";
+import {
+  createModelRoutes,
+  type ModelCatalogueReader,
+} from "./model-catalogue";
 import { parsePageLimit } from "./paging";
 import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
 import type { SignInService } from "./passwords/service";
@@ -484,6 +488,8 @@ export function createApp(
      * configuration and state. See setup/checklist.ts. Absent, `/api/setup` is not mounted.
      */
     setup?: SetupSources;
+    /** The models a person may pick for a built-in Bot's run. Absent, `/api/models` is not mounted. */
+    models?: ModelCatalogueReader;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1739,6 +1745,8 @@ export function createApp(
    */
   if (coworker?.setup)
     app.route("/api/setup", createSetupRoutes(coworker.setup, requireUser));
+  if (coworker?.models)
+    app.route("/api/models", createModelRoutes(coworker.models, requireUser));
   if (coworker?.groups)
     app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
   if (coworker?.teamBots)

@@ -14,6 +14,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { agents } from "../db/schema";
+import { requestedModel } from "../model-catalogue";
 import { type Capability, capabilityRefusal } from "./capabilities";
 import { enterpriseControls } from "./controls";
 
@@ -238,7 +239,19 @@ async function governRun(
   const allowlist = controls.snapshot()?.settings.modelAllowlist;
   const isAllowed = (model: string) =>
     !allowlist?.enabled || allowlist.models.includes(model);
-  const configured = builtIn ? controls.deps.builtInModel : undefined;
+  /*
+   * A built-in Bot runs on the model the person picked when they picked one (see `modelForRun`), so
+   * that is what the allowlist judges and what the usage row names. Same `provider/model` spelling
+   * as the deployment's own: the provider is the deployment's, the model is the picked one.
+   */
+  const picked = requestedModel(request.forwardedProps);
+  const deploymentModel = controls.deps.builtInModel;
+  const configured =
+    builtIn && deploymentModel
+      ? picked
+        ? `${deploymentModel.split("/")[0]}/${picked}`
+        : deploymentModel
+      : undefined;
 
   const record = (
     model: string,
