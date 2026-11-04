@@ -134,6 +134,12 @@ fi
 
 info "3/4  API server"
 stop_port "$SERVER_PORT" server
+# The personal edition's own browser, which start.sh runs on the host beside the server. Its browser
+# is asked to close first: the computer closes it on SIGTERM.
+if running "bun scripts/start-local-chrome-computer.ts"; then
+  stop_matching "bun scripts/start-local-chrome-computer.ts"
+  green "  your browser: stopped"
+fi
 
 info "4/4  Docker"
 if docker compose ps --quiet 2>/dev/null | grep -q .; then

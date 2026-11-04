@@ -208,10 +208,9 @@ const FIRECRAWL_READ_TOOLS = Object.freeze([
  * branch it falls into.
  *
  * Routines is the first entry here that is not a remote vendor at all — no host to dial, nothing
- * outside this process to trust. It is in the catalogue anyway, on purpose rather than by oversight:
- * the catalogue is where a deployment decides which Bots may do what, and a Bot that can schedule its
- * own future runs is a capability worth that same deliberate grant, even though there is no vendor on
- * the other end of it.
+ * outside this process to trust. It is in the catalogue so its tools reach a Bot the same way every
+ * other app's do, as grants. Unlike every other entry it is always on: the server adds it at startup
+ * and gives every Bot all of its tools. See `personal-defaults.ts`.
  */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
   {
@@ -477,11 +476,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "OpenBot",
     summary:
       "Standing instructions a Bot runs on a schedule, as whoever scheduled them.",
-    /*
-     * First-party and in-process: no host to dial, no credential to hold. In the catalogue anyway,
-     * because the catalogue is where a deployment decides WHICH Bots may do WHAT — and scheduling
-     * future work is a capability an administrator should grant as deliberately as a vendor.
-     */
+    // First-party and in-process: no host to dial, no credential to hold. Always on, for every Bot.
     host: "builtin://routines",
     path: "/",
     transport: "builtin-routines",

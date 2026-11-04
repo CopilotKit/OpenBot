@@ -4,6 +4,7 @@ import {
 } from "@openbot/shared/connect-prompt";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
+import { currentEdition } from "../edition";
 import type { AppAccess, AppAccessState } from "./app-access";
 import { ownerAppsAllowed } from "./owner-grants";
 import type {
@@ -122,5 +123,15 @@ function toldTheModel(access: AppAccess): string {
     not_granted: `${name} is switched on, and you have not been granted it. The card in front of the person lets them ask an administrator to grant it to you.`,
     owner_grantable: `${name} is switched on, and you have not been given it. This person owns you and can give it to you themselves: the card in front of them asks whether to let you use their ${name}. Ask them to try again once they have.`,
   };
+  /*
+   * ONE PERSON, NO ADMINISTRATOR. In the personal edition the card offers the step itself — turn it
+   * on and connect, in one press — so the model is not told to send anybody to an administrator.
+   */
+  if (
+    currentEdition() === "personal" &&
+    (access.state === "disabled" || access.state === "not_granted")
+  )
+    said[access.state] =
+      `${name} isn't connected yet. The card in front of the person offers Connect, which turns it on and connects it in one press; ask them to try again once they have.`;
   return `${said[access.state]} Do not browse to its website or ask them to sign in there.`;
 }

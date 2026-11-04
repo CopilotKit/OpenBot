@@ -90,6 +90,7 @@ import {
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
+import { createEditionGate } from "./edition-routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { identityRoutes } from "./identity/routes";
@@ -127,9 +128,6 @@ import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
 import type { ProactiveEngine } from "./proactive/engine";
 import { createProactiveRoutes } from "./proactive/routes";
 import type { ProactiveStore } from "./proactive/store";
-import { createTaskRoutes } from "./tasks/routes";
-import type { TaskRunner } from "./tasks/runner";
-import type { TaskStore } from "./tasks/store";
 import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
@@ -139,8 +137,8 @@ import {
   RECORDER_BEARER_PREFIX,
 } from "./recorder/guard";
 import { createRecorderRoutes } from "./recorder/routes";
-import { createReleaseStatusRoutes } from "./release-status";
 import type { RecorderExtensionDeps } from "./recorder/wiring";
+import { createReleaseStatusRoutes } from "./release-status";
 import { createOriginGuard, createSingleUserGate } from "./request-trust";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
 import type { ResponsibilityEngine } from "./responsibilities/engine";
@@ -153,11 +151,15 @@ import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
-import type { ProductTelemetry } from "./telemetry/product";
-import { createProductTelemetryRoutes } from "./telemetry/product-routes";
 import type { SelfHostBanner } from "./self-host-banner";
+import { createSetupRoutes, type SetupSources } from "./setup/checklist";
+import { createTaskRoutes } from "./tasks/routes";
+import type { TaskRunner } from "./tasks/runner";
+import type { TaskStore } from "./tasks/store";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
+import type { ProductTelemetry } from "./telemetry/product";
+import { createProductTelemetryRoutes } from "./telemetry/product-routes";
 import type { PackageStatusReader } from "./tenant-package";
 import {
   INSTRUCTIONS_LIMIT,
@@ -477,6 +479,11 @@ export function createApp(
     teamBots?: TeamBots;
     /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
     lifecycle?: BotLifecycleServices;
+    /**
+     * The setup checklist Settings → Setup draws, read from this server's own
+     * configuration and state. See setup/checklist.ts. Absent, `/api/setup` is not mounted.
+     */
+    setup?: SetupSources;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -526,9 +533,13 @@ export function createApp(
       generativeUi: config.generativeUi,
       // Whether to offer help self-hosting OpenBot. A fork running it for its own people turns it off,
       // and a deployment that pays for Intelligence never sees it. See self-host-banner.ts.
-      selfHostBanner: selfHostBanner
-        ? await selfHostBanner.shown()
-        : config.selfHostBanner,
+      // Never in the personal edition: one person running it for themselves is not the audience.
+      selfHostBanner:
+        config.edition === "personal"
+          ? false
+          : selfHostBanner
+            ? await selfHostBanner.shown()
+            : config.selfHostBanner,
       /*
        * Whether this is somebody trying OpenBot on their own machine, not an organization's
        * deployment. Onboarding reads it to explain where OpenBot can run, which only the person
@@ -539,6 +550,8 @@ export function createApp(
        * a local trial, and an operator cannot forget to set it.
        */
       localEvaluation: config.singleUser,
+      // Which product this is: the app shows the personal edition's screens instead of Admin.
+      edition: config.edition,
       transcription: Boolean(config.transcription),
       voice: Boolean(config.voice),
       /*
@@ -568,6 +581,8 @@ export function createApp(
         enterpriseControls()?.snapshot()?.settings.ssoRequired === true,
     }),
   );
+  // Ahead of every route it closes, the auth handler's SSO and SCIM routes included.
+  app.use("/api/*", createEditionGate(config.edition));
   /*
    * Registering an identity provider is an administrator's decision, not a signed-in one.
    *
@@ -1717,6 +1732,13 @@ export function createApp(
       "/api/bots",
       createBotLifecycleRoutes(coworker.lifecycle, requireUser),
     );
+  /*
+   * Signed in, unlike `/api/capabilities`, which anybody can read. The checklist names what this
+   * deployment has and lacks, and for an admin which variables would close a gap, which is not a
+   * visitor's to have before they sign in.
+   */
+  if (coworker?.setup)
+    app.route("/api/setup", createSetupRoutes(coworker.setup, requireUser));
   if (coworker?.groups)
     app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
   if (coworker?.teamBots)

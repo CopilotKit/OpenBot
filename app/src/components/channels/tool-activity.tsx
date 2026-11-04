@@ -5,6 +5,12 @@ import {
 } from "@openbot/shared/connect-prompt";
 import { researchRoleOfTool } from "@openbot/shared/research";
 import {
+  connectorName,
+  humanise,
+  ownToolLabel,
+  readToolName,
+} from "@openbot/shared/tool-name";
+import {
   IconFileText,
   IconFolder,
   IconPlug,
@@ -12,17 +18,17 @@ import {
   IconTool,
   IconWorld,
 } from "@tabler/icons-react";
-import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
-import {
-  connectorName,
-  humanise,
-  ownToolLabel,
-  readToolName,
-} from "@openbot/shared/tool-name";
 import {
   asText,
   forDisplay,
@@ -31,8 +37,8 @@ import {
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
-import { codingOutcome, lookStep } from "./coding-tool-cards";
 import type { VisibleChatItem } from "./chat-messages";
+import { codingOutcome, lookStep } from "./coding-tool-cards";
 import { ToolLine } from "./tool-line";
 
 type ToolItem = Extract<VisibleChatItem, { kind: "tool" }>;
@@ -358,7 +364,9 @@ export function stepDetails(step: ToolItem): StepDetails {
     pending: step.result === undefined,
     failed: !refused && toolResultFailed(step.result),
     refused,
-    inputs,
+    // Neither what it was given nor what it said: both were for the model (a tool search's query
+    // and limit), so the line says what it did and does not open.
+    inputs: own ? [] : inputs,
     ...(body && !own ? { output: body } : {}),
   };
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
@@ -585,32 +593,77 @@ export function StepRow({
         </summary>
         <div className="mt-1.5 space-y-2 pl-5">
           {step.inputs.length ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-muted-foreground">
               {step.inputs.map(([key, value]) => (
                 <div className="contents" key={key}>
-                  <dt className="text-muted-foreground">{key}</dt>
-                  <dd className="min-w-0 break-words">{value}</dd>
+                  <dt>{key}</dt>
+                  <dd className="min-w-0 break-words text-foreground/80">
+                    {value}
+                  </dd>
                 </div>
               ))}
             </dl>
           ) : null}
-          {step.output && step.verbatim ? (
-            <pre className="max-h-60 overflow-auto border-l pl-3 font-mono whitespace-pre-wrap break-words">
-              {step.output}
-            </pre>
-          ) : step.output ? (
-            <div className="max-h-60 overflow-auto border-l pl-3 [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
-              <Streamdown
-                components={markdownComponents}
-                plugins={markdownPlugins}
-              >
-                {forDisplay(step.output)}
-              </Streamdown>
-            </div>
+          {step.output ? (
+            <StepOutput output={step.output} verbatim={step.verbatim} />
           ) : null}
         </div>
       </details>
     </li>
+  );
+}
+
+/**
+ * What a step got back, in a soft box cut to a few lines and faded at the foot, with Show all to
+ * read the rest. Not a scrolling box: inside the group's own list, a second scrollbar beside the
+ * first was the hardest thing on the screen to read past.
+ */
+function StepOutput({
+  output,
+  verbatim,
+}: {
+  output: string;
+  verbatim?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  const measure = useCallback((element: HTMLDivElement | null) => {
+    if (element) setLong(element.scrollHeight > element.clientHeight + 1);
+  }, []);
+  return (
+    <div className="rounded-md bg-muted/50 px-3 py-2">
+      <div
+        className={`relative ${open ? "" : "max-h-40 overflow-hidden"}`}
+        ref={measure}
+      >
+        {verbatim ? (
+          <pre className="font-mono whitespace-pre-wrap break-words">
+            {output}
+          </pre>
+        ) : (
+          <div className="[&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
+            <Streamdown
+              components={markdownComponents}
+              plugins={markdownPlugins}
+            >
+              {forDisplay(output)}
+            </Streamdown>
+          </div>
+        )}
+        {long && !open ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-muted to-transparent" />
+        ) : null}
+      </div>
+      {long ? (
+        <button
+          className="mt-1 text-muted-foreground hover:text-foreground"
+          onClick={() => setOpen(!open)}
+          type="button"
+        >
+          {open ? "Show less" : "Show all"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -631,6 +684,7 @@ export function ToolActivity({
   return (
     <>
       <ToolLine
+        bare
         icon={<IconStack kinds={kinds} />}
         label={running && current ? `${current.label}…` : summarise(steps)}
         detail={issues ? plural(issues, "issue", "issues") : undefined}

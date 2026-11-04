@@ -305,8 +305,8 @@ async def test_blank_provider_keeps_opaque_model_at_compatible_endpoint(
 @pytest.mark.parametrize(
     ("provider", "model", "request_model"),
     [
-        ("anthropic", None, "claude-sonnet-4-5"),
-        ("anthropic", "", "claude-sonnet-4-5"),
+        ("anthropic", None, "claude-sonnet-5-5"),
+        ("anthropic", "", "claude-sonnet-5-5"),
         ("anthropic", "claude-sonnet-4-5", "claude-sonnet-4-5"),
         ("openai", "anthropic:claude-sonnet-4-5", "claude-sonnet-4-5"),
         ("anthropic", "claude-compatible:latest", "claude-compatible:latest"),

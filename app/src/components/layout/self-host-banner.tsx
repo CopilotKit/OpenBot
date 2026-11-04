@@ -58,7 +58,7 @@ export function SelfHostBanner() {
           rel="noopener noreferrer"
           target="_blank"
         >
-          Talk to an engineer
+          Book a call
         </a>
         <Button
           aria-label="Dismiss"
