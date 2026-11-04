@@ -882,7 +882,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     expect(page().queryByText("Compare pricing pages")).toBeNull();
     // OpenBot's own check-ins section for the Bot sits under the suggestions.
     expect(page().getByRole("heading", { name: "Check-ins" })).toBeTruthy();
-    fireEvent.click(page().getByRole("button", { name: "Start" }));
+    fireEvent.click(page().getByRole("button", { name: "Work on it" }));
     await waitFor(() =>
       expect(
         calls.some(

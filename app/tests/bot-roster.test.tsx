@@ -199,10 +199,12 @@ test("a failed refetch keeps the roster it already had, not the error", async ()
     ),
   );
   expect(view.getByText("Mine")).toBeTruthy();
-  expect(view.queryByRole("alert")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load your Bots. Reload the page."),
+  ).toBeNull();
 });
 
-test("a Bot with something waiting comes first, under Needs you, with its count", async () => {
+test("a Bot with something waiting stays in its own section, with its count", async () => {
   serving(
     [
       bot({ id: "mine", name: "Mine" }),
@@ -225,14 +227,13 @@ test("a Bot with something waiting comes first, under Needs you, with its count"
     ],
   );
   const view = draw();
-  expect(await view.findByText("Needs you")).toBeTruthy();
+  expect(await view.findByText("2")).toBeTruthy();
   const headings = [...view.container.querySelectorAll("h2")].map(
     (heading) => heading.textContent,
   );
-  expect(headings).toEqual(["Needs you", "Yours", "Shared with you"]);
-  // Once, under Needs you, not again under Shared with you.
+  // What it waits on is on the Needs you board, by name; the Bot itself stays where it is.
+  expect(headings).toEqual(["Yours", "Shared with you"]);
   expect(view.getAllByText("Waiting")).toHaveLength(1);
-  expect(view.getByText("2")).toBeTruthy();
 });
 
 test("a Bot's check-in items are counted in the words the badge and Needs you use", async () => {

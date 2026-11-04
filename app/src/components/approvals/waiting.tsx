@@ -2,9 +2,8 @@ import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { approvalWords } from "@openbot/shared/tool-name";
 import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
-import { PageRows, PageSection } from "@/components/layout/page-shell";
-import { NeedsYouRows, useNeedsYou } from "@/components/needs-you/needs-you";
+import { Fragment, type ReactNode, useState } from "react";
+import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -51,9 +50,12 @@ function useWaiting(agentId: string | undefined) {
 function QuestionRow({
   question,
   botName,
+  inGroup = false,
 }: {
   question: WaitingQuestion;
   botName: string;
+  /** Under its Bot's header, which already names who asks. */
+  inGroup?: boolean;
 }) {
   const [text, setText] = useState("");
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
@@ -64,7 +66,9 @@ function QuestionRow({
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="line-clamp-none">
-          {botName} asks: {question.question}
+          {inGroup
+            ? question.question
+            : `${botName} asks: ${question.question}`}
         </ItemTitle>
         {question.why ? (
           <ItemDescription className="line-clamp-none">
@@ -104,9 +108,12 @@ function QuestionRow({
 function RequestRow({
   request,
   botName,
+  inGroup = false,
 }: {
   request: WaitingRequest;
   botName: string;
+  /** Under its Bot's header, which already names who wants it. */
+  inGroup?: boolean;
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
@@ -117,7 +124,9 @@ function RequestRow({
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="line-clamp-none">
-          {botName} wants to {words.action}
+          {inGroup
+            ? `Wants to ${words.action}`
+            : `${botName} wants to ${words.action}`}
         </ItemTitle>
         <ItemDescription className="line-clamp-none break-all">
           {words.place}
@@ -202,6 +211,45 @@ function RequestRow({
   );
 }
 
+/**
+ * The waiting questions and actions as rows under each Bot's header, questions first: the Needs you
+ * board's half that is blocked on the person (`components/needs-you/board.tsx`).
+ */
+export function useWaitingByBot(
+  agentId: string | undefined,
+  /** Under a header naming each Bot; a Bot's own page has none, so its rows name it. */
+  grouped: boolean,
+) {
+  const waiting = useWaiting(agentId);
+  const agents = useQuery(agentListQueryOptions());
+  const botName = (id: string) =>
+    agents.data?.find((agent) => agent.id === id)?.name ?? id;
+  const byBot = new Map<string, ReactNode[]>();
+  const add = (botId: string, row: ReactNode) =>
+    byBot.set(botId, [...(byBot.get(botId) ?? []), row]);
+  for (const question of waiting.questions)
+    add(
+      question.conversationBotId ?? question.botId,
+      <QuestionRow
+        botName={botName(question.botId)}
+        inGroup={grouped}
+        key={`question-${question.id}`}
+        question={question}
+      />,
+    );
+  for (const request of waiting.pending)
+    add(
+      request.action.botId,
+      <RequestRow
+        botName={botName(request.action.botId)}
+        inGroup={grouped}
+        key={`request-${request.id}`}
+        request={request}
+      />,
+    );
+  return { error: waiting.error, byBot };
+}
+
 /** The waiting questions and actions as rows, questions first, for a card that may hold more. */
 export function useWaitingRows(agentId: string | undefined) {
   const waiting = useWaiting(agentId);
@@ -255,32 +303,5 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
         </PageRows>
       ) : null}
     </>
-  );
-}
-
-/**
- * Everything one Bot is waiting on the person for, at the top of its page, in one card: its
- * questions and the actions waiting on a decision, then the tasks started from its check-ins, then
- * what its check-ins found, with Start and Hide. Nothing is drawn when nothing waits: the sidebar's
- * badge already said whether to look.
- */
-export function BotNeedsYou({ agentId }: { agentId: string }) {
-  const waiting = useWaitingRows(agentId);
-  const list = useNeedsYou(agentId);
-  if (
-    waiting.rows.length + list.tasks.length + list.items.length === 0 &&
-    !waiting.error &&
-    !list.error
-  )
-    return null;
-  return (
-    <PageSection title="Needs you">
-      {waiting.error || list.error ? (
-        <p role="alert" className="mt-4 text-sm text-destructive">
-          {(waiting.error ?? list.error)?.message}
-        </p>
-      ) : null}
-      <NeedsYouRows items={list.items} lead={waiting.rows} tasks={list.tasks} />
-    </PageSection>
   );
 }

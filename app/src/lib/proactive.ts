@@ -68,6 +68,8 @@ type ProactiveSettingsBody = {
 export type ProactiveSuggestion = {
   id: string;
   agentId: string;
+  /** The check-in that found it. */
+  settingId?: string | null;
   title: string;
   detail: string;
   sourceApp: string | null;

@@ -22,20 +22,20 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { BotNeedsYou } from "@/components/approvals/waiting";
 import { BotRoster } from "@/components/bots/bot-roster";
+import { BotNeedsYou } from "@/components/needs-you/board";
+import { queryClient } from "@/query-client";
 import {
   TASKS_VIEW_STORAGE_KEY,
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
-import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * What a Bot's check-ins found and the tasks started from them, where the person meets them: the
  * Bots page's Needs you, the Bot's own page, and the OpenDuet skin's Tasks. All three are drawn at
  * once, in one cache, against a fake of OpenBot's API that keeps state the way the real routes do:
- * Hide takes an item off the open list, Start takes it off and opens a task, and a task's actions
+ * Dismiss takes an item off the open list, Work on it takes it off and opens a task, and a task's actions
  * move its status. The fake answers in the shapes `server/src/proactive/contracts.ts` promises.
  */
 
@@ -225,7 +225,7 @@ beforeEach(() => {
   items = [];
   tasks = [];
   busy = [];
-  // Start, Hide and a task's actions invalidate the app's one cache, so the lists draw from it.
+  // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
 });
 
@@ -277,7 +277,7 @@ async function drawAll() {
   return { view, region };
 }
 
-test("an item says what it is, why, which Bot found it and where, with Start and Hide", async () => {
+test("an item says what it is, why, which Bot found it and where, with Work on it and Dismiss", async () => {
   items = [item({ id: "s1", title: "Send Dana the Q3 numbers" })];
   serving();
   const { view, region } = await drawAll();
@@ -287,10 +287,15 @@ test("an item says what it is, why, which Bot found it and where, with Start and
   expect(
     bots.getByText("Dana asked for the Q3 numbers by Friday."),
   ).toBeTruthy();
-  expect(bots.getByText(/^Inbox Bot · From Gmail · /)).toBeTruthy();
-  expect(bots.getByRole("button", { name: "Start" })).toBeTruthy();
-  expect(bots.getByRole("button", { name: "Hide" })).toBeTruthy();
-  const open = bots.getByRole("button", { name: "Open mail.example.com" });
+  // Under its Bot's header, from the app it was read with.
+  expect(bots.getByText("From check-ins")).toBeTruthy();
+  expect(bots.getByText("· from its check-ins")).toBeTruthy();
+  expect(bots.getByText("Gmail")).toBeTruthy();
+  expect(bots.getByRole("button", { name: "Work on it" })).toBeTruthy();
+  expect(
+    bots.getByRole("button", { name: "Dismiss Send Dana the Q3 numbers" }),
+  ).toBeTruthy();
+  const open = bots.getByRole("link", { name: "Open mail.example.com" });
   expect(open.getAttribute("href")).toBe("https://mail.example.com/1");
   expect(open.getAttribute("target")).toBe("_blank");
 });
@@ -309,13 +314,13 @@ test("Open names the site its link goes to, never the app the Bot read it with",
   const { view, region } = await drawAll();
   await view.findAllByText("Review Bun 1.4.4 release notes");
   const bots = region("Bots page");
-  expect(bots.getByText(/^Inbox Bot · From Exa Search · /)).toBeTruthy();
-  expect(bots.queryByRole("button", { name: /Exa Search/ })).toBeNull();
-  const open = bots.getByRole("button", { name: "Open bun.com" });
+  expect(bots.getByText("Exa Search")).toBeTruthy();
+  expect(bots.queryByRole("link", { name: /Exa Search/ })).toBeNull();
+  const open = bots.getByRole("link", { name: "Open bun.com" });
   expect(open.getAttribute("href")).toBe("https://www.bun.com/blog/bun-v1.4.4");
 });
 
-test("Hide takes an item off the Bots page, the Bot's page and OpenDuet at once", async () => {
+test("Dismiss takes an item off the Bots page, the Bot's page and OpenDuet at once", async () => {
   items = [
     item({ id: "s1", title: "Send Dana the Q3 numbers" }),
     item({ id: "s2", title: "Renew the studio insurance" }),
@@ -328,7 +333,11 @@ test("Hide takes an item off the Bots page, the Bot's page and OpenDuet at once"
   const row = region("Bot page")
     .getByText("Send Dana the Q3 numbers")
     .closest("[data-slot=item]") as HTMLElement;
-  fireEvent.click(within(row).getByRole("button", { name: "Hide" }));
+  fireEvent.click(
+    within(row).getByRole("button", {
+      name: "Dismiss Send Dana the Q3 numbers",
+    }),
+  );
   await waitFor(() =>
     expect(view.queryAllByText("Send Dana the Q3 numbers")).toHaveLength(0),
   );
@@ -340,20 +349,18 @@ test("Hide takes an item off the Bots page, the Bot's page and OpenDuet at once"
   expect(view.getAllByText("Renew the studio insurance")).toHaveLength(3);
 });
 
-test("Start takes the item off and shows its task, Working, opening its own conversation", async () => {
+test("Work on it takes the item off and shows its task, Working, opening its own conversation", async () => {
   items = [item({ id: "s1", title: "Send Dana the Q3 numbers" })];
   serving();
   const { view, region } = await drawAll();
   const bots = region("Bots page");
-  fireEvent.click(await bots.findByRole("button", { name: "Start" }));
-  await waitFor(() =>
-    expect(bots.getByText(/^Working · Inbox Bot · /)).toBeTruthy(),
-  );
+  fireEvent.click(await bots.findByRole("button", { name: "Work on it" }));
+  await waitFor(() => expect(bots.getByText(/^Working · /)).toBeTruthy());
   expect(sent).toEqual([
     { method: "POST", path: "/api/proactive/suggestions/s1/start" },
   ]);
-  // The item became the task: no Start or Hide left for it anywhere.
-  expect(view.queryAllByRole("button", { name: "Start" })).toHaveLength(0);
+  // The item became the task: nothing left to start or dismiss for it anywhere.
+  expect(view.queryAllByRole("button", { name: "Work on it" })).toHaveLength(0);
   expect(bots.getByText("Just started.")).toBeTruthy();
   const row = bots
     .getByText("Send Dana the Q3 numbers")
@@ -362,7 +369,7 @@ test("Start takes the item off and shows its task, Working, opening its own conv
     within(row).getByRole("button", { name: "Open" }).getAttribute("href"),
   ).toBe("/channel/c-task-s1");
   // The Bot's own page lists it too.
-  expect(region("Bot page").getByText(/^Working · Inbox Bot · /)).toBeTruthy();
+  expect(region("Bot page").getByText(/^Working · /)).toBeTruthy();
 });
 
 test("tasks list what to read, answer and retry first, and each acts from its row", async () => {
@@ -440,9 +447,7 @@ test("a task whose conversation is running a turn reads Working, whatever the se
   serving();
   const { region } = await drawAll();
   const bots = region("Bots page");
-  await waitFor(() =>
-    expect(bots.getByText(/^Working · Inbox Bot · /)).toBeTruthy(),
-  );
+  await waitFor(() => expect(bots.getByText(/^Working · /)).toBeTruthy());
 });
 
 test("OpenDuet's Active lists the tasks under OpenDuet's headings, in its order", async () => {
