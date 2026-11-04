@@ -1,10 +1,13 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { configurationKey } from "../configuration/client";
+import { botConfiguration } from "../configuration/directory";
+import type { ComponentEntry, ComponentState } from "../configuration/types";
 import type { Database } from "../db/client";
 import {
-  componentExclusions,
-  componentFunctions,
-  components,
-} from "../db/schema";
+  byText,
+  changeComponent,
+  componentState,
+  findComponent,
+} from "./catalogue-records";
 import { dataFunction } from "./functions";
 
 export type ComponentRecord = {
@@ -115,166 +118,103 @@ export type ComponentStore = {
   saveDraft(name: string, description: string, by: string): Promise<void>;
 };
 
-const iso = (value: Date | string | null): string | null =>
-  value === null ? null : value instanceof Date ? value.toISOString() : value;
+const iso = (value: Date | null): string | null =>
+  value === null ? null : value.toISOString();
 
+/**
+ * The catalogue's governance, read from what this instance holds of Intelligence's UI components and
+ * written there (see `catalogue-records.ts`). Every run's component list and every component call is
+ * answered from memory.
+ */
 export function createComponentStore(database: Database): ComponentStore {
   async function requireComponent(name: string) {
-    const [row] = await database
-      .select()
-      .from(components)
-      .where(eq(components.name, name))
-      .limit(1);
-    if (!row) throw new ComponentNotFoundError(name);
-    return row;
+    const entry = await findComponent(name);
+    if (!entry) throw new ComponentNotFoundError(name);
+    return entry;
+  }
+
+  /** Change one component, refusing a name nobody has. */
+  async function change(
+    name: string,
+    work: (entry: ComponentEntry) => ComponentState | null,
+  ) {
+    const changed = await changeComponent(name, work);
+    if (!changed) throw new ComponentNotFoundError(name);
+    return changed;
   }
 
   return {
     async syncCatalogue(entries) {
       if (entries.length === 0) return { added: [] };
 
-      const existing = await database
-        .select({ name: components.name })
-        .from(components);
-      const known = new Set(existing.map((row) => row.name));
-      const missing = entries.filter((entry) => !known.has(entry.name));
+      const catalogue = botConfiguration().components;
+      const missing = entries.filter((entry) => !catalogue.get(entry.name));
       if (missing.length === 0) return { added: [] };
 
-      const inserted = await database
-        .insert(components)
-        .values(
-          missing.map((entry) => ({
-            name: entry.name,
-            title: entry.title,
-            kind: entry.kind,
-            draftDescription: entry.description,
-            // Published on arrival, so a fresh install can draw from the moment it starts.
-            publishedDescription: entry.description,
-            published: true,
-            publishedAt: new Date(),
-            updatedBy: "the build",
-          })),
-        )
-        // Two browsers announcing the same new component at once is ordinary, not a fault: whichever
-        // arrives second must be a no-op rather than a duplicate-key error thrown at a page load.
-        .onConflictDoNothing()
-        // What was actually inserted, which after `onConflictDoNothing` is only the rows this call
-        // won the race for. Returning `missing` instead would report the intent: the loser of that
-        // ordinary race would name every component it had tried to insert, and the caller writes an
-        // audit row per name, so a first start with two tabs open recorded all thirteen components
-        // twice. The insert was already protected; the trail was not.
-        .returning({ name: components.name });
-
-      return { added: inserted.map((row) => row.name) };
+      /*
+       * Registered in Intelligence, which creates only the names it does not have and leaves every
+       * other exactly as the deployment decided it: published on arrival, so a fresh install can draw
+       * from the moment it starts.
+       *
+       * Two browsers announcing the same new component at once is ordinary, not a fault: Intelligence
+       * reports a name to the one call that created it, so the trail, which writes a row per name the
+       * caller is told about, records each arrival once.
+       */
+      const added = await botConfiguration().client.components.register(
+        "the build",
+        missing,
+        configurationKey("component-register"),
+      );
+      for (const name of missing.map((entry) => entry.name))
+        await catalogue.refresh(name);
+      return { added };
     },
 
     async list() {
-      const rows = await database
-        .select()
-        .from(components)
-        .orderBy(asc(components.kind), asc(components.title));
-      if (rows.length === 0) return [];
-
-      const functionRows = await database
-        .select()
-        .from(componentFunctions)
-        .where(
-          inArray(
-            componentFunctions.componentName,
-            rows.map((row) => row.name),
-          ),
-        );
-      const functionsByComponent = new Map<string, string[]>();
-      for (const row of functionRows) {
-        const list = functionsByComponent.get(row.componentName) ?? [];
-        list.push(row.functionName);
-        functionsByComponent.set(row.componentName, list);
-      }
-
-      const exclusionRows = await database
-        .select()
-        .from(componentExclusions)
-        .where(
-          inArray(
-            componentExclusions.componentName,
-            rows.map((row) => row.name),
-          ),
-        );
-
-      const byComponent = new Map<string, string[]>();
-      for (const exclusion of exclusionRows) {
-        const list = byComponent.get(exclusion.componentName) ?? [];
-        list.push(exclusion.agentId);
-        byComponent.set(exclusion.componentName, list);
-      }
-
-      return rows.map((row) => ({
-        name: row.name,
-        title: row.title,
-        kind: row.kind,
-        draftDescription: row.draftDescription,
-        publishedDescription: row.publishedDescription,
-        published: row.published,
-        publishedAt: iso(row.publishedAt),
-        updatedBy: row.updatedBy,
-        updatedAt: iso(row.updatedAt) as string,
-        hasUnpublishedChanges:
-          row.draftDescription !== (row.publishedDescription ?? ""),
-        withheldFrom: (byComponent.get(row.name) ?? []).sort(),
-        functions: (functionsByComponent.get(row.name) ?? []).sort(),
-      }));
+      return botConfiguration()
+        .components.all()
+        .sort(
+          (left, right) =>
+            byText(left.kind, right.kind) || byText(left.title, right.title),
+        )
+        .map((row) => ({
+          name: row.name,
+          title: row.title,
+          kind: row.kind,
+          draftDescription: row.draftDescription,
+          publishedDescription: row.publishedDescription,
+          published: row.published,
+          publishedAt: iso(row.publishedAt),
+          updatedBy: row.updatedBy,
+          updatedAt: row.updatedAt.toISOString(),
+          hasUnpublishedChanges:
+            row.draftDescription !== (row.publishedDescription ?? ""),
+          withheldFrom: row.withheldFrom.map((entry) => entry.botId).sort(),
+          functions: row.functions.map((fn) => fn.name).sort(),
+        }));
     },
 
     async listForAgent(agentId) {
-      const rows = await database
-        .select({
-          name: components.name,
-          description: components.publishedDescription,
-        })
-        .from(components)
-        // Joined on this Bot specifically, so another Bot's withholding cannot remove a row here.
-        .leftJoin(
-          componentExclusions,
-          and(
-            eq(componentExclusions.componentName, components.name),
-            eq(componentExclusions.agentId, agentId),
-          ),
+      // A published row with no description is not a thing the model can be told about, so it is
+      // left out rather than sent as an empty string it would have to guess the meaning of. Held back
+      // from this Bot specifically, so another Bot's withholding cannot remove one here.
+      return botConfiguration()
+        .components.all()
+        .filter(
+          (row) =>
+            row.published &&
+            Boolean(row.publishedDescription) &&
+            !row.withheldFrom.some((entry) => entry.botId === agentId),
         )
-        .where(
-          and(
-            eq(components.published, true),
-            isNull(componentExclusions.agentId),
-          ),
-        )
-        .orderBy(asc(components.name));
-
-      // A published row with no description is not a thing the model can be told about, so it is left
-      // out rather than sent as an empty string it would have to guess the meaning of.
-      return rows.flatMap((row) =>
-        row.description
-          ? [{ name: row.name, description: row.description }]
-          : [],
-      );
+        .sort((left, right) => byText(left.name, right.name))
+        .map((row) => ({
+          name: row.name,
+          description: row.publishedDescription ?? "",
+        }));
     },
 
     async decide(name, agentId) {
-      const [row] = await database
-        .select({
-          published: components.published,
-          description: components.publishedDescription,
-          title: components.title,
-          withheldFrom: componentExclusions.agentId,
-        })
-        .from(components)
-        .leftJoin(
-          componentExclusions,
-          and(
-            eq(componentExclusions.componentName, components.name),
-            eq(componentExclusions.agentId, agentId),
-          ),
-        )
-        .where(eq(components.name, name))
-        .limit(1);
+      const row = botConfiguration().components.get(name);
 
       // Every refusal says which one it is. "Not allowed" sends a model round the same loop; naming
       // the cause lets it either pick a different component or tell the person what to change.
@@ -284,40 +224,47 @@ export function createComponentStore(database: Database): ComponentStore {
           reason: `There is no component called ${name} in this deployment. Answer in prose instead.`,
         };
       }
-      if (!row.published || !row.description) {
+      if (!row.published || !row.publishedDescription) {
         return {
           allowed: false,
           reason: `${row.title} is not published in this deployment, so no Bot may use it. Answer in prose instead.`,
         };
       }
-      if (row.withheldFrom) {
+      if (row.withheldFrom.some((entry) => entry.botId === agentId)) {
         return {
           allowed: false,
           reason: `${row.title} has been withheld from this Bot in this deployment, though other Bots may use it. Answer in prose instead.`,
         };
       }
-      return { allowed: true, description: row.description };
+      return { allowed: true, description: row.publishedDescription };
     },
 
     async grant(name, agentId) {
-      await requireComponent(name);
-      await database
-        .delete(componentExclusions)
-        .where(
-          and(
-            eq(componentExclusions.componentName, name),
-            eq(componentExclusions.agentId, agentId),
-          ),
-        );
+      await change(name, (entry) =>
+        entry.withheldFrom.some((withheld) => withheld.botId === agentId)
+          ? {
+              ...componentState(entry),
+              withheldFrom: componentState(entry).withheldFrom.filter(
+                (withheld) => withheld.botId !== agentId,
+              ),
+            }
+          : null,
+      );
     },
 
     async revoke(name, agentId, by) {
-      await requireComponent(name);
-      await database
-        .insert(componentExclusions)
-        .values({ componentName: name, agentId, withheldBy: by })
+      await change(name, (entry) =>
         // Withholding twice must not move the date.
-        .onConflictDoNothing();
+        entry.withheldFrom.some((withheld) => withheld.botId === agentId)
+          ? null
+          : {
+              ...componentState(entry),
+              withheldFrom: [
+                ...componentState(entry).withheldFrom,
+                { botId: agentId, withheldBy: by },
+              ],
+            },
+      );
     },
 
     async publish(name, by) {
@@ -325,17 +272,18 @@ export function createComponentStore(database: Database): ComponentStore {
       if (row.kind === "sandboxed") {
         throw new SandboxedPublicationRequiredError(name);
       }
-      await database
-        .update(components)
-        .set({
+      await change(name, (entry) => {
+        if (entry.kind === "sandboxed")
+          throw new SandboxedPublicationRequiredError(name);
+        return {
+          ...componentState(entry),
           // Promotes the draft, which is the whole of what publishing means here.
-          publishedDescription: row.draftDescription,
+          publishedDescription: entry.draftDescription,
           published: true,
           publishedAt: new Date(),
           updatedBy: by,
-          updatedAt: new Date(),
-        })
-        .where(eq(components.name, name));
+        };
+      });
     },
 
     async unpublish(name, by) {
@@ -343,55 +291,56 @@ export function createComponentStore(database: Database): ComponentStore {
       if (row.kind === "sandboxed") {
         throw new SandboxedPublicationRequiredError(name);
       }
-      await database
-        .update(components)
-        .set({ published: false, updatedBy: by, updatedAt: new Date() })
+      await change(name, (entry) => {
+        if (entry.kind === "sandboxed")
+          throw new SandboxedPublicationRequiredError(name);
         // Grants are left alone. Unpublishing is "nobody may use this for now", not "forget who was
         // trusted with it", clearing them would silently destroy an administrator's work and make
         // re-publishing a re-grant of everything.
-        .where(eq(components.name, name));
+        return { ...componentState(entry), published: false, updatedBy: by };
+      });
     },
 
     async grantFunction(name, functionName, by) {
-      await requireComponent(name);
-      await database
-        .insert(componentFunctions)
-        .values({ componentName: name, functionName, grantedBy: by })
-        .onConflictDoNothing();
+      await change(name, (entry) =>
+        entry.functions.some((fn) => fn.name === functionName)
+          ? null
+          : {
+              ...componentState(entry),
+              functions: [
+                ...componentState(entry).functions,
+                { name: functionName, grantedBy: by },
+              ],
+            },
+      );
     },
 
     async revokeFunction(name, functionName) {
       /*
-       * The only one of the four grant writes that did not ask whether the component exists. A grant
-       * cannot outlive its component (`component_functions.component_name` cascades), so a revoke
-       * against a name nobody has can only delete nothing, and the route then answered
-       * `revoked: true` and wrote `component.function_revoked` for a component that was never there.
+       * Refused for a name nobody has, as the other three grant writes are. A revoke against a name
+       * nobody has used to delete nothing, and the route then answered `revoked: true` and wrote
+       * `component.function_revoked` for a component that was never there.
        */
-      await requireComponent(name);
-      await database
-        .delete(componentFunctions)
-        .where(
-          and(
-            eq(componentFunctions.componentName, name),
-            eq(componentFunctions.functionName, functionName),
-          ),
-        );
+      await change(name, (entry) =>
+        entry.functions.some((fn) => fn.name === functionName)
+          ? {
+              ...componentState(entry),
+              functions: componentState(entry).functions.filter(
+                (fn) => fn.name !== functionName,
+              ),
+            }
+          : null,
+      );
     },
 
     async mayCall(name, functionName) {
-      const [row] = await database
-        .select({ granted: componentFunctions.functionName })
-        .from(componentFunctions)
-        .where(
-          and(
-            eq(componentFunctions.componentName, name),
-            eq(componentFunctions.functionName, functionName),
-          ),
-        )
-        .limit(1);
-      // A row is the permission. No row, no call, including for a component nobody has granted
+      // A grant is the permission. None, no call, including for a component nobody has granted
       // anything, which is every component the moment it is added.
-      return Boolean(row);
+      return Boolean(
+        botConfiguration()
+          .components.get(name)
+          ?.functions.some((fn) => fn.name === functionName),
+      );
     },
 
     async callFunction(functionName, args) {
@@ -404,15 +353,11 @@ export function createComponentStore(database: Database): ComponentStore {
     },
 
     async saveDraft(name, description, by) {
-      await requireComponent(name);
-      await database
-        .update(components)
-        .set({
-          draftDescription: description,
-          updatedBy: by,
-          updatedAt: new Date(),
-        })
-        .where(eq(components.name, name));
+      await change(name, (entry) => ({
+        ...componentState(entry),
+        draftDescription: description,
+        updatedBy: by,
+      }));
     },
   };
 }

@@ -630,7 +630,10 @@ export function createMemoryStore(
           }).catch(() => {});
       }
       const [source] = await database
-        .select({ agentId: memorySources.agentId })
+        .select({
+          agentId: memorySources.agentId,
+          toolRef: memorySources.toolRef,
+        })
         .from(memorySources)
         .where(
           and(
@@ -640,7 +643,15 @@ export function createMemoryStore(
         )
         .limit(1);
       if (!source) throw new MemoryNotFoundError();
-      // Removing a source is turning that app down for this Bot: OpenBot never adds it back.
+      // Removing a source is turning that app down for this Bot: OpenBot never adds it back. Said in
+      // Intelligence before the row goes, so no adoption on any replica can bring it back between
+      // the two (memory/defaults.ts).
+      await recordOptOut({
+        ownerUserId,
+        agentId: source.agentId,
+        feature: "memory_source",
+        scope: sourceServerId(source.toolRef),
+      });
       await database.transaction(async (transaction) => {
         await lockDefaults(transaction, ownerUserId, source.agentId);
         const [row] = await transaction
@@ -653,12 +664,6 @@ export function createMemoryStore(
           )
           .returning({ toolRef: memorySources.toolRef });
         if (!row) throw new MemoryNotFoundError();
-        await recordOptOut(transaction, {
-          ownerUserId,
-          agentId: source.agentId,
-          feature: "memory_source",
-          scope: sourceServerId(row.toolRef),
-        });
       });
     },
     async dueSources(limit = 5) {

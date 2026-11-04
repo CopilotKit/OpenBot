@@ -10,11 +10,15 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
-  pluginGrants,
   users,
 } from "../src/db/schema";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -32,6 +36,10 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 
 const suite = randomUUID().slice(0, 8);
 const botId = `agent_oauth_bot_${suite}`;
@@ -290,10 +298,17 @@ beforeAll(async () => {
     .onConflictDoNothing();
 
   // The Bot holds the tool throughout. Everything here is about the person, not the grant.
-  await database
-    .insert(pluginGrants)
-    .values({ kind: "mcp", ref, agentId: botId })
-    .onConflictDoNothing();
+  await changeAccess([
+    {
+      op: "grant",
+      botId,
+      kind: "mcp",
+      ref,
+      grantedBy: null,
+      grantedAs: "admin",
+      ifGranted: "keep",
+    },
+  ]);
 });
 
 afterAll(async () => {
@@ -341,9 +356,7 @@ afterAll(async () => {
    * a real server and a real tool, so a delete by ref alone removes an administrator's grants for
    * Bots people use. See the same note in plugin-store.integration.test.ts, which this shares.
    */
-  await database
-    .delete(pluginGrants)
-    .where(and(eq(pluginGrants.ref, ref), eq(pluginGrants.agentId, botId)));
+  await changeAccess([{ op: "revoke", botId, kind: "mcp", ref }]);
   // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
   if (!toolWasAlreadyAdvertised) {
     await database

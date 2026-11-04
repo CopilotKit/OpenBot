@@ -33,7 +33,7 @@ import {
 import type { Database } from "../db/client";
 import { bots } from "../agents/bot-registry/directory";
 import { users } from "../db/schema/core";
-import { botLifecycle } from "../db/schema/lifecycle";
+import { lifecyclePairs, notAmongPairs } from "../agents/lifecycle";
 import {
   proactivePeople,
   proactivePings,
@@ -122,14 +122,21 @@ export function pingText(items: readonly AttentionItem[]): {
  * An item a ping may carry: open, carried by no ping yet, from a Bot its person has not told to
  * notify them of nothing, while they have check-ins on.
  */
-const pingableItem = and(
-  eq(proactiveSuggestions.status, "open"),
-  isNull(proactiveSuggestions.pingId),
-  sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSuggestions.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSuggestions.agentId} and ${botLifecycle.notify} = 'none')`,
-  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSuggestions.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
-);
+const pingableItem = () =>
+  and(
+    eq(proactiveSuggestions.status, "open"),
+    isNull(proactiveSuggestions.pingId),
+    // A person's notification level per Bot lives in their preferences in Intelligence, held in
+    // memory here: the silenced pairs are left out by value.
+    notAmongPairs(
+      proactiveSuggestions.ownerUserId,
+      proactiveSuggestions.agentId,
+      lifecyclePairs((entry) => entry.notify === "none"),
+    ),
+    sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSuggestions.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
+  );
 const pingable = (ownerUserId: string) =>
-  and(eq(proactiveSuggestions.ownerUserId, ownerUserId), pingableItem);
+  and(eq(proactiveSuggestions.ownerUserId, ownerUserId), pingableItem());
 
 /** The person's slot is free: never pinged, or the last ping was an hour or more ago. */
 const slotFree = or(
@@ -247,7 +254,7 @@ export function createPingStore(database: Database) {
         )
         .where(
           and(
-            pingableItem,
+            pingableItem(),
             slotFree,
             skip.length > 0
               ? notInArray(proactiveSuggestions.ownerUserId, [...skip])

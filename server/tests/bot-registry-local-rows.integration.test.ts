@@ -21,19 +21,16 @@ import {
 } from "../src/agents/bot-registry/local-rows";
 import { createDatabase } from "../src/db/client";
 import * as schema from "../src/db/schema";
+import { MOVED_TO_INTELLIGENCE } from "../src/configuration/frozen-tables";
+import { channelAgents, channels, routines, users } from "../src/db/schema";
 import {
-  agentPreferences,
-  channelAgents,
-  channels,
-  pluginGrants,
-  routines,
-  teamBotPublications,
-  users,
-} from "../src/db/schema";
-import {
+  changeAccess,
+  changePreferences,
   deleteBot,
   removeBots,
   seedBot,
+  storedAccess,
+  storedPreferences,
   testIntelligence,
   useTestBots,
 } from "./support/bots";
@@ -70,6 +67,11 @@ describe("which rows go with a Bot", () => {
         ({ table, column }) => `${getTableName(table)}.${column.name}`,
       ),
     );
+    // Tables whose data moved into Intelligence beside the Bot: Intelligence removes it with the
+    // Bot, and these local tables are written by nothing (configuration/frozen-tables.ts).
+    const moved = new Set<string>(
+      Object.values(MOVED_TO_INTELLIGENCE).map((table) => getTableName(table)),
+    );
     const named: string[] = [];
     for (const value of Object.values(schema)) {
       if (!is(value, PgTable)) continue;
@@ -80,12 +82,16 @@ describe("which rows go with a Bot", () => {
       }
     }
     const undecided = named.filter(
-      (name) => !covered.has(name) && !OUTLIVES_ITS_BOT.has(name),
+      (name) =>
+        !covered.has(name) &&
+        !OUTLIVES_ITS_BOT.has(name) &&
+        !moved.has(name.split(".")[0] ?? ""),
     );
     // A new table naming a Bot: add it to BOT_CHILD_TABLES, or here with the reason it outlives one.
     expect(undecided).toEqual([]);
-    // The 26 tables that cascaded and the one column that was set to null, all still covered.
-    expect(BOT_CHILD_TABLES.length).toBe(26);
+    // Of the 26 tables that cascaded, the 17 still here, and the one column that was set to null.
+    // The other nine moved into Intelligence with the Bot configuration.
+    expect(BOT_CHILD_TABLES.length).toBe(17);
     expect([...covered]).toContain("channels.last_message_agent_id");
   });
 
@@ -105,37 +111,29 @@ async function person() {
   return id;
 }
 
-async function rowsFor(botId: string, channelId: string) {
-  const [preference] = await database
-    .select()
-    .from(agentPreferences)
-    .where(eq(agentPreferences.agentId, botId));
+async function rowsFor(botId: string, channelId: string, owner: string) {
   const [member] = await database
     .select()
     .from(channelAgents)
     .where(eq(channelAgents.agentId, botId));
-  const [grant] = await database
-    .select()
-    .from(pluginGrants)
-    .where(eq(pluginGrants.agentId, botId));
   const [routine] = await database
     .select()
     .from(routines)
     .where(eq(routines.agentId, botId));
-  const [publication] = await database
-    .select()
-    .from(teamBotPublications)
-    .where(eq(teamBotPublications.agentId, botId));
   const [channel] = await database
     .select({ lastMessageAgentId: channels.lastMessageAgentId })
     .from(channels)
     .where(eq(channels.id, channelId));
+  // The grant, the publication and the person's pin are in Intelligence, which removes them with
+  // the Bot.
+  const access = await storedAccess(botId);
+  const preferences = await storedPreferences(owner);
   return {
-    preference: Boolean(preference),
+    preference: preferences.bots.some((entry) => entry.botId === botId),
     member: Boolean(member),
-    grant: Boolean(grant),
+    grant: access.grants.length > 0,
     routine: Boolean(routine),
-    publication: Boolean(publication),
+    publication: access.publication !== null,
     lastSpeaker: channel?.lastMessageAgentId ?? null,
   };
 }
@@ -151,12 +149,27 @@ async function botWithRows() {
     lastMessageAgentId: bot.id,
   });
   await database.insert(channelAgents).values({ channelId, agentId: bot.id });
-  await database
-    .insert(agentPreferences)
-    .values({ userId: owner, agentId: bot.id, pinnedAt: new Date() });
-  await database
-    .insert(pluginGrants)
-    .values({ kind: "skill", ref: `skill-${randomUUID()}`, agentId: bot.id });
+  await changePreferences(owner, [
+    { op: "setBot", botId: bot.id, pinnedAt: new Date() },
+  ]);
+  await changeAccess([
+    {
+      op: "grant",
+      botId: bot.id,
+      kind: "skill",
+      ref: `skill-${randomUUID()}`,
+      grantedBy: owner,
+      grantedAs: "admin",
+      ifGranted: "replace",
+    },
+    {
+      op: "publish",
+      botId: bot.id,
+      audience: "team",
+      members: [],
+      publishedBy: owner,
+    },
+  ]);
   await database.insert(routines).values({
     id: `routine_${randomUUID()}`,
     ownerUserId: owner,
@@ -166,17 +179,14 @@ async function botWithRows() {
     cron: "0 9 * * *",
     nextRunAt: new Date(Date.now() + 86_400_000),
   });
-  await database
-    .insert(teamBotPublications)
-    .values({ agentId: bot.id, publishedBy: owner, audience: "team" });
   return { bot, owner, channelId };
 }
 
 describe("the cascade, by hand", () => {
   test("a soft delete keeps every row, so the conversations stay readable", async () => {
-    const { bot, channelId } = await botWithRows();
+    const { bot, channelId, owner } = await botWithRows();
     await deleteBot(bot.id);
-    expect(await rowsFor(bot.id, channelId)).toEqual({
+    expect(await rowsFor(bot.id, channelId, owner)).toEqual({
       preference: true,
       member: true,
       grant: true,
@@ -188,9 +198,9 @@ describe("the cascade, by hand", () => {
   });
 
   test("a purge removes every row and clears the channel's last speaker", async () => {
-    const { bot, channelId } = await botWithRows();
+    const { bot, channelId, owner } = await botWithRows();
     await removeBots([bot.id]);
-    expect(await rowsFor(bot.id, channelId)).toEqual({
+    expect(await rowsFor(bot.id, channelId, owner)).toEqual({
       preference: false,
       member: false,
       grant: false,
@@ -202,7 +212,7 @@ describe("the cascade, by hand", () => {
   });
 
   test("the boot sweep removes rows of a Bot purged while nothing was listening", async () => {
-    const { bot, channelId } = await botWithRows();
+    const { bot, channelId, owner } = await botWithRows();
     const keep = await botWithRows();
     // Purged in Intelligence behind this process's back: the registry directly, no listener.
     const directory = await useTestBots();
@@ -213,8 +223,10 @@ describe("the cascade, by hand", () => {
     );
     expect(swept).toContain(bot.id);
     expect(swept).not.toContain(keep.bot.id);
-    expect((await rowsFor(bot.id, channelId)).member).toBe(false);
-    expect((await rowsFor(keep.bot.id, keep.channelId)).member).toBe(true);
+    expect((await rowsFor(bot.id, channelId, owner)).member).toBe(false);
+    expect(
+      (await rowsFor(keep.bot.id, keep.channelId, keep.owner)).member,
+    ).toBe(true);
     await removeBots([keep.bot.id]);
     await database
       .delete(channels)
@@ -266,7 +278,7 @@ describe("the cascade, by hand", () => {
       expect(replica.peek(bot.id)?.createdAt.toISOString()).toBe(
         again.createdAt.toISOString(),
       );
-      expect((await rowsFor(bot.id, channelId)).member).toBe(true);
+      expect((await rowsFor(bot.id, channelId, "nobody")).member).toBe(true);
       await removeBots([bot.id]);
       await database.delete(channels).where(eq(channels.id, channelId));
     } finally {

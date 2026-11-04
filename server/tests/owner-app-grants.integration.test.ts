@@ -24,9 +24,7 @@ import {
   brokeredConnections,
   mcpServers,
   mcpTools,
-  pluginGrants,
   sharedUseApprovals,
-  teamBotConsents,
   users,
 } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
@@ -41,7 +39,12 @@ import {
   createTeamBots,
   TEAM_BOT_CONSENT_MARKER,
 } from "../src/team-bots/team-bots";
-import { removeBots, useTestBots } from "./support/bots";
+import {
+  clearPreferences,
+  removeBots,
+  storedAccess,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { stubBroker } from "./support/stub-broker";
 
@@ -214,17 +217,16 @@ async function stateOf(actorId: string, botId: string, app = GMAIL) {
   return ((await response.json()) as { app: AppAccess }).app;
 }
 
+/** Every grant this Bot holds, as Intelligence holds them now. */
 async function grantsOn(botId: string) {
-  return database
-    .select({ ref: pluginGrants.ref, grantedAs: pluginGrants.grantedAs })
-    .from(pluginGrants)
-    .where(eq(pluginGrants.agentId, botId));
+  return (await storedAccess(botId)).grants.map((grant) => ({
+    ref: grant.ref,
+    grantedAs: grant.grantedAs,
+  }));
 }
 
 async function clear() {
-  await database
-    .delete(teamBotConsents)
-    .where(inArray(teamBotConsents.userId, people));
+  await clearPreferences(people);
   // For good, with their publications, grants and approvals, as deleting the agents rows did.
   await removeBots(createdBots.splice(0));
   await database

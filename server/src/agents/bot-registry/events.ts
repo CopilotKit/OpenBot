@@ -46,6 +46,37 @@ export function subscribeToBotChanges(options: {
   /** Called every time a subscription is joined, the first and every one after a reconnect. */
   onJoined: (joinCode: string) => void;
 }): BotChangeSubscription {
+  return subscribeToProjectEvents({
+    client: options.client,
+    gatewayWsUrl: options.gatewayWsUrl,
+    events: {
+      agent_changed: (payload) => {
+        const change = parseChange(payload);
+        if (change) options.onChange(change);
+      },
+    },
+    onJoined: options.onJoined,
+    logType: "bot-registry-subscription-retry",
+  });
+}
+
+/**
+ * The project's change topic on Intelligence's realtime gateway, with a handler per event name.
+ *
+ * One topic carries every announcement a project key may hear: `agent_changed` for the agent
+ * registry, and `configuration_changed` for what Intelligence holds beside it (agent access, people's
+ * preferences, components, skills). Each subscriber opens its own socket with its own single-use
+ * join token, and gets the same at-most-once delivery and the same `onJoined` after every reconnect.
+ */
+export function subscribeToProjectEvents(options: {
+  client: Pick<AgentRegistryClient, "subscribe">;
+  gatewayWsUrl: string;
+  events: Record<string, (payload: unknown) => void>;
+  /** Called every time a subscription is joined, the first and every one after a reconnect. */
+  onJoined: (joinCode: string) => void;
+  /** What the retry log line is called, so each subscriber's trouble is told apart. */
+  logType?: string;
+}): BotChangeSubscription {
   const endpoint = clientSocketUrl(options.gatewayWsUrl);
   let socket: Socket | undefined;
   let joined: string | null = null;
@@ -71,7 +102,7 @@ export function subscribeToBotChanges(options: {
     attempt += 1;
     console.warn(
       JSON.stringify({
-        type: "bot-registry-subscription-retry",
+        type: options.logType ?? "project-events-subscription-retry",
         reason,
         retryInMs: delay,
       }),
@@ -112,10 +143,8 @@ export function subscribeToBotChanges(options: {
     });
     next.connect();
     const channel = next.channel(`project_meta:agents:${credentials.joinCode}`);
-    channel.on("agent_changed", (payload: unknown) => {
-      const change = parseChange(payload);
-      if (change) options.onChange(change);
-    });
+    for (const [event, handler] of Object.entries(options.events))
+      channel.on(event, (payload: unknown) => handler(payload));
     channel.onError(() => {
       if (mine === generation) retry("channel error");
     });

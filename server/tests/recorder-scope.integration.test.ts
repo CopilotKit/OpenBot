@@ -11,6 +11,7 @@ import type { AuditEventInput } from "../src/audit";
 import type { RoleRepository } from "../src/auth/guards";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
+import { botConfiguration } from "../src/configuration/directory";
 import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
@@ -19,7 +20,6 @@ import {
   learningOpenSkills,
   learningSkillSharing,
 } from "../src/db/schema/learning";
-import { skills } from "../src/db/schema/plugins";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
@@ -151,13 +151,14 @@ async function counts() {
   const of = async (
     table:
       | typeof routines
-      | typeof skills
       | typeof learningSkillSharing
       | typeof learningOpenSkills,
   ) => (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
   return {
     routines: await of(routines),
-    skills: await of(skills),
+    // Skills live in Intelligence: the ones this process holds, which every write here would change
+    // (and every fetch to Intelligence is refused in this file besides).
+    skills: botConfiguration().skills.all().length,
     sharing: await of(learningSkillSharing),
     openSkills: await of(learningOpenSkills),
   };

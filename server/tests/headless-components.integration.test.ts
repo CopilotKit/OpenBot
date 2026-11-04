@@ -9,7 +9,6 @@ import {
 } from "@ag-ui/client";
 import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
-import { inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { GALLERY } from "../../app/src/components/gallery/charts";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
@@ -23,8 +22,7 @@ import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
-import { componentExclusions, components } from "../src/db/schema";
-import { removeBots, seedBot } from "./support/bots";
+import { removeBots, removeTestComponents, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -70,14 +68,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(componentExclusions)
-    .where(inArray(componentExclusions.agentId, [allowedBot, deniedBot]));
-  if (addedComponents.length > 0)
-    await database
-      .delete(components)
-      .where(inArray(components.name, addedComponents));
+  // Purging the Bots takes their withholdings with them, in Intelligence.
   await removeBots([allowedBot, deniedBot]);
+  if (addedComponents.length > 0) await removeTestComponents(addedComponents);
 });
 
 function lifecycle(input: RunAgentInput, body: BaseEvent[]): BaseEvent[] {

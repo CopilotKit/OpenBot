@@ -7,14 +7,20 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createHandoffDesk, HANDOFF_KIND } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, pluginGrants, workItems } from "../src/db/schema";
+import { auditEvents, workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -41,15 +47,11 @@ const desk = createHandoffDesk({
   // The person's own role, as the request path resolves it: an administrator sees Bots a user does
   // not, and a hop to one of those is theirs to make.
   actorFor: async (id: string) => ({ id, role: "user" as const }),
-  mayAddress: async (fromBotId, toBotId) => {
-    const rows = await database
-      .select({ ref: pluginGrants.ref })
-      .from(pluginGrants)
-      .where(
-        and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, fromBotId)),
-      );
-    return rows.some((row) => row.ref === toBotId);
-  },
+  // The asking Bot's grants, as this process holds its access in Intelligence.
+  mayAddress: async (fromBotId, toBotId) =>
+    (await useTestConfiguration())
+      .accessOf(fromBotId)
+      .grants.some((grant) => grant.kind === "bot" && grant.ref === toBotId),
   auditStore: createAuditStore(database),
   caps: { maxDepth: 2, maxPerRun: 2 },
 });
@@ -60,9 +62,10 @@ async function clean() {
   await database
     .delete(workItems)
     .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
-  for (const id of [ASKER, TARGET]) {
-    await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
-  }
+  // Neither Bot holds another: what a test granted is taken back.
+  await changeAccess([
+    { op: "revokeMatching", kind: "bot", botIds: [ASKER, TARGET] },
+  ]);
 }
 
 // Made once: every test reads the same two Bots and changes neither.
@@ -104,10 +107,7 @@ const from = (over: Partial<{ runId: string; depth: number }> = {}) => ({
 });
 
 async function grantTarget() {
-  await database
-    .insert(pluginGrants)
-    .values({ kind: "bot", ref: TARGET, agentId: ASKER, grantedBy: "test" })
-    .onConflictDoNothing();
+  await grantBot(ASKER, "bot", TARGET, { grantedBy: "test" });
 }
 
 describe("a hop, against the database", () => {

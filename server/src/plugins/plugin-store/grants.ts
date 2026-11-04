@@ -1,6 +1,7 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
-import { mcpTools, pluginGrants, skills } from "../../db/schema";
+import { botConfiguration } from "../../configuration/directory";
+import { mcpTools } from "../../db/schema";
 import type { StoreContext } from "./context";
 import {
   type GrantedPlugins,
@@ -9,7 +10,13 @@ import {
   toolNameFor,
 } from "./model";
 
-/** Granting and revoking a server, skill or Bot on a Bot, and what a Bot holds. */
+/**
+ * Granting and revoking a server, skill or Bot on a Bot, and what a Bot holds.
+ *
+ * A Bot's grants are part of its access in Intelligence, held in memory on this instance
+ * (configuration/directory.ts): what a run may offer is read from there, never from a request to
+ * Intelligence, and a grant made on another replica arrives with its announcement.
+ */
 export function grantMethods(context: StoreContext) {
   const { database, auditStore, toolsDeclaredBy } = context;
   return {
@@ -29,24 +36,23 @@ export function grantMethods(context: StoreContext) {
       by: string,
       as: "admin" | "owner" = "admin",
     ): Promise<void> {
-      const insert = database
-        .insert(pluginGrants)
-        .values({ kind, ref, agentId, grantedBy: by, grantedAs: as });
-      if (as === "owner") {
-        /*
-         * Nothing written, nothing in the trail. A row already there is an administrator's grant
-         * or the owner's own from before, and a `plugin_granted` row marked `owner` over an
-         * administrator's grant would tell a reader the owner had given what an administrator did.
-         */
-        const written = await insert
-          .onConflictDoNothing()
-          .returning({ ref: pluginGrants.ref });
-        if (written.length === 0) return;
-      } else
-        await insert.onConflictDoUpdate({
-          target: [pluginGrants.kind, pluginGrants.ref, pluginGrants.agentId],
-          set: { grantedBy: by, grantedAs: "admin", updatedAt: new Date() },
-        });
+      const [result] = await botConfiguration().changeAccess([
+        {
+          op: "grant",
+          botId: agentId,
+          kind,
+          ref,
+          grantedBy: by,
+          grantedAs: as,
+          ifGranted: as === "owner" ? "keep" : "replace",
+        },
+      ]);
+      /*
+       * Nothing written, nothing in the trail. A grant already there is an administrator's or the
+       * owner's own from before, and a `plugin_granted` row marked `owner` over an administrator's
+       * grant would tell a reader the owner had given what an administrator did.
+       */
+      if (as === "owner" && result?.outcome === "kept") return;
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -74,23 +80,24 @@ export function grantMethods(context: StoreContext) {
       by: string,
     ): Promise<string[]> {
       if (serverIds.length === 0) return [];
-      const owned = and(
-        eq(pluginGrants.kind, "mcp"),
-        eq(pluginGrants.agentId, agentId),
-        eq(pluginGrants.grantedAs, "owner"),
+      // Every one this owner gave, on any of these servers, in one change.
+      const results = await botConfiguration().changeAccess(
+        serverIds.map((serverId) => ({
+          op: "revokeMatching" as const,
+          kind: "mcp" as const,
+          botIds: [agentId],
+          refPrefix: `${serverId}/`,
+          grantedAs: "owner" as const,
+        })),
       );
-      const refs = (
-        await database
-          .select({ ref: pluginGrants.ref })
-          .from(pluginGrants)
-          .where(owned)
-      )
-        .map((row) => row.ref)
-        .filter((ref) => serverIds.includes(ref.split("/")[0] ?? ""));
+      const refs = [
+        ...new Set(
+          results.flatMap((result) =>
+            (result.revoked ?? []).map((grant) => grant.ref),
+          ),
+        ),
+      ].sort();
       if (refs.length === 0) return [];
-      await database
-        .delete(pluginGrants)
-        .where(and(owned, inArray(pluginGrants.ref, refs)));
       for (const ref of refs)
         await recordAuditEvent(auditStore, {
           eventType: "configuration.changed",
@@ -114,15 +121,9 @@ export function grantMethods(context: StoreContext) {
       agentId: string,
       by: string,
     ): Promise<void> {
-      await database
-        .delete(pluginGrants)
-        .where(
-          and(
-            eq(pluginGrants.kind, kind),
-            eq(pluginGrants.ref, ref),
-            eq(pluginGrants.agentId, agentId),
-          ),
-        );
+      await botConfiguration().changeAccess([
+        { op: "revoke", botId: agentId, kind, ref },
+      ]);
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -140,10 +141,7 @@ export function grantMethods(context: StoreContext) {
 
     /** Everything one Bot may use. The runtime asks this and offers exactly what comes back. */
     async listForAgent(agentId: string): Promise<GrantedPlugins> {
-      const held = await database
-        .select()
-        .from(pluginGrants)
-        .where(eq(pluginGrants.agentId, agentId));
+      const held = botConfiguration().accessOf(agentId).grants;
       if (held.length === 0) return { tools: [], skills: [] };
 
       const toolRefs = held
@@ -191,13 +189,10 @@ export function grantMethods(context: StoreContext) {
           };
         });
 
-      const skillRows =
-        skillSlugs.length === 0
-          ? []
-          : await database
-              .select()
-              .from(skills)
-              .where(inArray(skills.slug, skillSlugs));
+      const skillRows = skillSlugs.flatMap((slug) => {
+        const skill = botConfiguration().skills.get(slug);
+        return skill ? [skill] : [];
+      });
 
       /*
        * What each skill says it needs, carried alongside rather than folded into `tools`.
@@ -206,7 +201,7 @@ export function grantMethods(context: StoreContext) {
        * built, intersects the two; handing the runtime a union instead would make writing a skill a
        * way to grant a tool, which is the one thing this must never be.
        */
-      const declared = await toolsDeclaredBy(skillRows.map((row) => row.id));
+      const declared = await toolsDeclaredBy(skillRows.map((row) => row.slug));
 
       return {
         tools: grantedTools,
@@ -215,7 +210,7 @@ export function grantMethods(context: StoreContext) {
           title: row.title,
           summary: row.summary,
           instructions: row.instructions,
-          tools: declared.get(row.id) ?? [],
+          tools: declared.get(row.slug) ?? [],
         })),
       };
     },

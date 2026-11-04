@@ -12,19 +12,20 @@
  *
  * A NEW TABLE THAT NAMES A BOT BELONGS IN {@link BOT_CHILD_TABLES}. `bot-registry-local-rows` in the
  * tests reads the schema for every `agent_id`-shaped column and fails when one is missing here.
+ *
+ * Not here: what moved into Intelligence beside the Bot (its grants, publication, audience and
+ * assignments; people's preferences about it; components withheld from it). Intelligence removes
+ * those with the Bot, and their old tables here are written by nothing (see
+ * `configuration/frozen-tables.ts`).
  */
 import { inArray, isNotNull, sql } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import type { Database } from "../../db/client";
 import {
-  agentPreferences,
   appAccessRequests,
-  botLifecycle,
   botTasks,
   channelAgents,
   channels,
-  componentExclusions,
-  defaultOptOuts,
   deliveryBindings,
   deliveryChallenges,
   deliveryInbox,
@@ -32,7 +33,6 @@ import {
   demonstrations,
   memorySources,
   personalMemories,
-  pluginGrants,
   proactiveRuns,
   proactiveSettings,
   proactiveSuggestions,
@@ -40,23 +40,15 @@ import {
   routines,
   sharedUseApprovals,
   sharedUseRequests,
-  teamBotAssignments,
-  teamBotAudience,
-  teamBotConsents,
-  teamBotPublications,
 } from "../../db/schema";
 
 type ChildTable = { table: PgTable; column: AnyPgColumn };
 
 /** Every table whose rows belong to a Bot and go with it. */
 export const BOT_CHILD_TABLES: readonly ChildTable[] = [
-  { table: agentPreferences, column: agentPreferences.agentId },
   { table: appAccessRequests, column: appAccessRequests.agentId },
-  { table: botLifecycle, column: botLifecycle.agentId },
   { table: botTasks, column: botTasks.agentId },
   { table: channelAgents, column: channelAgents.agentId },
-  { table: componentExclusions, column: componentExclusions.agentId },
-  { table: defaultOptOuts, column: defaultOptOuts.agentId },
   { table: deliveryBindings, column: deliveryBindings.agentId },
   { table: deliveryChallenges, column: deliveryChallenges.agentId },
   { table: deliveryInbox, column: deliveryInbox.agentId },
@@ -64,7 +56,6 @@ export const BOT_CHILD_TABLES: readonly ChildTable[] = [
   { table: demonstrations, column: demonstrations.botId },
   { table: memorySources, column: memorySources.agentId },
   { table: personalMemories, column: personalMemories.formedByAgentId },
-  { table: pluginGrants, column: pluginGrants.agentId },
   { table: proactiveRuns, column: proactiveRuns.agentId },
   { table: proactiveSettings, column: proactiveSettings.agentId },
   { table: proactiveSuggestions, column: proactiveSuggestions.agentId },
@@ -72,10 +63,6 @@ export const BOT_CHILD_TABLES: readonly ChildTable[] = [
   { table: routines, column: routines.agentId },
   { table: sharedUseApprovals, column: sharedUseApprovals.agentId },
   { table: sharedUseRequests, column: sharedUseRequests.agentId },
-  { table: teamBotAssignments, column: teamBotAssignments.agentId },
-  { table: teamBotAudience, column: teamBotAudience.agentId },
-  { table: teamBotConsents, column: teamBotConsents.agentId },
-  { table: teamBotPublications, column: teamBotPublications.agentId },
 ];
 
 /** Columns that name a Bot and are cleared, not deleted with it: the row is about something else. */

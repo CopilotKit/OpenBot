@@ -6,6 +6,7 @@ import { HANDOFF_KIND } from "../src/agents/handoff";
 import {
   BotPausedError,
   configureBotLifecycle,
+  configuredPauses,
   createBotLifecycleStore,
   guardBotTurn,
   isBotPaused,
@@ -29,7 +30,6 @@ import {
   users,
 } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
-import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources, personalMemories } from "../src/db/schema/memory";
 import {
   proactiveSettings,
@@ -38,7 +38,12 @@ import {
 import { responsibilities } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  removeBots,
+  seedBot,
+  storedPreferences,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -59,7 +64,8 @@ const shared = `${prefix}-shared`;
 const othersDirect = `${prefix}-others-direct`;
 
 beforeAll(async () => {
-  configureBotLifecycle({ database });
+  await useTestConfiguration();
+  configureBotLifecycle({ pauses: configuredPauses });
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
@@ -231,7 +237,7 @@ afterAll(async () => {
 });
 
 describe("pause", () => {
-  const lifecycle = createBotLifecycleStore(database);
+  const lifecycle = createBotLifecycleStore();
 
   test("pausing is one person's, and a headless turn refuses to start", async () => {
     await lifecycle.pause(owner, bot);
@@ -408,7 +414,7 @@ describe("follow-ups", () => {
 });
 
 describe("update routing", () => {
-  const lifecycle = createBotLifecycleStore(database);
+  const lifecycle = createBotLifecycleStore();
 
   test("per-Bot notify and per-kind transports decide what leaves the web", async () => {
     let route = await resolveUpdateRoute({
@@ -679,18 +685,9 @@ describe("reset", () => {
 
     await reset.execute({ id: person, role: "user" }, bot);
 
-    const declined = await database
-      .select({
-        feature: defaultOptOuts.feature,
-        scope: defaultOptOuts.scope,
-      })
-      .from(defaultOptOuts)
-      .where(
-        and(
-          eq(defaultOptOuts.ownerUserId, person),
-          eq(defaultOptOuts.agentId, bot),
-        ),
-      );
+    const declined = (await storedPreferences(person)).optOuts
+      .filter((optOut) => optOut.botId === bot)
+      .map((optOut) => ({ feature: optOut.feature, scope: optOut.scope }));
     expect(declined.sort((a, b) => a.feature.localeCompare(b.feature))).toEqual(
       [
         { feature: "memory_source", scope: "mail" },

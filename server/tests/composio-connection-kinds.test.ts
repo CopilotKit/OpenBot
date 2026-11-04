@@ -1,6 +1,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -22,7 +23,6 @@ import {
   brokeredConnections,
   mcpServers,
   mcpTools,
-  pluginGrants,
 } from "../src/db/schema";
 import {
   BrokerRefusalError,
@@ -41,7 +41,7 @@ import {
   type BrokeredProbe,
   createPluginStore,
 } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -515,6 +515,10 @@ for (const padded of PADDED_SCHEMES) {
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
+beforeAll(async () => {
+  await useTestConfiguration();
+});
+
 const suite = randomUUID().slice(0, 8);
 const person = `user_kinds_${suite}`;
 
@@ -849,7 +853,7 @@ async function recordedHere(): Promise<string[]> {
 }
 
 async function clean(): Promise<void> {
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
+  // Purging the Bot removes its grants in Intelligence with it.
   await removeBots([botId]);
   await database.delete(mcpTools).where(inArray(mcpTools.serverId, APP_IDS));
   await database.delete(mcpServers).where(inArray(mcpServers.id, APP_IDS));

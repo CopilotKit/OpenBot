@@ -1,13 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import { pluginGrants, skills, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  removeBots,
+  seedBot,
+  storedAccess,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -59,17 +64,17 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(skills)
-    .where(
-      inArray(skills.slug, [
-        personalSlug,
-        keptSlug,
-        deploymentSlug,
-        unwrittenSlug,
-        botlessSlug,
-      ]),
-    );
+  const configuration = await useTestConfiguration();
+  for (const slug of [
+    personalSlug,
+    keptSlug,
+    deploymentSlug,
+    unwrittenSlug,
+    botlessSlug,
+  ]) {
+    await configuration.client.skills.remove(slug, `test:${randomUUID()}`);
+    configuration.skills.forget(slug);
+  }
   await removeBots([aliceBot, sharedBot]);
   await database.delete(users).where(inArray(users.id, [alice, bob]));
 });
@@ -209,24 +214,15 @@ describe("a skill name written again after the skill was uninstalled", () => {
 
     expect(refused.status).toBe(403);
     expect(await refused.json()).toEqual({ error: "There is no such Bot." });
-    expect(
-      await database
-        .select({ ref: pluginGrants.ref })
-        .from(pluginGrants)
-        .where(eq(pluginGrants.agentId, missingBot)),
-    ).toEqual([]);
+    // Nothing stored for it in Intelligence either.
+    expect((await storedAccess(missingBot)).grants).toEqual([]);
   });
 
   test("uninstalling removes that skill's grants and no other", async () => {
-    const held = await database
-      .select({ ref: pluginGrants.ref, agentId: pluginGrants.agentId })
-      .from(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.kind, "skill"),
-          inArray(pluginGrants.agentId, [aliceBot, sharedBot]),
-        ),
-      );
+    const held = [];
+    for (const agentId of [aliceBot, sharedBot])
+      for (const grant of (await storedAccess(agentId)).grants)
+        if (grant.kind === "skill") held.push({ ref: grant.ref, agentId });
 
     expect(held).toEqual([{ ref: keptSlug, agentId: aliceBot }]);
   });

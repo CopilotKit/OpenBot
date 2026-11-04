@@ -1,18 +1,31 @@
-import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import { bots } from "../../agents/bot-registry/directory";
 import {
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-  skills,
-  skillTools,
-  vendorNameOf,
-} from "../../db/schema";
+  ConfigurationConflictError,
+  configurationKey,
+} from "../../configuration/client";
+import { botConfiguration } from "../../configuration/directory";
+import type { SkillEntry } from "../../configuration/types";
+import { mcpServers, mcpTools, vendorNameOf } from "../../db/schema";
+
+/** How many times a save is redone on top of somebody else's that saved first. */
+const SAVE_ATTEMPTS = 3;
+
+/** Skills sorted by title, as the deployment's database sorted them for a list. */
+function byTitle(left: SkillEntry, right: SkillEntry) {
+  return left.title.localeCompare(right.title);
+}
 import type { StoreContext } from "./context";
 import { PluginRefusedError, type SkillActor, type SkillRecord } from "./model";
 
-/** Skills, and what the store answers about Bots and servers for the routes and the desk. */
+/**
+ * Skills, and what the store answers about Bots and servers for the routes and the desk.
+ *
+ * Skills live in Intelligence, held in memory on this instance (configuration/directory.ts), so a
+ * run's skill selection and the `/` menu never wait on it. Writes go to Intelligence and are held
+ * here from its answer.
+ */
 export function skillMethods(context: StoreContext) {
   const { database, auditStore, grantsFor, toolsDeclaredBy, knownToolRefs } =
     context;
@@ -24,22 +37,23 @@ export function skillMethods(context: StoreContext) {
      * governing what Bots are told is the job of the surface they are looking at.
      */
     async listSkills(actor?: SkillActor): Promise<SkillRecord[]> {
-      const visible =
-        !actor || actor.isAdmin
-          ? undefined
-          : or(isNull(skills.ownerUserId), eq(skills.ownerUserId, actor.id));
-      const rows = await database
-        .select()
-        .from(skills)
-        .where(visible)
-        .orderBy(asc(skills.title));
+      const rows = botConfiguration()
+        .skills.all()
+        .filter(
+          (skill) =>
+            !actor ||
+            actor.isAdmin ||
+            skill.ownerUserId === null ||
+            skill.ownerUserId === actor.id,
+        )
+        .sort(byTitle);
       const grants = await grantsFor(
         "skill",
         rows.map((row) => row.slug),
       );
-      const declared = await toolsDeclaredBy(rows.map((row) => row.id));
+      const declared = await toolsDeclaredBy(rows.map((row) => row.slug));
       return rows.map((row) => ({
-        id: row.id,
+        id: row.slug,
         slug: row.slug,
         ownerUserId: row.ownerUserId,
         title: row.title,
@@ -48,17 +62,13 @@ export function skillMethods(context: StoreContext) {
         origin: row.origin,
         installedBy: row.installedBy,
         grantedTo: grants.get(row.slug) ?? [],
-        tools: declared.get(row.id) ?? [],
+        tools: declared.get(row.slug) ?? [],
       }));
     },
 
     /** Whose a skill is, or `undefined` if there is no such skill. Null owner means the deployment's. */
     async skillOwner(slug: string): Promise<string | null | undefined> {
-      const [row] = await database
-        .select({ ownerUserId: skills.ownerUserId })
-        .from(skills)
-        .where(eq(skills.slug, slug))
-        .limit(1);
+      const row = botConfiguration().skills.get(slug);
       return row ? row.ownerUserId : undefined;
     },
 
@@ -192,60 +202,75 @@ export function skillMethods(context: StoreContext) {
         }
       }
 
-      await database
-        .insert(skills)
-        .values({
-          id: input.slug,
-          slug: input.slug,
-          ownerUserId: input.ownerUserId,
-          title: input.title,
-          summary: input.summary,
-          instructions: input.instructions,
-          origin: input.origin ?? "yours",
-          installedBy: input.by,
-        })
-        // Editing keeps the owner it already had. Whose a skill is, is not something a re-save
-        // should quietly change, and the route has already checked this person may edit it.
-        // `installed_by` is left alone too: it records who first installed it, not who last saved.
-        .onConflictDoUpdate({
-          target: skills.slug,
-          set: {
-            title: input.title,
-            summary: input.summary,
-            instructions: input.instructions,
-            /*
-             * WHERE THE TEXT NOW COMES FROM, WRITTEN BESIDE THE TEXT.
-             *
-             * CRITERION. A save through here leaves `origin` saying what it says on an insert.
-             *
-             * REASON. `origin = 'catalogue'` is the condition the package seed (`tenant-package.ts`,
-             * `setWhere`) overwrites a skill on at every boot. Leaving it standing after somebody
-             * edited a shipped skill here kept the row eligible, so the next boot silently replaced
-             * their edit with the package's text — the exact outcome that seed's own comment says
-             * it exists to prevent ("rather than the package silently replacing something somebody
-             * wrote").
-             */
-            origin: input.origin ?? "yours",
-            updatedAt: new Date(),
-          },
-        });
-
       /*
-       * Replaced wholesale rather than merged. What a skill needs is a set the author is editing, so
-       * a save says what it is now; merging would make removing one a thing with no gesture for it.
+       * Written whole, at the version it was read at, and redone on the latest copy when somebody
+       * else saved first.
+       *
+       * Editing keeps the owner it already had. Whose a skill is, is not something a re-save should
+       * quietly change, and the route has already checked this person may edit it. `installedBy` is
+       * left alone too: it records who first installed it, not who last saved. What a skill needs
+       * is replaced wholesale rather than merged: a save says what it is now, and merging would make
+       * removing one a thing with no gesture for it. Absent leaves it as it was.
+       *
+       * WHERE THE TEXT NOW COMES FROM, WRITTEN BESIDE THE TEXT. A save through here leaves `origin`
+       * saying what it says on a create. `origin = 'catalogue'` is the condition the package seed
+       * (`tenant-package.ts`) overwrites a skill on at every boot; leaving it standing after somebody
+       * edited a shipped skill here kept it eligible, so the next boot silently replaced their edit
+       * with the package's text.
        */
-      if (declared !== undefined) {
-        await database
-          .delete(skillTools)
-          .where(eq(skillTools.skillId, input.slug));
-        if (declared.length > 0) {
-          await database.insert(skillTools).values(
-            declared.map((ref) => ({
-              skillId: input.slug,
-              ref,
-              declaredBy: input.by,
-            })),
-          );
+      const origin = input.origin ?? "yours";
+      for (let attempt = 1; ; attempt++) {
+        const current = botConfiguration().skills.get(input.slug);
+        try {
+          const saved = current
+            ? await botConfiguration().client.skills.replace(
+                input.slug,
+                current.version,
+                {
+                  ownerUserId: current.ownerUserId,
+                  title: input.title,
+                  summary: input.summary,
+                  instructions: input.instructions,
+                  origin,
+                  installedBy: current.installedBy,
+                  tools: (
+                    declared ?? current.tools.map((tool) => tool.ref)
+                  ).map((ref) => ({
+                    ref,
+                    declaredBy:
+                      declared === undefined
+                        ? (current.tools.find((tool) => tool.ref === ref)
+                            ?.declaredBy ?? null)
+                        : input.by,
+                  })),
+                },
+                configurationKey("skill-save"),
+              )
+            : await botConfiguration().client.skills.create(
+                input.slug,
+                {
+                  ownerUserId: input.ownerUserId,
+                  title: input.title,
+                  summary: input.summary,
+                  instructions: input.instructions,
+                  origin,
+                  installedBy: input.by,
+                  tools: (declared ?? []).map((ref) => ({
+                    ref,
+                    declaredBy: input.by,
+                  })),
+                },
+                configurationKey("skill-save"),
+              );
+          botConfiguration().skills.apply(saved);
+          break;
+        } catch (error) {
+          if (
+            !(error instanceof ConfigurationConflictError) ||
+            attempt >= SAVE_ATTEMPTS
+          )
+            throw error;
+          await botConfiguration().skills.refresh(input.slug);
         }
       }
 
@@ -265,14 +290,24 @@ export function skillMethods(context: StoreContext) {
     },
 
     async uninstallSkill(slug: string, by: string): Promise<void> {
-      await database.transaction(async (transaction) => {
-        await transaction
-          .delete(pluginGrants)
-          .where(
-            and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.ref, slug)),
-          );
-        await transaction.delete(skills).where(eq(skills.slug, slug));
-      });
+      // The skill and every grant of it, together: Intelligence removes both in one transaction, so
+      // a skill later written under this slug cannot reach a Bot through a grant of this one.
+      const holders = botConfiguration()
+        .access.all()
+        .filter((access) =>
+          access.grants.some(
+            (grant) => grant.kind === "skill" && grant.ref === slug,
+          ),
+        )
+        .map((access) => access.botId);
+      await botConfiguration().client.skills.remove(
+        slug,
+        configurationKey("skill-uninstall"),
+      );
+      botConfiguration().skills.forget(slug);
+      // The Bots that held it, read again now rather than when their announcements arrive.
+      for (const botId of holders)
+        await botConfiguration().access.refresh(botId);
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
         targetType: "skill",
@@ -282,11 +317,12 @@ export function skillMethods(context: StoreContext) {
     },
 
     /**
-     * The Bots one Bot has been granted, read fresh.
+     * The Bots one Bot has been granted.
      *
-     * NEVER CACHED. Whether one Bot may address another is a decision an administrator can change,
-     * and a grant revoked a minute ago has to apply to the next hop rather than after a restart. It
-     * is a single indexed read, which is the right price for that.
+     * Whether one Bot may address another is a decision an administrator can change, and a grant
+     * revoked a minute ago has to apply to the next hop rather than after a restart. Read from the
+     * Bot's access as this instance holds it, which a revocation reaches here at once and on every
+     * other replica with its announcement.
      */
     /**
      * The Bots this one may hand work to.
@@ -302,13 +338,10 @@ export function skillMethods(context: StoreContext) {
     async botsReachableFrom(agentId: string): Promise<string[]> {
       // A grant held by a Bot Intelligence no longer has does not count.
       if (!(await bots().find(agentId))) return [];
-      const rows = await database
-        .select({ ref: pluginGrants.ref })
-        .from(pluginGrants)
-        .where(
-          and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, agentId)),
-        );
-      return rows.map((row) => row.ref);
+      return botConfiguration()
+        .accessOf(agentId)
+        .grants.filter((grant) => grant.kind === "bot")
+        .map((grant) => grant.ref);
     },
   };
 }

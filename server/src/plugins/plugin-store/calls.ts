@@ -7,13 +7,9 @@ import {
   type PolicyContext,
   policyInitiator,
 } from "../../computer/policy";
+import { botConfiguration } from "../../configuration/directory";
 import { withoutStatement } from "../../db/query-failure";
-import {
-  brokeredConnections,
-  mcpTools,
-  pluginGrants,
-  vendorNameOf,
-} from "../../db/schema";
+import { brokeredConnections, mcpTools, vendorNameOf } from "../../db/schema";
 import { isProactiveInitiator } from "../../proactive/initiator";
 import {
   classifyTool,
@@ -63,17 +59,11 @@ export function callMethods(context: StoreContext) {
       ref: string,
       agentId: string,
     ): Promise<PluginDecision> {
-      const [row] = await database
-        .select()
-        .from(pluginGrants)
-        .where(
-          and(
-            eq(pluginGrants.kind, kind),
-            eq(pluginGrants.ref, ref),
-            eq(pluginGrants.agentId, agentId),
-          ),
-        )
-        .limit(1);
+      // From the Bot's access as this instance holds it: every tool call asks, so it never waits
+      // on Intelligence.
+      const row = botConfiguration()
+        .accessOf(agentId)
+        .grants.find((grant) => grant.kind === kind && grant.ref === ref);
 
       if (!row) {
         return {

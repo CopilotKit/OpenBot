@@ -6,12 +6,8 @@ import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
   mcpServers,
-  pluginGrants,
   responsibilities,
   sharedUseRequests,
-  teamBotAudience,
-  teamBotAssignments,
-  teamBotPublications,
   users,
 } from "../src/db/schema";
 import {
@@ -19,7 +15,24 @@ import {
   createSharedUseStore,
 } from "../src/plugins/shared-use-store";
 import { expectOnlyRefusal } from "./helpers/refusals";
-import { changeBot, removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  changeBot,
+  grantBot,
+  removeBots,
+  seedBot,
+} from "./support/bots";
+
+/** Publish a Bot to named people and groups, as its owner's publish does. */
+async function publishTo(
+  botId: string,
+  publishedBy: string,
+  members: { kind: "user" | "group"; value: string }[],
+) {
+  await changeAccess([
+    { op: "publish", botId, audience: "people", members, publishedBy },
+  ]);
+}
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -79,10 +92,7 @@ beforeEach(async () => {
     roleDescription: "Triage",
     avatarSeed: "x",
   });
-  await database.insert(pluginGrants).values({
-    kind: "mcp",
-    ref: `${app}/GITHUB_LIST_ISSUES`,
-    agentId: bot,
+  await grantBot(bot, "mcp", `${app}/GITHUB_LIST_ISSUES`, {
     grantedBy: "admin@example.test",
   });
 });
@@ -156,12 +166,9 @@ describe("the shared-use gate", () => {
     });
     expect((await call("named")).allowed).toBe(true);
     expect((await call("newhire")).allowed).toBe(true);
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database
-      .insert(teamBotAudience)
-      .values({ agentId: bot, kind: "user", value: id("stranger") });
+    await publishTo(bot, id("owner"), [
+      { kind: "user", value: id("stranger") },
+    ]);
     expect((await call("stranger")).allowed).toBe(false);
   });
 
@@ -305,15 +312,15 @@ describe("approval members", () => {
   });
 
   test("an audience also assigned to the Bot can be approved", async () => {
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database
-      .insert(teamBotAudience)
-      .values({ agentId: bot, kind: "group", value: "platform" });
-    await database
-      .insert(teamBotAssignments)
-      .values({ agentId: bot, groupName: "platform", assignedBy: id("owner") });
+    await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
+    await changeAccess([
+      {
+        op: "assign",
+        botId: bot,
+        group: "platform",
+        assignedBy: id("owner"),
+      },
+    ]);
     await call("newhire");
     const [pending] = await store.pendingFor(bot);
     expect(pending?.proposed.members).toEqual([
@@ -414,12 +421,7 @@ describe("decision durability", () => {
   test.each(["shared_use_approvals", "shared_use_approval_members"] as const)(
     "a failed %s write leaves an approval request pending and retryable",
     async (table) => {
-      await database
-        .insert(teamBotPublications)
-        .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-      await database
-        .insert(teamBotAudience)
-        .values({ agentId: bot, kind: "group", value: "platform" });
+      await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
       await call("newhire");
       const [pending] = await store.pendingFor(bot);
       const fault = `approval_fault_${suite}`;
@@ -583,12 +585,7 @@ describe("decide", () => {
   });
 
   test("approving writes the proposed approval, members included", async () => {
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database
-      .insert(teamBotAudience)
-      .values({ agentId: bot, kind: "group", value: "platform" });
+    await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
     await call("newhire");
     const [pending] = await store.pendingFor(bot);
     await store.decide({
@@ -639,11 +636,8 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   test("an approval written through the duplicate is the one the gate reads by the answering id", async () => {
-    await database.delete(pluginGrants).where(eq(pluginGrants.agentId, bot));
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
-      agentId: bot,
+    await changeAccess([{ op: "revokeMatching", kind: "mcp", botIds: [bot] }]);
+    await grantBot(bot, "mcp", `${duplicate}/GITHUB_LIST_ISSUES`, {
       grantedBy: "admin@example.test",
     });
     await store.setApproval({
@@ -662,10 +656,7 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   test("sharedAppsHeldBy lists the app once, by its answering row, when both rows are granted", async () => {
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${duplicate}/GITHUB_CREATE_ISSUE`,
-      agentId: bot,
+    await grantBot(bot, "mcp", `${duplicate}/GITHUB_CREATE_ISSUE`, {
       grantedBy: "admin@example.test",
     });
     expect(await store.sharedAppsHeldBy(bot)).toEqual([
@@ -675,10 +666,7 @@ describe("an app with a duplicate row at its url", () => {
 
   test("botsHolding the answering id includes a Bot granted only through the duplicate", async () => {
     await seedBot({ id: other, name: "Other", type: "built_in" });
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
-      agentId: other,
+    await grantBot(other, "mcp", `${duplicate}/GITHUB_LIST_ISSUES`, {
       grantedBy: "admin@example.test",
     });
     const holding = await store.botsHolding(app);
@@ -699,11 +687,10 @@ describe("an app with a duplicate row at its url", () => {
       accountMode: "personal",
     });
     try {
-      await database.delete(pluginGrants).where(eq(pluginGrants.agentId, bot));
-      await database.insert(pluginGrants).values({
-        kind: "mcp",
-        ref: `${slashy}/GITHUB_LIST_ISSUES`,
-        agentId: bot,
+      await changeAccess([
+        { op: "revokeMatching", kind: "mcp", botIds: [bot] },
+      ]);
+      await grantBot(bot, "mcp", `${slashy}/GITHUB_LIST_ISSUES`, {
         grantedBy: "admin@example.test",
       });
       await store.setApproval({

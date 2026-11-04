@@ -11,6 +11,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   configureBotLifecycle,
+  configuredPauses,
   createBotLifecycleStore,
   resetBotLifecycleForTests,
 } from "../src/agents/lifecycle";
@@ -25,10 +26,6 @@ import {
   deliveryInbox,
   deliveryOutbox,
 } from "../src/db/schema/delivery";
-import {
-  botLifecycle,
-  updateRoutingPreferences,
-} from "../src/db/schema/lifecycle";
 import {
   proactivePeople,
   proactivePings,
@@ -49,7 +46,12 @@ import { createProactiveStore } from "../src/proactive/store";
 import type { ProactiveSetting } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
 import { notificationDestination } from "../../mobile/src/links";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -83,7 +85,7 @@ const threadOf = (channelId: string) => `${channelId}-thread`;
 
 const proactive = createProactiveStore(database);
 const deliveries = createDeliveryStore(database);
-const lifecycle = createBotLifecycleStore(database);
+const lifecycle = createBotLifecycleStore();
 
 /** The conversations the person can still reach. A test takes one out to revoke it. */
 const reachable = new Set<string>();
@@ -168,7 +170,8 @@ let sms: DeliveryBinding;
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000);
 
 beforeAll(async () => {
-  configureBotLifecycle({ database });
+  configureBotLifecycle({ pauses: configuredPauses });
+  await useTestConfiguration();
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
@@ -256,12 +259,7 @@ async function reset() {
   await database
     .delete(proactivePeople)
     .where(eq(proactivePeople.ownerUserId, owner));
-  await database
-    .delete(botLifecycle)
-    .where(eq(botLifecycle.ownerUserId, owner));
-  await database
-    .delete(updateRoutingPreferences)
-    .where(eq(updateRoutingPreferences.ownerUserId, owner));
+  await clearPreferences([owner]);
   /*
    * Connected in this order, three hours to an hour ago. The older Slack account was the one the
    * person last wrote through (ten minutes ago), so it is their most recently used one.

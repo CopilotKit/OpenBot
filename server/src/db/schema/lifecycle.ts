@@ -12,6 +12,11 @@
 import { pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 import { users } from "./core";
 
+/**
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
+ */
 export const botLifecycle = pgTable(
   "bot_lifecycle",
   {
@@ -42,6 +47,10 @@ export const botLifecycle = pgTable(
  *
  * A missing row is the default (every transport the person has set up). An empty list means only
  * the web, which always shows everything.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const updateRoutingPreferences = pgTable(
   "update_routing_preferences",

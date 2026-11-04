@@ -34,11 +34,16 @@ import {
   scimGroups,
   sessions,
   ssoProviders,
-  teamBotPublications,
   users,
 } from "../src/db/schema";
 import { createTeamBots } from "../src/team-bots/team-bots";
-import { removeBots, seedBot } from "./support/bots";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  storedAccess,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -47,6 +52,10 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * Better Auth's own handler. Needs a database at the current TS schema (TEST_DATABASE_URL).
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const auditStore = createAuditStore(database);
 const suite = randomUUID().slice(0, 8);
 const admin = {
@@ -595,15 +604,9 @@ describe("Team Bots switch", () => {
           groups: [],
         }),
       ).rejects.toThrow(/Team Bots/);
-      const rows = await database
-        .select()
-        .from(teamBotPublications)
-        .where(eq(teamBotPublications.agentId, bot));
-      expect(rows).toEqual([]);
+      expect((await storedAccess(bot)).publication).toBeNull();
     } finally {
-      await database
-        .delete(teamBotPublications)
-        .where(eq(teamBotPublications.agentId, bot));
+      await changeAccess([{ op: "unpublish", botId: bot }]);
       await put(asAdmin, "/api/admin/enterprise/capabilities", {
         scopeKind: "organization",
         capability: "teamBots",

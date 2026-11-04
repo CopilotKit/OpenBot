@@ -6,17 +6,14 @@ import { createRoleRepository } from "../auth/guards";
 import type { OpenBotRole } from "../auth/roles";
 import type { Database } from "../db/client";
 import { bots } from "../agents/bot-registry/directory";
+import { botConfiguration } from "../configuration/directory";
 import {
   mcpServers,
-  pluginGrants,
   responsibilities,
   responsibilityTriggers,
   sharedUseApprovalMembers,
   sharedUseApprovals,
   sharedUseRequests,
-  teamBotAssignments,
-  teamBotAudience,
-  teamBotPublications,
   users,
 } from "../db/schema";
 import { BROKERED_PROFILE, type BrokerProvider, toolkitOfFor } from "./access";
@@ -483,25 +480,19 @@ export function createSharedUseStore(
 
   async function botFacts(botId: string): Promise<BotFacts> {
     const profile = await bots().find(botId);
-    const [published] = await database
-      .select({ audience: teamBotPublications.audience })
-      .from(teamBotPublications)
-      .where(eq(teamBotPublications.agentId, botId))
-      .limit(1);
+    // Its publication, audience and assignments: the Bot's access, as this instance holds it.
+    const access = botConfiguration().accessOf(botId);
+    const published = access.publication;
     const listed =
       published?.audience === "people"
-        ? await database
-            .select({
-              kind: teamBotAudience.kind,
-              value: teamBotAudience.value,
-            })
-            .from(teamBotAudience)
-            .where(eq(teamBotAudience.agentId, botId))
+        ? published.members.map((member) => ({
+            kind: member.kind,
+            value: member.value,
+          }))
         : [];
-    const assigned = await database
-      .select({ group: teamBotAssignments.groupName })
-      .from(teamBotAssignments)
-      .where(eq(teamBotAssignments.agentId, botId));
+    const assigned = access.assignments.map((assignment) => ({
+      group: assignment.group,
+    }));
     const goals = await database
       .select({ id: responsibilities.id })
       .from(responsibilities)
@@ -554,12 +545,9 @@ export function createSharedUseStore(
   async function sharedAppsHeldBy(
     botId: string,
   ): Promise<{ serverId: string; title: string }[]> {
-    const grants = await database
-      .select({ ref: pluginGrants.ref })
-      .from(pluginGrants)
-      .where(
-        and(eq(pluginGrants.kind, "mcp"), eq(pluginGrants.agentId, botId)),
-      );
+    const grants = botConfiguration()
+      .accessOf(botId)
+      .grants.filter((grant) => grant.kind === "mcp");
     const serverIds = [
       ...new Set(grants.map((grant) => grant.ref.split("/")[0] ?? "")),
     ].filter(Boolean);
@@ -637,16 +625,16 @@ export function createSharedUseStore(
         .map((row) => row.id);
       allIds = [...new Set([...ids, ...matching])];
     }
-    const rows = await database
-      .selectDistinct({ agentId: pluginGrants.agentId })
-      .from(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.kind, "mcp"),
-          inArray(sql<string>`split_part(${pluginGrants.ref}, '/', 1)`, allIds),
+    const servers = new Set(allIds);
+    return botConfiguration()
+      .access.all()
+      .filter((access) =>
+        access.grants.some(
+          (grant) =>
+            grant.kind === "mcp" && servers.has(grant.ref.split("/")[0] ?? ""),
         ),
-      );
-    return rows.map((row) => row.agentId);
+      )
+      .map((access) => access.botId);
   }
 
   async function shortfall(botId: string) {

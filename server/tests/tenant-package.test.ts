@@ -11,7 +11,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
@@ -19,10 +19,6 @@ import {
   channelAgents,
   channelMemberships,
   channels,
-  deploymentPackages,
-  pluginGrants,
-  skills as skillsTable,
-  skillTools,
   users,
 } from "../src/db/schema";
 import {
@@ -35,43 +31,40 @@ import {
   validateThemeCss,
 } from "../src/tenant-package";
 import {
+  changeAccess,
   changeBot,
   deleteBot,
+  recordTestPackage,
   removeBots,
+  removeTestPackages,
   seedBot,
+  storedAccess,
   storedBot,
+  trackTestPackage,
   useTestBots,
+  useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
-const createdPackageIds: string[] = [];
-const createdTenantIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
     await database.delete(channels).where(eq(channels.id, channelId));
   }
+  // Each test's tenant is its own random name, so nothing reads another's package record; they are
+  // purged once the file is done.
   await removeBots(createdAgentIds.splice(0));
-  for (const packageId of createdPackageIds.splice(0)) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.id, packageId));
-  }
-  for (const tenantId of createdTenantIds.splice(0)) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.tenantId, tenantId));
-  }
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
 });
 
 afterAll(async () => {
+  await removeTestPackages();
   await database.$client.close();
 });
 
@@ -93,8 +86,7 @@ function packageAgent(
 function loadedPackage(
   agent: LoadedTenantPackage["agents"][number] = packageAgent(),
 ): LoadedTenantPackage {
-  const tenantId = randomUUID();
-  createdTenantIds.push(tenantId);
+  const tenantId = trackTestPackage(randomUUID());
   return {
     tenantId,
     productName: "Package Test",
@@ -125,18 +117,20 @@ async function createUser() {
   return userId;
 }
 
+/**
+ * A package this deployment applied before, recorded in Intelligence as the server records one, in
+ * the shape the old `deployment_packages` row had.
+ */
 async function createPackage(tenantId: string) {
-  const [deploymentPackage] = await database
-    .insert(deploymentPackages)
-    .values({
-      tenantId,
-      sourcePath: `/old/${randomUUID()}`,
-      checksum: randomUUID(),
-    })
-    .returning();
-  if (!deploymentPackage) throw new Error("Expected deployment package.");
-  createdPackageIds.push(deploymentPackage.id);
-  return deploymentPackage;
+  const recorded = await recordTestPackage(tenantId, {
+    source: `/old/${randomUUID()}`,
+  });
+  return packageRecordOf(tenantId).then((records) => {
+    const [record] = records;
+    if (!record || record.id !== recorded.id)
+      throw new Error("Expected deployment package.");
+    return record;
+  });
 }
 
 /** The Bot as Intelligence holds it, or null when it has none: what a refused sync must not have made. */
@@ -144,12 +138,61 @@ async function botInIntelligence(id: string) {
   return (await useTestBots()).registry.get(id);
 }
 
-/** This tenant's package rows. A sync refused before writing leaves none for a tenant seen first. */
-function packageRowsOf(tenantId: string) {
-  return database
-    .select()
-    .from(deploymentPackages)
-    .where(eq(deploymentPackages.tenantId, tenantId));
+/**
+ * This tenant's package record in Intelligence, as a list of none or one. A sync refused before
+ * writing leaves none for a tenant seen first.
+ */
+async function packageRecordOf(tenantId: string) {
+  const record = await (await useTestConfiguration()).client.packages.get(
+    tenantId,
+  );
+  return record
+    ? [
+        {
+          id: record.id,
+          tenantId: record.name,
+          sourcePath: record.source,
+          checksum: record.checksum,
+          loadedAt: record.appliedAt,
+          version: record.version,
+        },
+      ]
+    : [];
+}
+
+const packageRowsOf = packageRecordOf;
+
+/** A skill as Intelligence holds it now, or null. */
+async function storedSkill(slug: string) {
+  return (await useTestConfiguration()).client.skills.get(slug);
+}
+
+/** A skill somebody wrote here, as a test's setup: the row the old tests inserted into `skills`. */
+async function writeSkill(
+  slug: string,
+  input: {
+    ownerUserId: string | null;
+    title: string;
+    summary: string;
+    instructions: string;
+    origin: string;
+  },
+) {
+  const configuration = await useTestConfiguration();
+  configuration.skills.apply(
+    await configuration.client.skills.create(
+      slug,
+      { ...input, installedBy: input.ownerUserId, tools: [] },
+      `test:${randomUUID()}`,
+    ),
+  );
+}
+
+/** Remove a skill for good, with every grant of it, in Intelligence and this process's copy. */
+async function removeSkill(slug: string) {
+  const configuration = await useTestConfiguration();
+  await configuration.client.skills.remove(slug, `test:${randomUUID()}`);
+  configuration.skills.forget(slug);
 }
 
 describe("tenant theme validation", () => {
@@ -629,7 +672,6 @@ describe("tenant package agent profile synchronization", () => {
       tenantPackage,
     );
     createdAgentIds.push(agent.id);
-    createdPackageIds.push(deploymentPackage.id);
 
     const bot = await storedBot(agent.id);
 
@@ -691,24 +733,16 @@ describe("tenant package agent profile synchronization", () => {
     });
     createdAgentIds.push(ordinary.id);
     const agent = packageAgent();
-    const deploymentPackage = await synchronizeTenantPackage(
-      database,
-      loadedPackage(agent),
-    );
+    await synchronizeTenantPackage(database, loadedPackage(agent));
     createdAgentIds.push(agent.id);
-    createdPackageIds.push(deploymentPackage.id);
     expect(await botInIntelligence(agent.id)).not.toBeNull();
   });
 
   test("resynchronizes and undeletes an existing package profile", async () => {
     const agent = packageAgent({ avatarSeed: "old-avatar" });
     const tenantPackage = loadedPackage(agent);
-    const deploymentPackage = await synchronizeTenantPackage(
-      database,
-      tenantPackage,
-    );
+    await synchronizeTenantPackage(database, tenantPackage);
     createdAgentIds.push(agent.id);
-    createdPackageIds.push(deploymentPackage.id);
     // Since then somebody made it private, and it was deleted.
     await changeBot(agent.id, { visibility: "private" });
     const deleted = await deleteBot(agent.id);
@@ -804,10 +838,7 @@ describe("tenant package agent profile synchronization", () => {
     ).rejects.toThrow("user-owned profile");
 
     const bot = await storedBot(agent.id);
-    const [unchangedPackage] = await database
-      .select()
-      .from(deploymentPackages)
-      .where(eq(deploymentPackages.id, deploymentPackage.id));
+    const [unchangedPackage] = await packageRecordOf(tenantPackage.tenantId);
     expect(bot).toMatchObject({
       name: "Original Package Agent",
       configuration: { systemPrompt: "Original package prompt." },
@@ -823,6 +854,7 @@ describe("tenant package agent profile synchronization", () => {
     expect(unchangedPackage).toMatchObject({
       sourcePath: deploymentPackage.sourcePath,
       checksum: deploymentPackage.checksum,
+      version: deploymentPackage.version,
     });
   });
 
@@ -857,9 +889,7 @@ describe("tenant package agent profile synchronization", () => {
 
     createdAgentIds.push(packageAAgent.id, packageBAgent.id);
     createdChannelIds.push(channelId);
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, packageA)).id,
-    );
+    await synchronizeTenantPackage(database, packageA);
 
     const snapshot = async () => ({
       channel: (
@@ -947,12 +977,8 @@ describe("tenant package agent profile synchronization", () => {
 
     createdAgentIds.push(firstAgent.id, secondAgent.id);
     createdChannelIds.push(channelId);
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, firstPackage)).id,
-    );
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, secondPackage)).id,
-    );
+    await synchronizeTenantPackage(database, firstPackage);
+    await synchronizeTenantPackage(database, secondPackage);
 
     const [channel] = await database
       .select()
@@ -984,7 +1010,6 @@ describe("tenant package agent profile synchronization", () => {
     const packageA = loadedPackage(packageAAgent);
     const packageARow = await synchronizeTenantPackage(database, packageA);
     createdAgentIds.push(packageAAgent.id);
-    createdPackageIds.push(packageARow.id);
 
     const packageB = loadedPackage({
       ...packageAAgent,
@@ -998,14 +1023,8 @@ describe("tenant package agent profile synchronization", () => {
 
     const snapshot = async () => {
       const bot = await storedBot(packageAAgent.id);
-      const [persistedPackageA] = await database
-        .select()
-        .from(deploymentPackages)
-        .where(eq(deploymentPackages.id, packageARow.id));
-      const [persistedPackageB] = await database
-        .select()
-        .from(deploymentPackages)
-        .where(eq(deploymentPackages.id, packageBRow.id));
+      const [persistedPackageA] = await packageRecordOf(packageARow.tenantId);
+      const [persistedPackageB] = await packageRecordOf(packageBRow.tenantId);
       return {
         bot,
         packageA: persistedPackageA,
@@ -1048,7 +1067,6 @@ describe("tenant package agent profile synchronization", () => {
       database,
       tenantPackage,
     );
-    createdPackageIds.push(deploymentPackage.id);
 
     await synchronizeTenantPackage(database, {
       ...tenantPackage,
@@ -1076,7 +1094,6 @@ describe("tenant package agent profile synchronization", () => {
       tenantPackage,
     );
     createdAgentIds.push(agent.id);
-    createdPackageIds.push(deploymentPackage.id);
     const before = await storedBot(agent.id);
     const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
     await database
@@ -1380,14 +1397,11 @@ describe("seeding the skills a package ships", () => {
   const createdSkillIds: string[] = [];
 
   beforeAll(async () => {
-    await useTestBots();
+    await useTestConfiguration();
   });
 
   afterEach(async () => {
-    for (const id of createdSkillIds.splice(0)) {
-      await database.delete(skillTools).where(eq(skillTools.skillId, id));
-      await database.delete(skillsTable).where(eq(skillsTable.id, id));
-    }
+    for (const slug of createdSkillIds.splice(0)) await removeSkill(slug);
   });
 
   function withSkills(skills: LoadedTenantPackage["skills"]) {
@@ -1411,22 +1425,15 @@ describe("seeding the skills a package ships", () => {
     const shipped = skill();
     const loaded = withSkills([shipped]);
     createdAgentIds.push(loaded.agents[0]?.id as string);
-    const created = await synchronizeTenantPackage(database, loaded);
-    createdPackageIds.push(created.id);
+    await synchronizeTenantPackage(database, loaded);
 
-    const [row] = await database
-      .select()
-      .from(skillsTable)
-      .where(eq(skillsTable.slug, shipped.slug));
+    const row = await storedSkill(shipped.slug);
     expect(row?.origin).toBe("catalogue");
     // Null owner is what makes it everybody's, the same as one an administrator wrote.
     expect(row?.ownerUserId).toBeNull();
     expect(row?.instructions).toBe(shipped.instructions);
 
-    const declared = await database
-      .select()
-      .from(skillTools)
-      .where(eq(skillTools.skillId, shipped.slug));
+    const declared = row?.tools ?? [];
     expect(declared.map((entry) => entry.ref).sort()).toEqual([
       "google-drive/read_file_content",
       "google-drive/search_files",
@@ -1442,13 +1449,9 @@ describe("seeding the skills a package ships", () => {
     const shipped = skill({ tools: ["not-added-yet/do_a_thing"] });
     const loaded = withSkills([shipped]);
     createdAgentIds.push(loaded.agents[0]?.id as string);
-    const created = await synchronizeTenantPackage(database, loaded);
-    createdPackageIds.push(created.id);
+    await synchronizeTenantPackage(database, loaded);
 
-    const declared = await database
-      .select()
-      .from(skillTools)
-      .where(eq(skillTools.skillId, shipped.slug));
+    const declared = (await storedSkill(shipped.slug))?.tools ?? [];
     expect(declared.map((entry) => entry.ref)).toEqual([
       "not-added-yet/do_a_thing",
     ]);
@@ -1458,18 +1461,13 @@ describe("seeding the skills a package ships", () => {
     const shipped = skill();
     const first = withSkills([shipped]);
     createdAgentIds.push(first.agents[0]?.id as string);
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, first)).id,
-    );
+    await synchronizeTenantPackage(database, first);
 
     const narrowed = { ...shipped, tools: ["google-drive/search_files"] };
     const second = { ...first, skills: [narrowed] };
     await synchronizeTenantPackage(database, second);
 
-    const declared = await database
-      .select()
-      .from(skillTools)
-      .where(eq(skillTools.skillId, shipped.slug));
+    const declared = (await storedSkill(shipped.slug))?.tools ?? [];
     // A tool the package stopped declaring stops being declared, rather than lingering.
     expect(declared.map((entry) => entry.ref)).toEqual([
       "google-drive/search_files",
@@ -1489,27 +1487,21 @@ describe("seeding the skills a package ships", () => {
       .values({ id: owner, email: `${owner}@example.test`, name: owner });
 
     const shipped = skill();
-    await database.insert(skillsTable).values({
-      id: `mine-${shipped.slug}`,
+    await writeSkill(shipped.slug, {
       ownerUserId: owner,
-      slug: shipped.slug,
       title: "Mine",
       summary: "Written here.",
       instructions: "Do it my way.",
       origin: "yours",
     });
-    createdSkillIds.push(`mine-${shipped.slug}`);
+    createdSkillIds.push(shipped.slug);
 
     const loaded = withSkills([shipped]);
     createdAgentIds.push(loaded.agents[0]?.id as string);
     // Resolves rather than throwing: that is the assertion.
-    const created = await synchronizeTenantPackage(database, loaded);
-    createdPackageIds.push(created.id);
+    await synchronizeTenantPackage(database, loaded);
 
-    const [row] = await database
-      .select()
-      .from(skillsTable)
-      .where(eq(skillsTable.slug, shipped.slug));
+    const row = await storedSkill(shipped.slug);
     expect(row?.instructions).toBe("Do it my way.");
     expect(row?.origin).toBe("yours");
     expect(row?.ownerUserId).toBe(owner);
@@ -1528,15 +1520,12 @@ describe("pairing a package's coworkers with its skills", () => {
   const createdSkillIds: string[] = [];
 
   beforeAll(async () => {
-    await useTestBots();
+    await useTestConfiguration();
   });
 
   afterEach(async () => {
-    for (const id of createdSkillIds.splice(0)) {
-      await database.delete(pluginGrants).where(eq(pluginGrants.ref, id));
-      await database.delete(skillTools).where(eq(skillTools.skillId, id));
-      await database.delete(skillsTable).where(eq(skillsTable.id, id));
-    }
+    // Removing a skill takes every grant of it with it, in Intelligence.
+    for (const slug of createdSkillIds.splice(0)) await removeSkill(slug);
   });
 
   function packageGiving(slugs: string[]) {
@@ -1554,19 +1543,16 @@ describe("pairing a package's coworkers with its skills", () => {
     return { ...loaded, skills };
   }
 
-  const grantsFor = (agentId: string) =>
-    database
-      .select()
-      .from(pluginGrants)
-      .where(
-        and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.agentId, agentId)),
-      );
+  /** The skills this Bot holds, as Intelligence holds its access now. */
+  const grantsFor = async (agentId: string) =>
+    (await storedAccess(agentId)).grants.filter(
+      (grant) => grant.kind === "skill",
+    );
 
   test("a coworker is granted the skills its package named", async () => {
     const slug = `pkg-${randomUUID().slice(0, 8)}`;
     const loaded = packageGiving([slug]);
-    const created = await synchronizeTenantPackage(database, loaded);
-    createdPackageIds.push(created.id);
+    await synchronizeTenantPackage(database, loaded);
 
     const granted = await grantsFor(loaded.agents[0]?.id as string);
     expect(granted.map((row) => row.ref)).toEqual([slug]);
@@ -1577,9 +1563,7 @@ describe("pairing a package's coworkers with its skills", () => {
   test("a skill the package stopped naming is taken back", async () => {
     const slug = `pkg-${randomUUID().slice(0, 8)}`;
     const loaded = packageGiving([slug]);
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, loaded)).id,
-    );
+    await synchronizeTenantPackage(database, loaded);
 
     const agentId = loaded.agents[0]?.id as string;
     expect(await grantsFor(agentId)).toHaveLength(1);
@@ -1589,9 +1573,7 @@ describe("pairing a package's coworkers with its skills", () => {
       ...loaded,
       agents: [{ ...(loaded.agents[0] as never), skills: [] }],
     } as typeof loaded;
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, withoutIt)).id,
-    );
+    await synchronizeTenantPackage(database, withoutIt);
 
     expect(await grantsFor(agentId)).toHaveLength(0);
   });
@@ -1604,25 +1586,26 @@ describe("pairing a package's coworkers with its skills", () => {
     const packageB = packageGiving([slugB]);
     createdSkillIds.push(userGrant);
 
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, packageA)).id,
-    );
+    await synchronizeTenantPackage(database, packageA);
     const [packageAAgent] = packageA.agents;
     if (!packageAAgent)
       throw new Error("Expected package A to declare an agent.");
     const agentA = packageAAgent.id;
     expect((await grantsFor(agentA)).map((row) => row.ref)).toEqual([slugA]);
 
-    await database.insert(pluginGrants).values({
-      kind: "skill",
-      ref: userGrant,
-      agentId: agentA,
-      grantedBy: "an-administrator",
-    });
+    await changeAccess([
+      {
+        op: "grant",
+        botId: agentA,
+        kind: "skill",
+        ref: userGrant,
+        grantedBy: "an-administrator",
+        grantedAs: "admin",
+        ifGranted: "replace",
+      },
+    ]);
 
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, packageB)).id,
-    );
+    await synchronizeTenantPackage(database, packageB);
     const [packageBAgent] = packageB.agents;
     if (!packageBAgent)
       throw new Error("Expected package B to declare an agent.");
@@ -1637,9 +1620,7 @@ describe("pairing a package's coworkers with its skills", () => {
       ...packageA,
       agents: [{ ...packageAAgent, skills: [] }],
     };
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, packageAWithoutSkill)).id,
-    );
+    await synchronizeTenantPackage(database, packageAWithoutSkill);
 
     expect((await grantsFor(agentA)).map((row) => row.ref)).toEqual([
       userGrant,
@@ -1650,26 +1631,28 @@ describe("pairing a package's coworkers with its skills", () => {
   test("a grant an administrator made by hand survives a redeploy", async () => {
     const slug = `pkg-${randomUUID().slice(0, 8)}`;
     const loaded = packageGiving([slug]);
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, loaded)).id,
-    );
+    await synchronizeTenantPackage(database, loaded);
 
     const agentId = loaded.agents[0]?.id as string;
-    // Somebody decides this Bot should keep it, through the Skills page.
-    await database
-      .update(pluginGrants)
-      .set({ grantedBy: "an-administrator" })
-      .where(
-        and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.agentId, agentId)),
-      );
+    // Somebody decides this Bot should keep it, through the Skills page: an administrator's grant of
+    // the same skill makes it theirs.
+    await changeAccess([
+      {
+        op: "grant",
+        botId: agentId,
+        kind: "skill",
+        ref: slug,
+        grantedBy: "an-administrator",
+        grantedAs: "admin",
+        ifGranted: "replace",
+      },
+    ]);
 
     const withoutIt = {
       ...loaded,
       agents: [{ ...(loaded.agents[0] as never), skills: [] }],
     } as typeof loaded;
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, withoutIt)).id,
-    );
+    await synchronizeTenantPackage(database, withoutIt);
 
     /*
      * Kept. The package retracts what it gave, not what somebody decided: a redeploy quietly undoing
@@ -1688,10 +1671,8 @@ describe("pairing a package's coworkers with its skills", () => {
      */
     const slug = `pkg-${randomUUID().slice(0, 8)}`;
     const owner = await createUser();
-    await database.insert(skillsTable).values({
-      id: slug,
+    await writeSkill(slug, {
       ownerUserId: owner,
-      slug,
       title: "Mine",
       summary: "Mine.",
       instructions: "Do it my way.",
@@ -1699,9 +1680,7 @@ describe("pairing a package's coworkers with its skills", () => {
     });
 
     const loaded = packageGiving([slug]);
-    createdPackageIds.push(
-      (await synchronizeTenantPackage(database, loaded)).id,
-    );
+    await synchronizeTenantPackage(database, loaded);
 
     expect(await grantsFor(loaded.agents[0]?.id as string)).toHaveLength(0);
   });
@@ -1749,7 +1728,7 @@ test("blank package endpoint disables only its owned agent and restores it when 
     const rename = (id: string) => `${id}-${suffix}`;
     const isolate = (loaded: LoadedTenantPackage): LoadedTenantPackage => ({
       ...loaded,
-      tenantId: suffix,
+      tenantId: trackTestPackage(suffix),
       skills: [],
       channels: [],
       agents: loaded.agents.map((agent) => ({
@@ -1786,15 +1765,10 @@ test("blank package endpoint disables only its owned agent and restores it when 
       (await runtime(actor)).find((agent) => agent.id === target)?.type,
     ).toBe("remote_ag_ui");
 
-    const [otherPackage] = await database
-      .insert(deploymentPackages)
-      .values({
-        tenantId: `other-${suffix}`,
-        sourcePath: "/synthetic/other",
-        checksum: suffix,
-      })
-      .returning();
-    if (!otherPackage) throw new Error("missing synthetic package");
+    const otherPackage = await recordTestPackage(`other-${suffix}`, {
+      source: "/synthetic/other",
+      checksum: suffix,
+    });
     otherPackageId = otherPackage.id;
     const controls = [
       { id: `user-${suffix}`, packageId: null, ownerUserId: actor.id },
@@ -1856,14 +1830,6 @@ test("blank package endpoint disables only its owned agent and restores it when 
     else process.env.PICKED_HARNESS_URL = originalPicked;
     await database.delete(channels).where(eq(channels.id, historyId));
     await removeBots(ownedIds);
-    if (packageId)
-      await database
-        .delete(deploymentPackages)
-        .where(eq(deploymentPackages.id, packageId));
-    if (otherPackageId)
-      await database
-        .delete(deploymentPackages)
-        .where(eq(deploymentPackages.id, otherPackageId));
     await database.delete(users).where(eq(users.id, actor.id));
   }
 });

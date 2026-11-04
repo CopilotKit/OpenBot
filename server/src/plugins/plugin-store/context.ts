@@ -2,6 +2,7 @@ import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
 import { DEV_ACTOR } from "../../auth/dev-actor";
+import { botConfiguration } from "../../configuration/directory";
 import type { Database } from "../../db/client";
 import {
   type EntraRefusal,
@@ -21,8 +22,6 @@ import {
   mcpTools,
   mcpUserCredentials,
   pendingAuthorizations,
-  pluginGrants,
-  skillTools,
 } from "../../db/schema";
 import {
   accessFor,
@@ -135,15 +134,16 @@ export function createStoreContext(options: PluginStoreOptions) {
     return next;
   }
 
+  /** Which Bots hold each of these refs, from every Bot's access as this instance holds it. */
   async function grantsFor(kind: PluginKind, refs: string[]) {
     if (refs.length === 0) return new Map<string, string[]>();
-    const rows = await database
-      .select()
-      .from(pluginGrants)
-      .where(and(eq(pluginGrants.kind, kind), inArray(pluginGrants.ref, refs)));
+    const wanted = new Set(refs);
     const byRef = new Map<string, string[]>();
-    for (const row of rows) {
-      byRef.set(row.ref, [...(byRef.get(row.ref) ?? []), row.agentId]);
+    for (const access of botConfiguration().access.all()) {
+      for (const grant of access.grants) {
+        if (grant.kind !== kind || !wanted.has(grant.ref)) continue;
+        byRef.set(grant.ref, [...(byRef.get(grant.ref) ?? []), access.botId]);
+      }
     }
     return byRef;
   }
@@ -161,33 +161,29 @@ export function createStoreContext(options: PluginStoreOptions) {
    */
   async function mcpGrantsForServers(serverIds: string[]) {
     if (serverIds.length === 0) return new Map<string, string[]>();
-    const rows = await database
-      .select({ ref: pluginGrants.ref, agentId: pluginGrants.agentId })
-      .from(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.kind, "mcp"),
-          inArray(sql`split_part(${pluginGrants.ref}, '/', 1)`, serverIds),
-        ),
-      );
+    const servers = new Set(serverIds);
     const byRef = new Map<string, string[]>();
-    for (const row of rows) {
-      byRef.set(row.ref, [...(byRef.get(row.ref) ?? []), row.agentId]);
+    for (const access of botConfiguration().access.all()) {
+      for (const grant of access.grants) {
+        if (grant.kind !== "mcp") continue;
+        if (!servers.has(grant.ref.split("/")[0] ?? "")) continue;
+        byRef.set(grant.ref, [...(byRef.get(grant.ref) ?? []), access.botId]);
+      }
     }
     return byRef;
   }
 
-  /** The refs each of these skills declares, keyed by skill id. Skills with none are absent. */
+  /** The refs each of these skills declares, keyed by slug. Skills with none are absent. */
   async function toolsDeclaredBy(skillIds: string[]) {
-    if (skillIds.length === 0) return new Map<string, string[]>();
-    const rows = await database
-      .select()
-      .from(skillTools)
-      .where(inArray(skillTools.skillId, skillIds))
-      .orderBy(asc(skillTools.ref));
     const bySkill = new Map<string, string[]>();
-    for (const row of rows) {
-      bySkill.set(row.skillId, [...(bySkill.get(row.skillId) ?? []), row.ref]);
+    for (const slug of skillIds) {
+      const tools = botConfiguration().skills.get(slug)?.tools ?? [];
+      if (tools.length === 0) continue;
+      // In Intelligence's order, which is by ref.
+      bySkill.set(
+        slug,
+        tools.map((tool) => tool.ref),
+      );
     }
     return bySkill;
   }

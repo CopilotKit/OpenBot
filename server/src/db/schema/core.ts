@@ -194,6 +194,11 @@ export const userRoles = pgTable(
  * prompt seam then has to recognise and skip anyway — so there is one representation of "none", and
  * it is having no row.
  */
+/**
+ * A person's standing instructions, as OpenBot kept them before they moved into the person's
+ * preferences in Intelligence. Read once, by the upgrade copy, written by nothing, dropped a release
+ * later.
+ */
 export const userInstructions = pgTable("user_instructions", {
   userId: text("user_id")
     .primaryKey()
@@ -258,6 +263,13 @@ export const revokedAccess = pgTable("revoked_access", {
   revokedBy: text("revoked_by").notNull(),
 });
 
+/**
+ * The tenant package this deployment applied, as OpenBot recorded it before the record moved into
+ * Intelligence (its agent packages, beside the Bots each package manages).
+ *
+ * Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by nothing. Kept for one
+ * release so a deployment that upgrades still has the row to copy, then dropped.
+ */
 export const deploymentPackages = pgTable("deployment_packages", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: text("tenant_id").notNull().unique(),
@@ -307,9 +319,12 @@ export const channels = pgTable(
      * from the identity provider before this one can decide anything.
      */
     allowedGroups: text("allowed_groups").array().notNull().default([]),
-    packageId: uuid("package_id").references(() => deploymentPackages.id, {
-      onDelete: "set null",
-    }),
+    /**
+     * The tenant package that declared this channel: the package's id in Intelligence, which records
+     * every package beside the Bots it manages. No foreign key: the local `deployment_packages` table
+     * is written by nothing now.
+     */
+    packageId: uuid("package_id"),
     override: jsonb("override"),
     /** A few words about the conversation. Channel grain like `last_message`; null is ordinary. */
     summary: text("summary"),

@@ -19,9 +19,9 @@
  */
 import { and, count, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { bots as directory } from "../agents/bot-registry/directory";
+import { lifecyclePairs, notAmongPairs } from "../agents/lifecycle";
 import type { Database } from "../db/client";
 import {
-  botLifecycle,
   proactivePings,
   proactiveRuns,
   proactiveSettings,
@@ -153,7 +153,11 @@ export async function proactiveMetrics(
       and(
         eq(proactiveSettings.enabled, true),
         sql`coalesce(${users.preferences}->>'proactive', 'on') <> 'off'`,
-        sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
+        notAmongPairs(
+          proactiveSettings.ownerUserId,
+          proactiveSettings.agentId,
+          lifecyclePairs((entry) => entry.pausedAt !== null),
+        ),
       ),
     );
   for (const row of on) {

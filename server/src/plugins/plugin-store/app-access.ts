@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm";
 import { type AuditEventInput, recordAuditEvent } from "../../audit";
 import { bots } from "../../agents/bot-registry/directory";
+import { botConfiguration } from "../../configuration/directory";
 import {
   appAccessRequests,
   brokeredConnections,
@@ -19,10 +20,6 @@ import {
   mcpServers,
   mcpTools,
   mcpUserCredentials,
-  pluginGrants,
-  teamBotConsentDefaults,
-  teamBotConsents,
-  teamBotPublications,
   users,
 } from "../../db/schema";
 import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
@@ -432,12 +429,9 @@ export function appAccessMethods(context: StoreContext) {
   async function grantsByServer(
     agentId: string,
   ): Promise<Map<string, { byAdmin: boolean }>> {
-    const grants = await database
-      .select({ ref: pluginGrants.ref, grantedAs: pluginGrants.grantedAs })
-      .from(pluginGrants)
-      .where(
-        and(eq(pluginGrants.kind, "mcp"), eq(pluginGrants.agentId, agentId)),
-      );
+    const grants = botConfiguration()
+      .accessOf(agentId)
+      .grants.filter((grant) => grant.kind === "mcp");
     const servers = new Map<string, { byAdmin: boolean }>();
     for (const grant of grants) {
       const serverId = grant.ref.split("/")[0] ?? "";
@@ -595,11 +589,7 @@ export function appAccessMethods(context: StoreContext) {
     agentId: string,
     userId: string,
   ): Promise<string | null> {
-    const [published] = await database
-      .select({ agentId: teamBotPublications.agentId })
-      .from(teamBotPublications)
-      .where(eq(teamBotPublications.agentId, agentId))
-      .limit(1);
+    const published = botConfiguration().access.get(agentId)?.publication;
     const bot = published ? await bots().find(agentId) : null;
     const owner = bot && bot.deletedAt === null ? bot.ownerUserId : null;
     return owner && owner !== userId ? owner : null;
@@ -613,22 +603,13 @@ export function appAccessMethods(context: StoreContext) {
     userId: string,
     agentId: string,
   ): Promise<Set<string>> {
-    const [forBot, forEvery] = await Promise.all([
-      database
-        .select({ serverId: teamBotConsents.serverId })
-        .from(teamBotConsents)
-        .where(
-          and(
-            eq(teamBotConsents.userId, userId),
-            eq(teamBotConsents.agentId, agentId),
-          ),
-        ),
-      database
-        .select({ serverId: teamBotConsentDefaults.serverId })
-        .from(teamBotConsentDefaults)
-        .where(eq(teamBotConsentDefaults.userId, userId)),
+    const preferences = botConfiguration().preferencesOf(userId);
+    return new Set([
+      ...preferences.consents
+        .filter((consent) => consent.botId === agentId)
+        .map((consent) => consent.serverId),
+      ...preferences.consentDefaults.map((consent) => consent.serverId),
     ]);
-    return new Set([...forBot, ...forEvery].map((row) => row.serverId));
   }
 
   /**

@@ -48,7 +48,7 @@ import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
-import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testDatabaseUrl } from "./support/database";
 
 /**
  * Tasks through the paths a person's Start takes: the real stores, the real work queue, the real
@@ -57,7 +57,13 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * a connector fake at the tool boundary, behind the same approval gate a granted app's call meets.
  */
 
-const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+/*
+ * Four connections, not the suite's usual two. This file runs the work queue, the task runner and the
+ * approval tick on its own pool beside the routes it calls, and with two connections the "what needs
+ * the person" read starved waiting for one whenever its reads were scheduled a little differently:
+ * the previous release hangs the same way when its pause read is answered without the database.
+ */
+const database = createDatabase(testDatabaseUrl(), { max: 4 });
 const profileStore = createAgentProfileStore(
   database,
   new URL("https://managed.example.test/ag-ui"),
@@ -1141,7 +1147,7 @@ describe("what needs the person", () => {
       "/api/bots",
       createBotLifecycleRoutes(
         {
-          lifecycle: createBotLifecycleStore(database),
+          lifecycle: createBotLifecycleStore(),
           reset: {} as never,
           activity: createActivityStore(database),
           wakeUps: {} as never,

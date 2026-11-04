@@ -1,8 +1,18 @@
 import { isDeepStrictEqual } from "node:util";
-import { asc, eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
+import {
+  ConfigurationConflictError,
+  configurationKey,
+} from "../configuration/client";
+import { botConfiguration } from "../configuration/directory";
+import type { ComponentEntry, ComponentSource } from "../configuration/types";
 import type { Database } from "../db/client";
-import { components, sandboxedComponents } from "../db/schema";
+import {
+  byText,
+  changeComponent,
+  componentState,
+  findComponent,
+} from "./catalogue-records";
 
 /**
  * Components authored in a browser rather than compiled into the build.
@@ -82,8 +92,8 @@ export class SandboxedPublicationRefusedError extends Error {
   }
 }
 
-const iso = (value: Date | string | null): string | null =>
-  value === null ? null : value instanceof Date ? value.toISOString() : value;
+const iso = (value: Date | null): string | null =>
+  value === null ? null : value.toISOString();
 
 function sameJson(left: unknown, right: unknown): boolean {
   return isDeepStrictEqual(left, right);
@@ -105,63 +115,61 @@ export function sandboxedNameFor(slug: string): string {
 }
 
 export function createSandboxedStore(
-  database: Database,
+  _database: Database,
   auditStore: AuditStore,
 ) {
+  /** The component, if it has playground source. */
   async function requireRow(name: string) {
-    const [row] = await database
-      .select()
-      .from(sandboxedComponents)
-      .where(eq(sandboxedComponents.name, name))
-      .limit(1);
-    if (!row) throw new SandboxedNotFoundError(name);
-    return row;
+    const entry = await findComponent(name);
+    if (!entry?.source) throw new SandboxedNotFoundError(name);
+    return entry;
   }
 
-  const toRecord = (
-    row: typeof sandboxedComponents.$inferSelect,
-  ): SandboxedRecord => ({
-    name: row.name,
-    title: row.title,
-    draftDescription: row.draftDescription,
-    draftHtml: row.draftHtml,
-    draftCss: row.draftCss,
-    draftJsFunctions: row.draftJsFunctions,
-    draftArgumentSchema: row.draftArgumentSchema as Record<string, unknown>,
-    publishedHtml: row.publishedHtml,
-    publishedCss: row.publishedCss,
-    publishedJsFunctions: row.publishedJsFunctions,
-    publishedArgumentSchema: row.publishedArgumentSchema as Record<
-      string,
-      unknown
-    > | null,
-    sampleArguments: row.sampleArguments as Record<string, unknown>,
-    revision: row.revision,
-    published: row.published,
-    publishedAt: iso(row.publishedAt),
-    authoredBy: row.authoredBy,
-    hasUnpublishedChanges:
-      row.published &&
-      (row.draftHtml !== row.publishedHtml ||
-        row.draftCss !== row.publishedCss ||
-        row.draftJsFunctions !== row.publishedJsFunctions),
-  });
+  const toRecord = (entry: ComponentEntry): SandboxedRecord => {
+    const source = entry.source as ComponentSource;
+    const draft = source.draft;
+    const published = source.published;
+    return {
+      name: entry.name,
+      title: entry.title,
+      draftDescription: draft.description,
+      draftHtml: draft.html,
+      draftCss: draft.css,
+      draftJsFunctions: draft.jsFunctions,
+      draftArgumentSchema: draft.argumentSchema,
+      publishedHtml: published?.html ?? null,
+      publishedCss: published?.css ?? null,
+      publishedJsFunctions: published?.jsFunctions ?? null,
+      publishedArgumentSchema: published?.argumentSchema ?? null,
+      sampleArguments: source.sampleArguments,
+      revision: source.revision,
+      published: source.isPublished,
+      publishedAt: iso(source.publishedAt),
+      authoredBy: source.authoredBy,
+      hasUnpublishedChanges:
+        source.isPublished &&
+        (draft.html !== (published?.html ?? null) ||
+          draft.css !== (published?.css ?? null) ||
+          draft.jsFunctions !== (published?.jsFunctions ?? null)),
+    };
+  };
 
   return {
     async list(): Promise<SandboxedRecord[]> {
-      const rows = await database
-        .select()
-        .from(sandboxedComponents)
-        .orderBy(asc(sandboxedComponents.title));
-      return rows.map(toRecord);
+      return botConfiguration()
+        .components.all()
+        .filter((entry) => entry.source !== null)
+        .sort((left, right) => byText(left.title, right.title))
+        .map(toRecord);
     },
 
     /**
      * Save a draft.
      *
-     * The `components` row is written at the same time, unpublished, so the new component appears in
-     * the grid straight away and no Bot can draw it yet. Publishing is the decision that hands it to
-     * every Bot, so it happens after somebody has looked at it rather than the moment it is saved.
+     * The component's governance is written in the same record, unpublished, so the new component
+     * appears in the grid straight away and no Bot can draw it yet. Publishing is the decision that
+     * hands it to every Bot, so it happens after somebody has looked at it rather than the moment it
+     * is saved.
      */
     async save(input: {
       slug: string;
@@ -180,57 +188,73 @@ export function createSandboxedStore(
         );
       }
       const name = sandboxedNameFor(input.slug);
+      const draft = {
+        description: input.description,
+        html: input.html,
+        css: input.css,
+        jsFunctions: input.jsFunctions,
+        argumentSchema: input.argumentSchema,
+      };
+      const configuration = botConfiguration();
 
-      await database
-        .insert(sandboxedComponents)
-        .values({
-          name,
+      for (let attempt = 1; ; attempt++) {
+        // `published` is left alone on an existing one: an administrator publishing it is their
+        // decision, and a save must not quietly undo or advance it.
+        const saved = await changeComponent(name, (entry) => ({
+          ...componentState(entry),
           title: input.title,
           draftDescription: input.description,
-          draftHtml: input.html,
-          draftCss: input.css,
-          draftJsFunctions: input.jsFunctions,
-          draftArgumentSchema: input.argumentSchema,
-          sampleArguments: input.sampleArguments,
-          authoredBy: input.by,
-        })
-        .onConflictDoUpdate({
-          target: sandboxedComponents.name,
-          set: {
-            title: input.title,
-            draftDescription: input.description,
-            draftHtml: input.html,
-            draftCss: input.css,
-            draftJsFunctions: input.jsFunctions,
-            draftArgumentSchema: input.argumentSchema,
-            sampleArguments: input.sampleArguments,
-            authoredBy: input.by,
-            updatedAt: new Date(),
-          },
-        });
-
-      // The governance row. `published` is left alone on conflict: an administrator publishing a
-      // description is their decision, and a save must not quietly undo or advance it.
-      await database
-        .insert(components)
-        .values({
-          name,
-          title: input.title,
-          kind: "sandboxed",
-          draftDescription: input.description,
-          publishedDescription: null,
-          published: false,
           updatedBy: input.by,
-        })
-        .onConflictDoUpdate({
-          target: components.name,
-          set: {
-            title: input.title,
-            draftDescription: input.description,
-            updatedBy: input.by,
+          source: {
+            draft,
+            published: entry.source?.published ?? null,
+            sampleArguments: input.sampleArguments,
+            revision: entry.source?.revision ?? 0,
+            isPublished: entry.source?.isPublished ?? false,
+            publishedAt: entry.source?.publishedAt ?? null,
+            authoredBy: input.by,
+            createdAt: entry.source?.createdAt ?? new Date(),
             updatedAt: new Date(),
           },
-        });
+        }));
+        if (saved) break;
+        try {
+          configuration.components.apply(
+            await configuration.client.components.create(
+              name,
+              {
+                title: input.title,
+                kind: "sandboxed",
+                draftDescription: input.description,
+                publishedDescription: null,
+                published: false,
+                publishedAt: null,
+                updatedBy: input.by,
+                functions: [],
+                withheldFrom: [],
+                source: {
+                  draft,
+                  published: null,
+                  sampleArguments: input.sampleArguments,
+                  revision: 0,
+                  isPublished: false,
+                  publishedAt: null,
+                  authoredBy: input.by,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                },
+              },
+              configurationKey("sandboxed-save"),
+            ),
+          );
+          break;
+        } catch (error) {
+          // Another save made it first: this one becomes an edit of it.
+          if (!(error instanceof ConfigurationConflictError) || attempt >= 3)
+            throw error;
+          await configuration.components.refresh(name);
+        }
+      }
 
       await recordAuditEvent(auditStore, {
         eventType: "component.draft_saved",
@@ -247,98 +271,77 @@ export function createSandboxedStore(
      *
      * One button because it is one decision. Publishing the wording without the markup would offer
      * the model a component that draws the previous version, and publishing the markup without the
-     * wording would leave a component no model is told about. Either half on its own is a state
-     * nobody wants and both would be reachable if this were two endpoints.
+     * wording would leave a component no model is told about. Both halves are one record in
+     * Intelligence, written together or not at all.
      */
     async publish(name: string, by: string): Promise<SandboxedRecord> {
-      const outcome = await database.transaction(async (transaction) => {
-        const [row] = await transaction
-          .select()
-          .from(sandboxedComponents)
-          .where(eq(sandboxedComponents.name, name))
-          .limit(1)
-          .for("update");
-        if (!row) {
-          throw new SandboxedPublicationRefusedError(
+      let changed = false;
+      const refusal = (entry: ComponentEntry) => {
+        if (!entry.source) {
+          return new SandboxedPublicationRefusedError(
             `${name} has no stored playground source to publish.`,
           );
         }
-
-        const [governance] = await transaction
-          .select()
-          .from(components)
-          .where(eq(components.name, name))
-          .limit(1)
-          .for("update");
-        if (governance?.kind !== "sandboxed") {
-          throw new SandboxedPublicationRefusedError(
+        if (entry.kind !== "sandboxed") {
+          return new SandboxedPublicationRefusedError(
             `${name} has no playground governance row to publish.`,
           );
         }
-
-        if (!row.draftDescription.trim()) {
-          throw new SandboxedPublicationRefusedError(
+        if (!entry.source.draft.description.trim()) {
+          return new SandboxedPublicationRefusedError(
             `${name} needs a description before it can be published.`,
           );
         }
-        if (!row.draftHtml.trim()) {
-          throw new SandboxedPublicationRefusedError(
+        if (!entry.source.draft.html.trim()) {
+          return new SandboxedPublicationRefusedError(
             `${name} needs rendered HTML before it can be published.`,
           );
         }
-
+        return null;
+      };
+      const written = await changeComponent(name, (entry) => {
+        changed = false;
+        const refused = refusal(entry);
+        if (refused) throw refused;
+        const source = entry.source as ComponentSource;
+        const published = source.published;
+        const draft = source.draft;
         const unchanged =
-          row.published &&
-          governance.published &&
-          row.publishedDescription === row.draftDescription &&
-          row.publishedHtml === row.draftHtml &&
-          row.publishedCss === row.draftCss &&
-          row.publishedJsFunctions === row.draftJsFunctions &&
-          sameJson(row.publishedArgumentSchema, row.draftArgumentSchema);
-        if (unchanged) return { record: toRecord(row), changed: false };
-
+          source.isPublished &&
+          entry.published &&
+          published !== null &&
+          published.description === draft.description &&
+          published.html === draft.html &&
+          published.css === draft.css &&
+          published.jsFunctions === draft.jsFunctions &&
+          sameJson(published.argumentSchema, draft.argumentSchema);
+        if (unchanged) return null;
+        changed = true;
         const now = new Date();
-        const revision = row.revision + 1;
-        await transaction
-          .update(sandboxedComponents)
-          .set({
-            publishedDescription: row.draftDescription,
-            publishedHtml: row.draftHtml,
-            publishedCss: row.draftCss,
-            publishedJsFunctions: row.draftJsFunctions,
-            publishedArgumentSchema: row.draftArgumentSchema,
-            published: true,
+        return {
+          ...componentState(entry),
+          publishedDescription: draft.description,
+          published: true,
+          publishedAt: now,
+          updatedBy: by,
+          source: {
+            ...source,
+            published: { ...draft },
+            isPublished: true,
             publishedAt: now,
-            revision,
+            revision: source.revision + 1,
             updatedAt: now,
-          })
-          .where(eq(sandboxedComponents.name, name));
-
-        await transaction
-          .update(components)
-          .set({
-            publishedDescription: row.draftDescription,
-            published: true,
-            publishedAt: now,
-            updatedBy: by,
-            updatedAt: now,
-          })
-          .where(eq(components.name, name));
-
-        const [updated] = await transaction
-          .select()
-          .from(sandboxedComponents)
-          .where(eq(sandboxedComponents.name, name))
-          .limit(1);
-        if (!updated) {
-          throw new SandboxedPublicationRefusedError(
-            `${name} disappeared while it was being published.`,
-          );
-        }
-        return { record: toRecord(updated), changed: true };
+          },
+        };
       });
+      if (!written) {
+        throw new SandboxedPublicationRefusedError(
+          `${name} has no stored playground source to publish.`,
+        );
+      }
+      const record = toRecord(written);
 
-      if (outcome.changed) {
+      if (changed) {
         await recordAuditEvent(auditStore, {
           eventType: "component.published",
           targetType: "component",
@@ -346,53 +349,37 @@ export function createSandboxedStore(
           payload: {
             actor: by,
             kind: "sandboxed",
-            revision: outcome.record.revision,
+            revision: record.revision,
           },
         });
       }
-      return outcome.record;
+      return record;
     },
 
     /**
      * Withdraw a playground component from every Bot.
      *
-     * The source and the governance row are two halves of one publication, so they are withdrawn
-     * together. The published columns stay put: re-publishing the same draft is a decision to make
+     * The source and the governance are two halves of one publication, so they are withdrawn
+     * together. The published source stays put: re-publishing the same draft is a decision to make
      * it drawable again, not a request to reconstruct source that was deliberately retained.
      */
     async unpublish(name: string, by: string): Promise<void> {
-      const changed = await database.transaction(async (transaction) => {
-        const [governance] = await transaction
-          .select()
-          .from(components)
-          .where(eq(components.name, name))
-          .limit(1)
-          .for("update");
-        if (governance?.kind !== "sandboxed") {
-          throw new SandboxedNotFoundError(name);
-        }
-
-        const [row] = await transaction
-          .select()
-          .from(sandboxedComponents)
-          .where(eq(sandboxedComponents.name, name))
-          .limit(1)
-          .for("update");
-        if (!governance.published && !row?.published) return false;
-
-        const now = new Date();
-        if (row) {
-          await transaction
-            .update(sandboxedComponents)
-            .set({ published: false, updatedAt: now })
-            .where(eq(sandboxedComponents.name, name));
-        }
-        await transaction
-          .update(components)
-          .set({ published: false, updatedBy: by, updatedAt: now })
-          .where(eq(components.name, name));
-        return true;
+      let changed = false;
+      const written = await changeComponent(name, (entry) => {
+        changed = false;
+        if (entry.kind !== "sandboxed") throw new SandboxedNotFoundError(name);
+        if (!entry.published && !entry.source?.isPublished) return null;
+        changed = true;
+        return {
+          ...componentState(entry),
+          published: false,
+          updatedBy: by,
+          source: entry.source
+            ? { ...entry.source, isPublished: false, updatedAt: new Date() }
+            : null,
+        };
       });
+      if (!written) throw new SandboxedNotFoundError(name);
 
       if (!changed) return;
       await recordAuditEvent(auditStore, {
@@ -407,41 +394,32 @@ export function createSandboxedStore(
       /*
        * Refuse a name this surface does not own.
        *
-       * `components` is shared with the compiled catalogue and the delete below is by name, with
-       * nothing checking which kind of component the name belonged to. So a compiled component's
-       * governance row could be deleted through the playground's endpoint, and the foreign keys took
-       * its per-Bot withholdings and its function grants with it.
+       * The catalogue is shared with the compiled components and the delete below is by name. A
+       * compiled component's record removed through the playground's endpoint would take its per-Bot
+       * withholdings and its function grants with it, and the withholdings are the half that fails
+       * open: a published component is available to every Bot unless a withholding says otherwise,
+       * and the next catalogue announcement registers the component again as published. A deliberate
+       * "not this Bot" would come back as "every Bot", under an audit row saying `kind:
+       * "sandboxed"`, which is the one thing it was not.
        *
-       * The withholdings are the half that fails open. A published component is available to every
-       * Bot unless a `component_exclusions` row says otherwise, so losing that row does not hide the
-       * component, it releases it — and the next catalogue announcement rewrites the component with
-       * `published: true`, because that is how one the build ships arrives. A deliberate "not this
-       * Bot" comes back as "every Bot", under an audit row saying `kind: "sandboxed"`, which is the
-       * one thing it was not.
-       *
-       * Asked of the governance row's `kind` rather than of `sandboxed_components`, because ownership
-       * is the actual question and the two answers differ in one case worth keeping: these deletes
-       * are not in a transaction, so a failure between them leaves a governance row with no source.
-       * That orphan is the "catalogue disagrees with the build" state named below, it is this
-       * surface's to clean up, and requiring the source row would have made it undeletable here.
+       * Asked of the governance `kind` rather than of whether there is source, because ownership is
+       * the actual question: a playground component whose source went missing is still this
+       * surface's to clean up.
        */
-      const [governance] = await database
-        .select({ kind: components.kind })
-        .from(components)
-        .where(eq(components.name, name))
-        .limit(1);
-      // "sandboxed" is the kind `save` writes above. A name with no row at all is refused for the
+      const entry = await findComponent(name);
+      // "sandboxed" is the kind `save` writes above. A name with nothing at all is refused for the
       // same reason `publish` refuses one: this surface has nothing by that name to act on.
-      if (governance?.kind !== "sandboxed") {
+      if (entry?.kind !== "sandboxed") {
         throw new SandboxedNotFoundError(name);
       }
 
-      // Delete both rows; a governance row pointing at a component with no source is the visible
-      // "catalogue disagrees with the build" state.
-      await database
-        .delete(sandboxedComponents)
-        .where(eq(sandboxedComponents.name, name));
-      await database.delete(components).where(eq(components.name, name));
+      // The governance, the source, the withholdings and the function grants, in one delete.
+      const configuration = botConfiguration();
+      await configuration.client.components.remove(
+        name,
+        configurationKey("sandboxed-remove"),
+      );
+      configuration.components.forget(name);
 
       await recordAuditEvent(auditStore, {
         eventType: "component.unpublished",
@@ -456,25 +434,24 @@ export function createSandboxedStore(
      *
      * Published only, and null is not a fallback. A component that has never been published has no
      * published source, so it is absent from this list and the app has nothing to draw. A draft
-     * quietly rendering in production is the one outcome the draft column exists to prevent.
+     * quietly rendering in production is the one outcome the draft exists to prevent.
      */
     async published(): Promise<PublishedSandboxed[]> {
-      const rows = await database
-        .select()
-        .from(sandboxedComponents)
-        .where(eq(sandboxedComponents.published, true));
-      return rows
-        .filter((row) => row.publishedHtml !== null)
-        .map((row) => ({
-          name: row.name,
-          html: row.publishedHtml ?? "",
-          css: row.publishedCss ?? "",
-          jsFunctions: row.publishedJsFunctions ?? "",
-          argumentSchema: (row.publishedArgumentSchema ?? {}) as Record<
-            string,
-            unknown
-          >,
-        }));
+      return botConfiguration()
+        .components.all()
+        .flatMap((entry) => {
+          const source = entry.source;
+          if (!source?.isPublished || !source.published) return [];
+          return [
+            {
+              name: entry.name,
+              html: source.published.html,
+              css: source.published.css,
+              jsFunctions: source.published.jsFunctions,
+              argumentSchema: source.published.argumentSchema,
+            },
+          ];
+        });
     },
   };
 }
