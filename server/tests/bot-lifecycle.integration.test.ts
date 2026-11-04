@@ -32,16 +32,16 @@ import {
   storedPreferences,
   useTestConfiguration,
 } from "./support/bots";
+import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
 import {
   deleteConversation,
   purgeConversations,
   seedConversation,
   storedConversation,
 } from "./support/conversations";
-import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
-import { useTestPolicy } from "./support/policy";
 import { removeTestMemory, testMemory } from "./support/memory";
+import { useTestPolicy } from "./support/policy";
 import {
   seedResponsibility,
   seedRoutine,
@@ -719,6 +719,7 @@ describe("reset", () => {
       .values({ id: person, email: `${person}@example.test` });
     await memory.intelligence.createSource({
       userId: person,
+      agentId: bot,
       connectorRef: "mail/search",
       title: "Mail",
       enabled: false,
