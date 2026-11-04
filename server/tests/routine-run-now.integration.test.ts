@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createDatabase } from "../src/db/client";
-import { routines, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import {
   createRoutineStore,
   RoutineNotFoundError,
@@ -11,6 +11,7 @@ import {
 } from "../src/routines/store";
 import { removeBots, seedBot } from "./support/bots";
 import { purgeConversations, seedConversation } from "./support/conversations";
+import { purgeRoutinesOwnedBy } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -30,7 +31,7 @@ afterEach(async () => {
   // cleared first so a failure part-way through cleanup leaves nothing pointing at rows this file
   // is about to delete.
   for (const userId of createdUserIds) {
-    await database.delete(routines).where(eq(routines.ownerUserId, userId));
+    await purgeRoutinesOwnedBy(userId);
   }
   await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));

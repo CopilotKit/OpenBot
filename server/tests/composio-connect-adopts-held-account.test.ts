@@ -9,19 +9,18 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { ComposioMultipleConnectedAccountsError } from "@composio/core";
-import { and, eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import {
   buildComposioClient,
   type ComposioVendor,
 } from "../src/plugins/composio-adapter";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   removeConnectionsWhere,
@@ -58,6 +57,7 @@ import {
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 const suite = randomUUID().slice(0, 8);
 const PERSON = `person-${suite}`;
 const ADMIN = `admin-${suite}`;
@@ -68,8 +68,9 @@ const DEPLOYMENT = `openbot-deployment:acme-${suite}:R`;
 /**
  * Every app a test here makes, so the afterEach can take its rows back.
  *
- * ONE SLUG PER TEST, because `audit_events` is append-only and no clean-up can reach it: a test
- * counting `mcp.account_connected` rows under an app would otherwise be counting another test's.
+ * ONE SLUG PER TEST, because the audit trail in Intelligence is append-only and no clean-up can reach
+ * it: a test counting `mcp.account_connected` rows under an app would otherwise be counting another
+ * test's.
  */
 const made: string[] = [];
 
@@ -276,15 +277,7 @@ const rowsFor = async (toolkit: string) =>
   (await storedConnections()).brokered.filter((row) => row.app === toolkit);
 
 const connectedTrail = (toolkit: string) =>
-  database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_connected"),
-        eq(auditEvents.targetId, toolkit),
-      ),
-    );
+  auditRows({ eventType: "mcp.account_connected", targetId: toolkit });
 
 let credentials: ReturnType<typeof createCredentialStore>;
 

@@ -5,23 +5,22 @@
  *
  * THE ROWS AND THE TRAIL ARE ASSERTED, never a response body alone.
  *
- * SCOPING. `audit_events` is append-only and nothing here is cleaned from it, so every case mints
- * its own `run()`: a fresh `suite+counter` suffix on every app, person and vendor identity it
- * touches. Rows and trail are read through `inArray` on THAT case's app names only, and the
+ * SCOPING. The audit trail (Intelligence's, shared by every run) is append-only and nothing here is
+ * cleaned from it, so every case mints its own `run()`: a fresh `suite+counter` suffix on every app,
+ * person and vendor identity it touches. Rows and trail are read by THAT case's app names only, and the
  * "untouched" and "nothing audited" assertions therefore name keys no other case writes — an
  * unwanted deletion or audit row for one of them could only have come from this case.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import {
@@ -174,19 +173,17 @@ const rowsFor = async (names: string[]) =>
     .filter((connection) => names.includes(connection.app))
     .map((connection) => connection.app)
     .sort();
-const trailFor = async (names: string[]) =>
-  (
-    await database
-      .select({ app: auditEvents.targetId })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.account_disconnected"),
-          inArray(auditEvents.targetId, names),
-        ),
-      )
-      .orderBy(asc(auditEvents.targetId))
-  ).map((row) => row.app);
+// One read per app name (the trail is asked for one target at a time), in app order.
+const trailFor = async (names: string[]) => {
+  const apps: (string | null)[] = [];
+  for (const name of names)
+    for (const row of await auditRows({
+      eventType: "mcp.account_disconnected",
+      targetId: name,
+    }))
+      apps.push(row.targetId);
+  return apps.sort((a, b) => ((a ?? "") < (b ?? "") ? -1 : 1));
+};
 
 const preview = (n: ReturnType<typeof run>, toolkit: string) =>
   build(n.person, n.provider).request(

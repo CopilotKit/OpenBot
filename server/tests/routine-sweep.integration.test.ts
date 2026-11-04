@@ -15,13 +15,7 @@ import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  routineRuns,
-  routineSweeps,
-  routines,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { routineSweeps, users, workItems } from "../src/db/schema";
 import { MINIMUM_INTERVAL_MS } from "../src/routines/schedule";
 import { createRoutineStore } from "../src/routines/store";
 import {
@@ -32,6 +26,14 @@ import {
 } from "../src/routines/sweep";
 import { createWorkQueue, DEFAULT_MAX_ATTEMPTS } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  changeRoutine,
+  changeRun,
+  purgeRoutinesOwnedBy,
+  runsOf,
+  storedRoutine,
+  useTestSchedules,
+} from "./support/schedules";
 import { purgeConversations } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -100,6 +102,7 @@ function sweepOptions(overrides: Record<string, unknown> = {}) {
 
 beforeAll(async () => {
   await useTestBots();
+  await useTestSchedules();
 });
 
 beforeEach(async () => {
@@ -111,7 +114,7 @@ afterEach(async () => {
   // Routines first, so a failure part-way through cleanup leaves nothing pointing at rows this file
   // is about to delete.
   for (const userId of createdUserIds) {
-    await database.delete(routines).where(eq(routines.ownerUserId, userId));
+    await purgeRoutinesOwnedBy(userId);
   }
   await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
@@ -178,26 +181,12 @@ async function makeRoutine(instruction = "Summarise the day.") {
  * "a month late" mean anything in a row stamped in 2001.
  */
 async function makeDueAt(routineId: string, nextRunAt: Date): Promise<Date> {
-  await database
-    .update(routines)
-    .set({ nextRunAt })
-    .where(eq(routines.id, routineId));
-  const [row] = await database
-    .select({ nextRunAt: routines.nextRunAt })
-    .from(routines)
-    .where(eq(routines.id, routineId))
-    .limit(1);
-  // Read back rather than trusting the Date we wrote: the stamp the sweep keys on is Postgres's.
-  return row?.nextRunAt as Date;
+  // Read back rather than trusting the Date we wrote: the stamp the sweep keys on is Intelligence's.
+  return (await changeRoutine(routineId, { nextRunAt })).nextRunAt;
 }
 
 async function readRoutine(routineId: string) {
-  const [row] = await database
-    .select()
-    .from(routines)
-    .where(eq(routines.id, routineId))
-    .limit(1);
-  return row;
+  return storedRoutine(routineId);
 }
 
 /** Every queued firing of one routine, whatever minute it was keyed on. */
@@ -213,12 +202,9 @@ async function firingsFor(routineId: string) {
     );
 }
 
-/** Every run row this routine has, in-flight ones included: `status` is null until something ends. */
+/** Every run this routine has, in-flight ones included: `status` is null until something ends. */
 async function runsFor(routineId: string) {
-  return await database
-    .select()
-    .from(routineRuns)
-    .where(eq(routineRuns.routineId, routineId));
+  return runsOf(routineId);
 }
 
 /**
@@ -495,10 +481,7 @@ describe("surviving a routine that cannot be scheduled", () => {
     const { routine: healthy } = await makeRoutine("Perfectly fine.");
     // Only a direct write can make this row: `create` and `update` both refuse a cron the schedule
     // module cannot read, which is exactly why the bad row has to be simulated rather than created.
-    await database
-      .update(routines)
-      .set({ cron: "not a cron" })
-      .where(eq(routines.id, poisoned.id));
+    await changeRoutine(poisoned.id, { cron: "not a cron" });
     // The poisoned one is due FIRST, so a pass that dies on it never reaches the healthy one.
     await makeDueAt(poisoned.id, new Date("2001-01-01T09:25:00Z"));
     await makeDueAt(healthy.id, new Date("2001-01-01T09:26:00Z"));
@@ -557,10 +540,7 @@ describe("surviving a routine that cannot be scheduled", () => {
    */
   test("a sub-floor cron already in the table is switched off instead of wedging the sweep", async () => {
     const { owner, routine } = await makeRoutine("Grandfathered in.");
-    await database
-      .update(routines)
-      .set({ cron: "45,55 8 * * *" })
-      .where(eq(routines.id, routine.id));
+    await changeRoutine(routine.id, { cron: "45,55 8 * * *" });
     await makeDueAt(routine.id, new Date("2001-01-01T08:45:00Z"));
 
     const warn = spyOn(console, "warn").mockImplementation(() => {});
@@ -952,10 +932,9 @@ describe("consuming a claimed firing", () => {
       // Old enough that no turn could still be running it; the reaper compares on the database's
       // clock, so the age is written rather than waited for.
       const [leaked] = await runsFor(routine.id);
-      await database
-        .update(routineRuns)
-        .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-        .where(eq(routineRuns.id, leaked?.id as string));
+      await changeRun(leaked?.id as string, {
+        startedAt: new Date(Date.now() - 11 * 60_000),
+      });
 
       await dispatchClaimedRoutines(
         sweepOptions({ now: at("2001-01-01T09:40:00Z") }),
@@ -1028,10 +1007,9 @@ describe("consuming a claimed firing", () => {
     // And once the abandoned attempt's row is old enough that no turn could still be running it,
     // the reaper closes it — as skipped, never touching the finished run beside it.
     const attempt = runs.find((run) => run.id !== inFlight.runId);
-    await database
-      .update(routineRuns)
-      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-      .where(eq(routineRuns.id, attempt?.id as string));
+    await changeRun(attempt?.id as string, {
+      startedAt: new Date(Date.now() - 11 * 60_000),
+    });
     const warnAgain = spyOn(console, "warn").mockImplementation(() => {});
     try {
       await dispatchClaimedRoutines(
@@ -1078,10 +1056,9 @@ describe("consuming a claimed firing", () => {
       runAt: new Date("2001-01-01T09:27:00Z"),
     });
     const [leaked] = await runsFor(routine.id);
-    await database
-      .update(routineRuns)
-      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-      .where(eq(routineRuns.id, leaked?.id as string));
+    await changeRun(leaked?.id as string, {
+      startedAt: new Date(Date.now() - 11 * 60_000),
+    });
 
     // Attempt two, claimed twenty minutes after the occurrence: outside the window, so the firing
     // is finished without dispatching — and the same pass's reaper closes the leaked row.
@@ -1118,10 +1095,7 @@ describe("consuming a claimed firing", () => {
     const { runId } = await store.insertRun(routine.id);
     // Aged past the reaper's cutoff (twice the server's five-minute turn timeout) by hand: the run
     // was opened by a server that died eleven minutes ago.
-    await database
-      .update(routineRuns)
-      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-      .where(eq(routineRuns.id, runId));
+    await changeRun(runId, { startedAt: new Date(Date.now() - 11 * 60_000) });
 
     // Nothing is claimed in this pass; the reaper alone does the work.
     const warn = spyOn(console, "warn").mockImplementation(() => {});

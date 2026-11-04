@@ -6,11 +6,11 @@
  * `account` each `grantsFor` call receives, and cases 1 and 2 read THAT. A route that asked about
  * the viewer for a Shared app would render a perfectly plausible answer.
  *
- * SCOPING. `audit_events` is append-only and nothing here is cleaned between cases, so every case
- * mints its own `run()`: a fresh `suite+counter` suffix on the toolkit, the app id, the viewer and
- * the shared identity. The captured calls are filtered to THIS case's toolkit, and the "mint
- * refused" check reads `audit_events` and `pending_authorizations` through `inArray` on this case's
- * own names only, so a minted attempt by any other case could not satisfy or redden it.
+ * SCOPING. The audit trail (Intelligence's, shared by every run) is append-only and nothing here is
+ * cleaned between cases, so every case mints its own `run()`: a fresh `suite+counter` suffix on the
+ * toolkit, the app id, the viewer and the shared identity. The captured calls are filtered to THIS
+ * case's toolkit, and the "mint refused" check reads the trail and `pending_authorizations` by this
+ * case's own names only, so a minted attempt by any other case could not satisfy or redden it.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -20,10 +20,11 @@ import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, pendingAuthorizations } from "../src/db/schema";
+import { pendingAuthorizations } from "../src/db/schema";
 import type { ConnectedAppBroker, GrantState } from "../src/plugins/broker";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import { removeServers, seedServer, useTestVault } from "./support/vault";
@@ -240,10 +241,10 @@ describe("whose identity is asked about", () => {
       .from(pendingAuthorizations)
       .where(inArray(pendingAuthorizations.actorId, [n.viewer]));
     expect(attempts).toEqual([]);
-    const trail = await database
-      .select()
-      .from(auditEvents)
-      .where(inArray(auditEvents.targetId, [n.toolkit, n.id]));
+    const trail = [
+      ...(await auditRows({ targetId: n.toolkit })),
+      ...(await auditRows({ targetId: n.id })),
+    ];
     expect(trail.filter((e) => e.eventType.includes("authoriz"))).toEqual([]);
   });
 });

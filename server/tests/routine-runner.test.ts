@@ -88,6 +88,15 @@ function harness(options: {
     dueRoutines: () => unreachable("dueRoutines"),
     advanceNextRun: () => unreachable("advanceNextRun"),
     insertRun: () => unreachable("insertRun"),
+    openRunFor: () => unreachable("openRunFor"),
+    startManualRun: () => unreachable("startManualRun"),
+    listRuns: () => unreachable("listRuns"),
+    routineForFiring: () => unreachable("routineForFiring"),
+    reapAbandonedRuns: () => unreachable("reapAbandonedRuns"),
+    recordSweep: () => unreachable("recordSweep"),
+    lastSweptAt: () => unreachable("lastSweptAt"),
+    markUnschedulable: () => unreachable("markUnschedulable"),
+    openRunsIn: () => unreachable("openRunsIn"),
 
     async runContext(runId) {
       expect(runId).toBe(RUN_ID);

@@ -8,13 +8,12 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   removeConnectionsWhere,
@@ -45,6 +44,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 beforeAll(async () => {
   await useTestVault();
 });
+useTestAuditTrail();
 
 afterAll(async () => {
   await database.$client.close();
@@ -145,20 +145,18 @@ const rowsFor = async (names: string[]) =>
     .map((connection) => `${connection.provider}:${connection.app}`)
     .sort();
 
-const trailFor = (names: string[]) =>
-  database
-    .select({
-      app: auditEvents.targetId,
-      payload: sql<Record<string, unknown>>`payload`,
-    })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_disconnected"),
-        inArray(auditEvents.targetId, names),
+/** Every `mcp.account_disconnected` row under these apps, ordered by app. */
+const trailFor = async (names: string[]) =>
+  (
+    await Promise.all(
+      names.map((name) =>
+        auditRows({ eventType: "mcp.account_disconnected", targetId: name }),
       ),
     )
-    .orderBy(asc(auditEvents.targetId));
+  )
+    .flat()
+    .map((row) => ({ app: row.targetId, payload: row.payload }))
+    .sort((a, b) => (a.app ?? "").localeCompare(b.app ?? ""));
 
 afterEach(async () => {
   if (apps.length) {

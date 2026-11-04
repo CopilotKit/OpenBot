@@ -27,13 +27,7 @@ import type { AppVariables } from "../src/auth/guards";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  approvalRequests,
-  proactiveSettings,
-  proactiveSuggestions,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { approvalRequests, users, workItems } from "../src/db/schema";
 import type { AttentionResponse } from "../src/proactive/contracts";
 import { createProactiveStore } from "../src/proactive/store";
 import type { ResponsibilityStore } from "../src/responsibilities/types";
@@ -44,6 +38,7 @@ import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
+import { purgeSchedulesOf, settingWithItem } from "./support/check-ins";
 import {
   conversationClient,
   maybeConversation,
@@ -54,6 +49,7 @@ import {
 } from "./support/conversations";
 import { testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
+import { useTestSchedules } from "./support/schedules";
 
 /**
  * Tasks through the paths a person's Start takes: the real stores, the real work queue, the real
@@ -389,32 +385,20 @@ async function seed(
   });
   bots.push(bot.id);
   const own = await channelStore.direct(owner, bot.id);
-  const settingId = randomUUID();
-  await database.insert(proactiveSettings).values({
-    id: settingId,
+  const { item: raised } = await settingWithItem({
     ownerUserId: owner.id,
     agentId: bot.id,
     channelId: own.id,
     threadId: `${prefix}-check-ins-${randomUUID()}`,
+    runId: `${prefix}-run`,
+    title: item.title ?? "Reply to Sam about the spec",
+    detail:
+      item.detail ??
+      "Sam asked for the spec by Friday.\n\nA short reply with the date would do.",
+    sourceApp: "Gmail",
+    sourceRef: "gmail/search",
+    sourceLink: item.sourceLink ?? "https://mail.example.test/m/1",
   });
-  const [raised] = await database
-    .insert(proactiveSuggestions)
-    .values({
-      id: randomUUID(),
-      ownerUserId: owner.id,
-      agentId: bot.id,
-      settingId,
-      runId: `${prefix}-run`,
-      title: item.title ?? "Reply to Sam about the spec",
-      detail:
-        item.detail ??
-        "Sam asked for the spec by Friday.\n\nA short reply with the date would do.",
-      sourceApp: "Gmail",
-      sourceRef: "gmail/search",
-      sourceLink: item.sourceLink ?? "https://mail.example.test/m/1",
-    })
-    .returning();
-  if (!raised) throw new Error("No item.");
   return { owner, botId: bot.id, own, item: raised };
 }
 
@@ -443,10 +427,12 @@ async function conversationsOf(userIds: readonly string[]): Promise<string[]> {
 beforeAll(async () => {
   await useTestPolicy();
   await useTestBots();
+  await useTestSchedules();
 });
 
 afterAll(async () => {
   await tasks.idle();
+  await purgeSchedulesOf(people);
   const approvals = await database
     .select({ id: approvalRequests.id })
     .from(approvalRequests)

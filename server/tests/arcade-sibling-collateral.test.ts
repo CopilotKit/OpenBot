@@ -8,14 +8,13 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   removeConnectionsWhere,
@@ -151,20 +150,17 @@ const rowsFor = async (names: string[]) =>
     .filter((row) => names.includes(row.app))
     .map((row) => row.app)
     .sort();
-const trailFor = (names: string[]) =>
-  database
-    .select({
-      app: auditEvents.targetId,
-      payload: sql<Record<string, unknown>>`payload`,
-    })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_disconnected"),
-        inArray(auditEvents.targetId, names),
-      ),
-    )
-    .orderBy(asc(auditEvents.targetId));
+// One read per app name (the trail is asked for one target at a time), in app order.
+const trailFor = async (names: string[]) => {
+  const rows: { app: string | null; payload: Record<string, unknown> }[] = [];
+  for (const name of names)
+    for (const row of await auditRows({
+      eventType: "mcp.account_disconnected",
+      targetId: name,
+    }))
+      rows.push({ app: row.targetId, payload: row.payload });
+  return rows.sort((a, b) => ((a.app ?? "") < (b.app ?? "") ? -1 : 1));
+};
 
 afterEach(async () => {
   if (apps.length) {

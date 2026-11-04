@@ -1,12 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
 import {
   type ApprovalContinuation,
   parseApprovalContinuation,
 } from "../approvals/types";
 import { channelOfThread } from "../conversations/directory";
 import type { Database } from "../db/client";
-import { routineRuns } from "../db/schema";
-import { responsibilityRuns } from "../db/schema/responsibilities";
+import { responsibilityRunWaitingOn } from "../responsibilities/store";
+import { finishRoutineRunsWaitingOn } from "../routines/store";
 import type { DeliveryScope } from "../delivery/types";
 import { signInToolResult } from "./service";
 import type { SignInRequestRecord } from "./types";
@@ -46,22 +45,12 @@ export function createSignInResumer(deps: {
   return async (request: SignInRequestRecord) => {
     if (!request.continuation) return;
     const content = JSON.stringify(signInToolResult(request));
-    const [waitingRun] = await deps.database
-      .select({ id: responsibilityRuns.id })
-      .from(responsibilityRuns)
-      .where(
-        and(
-          eq(responsibilityRuns.status, "waiting"),
-          sql`${responsibilityRuns.waiting}->>'signInRequestId' = ${request.id}`,
-        ),
-      )
-      .limit(1);
+    const waitingRun = await responsibilityRunWaitingOn(
+      "signInRequestId",
+      request.id,
+    );
     if (waitingRun) {
-      await deps.resumeResponsibility(
-        request.ownerUserId,
-        waitingRun.id,
-        content,
-      );
+      await deps.resumeResponsibility(request.ownerUserId, waitingRun, content);
       return;
     }
     const snapshot = parseApprovalContinuation(request.continuation);
@@ -87,20 +76,7 @@ export function createSignInResumer(deps: {
         messageId,
       });
     // A routine firing that was waiting on this sign-in is finished now, as after an approval.
-    await deps.database
-      .update(routineRuns)
-      .set({
-        status: "succeeded",
-        finishedAt: new Date(),
-        error: null,
-        waiting: null,
-      })
-      .where(
-        and(
-          eq(routineRuns.status, "waiting"),
-          sql`${routineRuns.waiting}->>'signInRequestId' = ${request.id}`,
-        ),
-      );
+    await finishRoutineRunsWaitingOn("signInRequestId", request.id);
   };
 }
 

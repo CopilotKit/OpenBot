@@ -1,10 +1,14 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq, sql } from "drizzle-orm";
-import postgres from "postgres";
-import { sweepAuditTrail } from "../src/audit-retention";
+import { ACTION_RECORD_RETENTION_DAYS } from "../src/admin/controls";
+import type { AuditTrailClient } from "../src/audit-trail/client";
+import { syncAuditRetention } from "../src/audit-trail/retention";
+import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { auditEvents } from "../src/db/schema";
+import { useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testEnvironment } from "./support/environment";
 
 /**
  * The audit trail has to be able to stop growing.
@@ -14,8 +18,16 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * use, and it is also a control an enterprise buyer asks about directly: "what is your retention
  * policy" had no answer other than "everything, forever, and you cannot change it".
  *
- * Against a real database because the whole thing is SQL: the advisory lock that decides which
- * server sweeps, the batching, and the interval arithmetic.
+ * THE TRAIL LIVES IN INTELLIGENCE NOW, and so does its sweep. This deployment's part is saying the
+ * window (`AUDIT_RETENTION_DAYS`, and Action Recording's 90 days) at boot, which the first half of
+ * this file holds it to. The sweep itself, which used to be tested here (only rows older than the
+ * window, nothing when no window is set, a row one day inside the window survives, one server at a
+ * time under an advisory lock, the lock released for the next sweep), is Intelligence's, held to the
+ * same rules in its `libs/audit-trail/src/audit-trail.pg.spec.ts`.
+ *
+ * The second half is the local `audit_events` table, kept unwritten for one release so an upgrading
+ * deployment's earlier trail can be copied into Intelligence. It stays append-only exactly as it was,
+ * against a real database because the whole thing is SQL.
  */
 
 const databaseUrl = testDatabaseUrl();
@@ -86,36 +98,138 @@ async function refusedAsAppendOnly(
   }
 }
 
-describe("keeping the audit trail to a retention policy", () => {
-  test("removes what is older than the window and keeps the rest", async () => {
-    await event(400, 1);
-    await event(100, 2);
-    await event(10, 3);
-    await event(2, 4);
+describe("saying the retention window to Intelligence, which keeps the trail", () => {
+  /** Leave the shared project keeping everything, as a deployment that never set a window does. */
+  async function keepEverything() {
+    await syncAuditRetention(useTestAuditTrail().client, {
+      eventRetentionDays: null,
+      actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+    });
+  }
+  afterAll(keepEverything);
 
-    const { deleted } = await sweepAuditTrail(databaseUrl, 90);
+  test("AUDIT_RETENTION_DAYS reaches Intelligence, with Action Recording's 90 days", async () => {
+    const { client } = useTestAuditTrail();
+    const config = loadConfig({
+      ...testEnvironment(),
+      AUDIT_RETENTION_DAYS: "90",
+    });
+    await keepEverything();
 
-    expect(deleted).toBe(2);
-    expect(await remaining()).toBe(2);
+    await expect(
+      syncAuditRetention(client, {
+        eventRetentionDays: config.auditRetentionDays ?? null,
+        actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+      }),
+    ).resolves.toBe("saved");
+
+    expect(await client.settings()).toMatchObject({
+      eventRetentionDays: 90,
+      actionRetentionDays: 90,
+    });
+    // Booting again with the same window changes nothing.
+    await expect(
+      syncAuditRetention(client, {
+        eventRetentionDays: 90,
+        actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+      }),
+    ).resolves.toBe("unchanged");
   });
 
   test("keeps everything when no policy is set", async () => {
     // The default, and the safe one. Deleting somebody's trail because a default said so is worse
-    // than a table that grows, so an unset or nonsense window sweeps nothing at all.
-    await event(400, 1);
+    // than a table that grows, so an unset window is said to Intelligence as "keep forever".
+    const { client } = useTestAuditTrail();
+    const config = loadConfig({ ...testEnvironment() });
+    expect(config.auditRetentionDays).toBeUndefined();
+    await syncAuditRetention(client, {
+      eventRetentionDays: 30,
+      actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+    });
 
-    for (const window of [0, -1, Number.NaN]) {
-      const { deleted } = await sweepAuditTrail(databaseUrl, window);
-      expect(deleted).toBeNull();
-    }
+    await syncAuditRetention(client, {
+      eventRetentionDays: config.auditRetentionDays ?? null,
+      actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+    });
+
+    expect(await client.settings()).toMatchObject({ eventRetentionDays: null });
+  });
+
+  test("two servers booting at once both end with the window, and neither puts back what it read", async () => {
+    /*
+     * Each reads the settings' version and saves under it (If-Match). The one that loses the race is
+     * refused, reads again, finds the window already there, and stops. Without the version, the
+     * slower one could put back whatever it had read.
+     */
+    const { client } = useTestAuditTrail();
+    await keepEverything();
+    const wanted = {
+      eventRetentionDays: 365,
+      actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+    };
+    const results = await Promise.all([
+      syncAuditRetention(client, wanted),
+      syncAuditRetention(client, wanted),
+    ]);
+    expect(results).toContain("saved");
+    expect(await client.settings()).toMatchObject({ eventRetentionDays: 365 });
+  });
+
+  test("a save that keeps losing to another writer is said, not swallowed", async () => {
+    let version = 1;
+    const contested: Pick<AuditTrailClient, "settings" | "putSettings"> = {
+      settings: async () => ({
+        eventRetentionDays: null,
+        actionRetentionDays: 90,
+        version: version++,
+      }),
+      putSettings: async () => null,
+    };
+    await expect(
+      syncAuditRetention(contested, {
+        eventRetentionDays: 90,
+        actionRetentionDays: 90,
+      }),
+    ).rejects.toThrow(/kept changing/);
+  });
+});
+
+describe("the local audit_events table, kept for the copy, stays append-only", () => {
+  test("a row one day inside the declared window cannot be deleted, one day outside it can", async () => {
+    // The boundary. Off by a day here means a deployment promising 90 days keeps 89.
+    await event(89, 1);
+    await event(91, 2);
+
+    await database.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('openbot.audit_retention_days', '90', true)`,
+      );
+      await tx
+        .delete(auditEvents)
+        .where(eq(auditEvents.targetId, `${MARKER}-2`));
+    });
+    expect(await remaining()).toBe(1);
+
+    expect(
+      await refusedAsAppendOnly(() =>
+        database.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('openbot.audit_retention_days', '90', true)`,
+          );
+          await tx
+            .delete(auditEvents)
+            .where(eq(auditEvents.targetId, `${MARKER}-1`));
+        }),
+      ),
+    ).toBe(true);
     expect(await remaining()).toBe(1);
   });
 
   test("the database refuses a malformed window even when the caller does not", async () => {
     /*
-     * The test above stops in TypeScript. `sweepAuditTrail` returns `{deleted: null}` before it ever
-     * opens a connection, so it proves the caller's guard and says nothing about the trigger, which
-     * has a branch of its own for this that nothing exercised. That is the shape where a guard reads
+     * The sweep that once ran here refused a malformed window in TypeScript before it ever opened a
+     * connection, which proved the caller's guard and said nothing about the trigger, which has a
+     * branch of its own for this that nothing exercised. That is the shape where a guard reads
      * as covered and is not: anything reaching the table without going through the sweep meets the
      * trigger and only the trigger.
      *
@@ -140,44 +254,6 @@ describe("keeping the audit trail to a retention policy", () => {
       ).toBe(true);
     }
     expect(await remaining()).toBe(1);
-  });
-
-  test("a row exactly inside the window survives", async () => {
-    // The boundary. Off by a day here means a deployment promising 90 days keeps 89.
-    await event(89, 1);
-
-    await sweepAuditTrail(databaseUrl, 90);
-
-    expect(await remaining()).toBe(1);
-  });
-
-  test("only one server sweeps at a time", async () => {
-    /*
-     * N servers running the same delete over the same rows every hour is N times the work for one
-     * outcome, on the largest table in the deployment and the one every action writes to. The
-     * advisory lock decides. A second sweep while one holds it reports null rather than zero, so a
-     * caller can tell "somebody else is doing it" from "there was nothing to do".
-     */
-    await event(400, 1);
-
-    /*
-     * Its own connection, standing in for the other server. A session advisory lock belongs to one
-     * connection and is re-entrant within it, so taking it through the shared pool would prove
-     * nothing: the sweep might be handed the same connection and sail through.
-     */
-    const otherServer = postgres(databaseUrl, { max: 1 });
-    try {
-      const [lock] = await otherServer`
-        select pg_try_advisory_lock(4192004) as held
-      `;
-      expect(lock?.held).toBe(true);
-
-      const { deleted } = await sweepAuditTrail(databaseUrl, 90);
-      expect(deleted).toBeNull();
-      expect(await remaining()).toBe(1);
-    } finally {
-      await otherServer.end({ timeout: 5 }).catch(() => undefined);
-    }
   });
 
   test("a recent row cannot be deleted, whatever the window says", async () => {
@@ -296,17 +372,6 @@ describe("keeping the audit trail to a retention policy", () => {
     ).toBe(true);
 
     expect(await remaining()).toBe(1);
-  });
-
-  test("the lock is released, so the next sweep can run", async () => {
-    // A sweep that kept the lock would be the last one this deployment ever ran.
-    await event(400, 1);
-    await sweepAuditTrail(databaseUrl, 90);
-
-    await event(400, 2);
-    const { deleted } = await sweepAuditTrail(databaseUrl, 90);
-
-    expect(deleted).toBe(1);
   });
 });
 

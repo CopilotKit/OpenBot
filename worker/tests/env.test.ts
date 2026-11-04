@@ -5,37 +5,59 @@ const base = () => ({
   WORKER_SHARED_SECRET: "secret",
   SERVER_INTERNAL_URL: "http://server:3001",
   DATABASE_URL: "postgres://localhost:5432/openbot",
+  INTELLIGENCE_API_URL: "http://intelligence:4201",
+  INTELLIGENCE_API_KEY: "cpk_key",
   HOSTNAME: "laptop",
 });
 
 describe("worker env", () => {
+  test("takes the gateway address when there is one", () => {
+    expect(
+      loadWorkerEnv({
+        ...base(),
+        INTELLIGENCE_GATEWAY_WS_URL: " ws://gateway:4401 ",
+      }).intelligence,
+    ).toEqual({
+      apiUrl: "http://intelligence:4201",
+      apiKey: "cpk_key",
+      gatewayWsUrl: "ws://gateway:4401",
+    });
+  });
+
   test("parses a complete environment", () => {
     const { owner, ...rest } = loadWorkerEnv(base());
     expect(rest).toEqual({
       workerSharedSecret: "secret",
       serverInternalUrl: "http://server:3001",
       databaseUrl: "postgres://localhost:5432/openbot",
+      intelligence: { apiUrl: "http://intelligence:4201", apiKey: "cpk_key" },
     });
     expect(owner).toMatch(/^routines\/laptop-[0-9a-f]{8}$/);
   });
 
-  test.each(["WORKER_SHARED_SECRET", "SERVER_INTERNAL_URL", "DATABASE_URL"])(
-    "refuses an unset %s",
-    (name) => {
-      const env = base();
-      delete env[name as keyof typeof env];
-      expect(() => loadWorkerEnv(env)).toThrow("is not set");
-    },
-  );
+  test.each([
+    "WORKER_SHARED_SECRET",
+    "SERVER_INTERNAL_URL",
+    "DATABASE_URL",
+    "INTELLIGENCE_API_URL",
+    "INTELLIGENCE_API_KEY",
+  ])("refuses an unset %s", (name) => {
+    const env = base();
+    delete env[name as keyof typeof env];
+    expect(() => loadWorkerEnv(env)).toThrow("is not set");
+  });
 
-  test.each(["WORKER_SHARED_SECRET", "SERVER_INTERNAL_URL", "DATABASE_URL"])(
-    "refuses a whitespace-only %s like an unset one",
-    (name) => {
-      expect(() => loadWorkerEnv({ ...base(), [name]: "   " })).toThrow(
-        "is not set",
-      );
-    },
-  );
+  test.each([
+    "WORKER_SHARED_SECRET",
+    "SERVER_INTERNAL_URL",
+    "DATABASE_URL",
+    "INTELLIGENCE_API_URL",
+    "INTELLIGENCE_API_KEY",
+  ])("refuses a whitespace-only %s like an unset one", (name) => {
+    expect(() => loadWorkerEnv({ ...base(), [name]: "   " })).toThrow(
+      "is not set",
+    );
+  });
 
   test("trims padded values", () => {
     const env = loadWorkerEnv({

@@ -7,7 +7,6 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { createAuditStore } from "../src/audit";
@@ -21,7 +20,6 @@ import {
   installBotConfiguration,
 } from "../src/configuration/directory";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import {
   makeTestComponent,
   removeTestComponents,
@@ -29,6 +27,7 @@ import {
   testIntelligence,
   useTestConfiguration,
 } from "./support/bots";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -43,6 +42,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 const auditStore = createAuditStore(database);
 const componentStore = createComponentStore(database);
 const sandboxedStore = createSandboxedStore(database, auditStore);
@@ -198,10 +198,7 @@ describe("the generic Published switch on a sandboxed component", () => {
     expect((await postPublication(name, true)).status).toBe(200);
 
     expect((await sourceOf(name))?.revision).toBe(1);
-    const events = await database
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, name));
+    const events = await auditRows({ targetId: name });
     expect(
       events.filter((event) => event.eventType === "component.published"),
     ).toHaveLength(1);

@@ -7,12 +7,12 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { LLMock } from "@copilotkit/aimock";
 import {
   COMPONENT_GUIDANCE,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
-import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Observable } from "rxjs";
@@ -24,16 +24,8 @@ import type { ActionPolicy } from "../src/computer/policy";
 import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { mcpTools } from "../src/db/schema/plugins";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
 import { workItems } from "../src/db/schema/work";
 import {
   CustomServerRefusedError,
@@ -52,6 +44,7 @@ import { createProactiveStore } from "../src/proactive/store";
 import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import {
   changeAccess,
   removeBots,
@@ -59,6 +52,13 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { purgeConversations, seedChannel } from "./support/conversations";
+import {
+  changeCheckIn,
+  makeDue,
+  purgeCheckInHistoryOf,
+  purgeSchedulesOf,
+  settingsOf,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   changeServer,
@@ -75,6 +75,7 @@ import {
   useTestVault,
 } from "./support/vault";
 import { testMemory } from "./support/memory";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
 /*
  * A check-in reads what the person connected with their own account, through the tools that say
@@ -84,7 +85,12 @@ import { testMemory } from "./support/memory";
  * agent resolver building the real built-in Bot, the real turn runner and the real check-in engine.
  * The model is the only fake: `@copilotkit/aimock`, answering the built-in Bot's own requests the
  * way a model would, and recording what it was offered.
+ *
+ * What a check-in read, and what the dispatcher refused, is on the audit trail in Intelligence: the
+ * engine reads a run's reads from it, and so does one case below.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -195,6 +201,7 @@ const textOf = (content: unknown) =>
 let environmentBefore: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
+  await useTestSchedules();
   environmentBefore = {
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -253,22 +260,13 @@ beforeEach(async () => {
   vendorCalls.length = 0;
   gateAsked.length = 0;
   endpointDials.length = 0;
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner));
-  await database
-    .delete(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner));
-  await database
-    .delete(proactivePeople)
-    .where(eq(proactivePeople.ownerUserId, owner));
-  await database
-    .delete(proactiveRuns)
-    .where(eq(proactiveRuns.ownerUserId, owner));
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: FAR, lastRunAt: null, lastStatus: "idle" })
-    .where(eq(proactiveSettings.ownerUserId, owner));
+  await purgeCheckInHistoryOf(owner);
+  for (const setting of await settingsOf(owner))
+    await changeCheckIn(setting.id, {
+      nextRunAt: FAR,
+      lastRunAt: null,
+      lastStatus: "idle",
+    });
 });
 
 afterAll(async () => {
@@ -280,10 +278,7 @@ afterAll(async () => {
       else process.env[name] = value;
     }
   }
-  const settings = await database
-    .select({ id: proactiveSettings.id })
-    .from(proactiveSettings)
-    .where(eq(proactiveSettings.ownerUserId, owner));
+  const settings = await settingsOf(owner);
   if (settings.length)
     await database.delete(workItems).where(
       and(
@@ -295,6 +290,7 @@ afterAll(async () => {
       ),
     );
   await fixtures.remove();
+  await purgeSchedulesOf([owner]);
   await database.delete(users).where(eq(users.id, owner));
   await purgeConversations(botIds.map(channelOf));
   await removeBots(botIds);
@@ -661,23 +657,17 @@ async function checkIn(
   at: ReturnType<typeof deployment> = composio,
 ) {
   const setting = await settingFor(bot);
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1_000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   await at.engine.sweep();
   return setting;
 }
-const itemsOf = (bot: string) =>
-  database
-    .select()
-    .from(proactiveSuggestions)
-    .where(
-      and(
-        eq(proactiveSuggestions.ownerUserId, owner),
-        eq(proactiveSuggestions.agentId, bot),
-      ),
-    );
+const itemsOf = async (bot: string) =>
+  (
+    await testScheduleClient().all("check-in-suggestions", {
+      ownerUserId: owner,
+      agentId: bot,
+    })
+  ).items;
 /** The check-in's message as the model received it. */
 const instructionIn = (request: ChatCompletionRequest | undefined) =>
   (request?.messages ?? [])
@@ -807,16 +797,15 @@ describe("a check-in reads what the person connected, through the tools that say
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
     expect(vendorCalls).toEqual([]);
-    const [refusal] = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.call_rejected"),
-          eq(auditEvents.targetId, ref(NOTES, notionDigest)),
-          sql`${auditEvents.payload} ->> 'bot' = ${unconnected}`,
-        ),
-      );
+    // Oldest first, as the rows were written; the trail answers newest first.
+    const [refusal] = (
+      await auditRows({
+        eventType: "mcp.call_rejected",
+        targetId: ref(NOTES, notionDigest),
+      })
+    )
+      .reverse()
+      .filter((row) => row.payload.bot === unconnected);
     expect(refusal?.payload).toMatchObject({ refusal: "check_in_not_a_read" });
   });
 

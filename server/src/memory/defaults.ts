@@ -14,7 +14,7 @@
  * Isolation is unchanged, because nothing here is a new path to a memory: a default source is an
  * ordinary memory source in Intelligence, owned by the person and bound to one Bot, and what it imports
  * is recalled by that Bot only, unreviewed until the person confirms it. A default research setting is
- * an ordinary `proactive_settings` row.
+ * an ordinary check-in setting, which lives in Intelligence's agent schedules (`proactive/store.ts`).
  *
  * NEVER SWITCHED BACK ON. Turning either off keeps it with `enabled = false`, and a source or setting of
  * any kind means there is nothing to adopt. Removing one records an opt-out in the person's preferences
@@ -25,10 +25,16 @@
  * records the opt-out in Intelligence first and deletes the source after; adoption reads the sources
  * from Intelligence first and the opt-outs after. Whichever the adoption sees (the source still there,
  * or gone with its opt-out already recorded), it does not add the app back. Two adoptions at once make
- * one source: its id is made from the person, Bot and app. A research setting is a row here, adopted
- * under one advisory lock per person and Bot that removal takes too. Removal waits for the lock;
- * adoption only tries it and steps aside when it is held, so it never parks a pooled connection behind
- * another transaction.
+ * one source: its id is made from the person, Bot and app. A research setting is adopted under a named
+ * lease per person and Bot (`work/local-lock.ts`) that removal and a reset take too: its setting is made
+ * in Intelligence, and no transaction here may be held open across that call. Removal waits for the
+ * lease or the lock; adoption only tries them and steps aside when one is held, so it never waits
+ * behind one.
+ *
+ * ON A PERSON'S TURN. Whether this person already has check-ins with this Bot is read from the
+ * schedule directory's memory, so a conversation that has them, which is nearly every one, never
+ * reaches Intelligence. Only a missing one is made there, and Intelligence's rule of one setting per
+ * person and Bot makes two replicas adopting it at once harmless.
  *
  * ACROSS REPLICAS. Another replica's copy of the preferences may not have heard of an opt-out yet when
  * it adopts, so an adoption that created anything asks Intelligence afresh once it has, and takes back
@@ -39,11 +45,17 @@
  * OPENBOT_PROACTIVE_DEFAULTS=false. Either switch stops new defaults; neither touches existing rows.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { botConfiguration } from "../configuration/directory";
 import type { DefaultFeature } from "../db/schema/defaults";
-import { proactiveSettings } from "../db/schema/proactive";
+import { ScheduleConflictError } from "../schedules/client";
+import { schedules } from "../schedules/directory";
+import {
+  releaseLocalLock,
+  tryLocalLock,
+  withLocalLock,
+} from "../work/local-lock";
 import type { MemoryIngestion } from "./ingestion";
 import type { MemoryStore } from "./store";
 import { MemoryNotFoundError } from "./types";
@@ -87,6 +99,31 @@ async function tryLockDefaults(
     sql`select pg_try_advisory_xact_lock(hashtext(${lockKey(ownerUserId, agentId)})) as locked`,
   );
   return [...rows][0]?.locked === true;
+}
+
+/** The lease research adoption and research removal share, per person and Bot. */
+const researchLockKey = (ownerUserId: string, agentId: string) =>
+  `defaults:research:${ownerUserId}:${agentId}`;
+/**
+ * How long the research lease may be held: a read of the opt-outs and one write to Intelligence, with
+ * the client's own retries. A holder that dies frees it after this.
+ */
+const RESEARCH_LOCK_TTL_MS = 60_000;
+
+/**
+ * Run `work` holding the research lease for this person and Bot, waiting for it. Removal and a reset
+ * use this: a person's removal always lands.
+ */
+export function withResearchDefaultsLock<T>(
+  database: Database,
+  ownerUserId: string,
+  agentId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  return withLocalLock(database, researchLockKey(ownerUserId, agentId), work, {
+    ttlMs: RESEARCH_LOCK_TTL_MS,
+    waitMs: 30_000,
+  });
 }
 
 /**
@@ -303,50 +340,75 @@ export function createMemoryDefaults(options: {
     channelId: string,
   ): Promise<boolean> {
     if (!options.research) return false;
+    // One per person and Bot, on or off, is the person's choice already: from memory, no round trip.
+    const has = () =>
+      schedules()
+        .cached("check-in-settings")
+        .some(
+          (setting) =>
+            setting.ownerUserId === ownerUserId &&
+            setting.agentId === agentId &&
+            setting.deletedAt === null,
+        );
+    if (has()) return false;
     if (!(await options.canDeliver(ownerUserId, channelId, agentId)))
       return false;
-    const adoptedId = await options.database.transaction(
-      async (transaction) => {
-        if (!(await tryLockDefaults(transaction, ownerUserId, agentId)))
-          return null;
-        if (declined(ownerUserId, agentId, "proactive_research").size)
-          return null;
-        const rows = await transaction
-          .insert(proactiveSettings)
-          .values({
-            id: randomUUID(),
-            ownerUserId,
-            agentId,
-            channelId,
-            threadId: options.mintThreadId(),
-            intervalMinutes: DEFAULT_RESEARCH_INTERVAL_MINUTES,
-            enabled: true,
-            nextRunAt: new Date(
-              now() + DEFAULT_RESEARCH_INTERVAL_MINUTES * 60_000,
-            ),
-          })
-          // One per person and Bot: a row already there, on or off, is the person's choice.
-          .onConflictDoNothing()
-          .returning({ id: proactiveSettings.id });
-        return rows[0]?.id ?? null;
-      },
-    );
+    const lock = researchLockKey(ownerUserId, agentId);
+    const holder = randomUUID();
+    if (
+      !(await tryLocalLock(
+        options.database,
+        lock,
+        holder,
+        RESEARCH_LOCK_TTL_MS,
+      ))
+    )
+      return false;
+    let adoptedId: string | null = null;
+    try {
+      if (
+        declined(ownerUserId, agentId, "proactive_research").size === 0 &&
+        !has()
+      ) {
+        const id = randomUUID();
+        await schedules().create("check-in-settings", {
+          id,
+          ownerUserId,
+          agentId,
+          channelId,
+          threadId: options.mintThreadId(),
+          focus: "",
+          intervalMinutes: DEFAULT_RESEARCH_INTERVAL_MINUTES,
+          enabled: true,
+          nextRunAt: new Date(
+            now() + DEFAULT_RESEARCH_INTERVAL_MINUTES * 60_000,
+          ),
+          lastRunAt: null,
+          lastStatus: "idle",
+          lastError: null,
+        });
+        adoptedId = id;
+      }
+    } catch (error) {
+      // Another replica made it first: one per person and Bot.
+      if (!(error instanceof ScheduleConflictError)) throw error;
+    } finally {
+      await releaseLocalLock(options.database, lock, holder).catch(
+        failed("research-lock"),
+      );
+    }
     // Asked afresh, as for sources: an opt-out written on another replica a moment ago wins.
     if (
       adoptedId !== null &&
       (await declinedNow(ownerUserId, agentId, "proactive_research")).size > 0
     ) {
-      await options.database.transaction(async (transaction) => {
-        await lockDefaults(transaction, ownerUserId, agentId);
-        await transaction
-          .delete(proactiveSettings)
-          .where(
-            and(
-              eq(proactiveSettings.ownerUserId, ownerUserId),
-              eq(proactiveSettings.id, adoptedId),
-            ),
-          );
-      });
+      const taken = adoptedId;
+      await withResearchDefaultsLock(
+        options.database,
+        ownerUserId,
+        agentId,
+        () => schedules().purge("check-in-settings", taken),
+      );
       return false;
     }
     const adopted = adoptedId !== null;

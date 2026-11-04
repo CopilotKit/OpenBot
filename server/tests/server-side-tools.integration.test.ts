@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
-import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import { createCredentialStore } from "../src/credentials";
-import { auditEvents, mcpTools } from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removeServers, seedServer, useTestVault } from "./support/vault";
@@ -27,6 +27,7 @@ import { removeServers, seedServer, useTestVault } from "./support/vault";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 const suite = randomUUID().slice(0, 8);
 const holderId = `agent_tools_holder_${suite}`;
@@ -147,10 +148,7 @@ describe("the tools a Bot is handed on the server", () => {
   });
 
   test("the call is still audited, and still names the Bot", async () => {
-    const rows = await database
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, ref));
+    const rows = await auditRows({ targetId: ref });
 
     const succeeded = rows.filter(
       (row) => row.eventType === "mcp.call_succeeded",
@@ -180,10 +178,11 @@ describe("the tools a Bot is handed on the server", () => {
       // And marked, so the transcript can draw it as a refusal rather than as a result. The wording
       // is an administrator's to change; the marker is not, which is the whole reason it exists.
       expect(text?.startsWith(REFUSAL_MARKER)).toBe(true);
-      const rejected = await database
-        .select()
-        .from(auditEvents)
-        .where(eq(auditEvents.eventType, "mcp.call_rejected"));
+      // Under this run's tool: the trail is shared by every run, so "any rejection" is not a claim.
+      const rejected = await auditRows({
+        eventType: "mcp.call_rejected",
+        targetId: ref,
+      });
       expect(rejected.length).toBeGreaterThan(0);
     } finally {
       policy = { mode: "enforce", deny: [], allow: ["true"] };

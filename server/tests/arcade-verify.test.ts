@@ -4,8 +4,8 @@
  *
  * ALMOST EVERY ASSERTION HERE IS "NOTHING WAS WRITTEN", which is the shape where a broken
  * implementation looks exactly like a passing one. So no case infers that from a status code:
- * each one QUERIES `brokered_connections` for a row belonging to this suite's app, and
- * `audit_events` for the `mcp.account_connected` entry the completion transaction files, and
+ * each one QUERIES `brokered_connections` for a row belonging to this suite's app, and the audit
+ * trail (in Intelligence) for the `mcp.account_connected` entry the completion transaction files, and
  * requires both to be empty. The app name is suite-scoped, so a count of zero is a fact about this
  * run.
  *
@@ -29,18 +29,20 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { getCookies } from "better-auth/cookies";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { eq, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { createAuth } from "../src/auth/index";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, pendingAuthorizations } from "../src/db/schema";
+import { pendingAuthorizations } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { AUTHORIZATION_REFUSALS } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
@@ -64,7 +66,7 @@ const database = createDatabase(testDatabaseUrl(), { max: 6 });
 const suite = randomUUID().slice(0, 8);
 const APP = `arcade-verify-${suite}`;
 /**
- * ONE APP PER TEST, because `audit_events` is APPEND-ONLY and cannot be cleaned between them. A
+ * ONE APP PER TEST, because the audit trail is APPEND-ONLY and cannot be cleaned between them. A
  * fixed name would let a completion's event be counted by the next case's "nothing was written",
  * which is the exact assertion this suite is built on. The app is keyed on its toolkit, so a fresh
  * toolkit per test is a fresh everything.
@@ -322,15 +324,10 @@ async function written() {
   const connections = (await storedConnections()).brokered.filter(
     (row) => row.app === TOOLKIT,
   );
-  const events = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.targetId, TOOLKIT),
-        eq(auditEvents.eventType, "mcp.account_connected"),
-      ),
-    );
+  const events = await auditRows({
+    targetId: TOOLKIT,
+    eventType: "mcp.account_connected",
+  });
   return { connections, events };
 }
 
@@ -1021,21 +1018,20 @@ describe("a consent whose account context has moved on", () => {
       .map((row) => row.app)
       .sort();
 
-  /** What the trail says ended, by app, with the payload a reader would be answered with. */
-  const disconnectsFor = (names: string[]) =>
-    database
-      .select({
-        app: auditEvents.targetId,
-        payload: sql<Record<string, unknown>>`payload`,
-      })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.account_disconnected"),
-          inArray(auditEvents.targetId, names),
-        ),
-      )
-      .orderBy(asc(auditEvents.targetId));
+  /**
+   * What the trail says ended, by app, with the payload a reader would be answered with. One read per
+   * app name (the trail is asked for one target at a time), in app order.
+   */
+  const disconnectsFor = async (names: string[]) => {
+    const rows: { app: string | null; payload: Record<string, unknown> }[] = [];
+    for (const name of names)
+      for (const row of await auditRows({
+        eventType: "mcp.account_disconnected",
+        targetId: name,
+      }))
+        rows.push({ app: row.targetId, payload: row.payload });
+    return rows.sort((a, b) => ((a.app ?? "") < (b.app ?? "") ? -1 : 1));
+  };
 
   test("refuses, withdraws the RETIRED identity's grant and leaves the CURRENT account alone", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });
@@ -1682,6 +1678,7 @@ describe("a return leg that completes", () => {
   test("a failure between the two writes settles nothing, still answers a Location, and a retry completes it once", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });
 
+    const dialect = new PgDialect();
     const brokenAuditDatabase = new Proxy(database, {
       get(target, property, receiver) {
         if (property !== "transaction") {
@@ -1693,11 +1690,15 @@ describe("a return leg that completes", () => {
             work(
               new Proxy(transaction, {
                 get(txTarget, txProperty, txReceiver) {
-                  if (txProperty === "insert") {
-                    return (table: unknown) => {
-                      if (table === auditEvents)
+                  if (txProperty === "execute") {
+                    return (query: unknown) => {
+                      if (
+                        /insert into audit_outbox/i.test(
+                          dialect.sqlToQuery(query as SQL).sql,
+                        )
+                      )
                         throw new Error("injected audit failure");
-                      return txTarget.insert(table as never);
+                      return txTarget.execute(query as never);
                     };
                   }
                   const value = Reflect.get(txTarget, txProperty, txReceiver);
@@ -1874,15 +1875,10 @@ const lines = (said: unknown[][]): string[] =>
 describe("a cancel that lands between the confirmation and the completion", () => {
   const leftLiveEvents = async () =>
     (
-      await database
-        .select({ payload: sql<Record<string, unknown>>`payload` })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.targetId, TOOLKIT),
-            eq(auditEvents.eventType, "mcp.cancelled_grant_left_live"),
-          ),
-        )
+      await auditRows({
+        targetId: TOOLKIT,
+        eventType: "mcp.cancelled_grant_left_live",
+      })
     ).map((row) => row.payload);
 
   function cancelDuringTheReturnLeg() {

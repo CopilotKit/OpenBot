@@ -33,11 +33,6 @@ import {
   demonstrations,
   memorySources,
   personalMemories,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-  responsibilities,
-  routines,
   sharedUseApprovals,
   sharedUseRequests,
 } from "../../db/schema";
@@ -56,11 +51,6 @@ export const BOT_CHILD_TABLES: readonly ChildTable[] = [
   { table: demonstrations, column: demonstrations.botId },
   { table: memorySources, column: memorySources.agentId },
   { table: personalMemories, column: personalMemories.formedByAgentId },
-  { table: proactiveRuns, column: proactiveRuns.agentId },
-  { table: proactiveSettings, column: proactiveSettings.agentId },
-  { table: proactiveSuggestions, column: proactiveSuggestions.agentId },
-  { table: responsibilities, column: responsibilities.agentId },
-  { table: routines, column: routines.agentId },
   { table: sharedUseApprovals, column: sharedUseApprovals.agentId },
   { table: sharedUseRequests, column: sharedUseRequests.agentId },
 ];

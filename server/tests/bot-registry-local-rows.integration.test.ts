@@ -22,7 +22,7 @@ import {
 import { createDatabase } from "../src/db/client";
 import * as schema from "../src/db/schema";
 import { MOVED_TO_INTELLIGENCE } from "../src/configuration/frozen-tables";
-import { channelAgents, channels, routines, users } from "../src/db/schema";
+import { channelAgents, channels, users } from "../src/db/schema";
 import {
   changeAccess,
   changePreferences,
@@ -34,6 +34,7 @@ import {
   testIntelligence,
   useTestBots,
 } from "./support/bots";
+import { seedRoutine, testScheduleClient } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -58,6 +59,19 @@ const OUTLIVES_ITS_BOT = new Set([
   "sign_in_requests.bot_id",
   // The legacy table itself, read only by the upgrade copy.
   "agent_profiles.agent_id",
+]);
+
+/**
+ * Legacy schedule tables whose data moved to Intelligence's agent schedules, kept unwritten for one
+ * release and read only by the upgrade copy. Intelligence purges the moved records with their agent,
+ * so nothing here does.
+ */
+const MOVED_SCHEDULE_COLUMNS = new Set([
+  "proactive_runs.agent_id",
+  "proactive_settings.agent_id",
+  "proactive_suggestions.agent_id",
+  "responsibilities.agent_id",
+  "routines.agent_id",
 ]);
 
 describe("which rows go with a Bot", () => {
@@ -85,13 +99,14 @@ describe("which rows go with a Bot", () => {
       (name) =>
         !covered.has(name) &&
         !OUTLIVES_ITS_BOT.has(name) &&
-        !moved.has(name.split(".")[0] ?? ""),
+        !moved.has(name.split(".")[0] ?? "") &&
+        !MOVED_SCHEDULE_COLUMNS.has(name),
     );
     // A new table naming a Bot: add it to BOT_CHILD_TABLES, or here with the reason it outlives one.
     expect(undecided).toEqual([]);
-    // Of the 26 tables that cascaded, the 17 still here, and the one column that was set to null.
-    // The other nine moved into Intelligence with the Bot configuration.
-    expect(BOT_CHILD_TABLES.length).toBe(17);
+    // Of the 26 tables that cascaded, the 12 still here, and the one column that was set to null.
+    // Nine moved into Intelligence with the Bot configuration, and five with the schedules.
+    expect(BOT_CHILD_TABLES.length).toBe(26 - 9 - MOVED_SCHEDULE_COLUMNS.size);
     expect([...covered]).toContain("channels.last_message_agent_id");
   });
 
@@ -116,10 +131,13 @@ async function rowsFor(botId: string, channelId: string, owner: string) {
     .select()
     .from(channelAgents)
     .where(eq(channelAgents.agentId, botId));
-  const [routine] = await database
-    .select()
-    .from(routines)
-    .where(eq(routines.agentId, botId));
+  // Routines live in Intelligence, which purges an agent's schedules with the agent.
+  const [routine] = (
+    await testScheduleClient().all("routines", {
+      agentId: botId,
+      includeDeleted: true,
+    })
+  ).items;
   const [channel] = await database
     .select({ lastMessageAgentId: channels.lastMessageAgentId })
     .from(channels)
@@ -170,14 +188,11 @@ async function botWithRows() {
       publishedBy: owner,
     },
   ]);
-  await database.insert(routines).values({
-    id: `routine_${randomUUID()}`,
+  await seedRoutine({
     ownerUserId: owner,
     agentId: bot.id,
     channelId,
     instruction: "Check in.",
-    cron: "0 9 * * *",
-    nextRunAt: new Date(Date.now() + 86_400_000),
   });
   return { bot, owner, channelId };
 }

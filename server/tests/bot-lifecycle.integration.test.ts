@@ -24,12 +24,6 @@ import {
 import { createDatabase } from "../src/db/client";
 import { approvalRequests } from "../src/db/schema/approvals";
 import { users } from "../src/db/schema/core";
-import { routines } from "../src/db/schema/coworker";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
-import { responsibilities } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
 import {
@@ -44,9 +38,16 @@ import {
   seedConversation,
   storedConversation,
 } from "./support/conversations";
+import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
 import { removeTestMemory, testMemory } from "./support/memory";
+import {
+  seedResponsibility,
+  seedRoutine,
+  testScheduleClient,
+  useTestSchedules,
+} from "./support/schedules";
 
 /**
  * Pause, reset, Activity, attention, follow-ups and update routing against a real PostgreSQL.
@@ -69,7 +70,29 @@ const direct = `${prefix}-direct`;
 const shared = `${prefix}-shared`;
 const othersDirect = `${prefix}-others-direct`;
 
+/** A check-in setting as a person turning check-ins on makes one, in Intelligence. */
+async function checkInSetting(input: {
+  id: string;
+  ownerUserId: string;
+  channelId: string;
+  threadId: string;
+  enabled?: boolean;
+}) {
+  return (await useTestSchedules()).create("check-in-settings", {
+    agentId: bot,
+    focus: "",
+    enabled: true,
+    intervalMinutes: 60,
+    nextRunAt: new Date(Date.now() + 3_600_000),
+    lastRunAt: null,
+    lastStatus: "idle",
+    lastError: null,
+    ...input,
+  });
+}
+
 beforeAll(async () => {
+  await useTestSchedules();
   await useTestPolicy();
   await useTestConfiguration();
   configureBotLifecycle({ pauses: configuredPauses });
@@ -107,16 +130,15 @@ beforeAll(async () => {
       members: members.map((userId) => ({ userId, threadId: null })),
     });
   for (const person of [owner, other]) {
-    await database.insert(routines).values({
+    await seedRoutine({
       id: `${prefix}-routine-${person}`,
       ownerUserId: person,
       agentId: bot,
       channelId: person === owner ? direct : othersDirect,
       instruction: "Summarise the day",
-      cron: "0 9 * * *",
       nextRunAt: new Date(Date.now() + 3_600_000),
     });
-    await database.insert(responsibilities).values({
+    await seedResponsibility({
       id: `${prefix}-goal-${person}`,
       ownerUserId: person,
       agentId: bot,
@@ -334,6 +356,58 @@ describe("Activity and attention", () => {
     ).toBe(true);
   });
 
+  test("a responsibility is standing work, and its run says what woke it", async () => {
+    const client = testScheduleClient();
+    const eventId = `${prefix}-event`;
+    await client.create("responsibility-events", {
+      id: eventId,
+      ownerUserId: owner,
+      source: "github",
+      externalId: `${prefix}-push`,
+      type: "push",
+      payload: {},
+    });
+    const runId = `${prefix}-goal-run`;
+    await client.create("responsibility-runs", {
+      id: runId,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId,
+      status: "queued",
+      replyText: null,
+      error: null,
+      waiting: null,
+      continuation: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+    try {
+      const result = await activity.forBot(owner, bot);
+      expect(result.scheduled).toContainEqual(
+        expect.objectContaining({
+          id: `responsibility:${prefix}-goal-${owner}`,
+          kind: "responsibility",
+          status: "active",
+          channelId: direct,
+        }),
+      );
+      expect(result.scheduled).toContainEqual(
+        expect.objectContaining({
+          id: `responsibility-run:${runId}`,
+          status: "queued",
+          detail: "github/push",
+        }),
+      );
+      expect(
+        [...result.scheduled, ...result.inProgress, ...result.completed].some(
+          (item) => item.id === `responsibility:${prefix}-goal-${other}`,
+        ),
+      ).toBe(false);
+    } finally {
+      await client.purge("responsibility-runs", runId);
+      await client.purge("responsibility-events", eventId);
+    }
+  });
+
   test("attention counts what waits on this person", async () => {
     const [row] = (await activity.attention(owner)).filter(
       (entry) => entry.agentId === bot,
@@ -548,14 +622,13 @@ describe("reset", () => {
         reviewState: "unreviewed",
       });
       formedMemoryId.set(person, formed.id);
-      await database.insert(proactiveSettings).values({
+      await checkInSetting({
         id: `${prefix}-research-${person}`,
         ownerUserId: person,
-        agentId: bot,
         channelId: person === owner ? direct : othersDirect,
         threadId: `${prefix}-research-thread-${person}`,
       });
-      await database.insert(proactiveSuggestions).values({
+      await testScheduleClient().create("check-in-suggestions", {
         id: `${prefix}-suggestion-${person}`,
         ownerUserId: person,
         agentId: bot,
@@ -563,6 +636,14 @@ describe("reset", () => {
         runId: "run-1",
         title: "Review the PR",
         detail: "It waits on you",
+        sourceApp: null,
+        sourceRef: null,
+        sourceLink: null,
+        status: "open",
+        dedupeKey: null,
+        pingId: null,
+        deliveredAt: null,
+        resolvedAt: null,
       });
       const rules = await useTestPolicy();
       await rules.createApprovalRule({
@@ -608,10 +689,7 @@ describe("reset", () => {
             .getMemory(person, formedMemoryId.get(person) as string)
             .then((found) => (found ? [found] : []))
         : table === "research"
-          ? database
-              .select({ id: proactiveSuggestions.id })
-              .from(proactiveSuggestions)
-              .where(eq(proactiveSuggestions.ownerUserId, person))
+          ? itemsOf(person)
           : // As Intelligence holds them now, past this process's memory.
             (await useTestPolicy()).client
               .approvalRules({ ownerUserId: person })
@@ -641,7 +719,6 @@ describe("reset", () => {
       .values({ id: person, email: `${person}@example.test` });
     await memory.intelligence.createSource({
       userId: person,
-      agentId: bot,
       connectorRef: "mail/search",
       title: "Mail",
       enabled: false,
@@ -652,10 +729,9 @@ describe("reset", () => {
       connectorRef: "calendar/list",
       title: "Calendar",
     });
-    await database.insert(proactiveSettings).values({
+    await checkInSetting({
       id: `${prefix}-off-research`,
       ownerUserId: person,
-      agentId: bot,
       channelId: direct,
       threadId: `${prefix}-off-research-thread`,
       enabled: false,
@@ -678,5 +754,6 @@ describe("reset", () => {
 
 afterAll(async () => {
   await removeTestMemory([owner, other, `${prefix}-chooser`]);
+  await purgeSchedulesOf([owner, other, `${prefix}-chooser`]);
   await database.$client.close();
 });

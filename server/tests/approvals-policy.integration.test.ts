@@ -9,9 +9,9 @@ import {
 import { createApprovalStore } from "../src/approvals/store";
 import type { ApprovalCandidate } from "../src/approvals/types";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { resetTestPolicy, useTestPolicy } from "./support/policy";
 
@@ -167,15 +167,11 @@ test("'Always allow here' saves a personal allow rule that the gate then honours
 });
 
 test("every non-trivial verdict is on the audit trail with its initiator", async () => {
-  const rows = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.actorUserId, owner),
-        eq(auditEvents.eventType, "approval.evaluated"),
-      ),
-    );
+  // The trail is Intelligence's, read after the outbox is flushed, by this file's own people.
+  const rows = await auditRows({
+    actorUserId: owner,
+    eventType: "approval.evaluated",
+  });
   expect(rows.length).toBeGreaterThanOrEqual(4);
   expect(rows).toContainEqual(
     expect.objectContaining({
@@ -186,10 +182,7 @@ test("every non-trivial verdict is on the audit trail with its initiator", async
       }),
     }),
   );
-  const changes = await database
-    .select()
-    .from(auditEvents)
-    .where(eq(auditEvents.actorUserId, admin));
+  const changes = await auditRows({ actorUserId: admin });
   expect(changes.map((row) => row.eventType)).toEqual(
     expect.arrayContaining([
       "approval.rule_changed",
@@ -239,10 +232,14 @@ test("a saved rule is changed in place, only by its owner, and the change is on 
   await expect(
     service.updateTeamRule(admin, locked.id, { behaviour: "hand_off" }),
   ).resolves.toMatchObject({ behaviour: "hand_off" });
-  const rows = await database
-    .select()
-    .from(auditEvents)
-    .where(eq(auditEvents.eventType, "approval.rule_changed"));
+  // By the two rules this test made: the trail is shared by every run, so not by event type alone.
+  const rows = (
+    await Promise.all(
+      [rule.id, locked.id].map((targetId) =>
+        auditRows({ eventType: "approval.rule_changed", targetId }),
+      ),
+    )
+  ).flat();
   expect(
     rows.filter(
       (row) =>

@@ -6,13 +6,16 @@
  * Intelligence's change announcements, so every server enforces the same rows the moment one of them
  * saves a change. A switch that applies on one replica out of N reads as working while it does not.
  *
- * What stays here is this deployment's own: who is an administrator and in which groups (identity),
- * and the records kept about what Bots did (Action Recording, model usage).
+ * Who is an administrator and in which groups is the person's row here, this deployment's copy of
+ * Intelligence's directory. The records kept about what Bots did (Action Recording, model usage) go
+ * through the outbox to Intelligence's audit trail (`audit-trail/`) and are read back from there.
  */
-import { desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import { writeOutbox } from "../audit-trail/outbox";
+import { auditTrail, flushBeforeRead } from "../audit-trail/trail";
 import type { Database } from "../db/client";
 import { people } from "../people/directory/directory";
-import { actionRecords, modelUsage, users } from "../db/schema";
+import { users } from "../db/schema";
 import { policy } from "../policy/cache";
 import type { PolicySettings, PolicySettingsPatch } from "../policy/types";
 import type { CapabilityRow, Member } from "./capabilities";
@@ -100,6 +103,11 @@ export type ModelUsageSummary = {
   people: number;
   lastUsedAt: string;
 };
+
+/** Intelligence's microsecond timestamps, as the millisecond ISO strings these rows always carried. */
+function millisecondIso(timestamp: string): string {
+  return new Date(timestamp.replace(/\.(\d{3})\d*Z$/, ".$1Z")).toISOString();
+}
 
 /**
  * The policy, refusing while it has never been read: an unread policy is not an empty one, and every
@@ -253,6 +261,11 @@ export function createEnterpriseStore(database: Database) {
       });
     },
 
+    /**
+     * Action Recording's row, written to the outbox and carried to Intelligence's action records
+     * (`audit-trail/`). Intelligence keeps them for `actionRetentionDays` (90, set at boot) and removes
+     * older ones itself, which is why there is no purge here any more.
+     */
     async recordAction(input: {
       surface: "cloud" | "local";
       botId?: string | null;
@@ -261,36 +274,36 @@ export function createEnterpriseStore(database: Database) {
       command: string;
       outcome: string;
     }): Promise<void> {
-      await database.insert(actionRecords).values({
+      await writeOutbox(database, "action", {
         surface: input.surface,
-        botId: input.botId ?? null,
-        actorUserId: input.actorUserId ?? null,
+        agentId: input.botId || null,
+        actorUserId: input.actorUserId || null,
         toolName: input.toolName,
         command: input.command,
         outcome: input.outcome,
       });
     },
 
+    /** The newest action records, from Intelligence, after sending what this deployment just wrote. */
     async actions(limit = 100) {
-      const rows = await database
-        .select()
-        .from(actionRecords)
-        .orderBy(desc(actionRecords.createdAt))
-        .limit(Math.min(Math.max(limit, 1), 500));
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const { actions } = await trail.client.actions({
+        limit: Math.min(Math.max(limit, 1), 500),
+      });
+      return actions.map((row) => ({
+        id: row.id,
+        surface: row.surface,
+        botId: row.agentId,
+        actorUserId: row.actorUserId,
+        toolName: row.toolName,
+        command: row.command,
+        outcome: row.outcome,
+        createdAt: millisecondIso(row.occurredAt),
       }));
     },
 
-    async purgeActions(olderThan: Date): Promise<number> {
-      const removed = await database
-        .delete(actionRecords)
-        .where(lt(actionRecords.createdAt, olderThan))
-        .returning({ id: actionRecords.id });
-      return removed.length;
-    },
-
+    /** Which model served a run, written to the outbox and carried to Intelligence's model usage. */
     async recordModelUsage(input: {
       userId?: string | null;
       agentId: string;
@@ -300,11 +313,11 @@ export function createEnterpriseStore(database: Database) {
       source: "configured" | "observed" | "unknown";
       allowed: boolean;
     }): Promise<void> {
-      await database.insert(modelUsage).values({
-        userId: input.userId ?? null,
+      await writeOutbox(database, "usage", {
+        userId: input.userId || null,
         agentId: input.agentId,
-        threadId: input.threadId ?? null,
-        runId: input.runId ?? null,
+        threadId: input.threadId || null,
+        runId: input.runId || null,
         model: input.model,
         source: input.source,
         allowed: input.allowed,
@@ -313,34 +326,35 @@ export function createEnterpriseStore(database: Database) {
 
     async modelUsageSummary(sinceDays: number): Promise<ModelUsageSummary[]> {
       const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
-      const rows = await database
-        .select({
-          model: modelUsage.model,
-          source: modelUsage.source,
-          runs: sql<number>`count(*)::int`,
-          refused: sql<number>`count(*) filter (where not ${modelUsage.allowed})::int`,
-          people: sql<number>`count(distinct ${modelUsage.userId})::int`,
-          lastUsedAt: sql<string>`max(${modelUsage.createdAt})`,
-        })
-        .from(modelUsage)
-        .where(gt(modelUsage.createdAt, since))
-        .groupBy(modelUsage.model, modelUsage.source)
-        .orderBy(sql`count(*) desc`);
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const rows = await trail.client.usageSummary(since.toISOString());
       return rows.map((row) => ({
-        ...row,
-        lastUsedAt: new Date(row.lastUsedAt).toISOString(),
+        model: row.model,
+        source: row.source,
+        runs: row.runs,
+        refused: row.refused,
+        people: row.people,
+        lastUsedAt: millisecondIso(row.lastUsedAt),
       }));
     },
 
     async recentModelUsage(limit = 50) {
-      const rows = await database
-        .select()
-        .from(modelUsage)
-        .orderBy(desc(modelUsage.createdAt))
-        .limit(Math.min(Math.max(limit, 1), 500));
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const { records } = await trail.client.usage({
+        limit: Math.min(Math.max(limit, 1), 500),
+      });
+      return records.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        agentId: row.agentId,
+        threadId: row.threadId,
+        runId: row.runId,
+        model: row.model,
+        source: row.source,
+        allowed: row.allowed,
+        createdAt: millisecondIso(row.occurredAt),
       }));
     },
 

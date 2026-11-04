@@ -114,6 +114,10 @@ export function useTestBots(): Promise<BotDirectory> {
     directory.onPurged((botId) =>
       forgetPurgedBot(conversations, delivery, botId),
     );
+    // Every Bot's routines, check-ins and responsibilities live in Intelligence too, and much of what
+    // a Bot test drives reads them (a channel's work, a Bot's activity), so the schedule directory
+    // starts with the Bots, as it does in the server.
+    await (await import("./schedules")).useTestSchedules();
     return directory;
   })();
   return started;

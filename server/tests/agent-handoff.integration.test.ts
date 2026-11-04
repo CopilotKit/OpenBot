@@ -12,8 +12,9 @@ import { createHandoffDesk, HANDOFF_KIND } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, workItems } from "../src/db/schema";
+import { workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows } from "./support/audit";
 import {
   changeAccess,
   grantBot,
@@ -210,10 +211,12 @@ describe("a hop, against the database", () => {
     });
 
     expect(outcome.ok).toBe(false);
-    const rows = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "agent.handoff_refused"));
+    // The trail is Intelligence's and shared by every run, so read by the asking Bot this suite made,
+    // which a refusal names as its target.
+    const rows = await auditRows({
+      eventType: "agent.handoff_refused",
+      targetId: ASKER,
+    });
     expect(
       rows.some(
         (row) =>

@@ -16,6 +16,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removeTestMemory, testMemory } from "./support/memory";
 import { useTestPolicy } from "./support/policy";
 import { removeServers, seedServer, useTestVault } from "./support/vault";
+import { useTestSchedules } from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `memory-${randomUUID()}`;
@@ -54,6 +55,8 @@ const held = (userId = owner) =>
 beforeAll(async () => {
   // Sign-in and Bot reset read the organization policy (support/policy.ts).
   await useTestPolicy();
+  // A Bot reset reaches the person's check-ins, which live in Intelligence.
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },

@@ -11,6 +11,7 @@ import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
+  ACTION_RECORD_RETENTION_DAYS,
   auditRoutineStore,
   enterpriseControls,
   guardDeliveryStore,
@@ -109,6 +110,11 @@ import {
   recordAuditEvent,
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
+import { createAuditTrailClient } from "./audit-trail/client";
+import { createAuditDrainer } from "./audit-trail/drainer";
+import { startAuditRetentionSync } from "./audit-trail/retention";
+import { installAuditTrail } from "./audit-trail/trail";
+import { startAuditHistoryCopy } from "./audit-trail/upgrade";
 import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createEntra, withEntraBearer } from "./auth/entra";
@@ -330,6 +336,7 @@ import {
 } from "./proactive/restriction";
 import { checkInToolsFor, createCheckInScope } from "./proactive/scope";
 import { createProactiveStore } from "./proactive/store";
+import { checkInCopySteps } from "./proactive/upgrade";
 import { createProviderOAuthProxy } from "./provider-oauth";
 import { createTrajectoryBindingStore } from "./recorder/trajectory-bindings";
 import { createRecorderExtension } from "./recorder/wiring";
@@ -353,11 +360,19 @@ import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
+import { responsibilityCopySteps } from "./responsibilities/upgrade";
 import { createServerResponsibilityEngine } from "./responsibilities/wiring";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
+import { routineCopySteps } from "./routines/upgrade";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { createScheduleClient } from "./schedules/client";
+import {
+  createScheduleDirectory,
+  installScheduleDirectory,
+} from "./schedules/directory";
+import { copyLocalSchedulesToIntelligence } from "./schedules/upgrade";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createTaskRunner } from "./tasks/runner";
 import { createTaskStore } from "./tasks/store";
@@ -550,6 +565,26 @@ await peopleDirectory.start();
 await copyLocalPeopleToIntelligence(database, peopleDirectory);
 await initializeDevActorUser(database, config.singleUser);
 /*
+ * The audit trail, action records and model usage live in Intelligence. Every row is written to the
+ * local outbox in its writer's own transaction, as before; the drainer carries it to Intelligence and
+ * readers read it there (audit-trail/). Started here so anything written before it waits only until now.
+ */
+const auditTrailClient = createAuditTrailClient({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const { drainer: auditDrainer } = installAuditTrail({
+  client: auditTrailClient,
+  drainer: createAuditDrainer({ database, client: auditTrailClient }),
+});
+auditDrainer.start();
+// How long Intelligence keeps the trail is still this deployment's to say: AUDIT_RETENTION_DAYS, and
+// 90 days of Action Recording.
+const auditRetentionSync = startAuditRetentionSync(auditTrailClient, {
+  eventRetentionDays: config.auditRetentionDays ?? null,
+  actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+});
+/*
  * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
  * Intelligence's change announcements (agents/bot-registry/directory.ts). Started before anything
  * reads a Bot (nothing above does), and fatal when Intelligence cannot answer: a server with no Bots would show everybody
@@ -590,6 +625,41 @@ await sweepPurgedBotRows(
   database,
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
 );
+/*
+ * Routines, check-ins and responsibilities, from Intelligence's agent schedules, held in memory on
+ * this instance and kept fresh by its change announcements (schedules/directory.ts). The sweeps that
+ * fire them read this, never Intelligence directly. Fatal when Intelligence cannot answer, like the
+ * Bots: a server with no routines would quietly stop firing everybody's.
+ */
+const scheduleDirectory = installScheduleDirectory(
+  createScheduleDirectory({
+    client: createScheduleClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await scheduleDirectory.start();
+/*
+ * An upgraded deployment's routines, check-ins and responsibilities, copied from the local tables
+ * once, parents first (schedules/upgrade.ts), then read into the directory so the first sweep sees
+ * them.
+ */
+const copiedSchedules = await copyLocalSchedulesToIntelligence(
+  database,
+  scheduleDirectory.client,
+  [
+    ...routineCopySteps(database),
+    ...checkInCopySteps(database),
+    ...responsibilityCopySteps(database),
+  ],
+);
+if (copiedSchedules.some((step) => step.kind === "copied"))
+  await scheduleDirectory.resync();
+// An upgraded deployment's earlier audit trail, action records and model usage, copied into
+// Intelligence once, in the background: it can be millions of rows (audit-trail/upgrade.ts).
+const auditHistoryCopy = startAuditHistoryCopy(database, auditTrailClient);
 /*
  * Everything Intelligence holds beside the Bots: each Bot's grants, publication and assignments, each
  * person's preferences, the component catalogue and the skills, in memory on this instance and kept
@@ -1152,14 +1222,11 @@ const approvalService = createServerApprovalService({
 });
 // Check-ins' settings, items, run ledger and pings. See proactive/store.ts.
 const proactiveStore = createProactiveStore(database);
-// Housekeeping on a schedule: audit rows when asked for, screenshots and the check-in ledger always,
-// one timer. See audit-retention.ts.
-const retentionSweeps = startRetentionSweeps(
-  config.databaseUrl,
-  config.auditRetentionDays,
-  pageFrameStore,
-  { proactive: proactiveStore },
-);
+// Housekeeping on a schedule: screenshots and the check-in ledger, one timer. See audit-retention.ts;
+// the audit trail's own retention is Intelligence's.
+const retentionSweeps = startRetentionSweeps(pageFrameStore, {
+  proactive: proactiveStore,
+});
 /**
  * Whose computer a Bot runs on: the person it acts for, unless the Bot is isolated and its owner
  * still holds the switch (`runsIsolated`, agents/isolation.ts). A provider that cannot make a
@@ -2384,6 +2451,15 @@ const responsibilityAnswerTurn = ({
 };
 const responsibilitySweep = repeatAfterEach(async () => {
   try {
+    // Events accepted by a process that stopped before queueing their runs, and queued runs left
+    // without an item, before this pass dispatches (responsibilities/store.ts).
+    const recovered = await responsibilityStore.recover({
+      owner: workOwner("responsibility"),
+    });
+    if (recovered.ingests || recovered.requeued.length)
+      console.info(
+        JSON.stringify({ type: "responsibility-recovery", ...recovered }),
+      );
     const report = await responsibilityEngine.dispatch({
       owner: workOwner("responsibility"),
       limit: 1,
@@ -3317,6 +3393,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     deliveryDirectory.stop();
     peopleDirectory.stop();
     scimReactionsRunner.stop();
+    auditRetentionSync.stop();
+    auditHistoryCopy.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();
@@ -3335,6 +3413,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       // Started only where handing work between Bots is switched on, so it is often not there.
       workOfferedListener?.stop() ?? Promise.resolve(),
       Promise.resolve(retentionSweeps.stop()),
+      // What is written but not yet sent stays in the outbox for the next start; this ends the pass.
+      auditDrainer.stop(),
     ]).finally(() => process.exit(0));
   });
 }

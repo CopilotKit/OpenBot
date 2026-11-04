@@ -5,7 +5,6 @@ import {
   FRAME_RETENTION_MS,
 } from "../src/computer/page-frames";
 import { filesClient } from "../src/files/client";
-import { testDatabaseUrl } from "./support/database";
 import { useTestFiles } from "./support/files";
 
 /**
@@ -20,7 +19,6 @@ import { useTestFiles } from "./support/files";
  * each frame's own expiry there and the sweep's delete by age.
  */
 
-const databaseUrl = testDatabaseUrl();
 useTestFiles();
 const store = createPageFrameStore();
 
@@ -70,7 +68,7 @@ describe("page frame retention", () => {
      * `AUDIT_RETENTION_DAYS` has, and the sweeper used to return before starting a timer at all,
      * which is how the frames went unswept everywhere the culler does not run.
      */
-    const sweeps = startRetentionSweeps(databaseUrl, undefined, store, {
+    const sweeps = startRetentionSweeps(store, {
       firstRunMs: 10,
       intervalMs: 3_600_000,
     });

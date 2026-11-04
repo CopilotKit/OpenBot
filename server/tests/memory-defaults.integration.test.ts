@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import {
@@ -10,11 +10,11 @@ import {
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { mcpTools } from "../src/db/schema/plugins";
-import { proactiveSettings } from "../src/db/schema/proactive";
 import {
   createMemoryDefaults,
   DEFAULT_RESEARCH_INTERVAL_MINUTES,
   lockDefaults,
+  withResearchDefaultsLock,
 } from "../src/memory/defaults";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createPluginStore } from "../src/plugins/store";
@@ -27,6 +27,7 @@ import {
   storedPreferences,
   useTestConfiguration,
 } from "./support/bots";
+import { purgeSchedulesOf, settingsOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   removeConnectionsWhere,
@@ -35,6 +36,7 @@ import {
   seedServer,
   useTestVault,
 } from "./support/vault";
+import { useTestSchedules } from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -90,28 +92,20 @@ function defaults(
 /** The person's sources for a Bot, as Intelligence holds them. */
 const sourcesOf = (person: string, agentId: string) =>
   memory.sourcesFor(person, agentId);
-const researchOf = (person: string, agentId: string) =>
-  database
-    .select()
-    .from(proactiveSettings)
-    .where(
-      and(
-        eq(proactiveSettings.ownerUserId, person),
-        eq(proactiveSettings.agentId, agentId),
-      ),
-    );
+/** The person's check-in settings with this Bot, as Intelligence holds them. */
+const researchOf = async (person: string, agentId: string) =>
+  (await settingsOf(person)).filter((setting) => setting.agentId === agentId);
 async function reset() {
   for (const person of [owner, other])
     await intelligence.purgeSources({ userId: person });
   cache.forget();
-  await database
-    .delete(proactiveSettings)
-    .where(inArray(proactiveSettings.ownerUserId, [owner, other]));
+  await purgeSchedulesOf([owner, other]);
   await clearPreferences([owner, other]);
 }
 
 beforeAll(async () => {
   await useTestConfiguration();
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
@@ -201,6 +195,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await removeTestMemory([owner, other]);
+  await purgeSchedulesOf([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, secondBot]);
   await removeServers([app, unconnected]);
@@ -241,10 +236,14 @@ describe("memory sources, on by default", () => {
       await removal.transaction(async (transaction) => {
         await lockDefaults(transaction, owner, bot);
         expect(await defaults().adoptSources(owner, bot)).toEqual([]);
+      });
+      // Research is made in Intelligence, so its removal holds a lease rather than a transaction.
+      await withResearchDefaultsLock(removal, owner, bot, async () => {
         expect(
           await defaults().adoptResearch(owner, bot, `channel-${suite}`),
         ).toBe(false);
       });
+      expect(await researchOf(owner, bot)).toEqual([]);
     } finally {
       await removal.$client.close();
     }

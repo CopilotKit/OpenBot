@@ -8,12 +8,10 @@ import {
   deliveryInbox,
   deliveryOutbox,
 } from "../db/schema/delivery";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../db/schema/proactive";
 import { workItems } from "../db/schema/work";
 import { deliveryDirectory, type StoredBinding } from "./directory";
+import { schedules } from "../schedules/directory";
+import type { CheckInSuggestionRecord } from "../schedules/types";
 import {
   type BindingTransport,
   type DeliveryBinding,
@@ -134,26 +132,33 @@ export function createDeliveryStore(database: Database) {
       suggestionIds: string[],
     ): Promise<{ agentId: string; channelId: string }[]> {
       if (suggestionIds.length === 0) return [];
-      return database
-        .select({
-          agentId: proactiveSuggestions.agentId,
-          channelId: proactiveSettings.channelId,
-        })
-        .from(proactiveSuggestions)
-        .innerJoin(
-          proactiveSettings,
-          eq(proactiveSettings.id, proactiveSuggestions.settingId),
-        )
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            inArray(proactiveSuggestions.id, suggestionIds),
-          ),
-        )
-        .orderBy(
-          desc(proactiveSuggestions.createdAt),
-          desc(proactiveSuggestions.id),
+      // The items are in Intelligence's check-in suggestions; each one's setting is held in memory.
+      const items: CheckInSuggestionRecord[] = [];
+      for (let start = 0; start < suggestionIds.length; start += 200) {
+        const { items: page } = await schedules().client.all(
+          "check-in-suggestions",
+          {
+            ownerUserId: owner,
+            ids: suggestionIds.slice(start, start + 200),
+          },
         );
+        items.push(...page);
+      }
+      items.sort(
+        (left, right) =>
+          right.createdAt.getTime() - left.createdAt.getTime() ||
+          (right.id > left.id ? 1 : right.id < left.id ? -1 : 0),
+      );
+      const found: { agentId: string; channelId: string }[] = [];
+      for (const item of items) {
+        const setting = await schedules().find(
+          "check-in-settings",
+          item.settingId,
+        );
+        if (setting && setting.deletedAt === null)
+          found.push({ agentId: item.agentId, channelId: setting.channelId });
+      }
+      return found;
     },
     async bind(input: Omit<DeliveryBinding, "id" | "enabled">) {
       // An identity already bound to this person is pointed at the new conversation and keeps its

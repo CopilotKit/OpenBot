@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { mcpTools } from "../src/db/schema/plugins";
-import { proactiveSettings } from "../src/db/schema/proactive";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { MemoryRefusedError } from "../src/memory/types";
 import { createPluginStore } from "../src/plugins/store";
@@ -16,8 +15,15 @@ import {
   ProactiveNotFoundError,
   ProactiveRefusedError,
 } from "../src/proactive/types";
+import { ScheduleError } from "../src/schedules/client";
+import { useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
+import { makeDue, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
+
+// A run's reads are its audit rows, which live in Intelligence: `readsFor` reads the trail there.
+useTestAuditTrail();
 import { removeServers, seedServer, useTestVault } from "./support/vault";
 import { testMemory } from "./support/memory";
 
@@ -46,6 +52,7 @@ const memory = testMemory(database).store;
 const ingestion = createMemoryIngestion({ store: memory, plugins });
 
 beforeAll(async () => {
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
@@ -79,6 +86,7 @@ beforeAll(async () => {
   await plugins.grant("mcp", ref, bot, owner);
 });
 afterAll(async () => {
+  await purgeSchedulesOf([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, secondBot]);
   await removeServers([server]);
@@ -108,24 +116,28 @@ test("settings are owner scoped, one per Bot, and bounded in frequency", async (
       `${prefix}-t3`,
     ),
   ).rejects.toBeInstanceOf(ProactiveRefusedError);
-  // The database refuses what the schema refuses, even past the parser.
-  const refusal = await database
-    .insert(proactiveSettings)
-    .values({
+  // Intelligence refuses what the schema refuses, even past the parser.
+  const refusal = await testScheduleClient()
+    .create("check-in-settings", {
       id: randomUUID(),
       ownerUserId: owner,
       agentId: secondBot,
       channelId: "c",
       threadId: "t",
+      focus: "",
+      enabled: true,
       intervalMinutes: 5,
+      nextRunAt: new Date(),
+      lastRunAt: null,
+      lastStatus: "idle",
+      lastError: null,
     })
     .then(
       () => null,
       (error: unknown) => error,
     );
-  expect(
-    (refusal as { cause?: { constraint?: string } } | null)?.cause?.constraint,
-  ).toBe("proactive_settings_interval_check");
+  expect(refusal).toBeInstanceOf(ScheduleError);
+  expect((refusal as ScheduleError).status).toBe(400);
   expect((await proactive.list(other)).length).toBe(0);
   await expect(proactive.get(other, setting.id)).rejects.toBeInstanceOf(
     ProactiveNotFoundError,
@@ -144,10 +156,7 @@ test("settings are owner scoped, one per Bot, and bounded in frequency", async (
 test("a due setting is claimed once and its next run moves forward by its interval", async () => {
   const [setting] = await proactive.list(owner);
   if (!setting) throw new Error("setting missing");
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   const [first, second] = await Promise.all([
     proactive.claimDue(10),
     proactive.claimDue(10),
@@ -167,10 +176,7 @@ test("a due setting is claimed once and its next run moves forward by its interv
   expect(after.lastError).toHaveLength(500);
   // A disabled setting is never claimed.
   await proactive.update(owner, setting.id, { enabled: false });
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   expect(
     (await proactive.claimDue(10)).some((row) => row.id === setting.id),
   ).toBe(false);
@@ -208,6 +214,9 @@ test("a run's reads come from its own successful audit rows only", async () => {
   expect(reads.map((read) => read.ref)).toEqual([ref]);
   expect(reads[0]?.at).toBeInstanceOf(Date);
 });
+
+/** How the person decided the first item: whichever of the two clicks landed first. */
+let firstDecision = "";
 
 test("items carry their normalized title, are listed to their owner, and are resolved once", async () => {
   const [setting] = await proactive.list(owner);
@@ -257,9 +266,12 @@ test("items carry their normalized title, are listed to their owner, and are res
     proactive.resolveSuggestion(owner, suggestion.id, "started"),
     proactive.resolveSuggestion(owner, suggestion.id, "dismissed"),
   ]);
-  expect(
-    [started, again].filter((result) => result.status === "fulfilled"),
-  ).toHaveLength(1);
+  const won = [started, again].filter(
+    (result) => result.status === "fulfilled",
+  );
+  expect(won).toHaveLength(1);
+  firstDecision = (won[0] as PromiseFulfilledResult<{ status: string }>).value
+    .status;
   expect(
     (await proactive.suggestions(owner)).some(
       (row) => row.id === suggestion.id,
@@ -319,6 +331,17 @@ test("open items stay open across check-ins until the person starts or hides one
       sourceLink: null,
       sourceApp: "Issue tracker",
     },
+    // The first item, from the first Bot, when Hide was the click that landed: hidden from all.
+    ...(firstDecision === "dismissed"
+      ? [
+          {
+            agentId: bot,
+            title: "Reply to Sam",
+            sourceLink: "https://issues.example.test/1",
+            sourceApp: "Issue tracker",
+          },
+        ]
+      : []),
   ]);
   expect(prior.started).toEqual([{ title: "Book the venue" }]);
   expect(await proactive.priorItems(other, secondBot)).toEqual({

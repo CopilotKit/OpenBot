@@ -19,7 +19,13 @@ import {
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import { routineRuns, routines, users, workItems } from "../src/db/schema";
+import { users, workItems } from "../src/db/schema";
+import {
+  changeRun,
+  seedRoutine,
+  seedRun,
+  useTestSchedules,
+} from "./support/schedules";
 import { removeBots, useTestBots } from "./support/bots";
 import {
   addConversationMember,
@@ -60,7 +66,7 @@ afterEach(async () => {
     .delete(workItems)
     .where(like(workItems.key, `%${testPrefix}%`));
   for (const routineId of createdRoutineIds.splice(0)) {
-    await database.delete(routines).where(eq(routines.id, routineId));
+    await (await useTestSchedules()).purge("routines", routineId);
   }
   await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
@@ -312,18 +318,15 @@ describe("what a conversation is waiting on", () => {
   test("a routine firing into it, until the run has an outcome", async () => {
     const { owner, asker, channel } = await setup();
     const routineId = `${testPrefix}-routine`;
-    await database.insert(routines).values({
+    await seedRoutine({
       id: routineId,
       ownerUserId: owner.id,
       agentId: asker,
       channelId: channel.id,
-      instruction: "Post the standup summary.",
-      cron: "0 9 * * *",
-      nextRunAt: new Date(Date.now() + 86_400_000),
     });
     createdRoutineIds.push(routineId);
     const runId = `${testPrefix}-run`;
-    await database.insert(routineRuns).values({ id: runId, routineId });
+    await seedRun(routineId, runId);
 
     const running = await workFor(owner, channel);
     expect(running).toHaveLength(1);
@@ -334,10 +337,7 @@ describe("what a conversation is waiting on", () => {
       botId: asker,
     });
 
-    await database
-      .update(routineRuns)
-      .set({ status: "succeeded", finishedAt: new Date() })
-      .where(eq(routineRuns.id, runId));
+    await changeRun(runId, { status: "succeeded", finishedAt: new Date() });
     expect(await workFor(owner, channel)).toEqual([]);
   });
   test("only what this person's own thread and routines wait on, in a shared channel", async () => {
@@ -345,19 +345,14 @@ describe("what a conversation is waiting on", () => {
     const { member, channel: theirs } = await addMember(channel.id);
     await hop({ threadId: channel.threadId, toName: "Ana" });
     const routineId = `${testPrefix}-routine-shared`;
-    await database.insert(routines).values({
+    await seedRoutine({
       id: routineId,
       ownerUserId: owner.id,
       agentId: asker,
       channelId: channel.id,
-      instruction: "Post the standup summary.",
-      cron: "0 9 * * *",
-      nextRunAt: new Date(Date.now() + 86_400_000),
     });
     createdRoutineIds.push(routineId);
-    await database
-      .insert(routineRuns)
-      .values({ id: `${testPrefix}-run-shared`, routineId });
+    await seedRun(routineId, `${testPrefix}-run-shared`);
 
     expect(await workFor(owner, channel)).toHaveLength(2);
     // The other member's read names neither the Bot the owner asked nor the owner's routine.

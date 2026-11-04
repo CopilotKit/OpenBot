@@ -1,29 +1,33 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   auditQueryFromUrl,
   createAuditReader,
   createAuditStore,
 } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
+import { auditOutbox } from "../src/db/schema";
+import { auditRows, flushAuditTrail, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const store = createAuditStore(database);
+// The reader reads the trail in Intelligence, after flushing what the store wrote to the outbox.
+useTestAuditTrail();
 const reader = createAuditReader(database);
 
-// Nothing is cleaned up: the retention trigger refuses the delete, so each test takes its own target id.
+// Nothing is cleaned up: the trail in Intelligence is append-only and shared by every run, so each
+// test takes its own target id and reads by it.
 const target = () => `initiator-test-${crypto.randomUUID()}`;
 
 /**
  * The page a filter actually answers with, across every row in the trail.
  *
- * `rowsFor` narrows to one test's target afterwards, which is what makes the tests independent —
- * but it also hides the difference between a filter that matched one row and a filter that matched
- * the entire trail and was then cut down here. A filter that must narrow to nothing is only shown
- * to have done so by reading the page before that cut.
+ * `rowsFor` narrows to one test's target, which is what makes the tests independent, but it also
+ * hides the difference between a filter that matched one row and a filter that matched the entire
+ * trail and was then cut down. A filter that must narrow to nothing is only shown to have done so by
+ * reading the page before that cut.
  */
 async function pageFor(search = "") {
   const { events } = await reader.list(
@@ -32,8 +36,15 @@ async function pageFor(search = "") {
   return events;
 }
 
+/**
+ * One test's rows under a filter. The target goes into the query as well as the cut afterwards: the
+ * trail is shared by every run of every file, so a first page across all of it need not reach the
+ * row this test just wrote.
+ */
 async function rowsFor(targetId: string, search = "") {
-  const events = await pageFor(search);
+  const params = new URLSearchParams(search);
+  params.set("targetId", targetId);
+  const events = await pageFor(`?${params}`);
   return events.filter((event) => event.targetId === targetId);
 }
 
@@ -281,14 +292,50 @@ describe("what started a run", () => {
       payload: { bot: "general-assistant" },
     });
 
+    /*
+     * Two places the row lives, and neither lets it be re-attributed. Waiting in the outbox to be
+     * sent, an UPDATE of the record is refused, as it always was on `audit_events`.
+     */
     const reattribute = async () => {
       await database
-        .update(auditEvents)
-        .set({ initiatorKind: "person", initiatorId: null })
-        .where(eq(auditEvents.targetId, TARGET));
+        .update(auditOutbox)
+        .set({
+          record: sql`jsonb_set(${auditOutbox.record}, '{initiator}', '{"kind":"person","id":null}')`,
+        })
+        .where(sql`${auditOutbox.record}->'target'->>'id' = ${TARGET}`);
     };
 
     expect(reattribute()).rejects.toThrow();
+
+    /*
+     * And once it is in Intelligence's trail, sending the same id again as a person's is not a
+     * change: the trail keeps the row it has (its database refuses every UPDATE, as this one did).
+     */
+    await flushAuditTrail();
+    const [stored] = await auditRows({ targetId: TARGET });
+    expect(stored).toMatchObject({
+      initiatorKind: "routine",
+      initiatorId: "routine-7",
+    });
+    await useTestAuditTrail().client.store("event", [
+      {
+        id: stored?.id ?? "",
+        occurredAt: stored?.occurredAt ?? new Date().toISOString(),
+        eventType: "mcp.call_succeeded",
+        actorUserId: null,
+        agentId: null,
+        initiator: { kind: "person", id: null },
+        target: { type: "mcp_tool", id: TARGET },
+        payload: { bot: "general-assistant" },
+      },
+    ]);
+    expect(await auditRows({ targetId: TARGET })).toEqual([
+      expect.objectContaining({
+        id: stored?.id,
+        initiatorKind: "routine",
+        initiatorId: "routine-7",
+      }),
+    ]);
   });
 });
 

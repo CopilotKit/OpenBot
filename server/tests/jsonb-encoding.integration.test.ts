@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { workItems } from "../src/db/schema";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -14,8 +15,12 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * on `payload->>'bot'` and related SQL reads returning fields from an object, not from a JSON string.
  *
  * These assertions are deliberately made in SQL, against a real database, on the shape of the stored
- * value rather than on what comes back through the application.
+ * value rather than on what comes back through the application. The audit row is held twice: in the
+ * local outbox it is written to (`audit_outbox.record`, payload at `record->'payload'`), and as
+ * Intelligence hands it back once the outbox is carried there.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -61,13 +66,30 @@ describe("what a jsonb column actually stores", () => {
       payload: { bot: marker, function: "botActivity" },
     });
 
-    const [row] = await database.execute<{ shape: string; bot: string }>(
-      sql`select jsonb_typeof(payload) as shape, payload->>'bot' as bot
-          from audit_events where target_id = ${`test_${suite}`}`,
+    // The outbox row, before anything carries it to Intelligence: `record` and the payload inside it
+    // are objects whose keys JSON operators reach, not strings holding them. A `record` stored as a
+    // string is the row Intelligence refuses.
+    const [row] = await database.execute<{
+      record: string;
+      shape: string;
+      bot: string;
+    }>(
+      sql`select jsonb_typeof(record) as record,
+                 jsonb_typeof(record->'payload') as shape,
+                 record->'payload'->>'bot' as bot
+          from audit_outbox
+          where kind = 'event' and record->'target'->>'id' = ${`test_${suite}`}`,
     );
 
+    expect(row?.record).toBe("object");
     expect(row?.shape).toBe("object");
     expect(row?.bot).toBe(marker);
+
+    // And the same payload as Intelligence stored it: still an object with its own fields.
+    const stored = await auditRows({ targetId: `test_${suite}` });
+    expect(stored).toHaveLength(1);
+    expect(typeof stored[0]?.payload).toBe("object");
+    expect(stored[0]?.payload.bot).toBe(marker);
     // Left in place: the trail is append-only, so a test cannot tidy up after itself. One row.
   });
 });

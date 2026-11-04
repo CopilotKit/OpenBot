@@ -4,7 +4,8 @@ import { conversations } from "../conversations/directory";
 import { writeKey } from "../conversations/http";
 import type { AgentTask, ConversationDraft } from "../conversations/types";
 import type { Database } from "../db/client";
-import { proactiveSuggestions, workItems } from "../db/schema";
+import { workItems } from "../db/schema";
+import { schedules } from "../schedules/directory";
 import type { BotTaskOrigin } from "../db/schema/tasks";
 import type { BotTaskCounts, TaskPayload } from "../proactive/contracts";
 import {
@@ -58,30 +59,27 @@ export type NewTask = {
 /**
  * Unlink every task whose check-in item is gone, as the old foreign key did (`on delete set null`).
  *
- * The items stay in this deployment's database and the tasks are in Intelligence, so no constraint
- * joins them any more. Whatever removed an item (a person removing a Bot's research, a reset, a
+ * The items are check-in suggestions in Intelligence's agent schedules and the tasks are in its
+ * conversations, so no constraint joins them any more. Whatever removed an item (a person removing a Bot's research, a reset, a
  * cascade), the next read of its task finds no item under its reference, unlinks it in Intelligence,
  * and answers with it unlinked. A failed unlink is said and retried on the next read; the answer
  * is unlinked either way.
  */
-async function withLiveItems(
-  database: Database,
-  rows: TaskRow[],
-): Promise<TaskRow[]> {
+async function withLiveItems(rows: TaskRow[]): Promise<TaskRow[]> {
   const refs = [
     ...new Set(
       rows.flatMap((row) => (row.suggestionId ? [row.suggestionId] : [])),
     ),
   ];
   if (refs.length === 0) return rows;
-  const live = new Set(
-    (
-      await database
-        .select({ id: proactiveSuggestions.id })
-        .from(proactiveSuggestions)
-        .where(inArray(proactiveSuggestions.id, refs))
-    ).map((row) => row.id),
-  );
+  // Asked of Intelligence by id, past this instance's memory: an item removed on another replica is gone.
+  const live = new Set<string>();
+  for (let start = 0; start < refs.length; start += 200) {
+    const { items } = await schedules().client.all("check-in-suggestions", {
+      ids: refs.slice(start, start + 200),
+    });
+    for (const item of items) live.add(item.id);
+  }
   const client = conversations().client;
   return Promise.all(
     rows.map(async (row) => {
@@ -209,7 +207,7 @@ export async function listedTasks(
       listed.push(...done.filter((task) => again.has(task.id)));
     }
   }
-  return (await withLiveItems(database, listed))
+  return (await withLiveItems(listed))
     .sort(
       (left, right) =>
         right.createdAt.getTime() - left.createdAt.getTime() ||
@@ -267,7 +265,7 @@ export function createTaskStore(
   async function owned(owner: string, id: string): Promise<TaskRow | null> {
     const task = await client().tasks.get(id);
     if (!task || task.userId !== owner) return null;
-    const [row] = await withLiveItems(database, [taskRowOf(task)]);
+    const [row] = await withLiveItems([taskRowOf(task)]);
     return row ?? null;
   }
 
@@ -357,7 +355,7 @@ export function createTaskStore(
       const task = tasks[0];
       if (!task) return null;
       // An item that is gone opened no task any more: its task is unlinked.
-      const [row] = await withLiveItems(database, [taskRowOf(task)]);
+      const [row] = await withLiveItems([taskRowOf(task)]);
       return row?.suggestionId === itemId
         ? { id: task.id, channelId: task.conversationId }
         : null;

@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore, rotateCredential } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import { deploymentFaultSentence } from "../src/plugins/store";
 import { SecretNameTakenError } from "../src/vault/client";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { purgeSecrets, useTestVault } from "./support/vault";
 
@@ -19,11 +18,12 @@ import { purgeSecrets, useTestVault } from "./support/vault";
  * message the test chose would prove nothing, because the message this test is about is one the
  * real service produces.
  *
- * `audit_events` is append-only by trigger, exported, and kept for the whole retention window, so a
- * secret written here is not one anybody can take back out.
+ * The audit trail is append-only, held in Intelligence, exported, and kept for the whole retention
+ * window, so a secret written here is not one anybody can take back out.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 let store: ReturnType<typeof createCredentialStore>;
 let service: {
@@ -61,17 +61,11 @@ async function liveCredential(keyId: string, secret: string) {
 }
 
 async function refusalReason(targetId: string) {
-  const [event] = await database
-    .select({ payload: auditEvents.payload })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "credential.rotation_refused"),
-        eq(auditEvents.targetId, targetId),
-      ),
-    )
-    .orderBy(desc(auditEvents.createdAt))
-    .limit(1);
+  // Newest first, as the helper answers.
+  const [event] = await auditRows({
+    eventType: "credential.rotation_refused",
+    targetId,
+  });
 
   return (event?.payload as { reason?: string } | undefined)?.reason;
 }

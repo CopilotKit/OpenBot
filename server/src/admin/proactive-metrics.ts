@@ -14,20 +14,17 @@
  * on. An item nobody has answered yet, or one the Bot cleared itself, says nothing about whether the
  * Bot raised the right thing, so neither is in it. Null until somebody decided one.
  *
- * Runs come from the run ledger (`proactive_runs`), which keeps 30 days, so the longer window is
- * the whole ledger.
+ * Runs come from the run ledger (Intelligence's `check-in-runs`), which keeps 30 days, so the longer
+ * window is the whole ledger. The counts are Intelligence's own summaries: the history is not read
+ * here, only how many of each. The settings are held in memory (`schedules/directory.ts`); whose
+ * check-ins are on is decided here from this deployment's own switches.
  */
-import { and, count, eq, gt, inArray, ne, sql } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { bots as directory } from "../agents/bot-registry/directory";
-import { lifecyclePairs, notAmongPairs } from "../agents/lifecycle";
+import { lifecyclePairs } from "../agents/lifecycle";
 import type { Database } from "../db/client";
-import {
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-  users,
-} from "../db/schema";
+import { users } from "../db/schema";
+import { schedules } from "../schedules/directory";
 import type {
   BotProactiveMetrics,
   ProactiveMetricsResponse,
@@ -96,29 +93,25 @@ export async function proactiveMetrics(
     admins: ReadonlySet<string>;
   },
 ): Promise<ProactiveMetricsResponse> {
-  const since = sql`now() - make_interval(days => ${input.days})`;
+  const since = new Date(Date.now() - input.days * 86_400_000);
+  const settings = schedules().live("check-in-settings");
 
   /*
    * Every Bot anybody has check-ins for, on or off. A setting goes with its Bot, and the runs and
-   * items go with their setting, so this is every Bot with a number to show. One after another, not
-   * Promise.all: see the note in controls.ts about concurrent statements on one connection.
+   * items go with their setting, so this is every Bot with a number to show.
    */
-  const settingBots = await database
-    .selectDistinct({ agentId: proactiveSettings.agentId })
-    .from(proactiveSettings);
+  const settingBots = [...new Set(settings.map((setting) => setting.agentId))];
   // A setting whose Bot Intelligence no longer has is left out, as the join to `agents` left it out.
-  const known = await directory().findMany(
-    settingBots.map((row) => row.agentId),
-  );
+  const known = await directory().findMany(settingBots);
   const byBot = new Map(
-    settingBots.flatMap((row) => {
-      const bot = known.get(row.agentId);
+    settingBots.flatMap((agentId) => {
+      const bot = known.get(agentId);
       return bot
         ? [
             [
-              row.agentId,
+              agentId,
               emptyBot({
-                agentId: row.agentId,
+                agentId,
                 name: bot.name,
                 avatarSeed: bot.avatarSeed,
               }),
@@ -133,7 +126,7 @@ export async function proactiveMetrics(
       days: input.days,
       dailyRuns: input.dailyRuns,
       bots: [],
-      pings: await pings(database, since),
+      pings: await pings(since),
     };
 
   /*
@@ -141,33 +134,46 @@ export async function proactiveMetrics(
    * their Bots or paused this one (the sweep's own claim, `proactive/store.ts`), and the admin's
    * switch is on for them, decided by the same rule every capability is.
    */
-  const on = await database
-    .select({
-      agentId: proactiveSettings.agentId,
-      ownerUserId: proactiveSettings.ownerUserId,
-      groups: users.groups,
-    })
-    .from(proactiveSettings)
-    .innerJoin(users, eq(users.id, proactiveSettings.ownerUserId))
-    .where(
-      and(
-        eq(proactiveSettings.enabled, true),
-        sql`coalesce(${users.preferences}->>'proactive', 'on') <> 'off'`,
-        notAmongPairs(
-          proactiveSettings.ownerUserId,
-          proactiveSettings.agentId,
-          lifecyclePairs((entry) => entry.pausedAt !== null),
-        ),
-      ),
-    );
-  for (const row of on) {
+  const enabled = settings.filter(
+    (setting) => setting.enabled && byBot.has(setting.agentId),
+  );
+  const owners = [...new Set(enabled.map((setting) => setting.ownerUserId))];
+  const people =
+    owners.length === 0
+      ? []
+      : await database
+          .select({
+            id: users.id,
+            groups: users.groups,
+            preferences: users.preferences,
+          })
+          .from(users)
+          .where(inArray(users.id, owners));
+  // Which Bots people paused: their preferences in Intelligence, held in memory here.
+  const pausedPairs = new Set(
+    lifecyclePairs((entry) => entry.pausedAt !== null).map(
+      (pair) => `${pair.ownerUserId}\u001f${pair.agentId}`,
+    ),
+  );
+  const personById = new Map(people.map((person) => [person.id, person]));
+  for (const setting of enabled) {
+    const person = personById.get(setting.ownerUserId);
+    // As the join to `users` did: a setting whose person is gone counts for nobody.
+    if (!person) continue;
+    if (
+      (person.preferences as { proactive?: unknown } | null)?.proactive ===
+      "off"
+    )
+      continue;
+    if (pausedPairs.has(`${setting.ownerUserId}\u001f${setting.agentId}`))
+      continue;
     const member = {
-      role: input.admins.has(row.ownerUserId)
+      role: input.admins.has(setting.ownerUserId)
         ? ("admin" as const)
         : ("user" as const),
-      groups: row.groups,
+      groups: person.groups,
     };
-    const bot = byBot.get(row.agentId);
+    const bot = byBot.get(setting.agentId);
     if (
       bot &&
       resolveCapability(input.capabilityRows, member, "proactive").allowed
@@ -176,59 +182,37 @@ export async function proactiveMetrics(
   }
 
   // How the window's check-ins ended. One still running has not ended, so it is in none of them.
-  const runs = await database
-    .select({
-      agentId: proactiveRuns.agentId,
-      outcome: proactiveRuns.outcome,
-      skipReason: proactiveRuns.skipReason,
-      count: count(),
-    })
-    .from(proactiveRuns)
-    .where(
-      and(
-        inArray(proactiveRuns.agentId, agentIds),
-        ne(proactiveRuns.outcome, "running"),
-        gt(proactiveRuns.startedAt, since),
-      ),
-    )
-    .groupBy(
-      proactiveRuns.agentId,
-      proactiveRuns.outcome,
-      proactiveRuns.skipReason,
-    );
-  for (const row of runs) {
+  for (const row of await schedules().client.checkInRunSummary(
+    since,
+    agentIds,
+  )) {
     const bot = byBot.get(row.agentId);
     if (!bot) continue;
     if (row.outcome === "skipped") {
-      if (row.skipReason) bot.runs.skipped[row.skipReason] += row.count;
-    } else if (row.outcome !== "running") bot.runs[row.outcome] += row.count;
+      const reason = row.skipReason as ProactiveSkipReason | null;
+      if (reason && reason in bot.runs.skipped)
+        bot.runs.skipped[reason] += row.runs;
+    } else if (
+      row.outcome === "quiet" ||
+      row.outcome === "raised" ||
+      row.outcome === "failed"
+    )
+      bot.runs[row.outcome] += row.runs;
   }
 
   // The window's items, by where each stands now, and how many of them a ping carried.
-  const items = await database
-    .select({
-      agentId: proactiveSuggestions.agentId,
-      status: proactiveSuggestions.status,
-      count: count(),
-      pinged: sql<number>`count(*) filter (where ${proactiveSuggestions.deliveredAt} is not null)::int`,
-    })
-    .from(proactiveSuggestions)
-    .where(
-      and(
-        inArray(proactiveSuggestions.agentId, agentIds),
-        gt(proactiveSuggestions.createdAt, since),
-      ),
-    )
-    .groupBy(proactiveSuggestions.agentId, proactiveSuggestions.status);
-  for (const row of items) {
+  for (const row of await schedules().client.checkInSuggestionSummary(
+    since,
+    agentIds,
+  )) {
     const bot = byBot.get(row.agentId);
     if (!bot) continue;
-    bot.items.raised += row.count;
-    bot.pinged += row.pinged;
-    if (row.status === "open") bot.items.open += row.count;
-    else if (row.status === "started") bot.items.started += row.count;
-    else if (row.status === "dismissed") bot.items.hidden += row.count;
-    else bot.items.cleared += row.count;
+    bot.items.raised += row.items;
+    bot.pinged += row.delivered;
+    if (row.status === "open") bot.items.open += row.items;
+    else if (row.status === "started") bot.items.started += row.items;
+    else if (row.status === "dismissed") bot.items.hidden += row.items;
+    else bot.items.cleared += row.items;
   }
 
   for (const bot of byBot.values()) {
@@ -242,7 +226,7 @@ export async function proactiveMetrics(
     bots: [...byBot.values()].sort((left, right) =>
       left.name.localeCompare(right.name),
     ),
-    pings: await pings(database, since),
+    pings: await pings(since),
   };
 }
 
@@ -251,24 +235,10 @@ export async function proactiveMetrics(
  * belongs to no one Bot. Only pings delivery was offered: one written but not yet offered has not
  * reached anybody.
  */
-async function pings(
-  database: Database,
-  since: ReturnType<typeof sql>,
-): Promise<ProactiveMetricsResponse["pings"]> {
-  const [row] = await database
-    .select({
-      sent: count(),
-      items: sql<string | null>`avg(${proactivePings.itemCount})`,
-    })
-    .from(proactivePings)
-    .where(
-      and(
-        gt(proactivePings.createdAt, since),
-        sql`${proactivePings.offeredAt} is not null`,
-      ),
-    );
+async function pings(since: Date): Promise<ProactiveMetricsResponse["pings"]> {
+  const summary = await schedules().client.checkInPingSummary(since);
   return {
-    sent: row?.sent ?? 0,
-    itemsPerPing: row?.items == null ? null : Number(row.items),
+    sent: summary.pings,
+    itemsPerPing: summary.itemsPerPing ?? null,
   };
 }

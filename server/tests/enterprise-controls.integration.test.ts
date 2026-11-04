@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { AbstractAgent } from "@ag-ui/client";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { Hono } from "hono";
 import { EMPTY } from "rxjs";
 import {
@@ -21,16 +21,14 @@ import type { AppVariables } from "../src/auth/guards";
 import { computerKeyText } from "../src/computer/computer-key";
 import type { ComputerProvider } from "../src/computer/provider";
 import { createDatabase } from "../src/db/client";
-import {
-  actionRecords,
-  auditEvents,
-  modelUsage,
-  scimGroups,
-  sessions,
-  ssoProviders,
-  users,
-} from "../src/db/schema";
+import { scimGroups, sessions, ssoProviders, users } from "../src/db/schema";
 import { createTeamBots } from "../src/team-bots/team-bots";
+import {
+  actionRows,
+  auditRows,
+  modelUsageRows,
+  useTestAuditTrail,
+} from "./support/audit";
 import {
   changeAccess,
   removeBots,
@@ -47,7 +45,11 @@ import { resetTestPolicy, useTestPolicy } from "./support/policy";
  * and the in-place store guards. SCIM, which
  * Intelligence's directory serves now, is scim-directory.integration.test.ts. Needs a database at the
  * current TS schema (TEST_DATABASE_URL).
+ *
+ * The audit trail, action records and model usage are Intelligence's: the controls write them to the
+ * outbox, and the admin routes (and these tests) read them back from Intelligence after a flush.
  */
+useTestAuditTrail();
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 beforeAll(async () => {
@@ -87,14 +89,10 @@ const provider: ComputerProvider = {
 
 let controls: EnterpriseControls;
 
+// Action records and model usage are in Intelligence, append-only and read by this suite's own Bot,
+// so there is nothing of theirs to clean.
 async function clean() {
   await resetTestPolicy();
-  await database
-    .delete(actionRecords)
-    .where(like(actionRecords.botId, `ent-bot-${suite}%`));
-  await database
-    .delete(modelUsage)
-    .where(like(modelUsage.agentId, `ent-%${suite}%`));
 }
 
 /** A Bot a person is recording in the browser of, as far as the controls are told (browser/bot-browser.ts). */
@@ -204,15 +202,10 @@ describe("capability switches", () => {
       allowed: false,
     });
     expect(saved.status).toBe(200);
-    const rows = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "capability.changed"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const rows = await auditRows({
+      eventType: "capability.changed",
+      actorUserId: admin.id,
+    });
     expect(rows.length).toBeGreaterThan(0);
   });
 
@@ -319,10 +312,7 @@ describe("models", () => {
       body: JSON.stringify({ threadId: "t", runId: "r2" }),
     });
     expect(ran.status).toBe(200);
-    const usage = await database
-      .select()
-      .from(modelUsage)
-      .where(eq(modelUsage.agentId, bot));
+    const usage = await modelUsageRows(bot);
     expect(usage.map((row) => [row.model, row.allowed]).sort()).toEqual([
       ["openai/gpt-test", false],
       ["openai/gpt-test", true],
@@ -651,15 +641,10 @@ describe("SSO required", () => {
           .from(sessions)
           .where(eq(sessions.id, signedIn.id)),
       ).toEqual([]);
-      const [revoked] = await database
-        .select({ payload: auditEvents.payload })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.eventType, "auth.sessions_revoked"),
-            eq(auditEvents.actorUserId, admin.id),
-          ),
-        );
+      const [revoked] = await auditRows({
+        eventType: "auth.sessions_revoked",
+        actorUserId: admin.id,
+      });
       expect(revoked?.payload).toMatchObject({ reason: "sso_required" });
     } finally {
       await database.delete(sessions).where(eq(sessions.id, signedIn.id));
@@ -728,15 +713,10 @@ describe("offboarding", () => {
       `bot:${bot}`,
     ]);
     expect(stopped).toEqual([`person:${member.id}`, `bot:${bot}`]);
-    const [row] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "computer.terminated"),
-          eq(auditEvents.targetId, member.id),
-        ),
-      );
+    const [row] = await auditRows({
+      eventType: "computer.terminated",
+      targetId: member.id,
+    });
     expect(row?.actorUserId).toBe(admin.id);
   });
 
@@ -770,16 +750,11 @@ describe("Skill sharing", () => {
     expect(await skillSharingAllowed()).toBe(true);
     // The saving replica refreshes its snapshot before answering; the others on Intelligence's announcement.
     expect(skillSharingInSnapshot()).toBe(true);
-    const [row] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "enterprise.setting_changed"),
-          eq(auditEvents.targetId, "skillSharing"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const [row] = await auditRows({
+      eventType: "enterprise.setting_changed",
+      targetId: "skillSharing",
+      actorUserId: admin.id,
+    });
     expect(row?.payload).toMatchObject({
       setting: "skillSharing",
       before: false,
@@ -817,10 +792,7 @@ describe("action recording", () => {
     });
     await write("curl -H 'Authorization: Bearer s3cr3t' https://x.test");
     await Bun.sleep(100);
-    const rows = await database
-      .select()
-      .from(actionRecords)
-      .where(inArray(actionRecords.botId, [bot]));
+    const rows = await actionRows(bot);
     expect(rows.map((row) => row.command)).toEqual([
       "curl -H 'Authorization: Bearer [REDACTED]' https://x.test",
     ]);

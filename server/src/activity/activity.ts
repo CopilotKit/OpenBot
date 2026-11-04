@@ -9,32 +9,16 @@
  * EVERY QUERY IS NARROWED TO THE PERSON FIRST. A public Bot works for many people; this screen shows
  * the work done in the caller's name and nothing of anybody else's.
  */
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  type SQL,
-  sql,
-} from "drizzle-orm";
+import { and, desc, eq, gte, isNull, type SQL, sql } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
 import { conversations } from "../conversations/directory";
 import { ownThread } from "../conversations/types";
 import type { Database } from "../db/client";
-import {
-  approvalRequests,
-  proactivePings,
-  proactiveSuggestions,
-  responsibilities,
-  responsibilityEvents,
-  responsibilityRuns,
-  routineRuns,
-  routines,
-  workItems,
-} from "../db/schema";
+import { approvalRequests, workItems } from "../db/schema";
+import { responsibilitiesOf } from "../responsibilities/store";
+import { routinesOf } from "../routines/store";
+import { schedules } from "../schedules/directory";
 import { listedTasks } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
@@ -189,15 +173,8 @@ export function createActivityStore(database: Database) {
       const now = Date.now();
 
       // Routines: the standing schedule, and each firing.
-      const ownedRoutines = await database
-        .select()
-        .from(routines)
-        .where(
-          and(
-            eq(routines.ownerUserId, ownerUserId),
-            eq(routines.agentId, agentId),
-          ),
-        );
+      // Live in Intelligence: a deleted routine and its firings are gone from here, as before.
+      const ownedRoutines = await routinesOf(ownerUserId, agentId);
       for (const routine of ownedRoutines)
         if (routine.enabled)
           activity.scheduled.push({
@@ -216,12 +193,12 @@ export function createActivityStore(database: Database) {
         const byId = new Map(
           ownedRoutines.map((routine) => [routine.id, routine]),
         );
-        const runs = await database
-          .select()
-          .from(routineRuns)
-          .where(inArray(routineRuns.routineId, [...byId.keys()]))
-          .orderBy(desc(routineRuns.startedAt))
-          .limit(COMPLETED_LIMIT * 2);
+        const { items: runs } = await schedules().client.page(
+          "routine-runs",
+          { routineId: [...byId.keys()] },
+          null,
+          COMPLETED_LIMIT * 2,
+        );
         for (const run of runs) {
           const routine = byId.get(run.routineId);
           if (!routine) continue;
@@ -244,15 +221,7 @@ export function createActivityStore(database: Database) {
       }
 
       // Responsibilities: an active one is standing work; each run is a piece of it.
-      const goals = await database
-        .select()
-        .from(responsibilities)
-        .where(
-          and(
-            eq(responsibilities.ownerUserId, ownerUserId),
-            eq(responsibilities.agentId, agentId),
-          ),
-        );
+      const goals = await responsibilitiesOf(ownerUserId, agentId);
       for (const goal of goals)
         if (goal.status === "active")
           activity.scheduled.push({
@@ -271,23 +240,26 @@ export function createActivityStore(database: Database) {
           });
       if (goals.length > 0) {
         const byId = new Map(goals.map((goal) => [goal.id, goal]));
-        const runs = await database
-          .select({
-            run: responsibilityRuns,
-            eventType: responsibilityEvents.type,
-            source: responsibilityEvents.source,
-          })
-          .from(responsibilityRuns)
-          .innerJoin(
-            responsibilityEvents,
-            eq(responsibilityEvents.id, responsibilityRuns.eventId),
-          )
-          .where(inArray(responsibilityRuns.responsibilityId, [...byId.keys()]))
-          .orderBy(desc(responsibilityRuns.createdAt))
-          .limit(COMPLETED_LIMIT * 2);
-        for (const { run, eventType, source } of runs) {
+        const client = schedules().client;
+        const { items: goalRuns } = await client.page(
+          "responsibility-runs",
+          { responsibilityId: [...byId.keys()] },
+          null,
+          COMPLETED_LIMIT * 2,
+        );
+        // Each run's event says what woke it; read in one listing, as the join did.
+        const eventIds = [...new Set(goalRuns.map((run) => run.eventId))];
+        const events =
+          eventIds.length === 0
+            ? []
+            : (await client.all("responsibility-events", { ids: eventIds }))
+                .items;
+        const eventById = new Map(events.map((event) => [event.id, event]));
+        for (const run of goalRuns) {
           const goal = byId.get(run.responsibilityId);
-          if (!goal) continue;
+          const event = eventById.get(run.eventId);
+          if (!goal || !event) continue;
+          const { type: eventType, source } = event;
           const item: ActivityItem = {
             id: `responsibility-run:${run.id}`,
             kind: "responsibility",
@@ -604,20 +576,11 @@ export function createActivityStore(database: Database) {
        * What check-ins raised and the person has not decided: listed in the app the moment it is
        * raised, pinged or not, and whatever the Bot may notify them of. Badges always show.
        */
-      const items = await database
-        .select({
-          agentId: proactiveSuggestions.agentId,
-          total: sql<number>`count(*)::int`,
-        })
-        .from(proactiveSuggestions)
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, ownerUserId),
-            eq(proactiveSuggestions.status, "open"),
-          ),
-        )
-        .groupBy(proactiveSuggestions.agentId);
-      for (const row of items) entry(row.agentId).items += row.total;
+      const { items } = await schedules().client.all("check-in-suggestions", {
+        ownerUserId,
+        status: "open",
+      });
+      for (const item of items) entry(item.agentId).items += 1;
 
       return [...byBot.values()];
     },
@@ -627,13 +590,26 @@ export function createActivityStore(database: Database) {
      * notification each time this changes, never one per item.
      */
     async lastPing(ownerUserId: string): Promise<string | null> {
-      const [row] = await database
-        .select({ id: proactivePings.id })
-        .from(proactivePings)
-        .where(eq(proactivePings.ownerUserId, ownerUserId))
-        .orderBy(desc(proactivePings.createdAt), desc(proactivePings.id))
-        .limit(1);
-      return row?.id ?? null;
+      /*
+       * The slot records when the person was last pinged, in the same step that wrote that ping, so
+       * only pings from about then are asked for. The person's slot is held in memory: one never
+       * pinged has none and asks nothing.
+       */
+      const pingedAt = schedules().peek(
+        "check-in-people",
+        ownerUserId,
+      )?.lastPingedAt;
+      if (!pingedAt) return null;
+      const { client } = schedules();
+      const recent = await client.all("check-in-pings", {
+        ownerUserId,
+        createdAfter: new Date(pingedAt.getTime() - 60_000),
+      });
+      const pings =
+        recent.items.length > 0
+          ? recent.items
+          : (await client.all("check-in-pings", { ownerUserId })).items;
+      return pings.at(-1)?.id ?? null;
     },
   };
 }

@@ -1,12 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
-import { proactiveSuggestions } from "../db/schema";
 import type { TaskService } from "../proactive/contracts";
+import { schedules } from "../schedules/directory";
 import type { WorkQueue } from "../work/queue";
 import { PROACTIVE_TASK_KIND, TASK_RUNS } from "./state";
 import { itemAsk, TaskRefusedError, type TaskStore, whyOf } from "./store";
@@ -188,18 +187,13 @@ export function createTaskRunner(deps: {
        * Queued by a Start from before tasks, which ran the ask in the person's own conversation. It
        * gets its task now, and its turn is queued as a task's, so started work never lands there.
        */
-      const [item] = work.suggestionId
-        ? await deps.database
-            .select()
-            .from(proactiveSuggestions)
-            .where(
-              and(
-                eq(proactiveSuggestions.ownerUserId, work.ownerUserId),
-                eq(proactiveSuggestions.id, work.suggestionId),
-              ),
-            )
-            .limit(1)
-        : [];
+      const found = work.suggestionId
+        ? await schedules().client.get(
+            "check-in-suggestions",
+            work.suggestionId,
+          )
+        : null;
+      const item = found?.ownerUserId === work.ownerUserId ? found : null;
       if (!item) throw new TaskRefusedError("This task has nothing to start.");
       const task = await open(work.ownerUserId, item);
       await queueTurn(

@@ -11,12 +11,7 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  responsibilities,
-  sharedUseApprovals,
-  sharedUseRequests,
-  users,
-} from "../src/db/schema";
+import { sharedUseApprovals, sharedUseRequests, users } from "../src/db/schema";
 import {
   createSharedUseGate,
   createSharedUseStore,
@@ -57,6 +52,10 @@ import {
   seedServer,
   useTestVault,
 } from "./support/vault";
+import {
+  purgeResponsibilitiesOwnedBy,
+  seedResponsibility,
+} from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -85,6 +84,8 @@ beforeEach(async () => {
   await database
     .delete(sharedUseRequests)
     .where(eq(sharedUseRequests.agentId, bot));
+  await purgeResponsibilitiesOwnedBy(id("owner"));
+  await purgeResponsibilitiesOwnedBy(id("owner"));
   await removeBots([bot]);
   // Takes the app's approvals, requests and grants here with it, as the cascade from mcp_servers did.
   await removeServers([app]);
@@ -208,23 +209,20 @@ describe("the shared-use gate", () => {
       by: id("owner"),
       approval: { audience: "team", outsideInput: false, members: [] },
     });
-    const [goal] = await database
-      .insert(responsibilities)
-      .values({
-        id: id("goal"),
-        ownerUserId: id("owner"),
-        agentId: bot,
-        title: "Watch mail",
-        instruction: "x",
-        channelId: id("ch"),
-        threadId: id("th"),
-        successCriteria: "x",
-        subscriptions: [{ source: "email", eventType: "*" }],
-      })
-      .returning({ id: responsibilities.id });
+    const goal = await seedResponsibility({
+      id: id("goal"),
+      ownerUserId: id("owner"),
+      agentId: bot,
+      title: "Watch mail",
+      instruction: "x",
+      channelId: id("ch"),
+      threadId: id("th"),
+      successCriteria: "x",
+      subscriptions: [{ source: "email", eventType: "*" }],
+    });
     const answer = await call("owner", {
       kind: "responsibility",
-      id: goal!.id,
+      id: goal.id,
     });
     expect(answer.allowed).toBe(false);
     expect(await store.pendingFor(bot)).toEqual([
@@ -242,7 +240,7 @@ describe("the shared-use gate", () => {
       by: id("owner"),
       approval: { audience: "team", outsideInput: false, members: [] },
     });
-    await database.insert(responsibilities).values({
+    await seedResponsibility({
       id: id("mailgoal"),
       ownerUserId: id("owner"),
       agentId: bot,

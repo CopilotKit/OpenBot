@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { capabilityRefusal } from "../src/admin/capabilities";
 import {
@@ -20,7 +20,8 @@ import {
   seatOf,
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
+import { auditRows } from "./support/audit";
 import {
   recordTestPackage,
   removeBots,
@@ -191,16 +192,12 @@ async function storedIsolated(agentId: string) {
   return (await (await useTestBots()).registry.get(agentId))?.isolated;
 }
 
+/** The refusals one of this suite's people met, from the trail in Intelligence, newest first. */
 async function refusals(actorId: string) {
-  return database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "bot.isolation_refused"),
-        eq(auditEvents.actorUserId, actorId),
-      ),
-    );
+  return auditRows({
+    eventType: "bot.isolation_refused",
+    actorUserId: actorId,
+  });
 }
 
 describe("making an isolated Bot", () => {
@@ -215,15 +212,10 @@ describe("making an isolated Bot", () => {
       isolationOffReason: null,
     });
     expect(await storedIsolated(agent.id)).toBe(true);
-    const [created] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "bot.created"),
-          eq(auditEvents.targetId, agent.id),
-        ),
-      );
+    const [created] = await auditRows({
+      eventType: "bot.created",
+      targetId: agent.id,
+    });
     expect(created?.payload).toMatchObject({ isolated: true });
   });
 

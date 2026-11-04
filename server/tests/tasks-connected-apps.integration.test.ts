@@ -28,14 +28,7 @@ import { createThreadIdentity } from "../src/channels/thread-identity";
 import type { RegisteredAgent } from "../src/copilot";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  approvalRequests,
-  mcpTools,
-  proactiveSettings,
-  proactiveSuggestions,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { approvalRequests, mcpTools, users, workItems } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import {
   grantedTools,
@@ -57,6 +50,7 @@ import {
   conversationClient,
   purgeConversations,
 } from "./support/conversations";
+import { purgeSchedulesOf, settingWithItem } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   changeServer,
@@ -72,6 +66,7 @@ import {
   useTestVault,
 } from "./support/vault";
 import { useTestPolicy } from "./support/policy";
+import { useTestSchedules } from "./support/schedules";
 
 /*
  * A task started from a check-in, working with the apps the person connected: it reads their own
@@ -282,6 +277,7 @@ let environmentBefore: Record<string, string | undefined> = {};
 beforeAll(async () => {
   await useTestPolicy();
   await useTestBots();
+  await useTestSchedules();
   llm.on({ predicate: () => true }, (request) => script(request));
   const model = await llm.start();
   relay = Bun.serve({
@@ -628,30 +624,18 @@ async function seed(title = "Reply to Sam about the spec") {
   });
   await fixtures.connect(id, bot.id);
   const own = await channelStore.direct(owner, bot.id);
-  const settingId = randomUUID();
-  await database.insert(proactiveSettings).values({
-    id: settingId,
+  const { item } = await settingWithItem({
     ownerUserId: id,
     agentId: bot.id,
     channelId: own.id,
     threadId: `tasks-apps-${suite}-check-ins-${randomUUID()}`,
+    runId: `tasks-apps-${suite}-run`,
+    title,
+    detail: "Sam asked for the spec by Friday.",
+    sourceApp: "Notion",
+    sourceRef: ref(NOTION, GET_REQUEST),
+    sourceLink: "https://www.notion.so/r-1",
   });
-  const [item] = await database
-    .insert(proactiveSuggestions)
-    .values({
-      id: randomUUID(),
-      ownerUserId: id,
-      agentId: bot.id,
-      settingId,
-      runId: `tasks-apps-${suite}-run`,
-      title,
-      detail: "Sam asked for the spec by Friday.",
-      sourceApp: "Notion",
-      sourceRef: ref(NOTION, GET_REQUEST),
-      sourceLink: "https://www.notion.so/r-1",
-    })
-    .returning();
-  if (!item) throw new Error("No item.");
   return { owner, botId: bot.id, own, item };
 }
 
@@ -692,6 +676,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await tasks.idle();
+  await purgeSchedulesOf(people);
   try {
     await llm.stop();
     relay?.stop(true);

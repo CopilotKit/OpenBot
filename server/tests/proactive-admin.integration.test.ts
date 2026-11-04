@@ -32,17 +32,7 @@ import { createAuditStore } from "../src/audit";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  modelUsage,
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { users, workItems } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import type {
   ProactiveMetricsResponse,
@@ -59,6 +49,7 @@ import type {
   SuggestionStatus,
 } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import {
   clearPreferences,
   removeBots,
@@ -66,7 +57,16 @@ import {
   setBotPreference,
   useTestConfiguration,
 } from "./support/bots";
+import {
+  changeCheckIn,
+  makeDue,
+  pingsOf,
+  purgeSchedulesOf,
+  purgeWhere,
+  seedHistory,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestSchedules } from "./support/schedules";
 import { useTestPolicy } from "./support/policy";
 import { testMemory } from "./support/memory";
 import { useTestPeople } from "./support/directory";
@@ -77,7 +77,12 @@ import { useTestVault } from "./support/vault";
  * and their routes, the real proactive store, work queue and headless turn runner, with the engine
  * asking `proactiveAdmin` exactly as the server wires it. The model is the only fake: a scripted
  * AG-UI agent that looks and finds nothing, so a request reaching it is a check-in that ran.
+ *
+ * The audit trail and model usage live in Intelligence: a check-in reads its own reads from the trail
+ * there, and the setting's change is read back from it.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 // The groups a directory provisioned are Intelligence's organization directory's.
@@ -121,6 +126,7 @@ const settingOf = (person: { id: string }, bot: string) =>
   settings.get(`${person.id}:${bot}`) as ProactiveSetting;
 
 beforeAll(async () => {
+  await useTestSchedules();
   await useTestConfiguration();
   await useTestPolicy();
   await database.insert(users).values([
@@ -182,18 +188,11 @@ async function reset() {
         inArray(sql<string>`${workItems.payload}->>'settingId'`, settingIds()),
       ),
     );
-  await database
-    .delete(proactiveSuggestions)
-    .where(inArray(proactiveSuggestions.settingId, settingIds()));
-  await database.delete(proactivePings).where(
-    inArray(
-      proactivePings.ownerUserId,
-      people.map((person) => person.id),
-    ),
-  );
-  await database
-    .delete(proactiveRuns)
-    .where(inArray(proactiveRuns.settingId, settingIds()));
+  await purgeWhere("check-in-suggestions", { settingId: settingIds() });
+  await purgeWhere("check-in-pings", {
+    ownerUserId: people.map((person) => person.id),
+  });
+  await purgeWhere("check-in-runs", { settingId: settingIds() });
   await clearPreferences(people.map((person) => person.id));
   await database
     .update(users)
@@ -204,22 +203,20 @@ async function reset() {
         people.map((person) => person.id),
       ),
     );
-  await database
-    .update(proactiveSettings)
-    .set({ enabled: true, nextRunAt: FAR, lastStatus: "idle", lastRunAt: null })
-    .where(inArray(proactiveSettings.id, settingIds()));
+  for (const id of settingIds())
+    await changeCheckIn(id, {
+      enabled: true,
+      nextRunAt: FAR,
+      lastStatus: "idle",
+      lastRunAt: null,
+    });
 }
 beforeEach(reset);
 
 afterAll(async () => {
   await reset();
   await controls?.stop();
-  await database
-    .delete(modelUsage)
-    .where(inArray(modelUsage.agentId, [inboxBot, calendarBot]));
-  await database
-    .delete(proactiveSettings)
-    .where(inArray(proactiveSettings.id, settingIds()));
+  await purgeSchedulesOf(people.map((person) => person.id));
   await removeBots([inboxBot, calendarBot]);
   await database.delete(users).where(like(users.email, `%${suite}%`));
   await database.$client.close();
@@ -327,15 +324,7 @@ function replica() {
 
 /** Make these settings due, and sweep until every one of them has been tried. */
 async function checkIn(...due: ProactiveSetting[]) {
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1_000) })
-    .where(
-      inArray(
-        proactiveSettings.id,
-        due.map((setting) => setting.id),
-      ),
-    );
+  for (const setting of due) await makeDue(setting.id);
   const { engine, asked } = replica();
   for (let sweep = 0; sweep < due.length + 2; sweep += 1) await engine.sweep();
   return asked;
@@ -467,6 +456,30 @@ describe("the Check-ins switch", () => {
   });
 });
 
+/** An open item no ping has carried yet, raised by the inbox Bot at `createdAt`. */
+function waitingItem(input: {
+  ownerUserId: string;
+  settingId: string;
+  title: string;
+  detail: string;
+  createdAt: Date;
+}) {
+  return {
+    id: randomUUID(),
+    agentId: inboxBot,
+    runId: `ci-run-${randomUUID()}`,
+    sourceApp: null,
+    sourceRef: null,
+    sourceLink: null,
+    status: "open",
+    dedupeKey: null,
+    pingId: null,
+    deliveredAt: null,
+    resolvedAt: null,
+    ...input,
+  };
+}
+
 describe("the ping pass", () => {
   test("skips past the people an admin turned check-ins off for, so nobody behind them waits for ever", async () => {
     // More people with older waiting items than one pass looks at, every one of them refused.
@@ -478,9 +491,8 @@ describe("the ping pass", () => {
     }));
     await database.insert(users).values(refused);
     const everyone = [...refused.map((person) => person.id), admin.id];
-    await database
-      .delete(proactivePeople)
-      .where(inArray(proactivePeople.ownerUserId, everyone));
+    for (const person of everyone)
+      await (await useTestSchedules()).purge("check-in-people", person);
     const theirSettings: string[] = [];
     try {
       const hourAgo = Date.now() - 60 * 60_000;
@@ -491,41 +503,37 @@ describe("the ping pass", () => {
           `ci-thread-${randomUUID()}`,
         );
         theirSettings.push(setting.id);
-        await database.insert(proactiveSuggestions).values({
-          id: randomUUID(),
-          ownerUserId: person.id,
-          agentId: inboxBot,
-          settingId: setting.id,
-          runId: `ci-run-${randomUUID()}`,
-          title: `Waiting since before the switch ${index}`,
-          detail: "Raised before check-ins were turned off.",
-          createdAt: new Date(hourAgo - (index + 1) * 60_000),
-        });
+        await seedHistory("check-in-suggestions", [
+          waitingItem({
+            ownerUserId: person.id,
+            settingId: setting.id,
+            title: `Waiting since before the switch ${index}`,
+            detail: "Raised before check-ins were turned off.",
+            createdAt: new Date(hourAgo - (index + 1) * 60_000),
+          }),
+        ]);
       }
       // The admin is still allowed, and their item is the newest of all.
-      await database.insert(proactiveSuggestions).values({
-        id: randomUUID(),
-        ownerUserId: admin.id,
-        agentId: inboxBot,
-        settingId: settingOf(admin, inboxBot).id,
-        runId: `ci-run-${randomUUID()}`,
-        title: "Reply to Sam",
-        detail: "Sam asked for the spec by Friday.",
-        createdAt: new Date(hourAgo),
-      });
+      await seedHistory("check-in-suggestions", [
+        waitingItem({
+          ownerUserId: admin.id,
+          settingId: settingOf(admin, inboxBot).id,
+          title: "Reply to Sam",
+          detail: "Sam asked for the spec by Friday.",
+          createdAt: new Date(hourAgo),
+        }),
+      ]);
 
       const { engine } = replica();
       await engine.sweep();
 
-      const pinged = await database
-        .select({ ownerUserId: proactivePings.ownerUserId })
-        .from(proactivePings)
-        .where(inArray(proactivePings.ownerUserId, everyone));
+      const pinged: { ownerUserId: string }[] = [];
+      for (const person of everyone)
+        for (const ping of await pingsOf(person))
+          pinged.push({ ownerUserId: ping.ownerUserId });
       expect(pinged).toEqual([{ ownerUserId: admin.id }]);
     } finally {
-      await database
-        .delete(proactiveSettings)
-        .where(inArray(proactiveSettings.id, theirSettings));
+      await purgeSchedulesOf(refused.map((person) => person.id));
       await database.delete(users).where(
         inArray(
           users.id,
@@ -584,16 +592,11 @@ describe("the daily cap", () => {
     });
 
     // The change is on the audit trail with who made it, like every other enterprise setting.
-    const trail = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "enterprise.setting_changed"),
-          eq(auditEvents.targetId, "proactiveDailyRuns"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const trail = await auditRows({
+      eventType: "enterprise.setting_changed",
+      targetId: "proactiveDailyRuns",
+      actorUserId: admin.id,
+    });
     expect(trail.map((row) => row.payload)).toContainEqual({
       setting: "proactiveDailyRuns",
       before: 24,
@@ -612,17 +615,23 @@ describe("the numbers", () => {
     setting: ProactiveSetting,
     runs: [ProactiveRunOutcome, ProactiveSkipReason | null, number][],
   ) {
-    await database.insert(proactiveRuns).values(
+    await seedHistory(
+      "check-in-runs",
       runs.map(([outcome, skipReason, agoMinutes]) => ({
         id: `ci-run-${randomUUID()}`,
         settingId: setting.id,
         ownerUserId: setting.ownerUserId,
         agentId: setting.agentId,
+        threadId: null,
         trigger: "schedule" as const,
         outcome,
         skipReason,
+        itemsRaised: 0,
+        reads: 0,
+        error: null,
         startedAt: minutesAgo(agoMinutes),
         finishedAt: outcome === "running" ? null : minutesAgo(agoMinutes - 1),
+        createdAt: minutesAgo(agoMinutes),
       })),
     );
   }
@@ -630,7 +639,8 @@ describe("the numbers", () => {
     setting: ProactiveSetting,
     items: [string, SuggestionStatus, number, boolean][],
   ) {
-    await database.insert(proactiveSuggestions).values(
+    await seedHistory(
+      "check-in-suggestions",
       items.map(([title, status, agoMinutes, pinged]) => ({
         id: `ci-item-${randomUUID()}`,
         ownerUserId: setting.ownerUserId,
@@ -641,7 +651,10 @@ describe("the numbers", () => {
         detail: `Why: ${title}`,
         sourceApp: "Mail",
         sourceRef: "mail/list_messages",
+        sourceLink: null,
         status,
+        dedupeKey: null,
+        pingId: null,
         createdAt: minutesAgo(agoMinutes),
         deliveredAt: pinged ? minutesAgo(agoMinutes - 1) : null,
         resolvedAt: status === "open" ? null : minutesAgo(agoMinutes - 2),
@@ -679,7 +692,7 @@ describe("the numbers", () => {
       ["Renew the lease", "started", 10 * DAY, true],
     ]);
     await seedItems(calendar, [["Move the standup", "open", 60, false]]);
-    await database.insert(proactivePings).values([
+    await seedHistory("check-in-pings", [
       {
         id: `ci-ping-${randomUUID()}`,
         ownerUserId: member.id,
@@ -706,6 +719,7 @@ describe("the numbers", () => {
         text: "5 things need you",
         pushBody: "5 things need you",
         createdAt: minutesAgo(5),
+        offeredAt: null,
       },
       {
         id: `ci-ping-${randomUUID()}`,
@@ -724,10 +738,7 @@ describe("the numbers", () => {
       .set({ preferences: { proactive: "off" } })
       .where(eq(users.id, admin.id));
     await setBotPreference(seller.id, calendarBot, { pausedAt: new Date() });
-    await database
-      .update(proactiveSettings)
-      .set({ enabled: false })
-      .where(eq(proactiveSettings.id, calendar.id));
+    await changeCheckIn(calendar.id, { enabled: false });
 
     const week = await metrics();
     expect(week.days).toBe(7);

@@ -3,27 +3,34 @@
  *
  * Every kind ends in the same place: an ingress route verifies the sender with that vendor's own
  * signature scheme, applies the trigger's narrow filter, and hands `store.ingestEvent` an event that
- * names this trigger and its responsibility. The store commits the event, the run ledger row and the
- * `work_items` queue entry in one transaction; the engine then runs the selected Bot through the
- * normal headless AG-UI path. There is no second engine and no second queue here.
+ * names this trigger and its responsibility. The store records the event and its runs in
+ * Intelligence and queues them through the outbox (`store.ts`); the engine then runs the selected Bot
+ * through the normal headless AG-UI path. There is no second engine and no second queue here.
+ *
+ * A trigger is a record in Intelligence's agent schedules (`responsibility-triggers`). Its secret
+ * is in Intelligence's vault and the record names it by `credentialRef`, never holding it. An
+ * inbound delivery finds its trigger in this instance's schedule directory (reading through on a
+ * miss); the store re-checks it against Intelligence before anything is recorded.
  *
  * Paused and completed responsibilities never run: ingress refuses to queue for them, and
  * `beginRun` re-checks at dispatch and marks any run that slipped through as skipped.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  CredentialRefusedError,
   type CredentialSecretReader,
   type CredentialStore,
   CredentialUnusableError,
 } from "../credentials";
 import type { Database } from "../db/client";
-import {
-  responsibilities,
-  responsibilityTriggers,
-} from "../db/schema/responsibilities";
+import { ScheduleVersionConflictError } from "../schedules/client";
+import { schedules } from "../schedules/directory";
+import type {
+  ResponsibilityRecord,
+  ResponsibilityTriggerRecord,
+  ScheduleChanges,
+} from "../schedules/types";
+import { withLocalLock } from "../work/local-lock";
 import {
   ResponsibilityNotFoundError,
   ResponsibilityRefusedError,
@@ -341,6 +348,24 @@ export type TriggerDirectory = {
   ): Promise<(ResolvedTrigger & { agentId: string })[]>;
 };
 
+/** How often a write is redone after Intelligence says the trigger changed under it. */
+const VERSION_RETRIES = 5;
+
+const record = (trigger: ResponsibilityTriggerRecord): TriggerRecord => ({
+  id: trigger.id,
+  responsibilityId: trigger.responsibilityId,
+  kind: trigger.kind,
+  config: trigger.config as TriggerConfig,
+  hasSecret: trigger.credentialRef !== null,
+  enabled: trigger.enabled,
+  createdAt: trigger.createdAt,
+  updatedAt: trigger.updatedAt,
+});
+
+const live = <T extends { deletedAt: Date | null }>(
+  value: T | null | undefined,
+): value is T => !!value && value.deletedAt === null;
+
 export function createTriggerStore(
   database: Database,
   vault: {
@@ -359,54 +384,50 @@ export function createTriggerStore(
     );
     if (refusal) throw new ResponsibilityRefusedError(refusal);
   }
-  const columns = {
-    id: responsibilityTriggers.id,
-    responsibilityId: responsibilityTriggers.responsibilityId,
-    kind: responsibilityTriggers.kind,
-    config: responsibilityTriggers.config,
-    credentialId: responsibilityTriggers.credentialId,
-    enabled: responsibilityTriggers.enabled,
-    createdAt: responsibilityTriggers.createdAt,
-    updatedAt: responsibilityTriggers.updatedAt,
-  };
-  type Row = {
-    id: string;
-    responsibilityId: string;
-    kind: TriggerKind;
-    config: TriggerConfig;
-    credentialId: string | null;
-    enabled: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-  };
-  const record = ({ credentialId, ...row }: Row): TriggerRecord => ({
-    ...row,
-    hasSecret: credentialId !== null,
-  });
+  /** The person's own responsibility, as Intelligence holds it now. */
   async function ownedGoal(ownerUserId: string, responsibilityId: string) {
-    const [goal] = await database
-      .select({ id: responsibilities.id })
-      .from(responsibilities)
-      .where(
-        and(
-          eq(responsibilities.id, responsibilityId),
-          eq(responsibilities.ownerUserId, ownerUserId),
-        ),
-      );
-    if (!goal) throw new ResponsibilityNotFoundError();
+    const goal = await schedules().refresh(
+      "responsibilities",
+      responsibilityId,
+    );
+    if (!live(goal) || goal.ownerUserId !== ownerUserId)
+      throw new ResponsibilityNotFoundError();
+    return goal;
   }
+  /** The person's own trigger, as Intelligence holds it now. Anybody else's does not exist. */
   async function ownedTrigger(ownerUserId: string, id: string) {
-    const [row] = await database
-      .select(columns)
-      .from(responsibilityTriggers)
-      .where(
-        and(
-          eq(responsibilityTriggers.id, id),
-          eq(responsibilityTriggers.ownerUserId, ownerUserId),
-        ),
-      );
-    if (!row) throw new ResponsibilityNotFoundError();
-    return row;
+    const trigger = await schedules().refresh("responsibility-triggers", id);
+    if (!live(trigger) || trigger.ownerUserId !== ownerUserId)
+      throw new ResponsibilityNotFoundError();
+    return trigger;
+  }
+  /** Apply changes derived from the trigger as it is now, again if it changed in between. */
+  async function rewrite(
+    ownerUserId: string,
+    id: string,
+    derive: (
+      existing: ResponsibilityTriggerRecord,
+    ) => Promise<ScheduleChanges<"responsibility-triggers">>,
+  ) {
+    for (let attempt = 1; ; attempt++) {
+      const existing = await ownedTrigger(ownerUserId, id);
+      const changes = await derive(existing);
+      try {
+        return await schedules().update(
+          "responsibility-triggers",
+          id,
+          existing.version,
+          changes,
+        );
+      } catch (error) {
+        if (
+          error instanceof ScheduleVersionConflictError &&
+          attempt < VERSION_RETRIES
+        )
+          continue;
+        throw error;
+      }
+    }
   }
   function checkSecret(secret: string) {
     if (!secret.trim() || secret.length > 4096)
@@ -416,41 +437,36 @@ export function createTriggerStore(
     return secret.trim();
   }
   async function secretFor(
-    credentialId: string | null,
+    credentialRef: string | null,
     accessor: { purpose: string; userId: string },
   ) {
-    if (!credentialId) return null;
+    if (!credentialRef) return null;
     try {
-      return (await vault.reader.reveal(credentialId, accessor)).value;
+      return (await vault.reader.reveal(credentialRef, accessor)).value;
     } catch (error) {
       if (error instanceof CredentialUnusableError) return null;
       throw error;
     }
   }
   async function resolved(
-    row: Row & { ownerUserId: string; status: ResponsibilityStatus },
-  ) {
+    trigger: ResponsibilityTriggerRecord,
+    goal: ResponsibilityRecord,
+  ): Promise<ResolvedTrigger> {
     return {
-      id: row.id,
-      ownerUserId: row.ownerUserId,
-      responsibilityId: row.responsibilityId,
-      responsibilityStatus: row.status,
-      kind: row.kind,
-      config: row.config,
-      secret: await secretFor(row.credentialId, {
+      id: trigger.id,
+      ownerUserId: trigger.ownerUserId,
+      responsibilityId: trigger.responsibilityId,
+      responsibilityStatus: goal.status,
+      kind: trigger.kind,
+      config: trigger.config as TriggerConfig,
+      secret: await secretFor(trigger.credentialRef, {
         purpose: "trigger_delivery_check",
-        userId: row.ownerUserId,
+        userId: trigger.ownerUserId,
       }),
-      enabled: row.enabled,
-      createdAt: row.createdAt,
+      enabled: trigger.enabled,
+      createdAt: trigger.createdAt,
     };
   }
-  const resolvedColumns = {
-    ...columns,
-    ownerUserId: responsibilityTriggers.ownerUserId,
-    status: responsibilities.status,
-    agentId: responsibilities.agentId,
-  };
 
   return {
     async list(
@@ -458,16 +474,11 @@ export function createTriggerStore(
       responsibilityId: string,
     ): Promise<TriggerRecord[]> {
       await ownedGoal(ownerUserId, responsibilityId);
-      const rows = await database
-        .select(columns)
-        .from(responsibilityTriggers)
-        .where(
-          and(
-            eq(responsibilityTriggers.ownerUserId, ownerUserId),
-            eq(responsibilityTriggers.responsibilityId, responsibilityId),
-          ),
-        );
-      return rows.map(record);
+      const { items } = await schedules().client.all(
+        "responsibility-triggers",
+        { ownerUserId, responsibilityId },
+      );
+      return items.map(record);
     },
     /** Returns the secret once when OpenBot generated it; vendor secrets are pasted in `input.secret`. */
     async create(
@@ -484,8 +495,8 @@ export function createTriggerStore(
         : SECRET_KINDS.has(config.kind) && input.secret
           ? checkSecret(input.secret)
           : null;
-      // The secret goes to the vault first, then the trigger that names it; a trigger that could not
-      // be written takes its secret back with it, so no live secret is left that nothing names.
+      // The secret first, then the trigger naming it; refused, the secret goes again rather than
+      // outliving a trigger that is not there.
       const credential = secret
         ? await vault.store.create({
             kind: "connector",
@@ -495,76 +506,64 @@ export function createTriggerStore(
             plaintext: secret,
           })
         : null;
+      let trigger: ResponsibilityTriggerRecord;
       try {
-        const [row] = await database
-          .insert(responsibilityTriggers)
-          .values({
+        trigger = await schedules().create(
+          "responsibility-triggers",
+          {
             id,
             ownerUserId,
             responsibilityId,
             kind: config.kind,
-            config,
-            credentialId: credential?.id ?? null,
-          })
-          .returning(columns);
-        if (!row) throw new Error("Trigger creation returned no row.");
-        return {
-          trigger: record(row),
-          secret: GENERATED_SECRET.has(config.kind) ? secret : null,
-        };
+            config: config as unknown as Record<string, unknown>,
+            credentialRef: credential?.id ?? null,
+            enabled: true,
+          },
+          `openbot:trigger:${id}`,
+        );
       } catch (error) {
         if (credential)
           await vault.store.revoke(credential.id).catch(() => undefined);
         throw error;
       }
+      return {
+        trigger: record(trigger),
+        secret: GENERATED_SECRET.has(config.kind) ? secret : null,
+      };
     },
     async update(ownerUserId: string, id: string, input: { config: unknown }) {
-      const existing = await ownedTrigger(ownerUserId, id);
       const config = parseTriggerConfig(input.config);
-      if (config.kind !== existing.kind)
-        throw new ResponsibilityRefusedError(
-          "A trigger cannot change kind. Add a new trigger.",
-        );
-      await checkSlack(ownerUserId, config);
-      const [row] = await database
-        .update(responsibilityTriggers)
-        .set({ config, updatedAt: new Date() })
-        .where(eq(responsibilityTriggers.id, id))
-        .returning(columns);
-      if (!row) throw new ResponsibilityNotFoundError();
-      return record(row);
+      let checked = false;
+      const trigger = await rewrite(ownerUserId, id, async (existing) => {
+        if (config.kind !== existing.kind)
+          throw new ResponsibilityRefusedError(
+            "A trigger cannot change kind. Add a new trigger.",
+          );
+        if (!checked) await checkSlack(ownerUserId, config);
+        checked = true;
+        return { config: config as unknown as Record<string, unknown> };
+      });
+      return record(trigger);
     },
     async setEnabled(ownerUserId: string, id: string, enabled: boolean) {
-      await ownedTrigger(ownerUserId, id);
-      const [row] = await database
-        .update(responsibilityTriggers)
-        .set({ enabled, updatedAt: new Date() })
-        .where(eq(responsibilityTriggers.id, id))
-        .returning(columns);
-      if (!row) throw new ResponsibilityNotFoundError();
-      return record(row);
+      return record(await rewrite(ownerUserId, id, async () => ({ enabled })));
     },
     /** Every trigger on this owner's responsibilities carried out by one Bot (the chat tools' view). */
     async listForAgent(ownerUserId: string, agentId: string) {
-      const rows = await database
-        .select({ ...columns, title: responsibilities.title })
-        .from(responsibilityTriggers)
-        .innerJoin(
-          responsibilities,
-          eq(responsibilities.id, responsibilityTriggers.responsibilityId),
-        )
-        .where(
-          and(
-            eq(responsibilityTriggers.ownerUserId, ownerUserId),
-            eq(responsibilities.agentId, agentId),
-          ),
-        );
-      return rows.map(({ title, ...row }) => ({ ...record(row), title }));
+      const [{ items: goals }, { items: triggers }] = await Promise.all([
+        schedules().client.all("responsibilities", { ownerUserId, agentId }),
+        schedules().client.all("responsibility-triggers", { ownerUserId }),
+      ]);
+      const titles = new Map(goals.map((goal) => [goal.id, goal.title]));
+      return triggers.flatMap((trigger) => {
+        const title = titles.get(trigger.responsibilityId);
+        return title === undefined ? [] : [{ ...record(trigger), title }];
+      });
     },
     /**
      * Rotate: a new generated secret for webhook/GitHub, or the vendor's new pasted secret for
-     * Linear/Sentry/PagerDuty. The vault revokes the old credential in the same step it stores the
-     * new one, then the trigger is pointed at it.
+     * Linear/Sentry/PagerDuty. The vault swaps the old credential for the new one in one step; the
+     * trigger then names the new one.
      */
     async setSecret(
       ownerUserId: string,
@@ -584,33 +583,41 @@ export function createTriggerStore(
       const secret = generated
         ? generateWebhookSecret()
         : checkSecret(pasted ?? "");
-      const value = {
-        kind: "connector" as const,
-        provider: `${existing.kind}-trigger`,
-        keyId: id,
-        metadata: {
-          ownerUserId,
-          responsibilityId: existing.responsibilityId,
+      return withLocalLock(
+        database,
+        `responsibility-trigger:${id}`,
+        async () => {
+          const value = {
+            kind: "connector" as const,
+            provider: `${existing.kind}-trigger`,
+            keyId: id,
+            metadata: {
+              ownerUserId,
+              responsibilityId: existing.responsibilityId,
+            },
+            plaintext: secret,
+          };
+          /*
+           * Rotated from the key's live credential, which is the one the trigger names, or, when a
+           * rotation stopped after the vault and before the trigger, the one it left behind: so a second
+           * attempt always finishes the first.
+           */
+          const previous = await vault.store.findLiveByKey(value);
+          const credential = previous
+            ? await vault.store.rotate({
+                ...value,
+                previousCredentialId: previous.id,
+              })
+            : await vault.store.create(value);
+          const trigger = await rewrite(ownerUserId, id, async () => ({
+            credentialRef: credential.id,
+          }));
+          return {
+            trigger: record(trigger),
+            secret: generated ? secret : null,
+          };
         },
-        plaintext: secret,
-      };
-      const credential = existing.credentialId
-        ? await vault.store.rotate({
-            ...value,
-            previousCredentialId: existing.credentialId,
-          })
-        : await vault.store.create(value);
-      const [row] = await database
-        .update(responsibilityTriggers)
-        .set({ credentialId: credential.id, updatedAt: new Date() })
-        .where(eq(responsibilityTriggers.id, id))
-        .returning(columns);
-      if (!row) {
-        // Removed while the secret was being stored: nothing names the new one.
-        await vault.store.revoke(credential.id).catch(() => undefined);
-        throw new ResponsibilityNotFoundError();
-      }
-      return { trigger: record(row), secret: generated ? secret : null };
+      );
     },
     /** The owner re-reading a generated secret (the page's copy button). Vendor secrets are never echoed. */
     async revealSecret(ownerUserId: string, id: string): Promise<string> {
@@ -619,7 +626,7 @@ export function createTriggerStore(
         throw new ResponsibilityRefusedError(
           "Provider secrets are not shown again. Paste a new one to rotate.",
         );
-      const secret = await secretFor(existing.credentialId, {
+      const secret = await secretFor(existing.credentialRef, {
         purpose: "trigger_secret_shown_to_owner",
         userId: ownerUserId,
       });
@@ -630,60 +637,62 @@ export function createTriggerStore(
       return secret;
     },
     async remove(ownerUserId: string, id: string) {
-      const [row] = await database
-        .select(columns)
-        .from(responsibilityTriggers)
-        .where(
-          and(
-            eq(responsibilityTriggers.id, id),
-            eq(responsibilityTriggers.ownerUserId, ownerUserId),
-          ),
-        );
-      if (!row) throw new ResponsibilityNotFoundError();
-      // Revoked before the row goes: a failure between the two leaves a trigger naming a revoked
-      // secret (which accepts nothing, and a retry removes), never a live secret nothing names.
-      if (row.credentialId) {
-        try {
-          await vault.store.revoke(row.credentialId);
-        } catch (error) {
-          if (!(error instanceof CredentialRefusedError)) throw error;
-        }
-      }
-      await database
-        .delete(responsibilityTriggers)
-        .where(eq(responsibilityTriggers.id, id));
+      await withLocalLock(
+        database,
+        `responsibility-trigger:${id}`,
+        async () => {
+          const trigger = await ownedTrigger(ownerUserId, id);
+          // Deleted first, so its URL stops working at once; then its key is revoked.
+          await schedules().remove("responsibility-triggers", id);
+          if (trigger.credentialRef)
+            await vault.store
+              .revoke(trigger.credentialRef)
+              .catch(async (error: unknown) => {
+                // Already revoked is what was wanted; anything else is a key left live, said loudly.
+                if (
+                  await vault.store
+                    .isLive(trigger.credentialRef ?? "")
+                    .catch(() => true)
+                )
+                  throw error;
+              });
+        },
+      );
     },
     directory: {
       async resolve(id: string) {
         if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-        const [row] = await database
-          .select(resolvedColumns)
-          .from(responsibilityTriggers)
-          .innerJoin(
-            responsibilities,
-            eq(responsibilities.id, responsibilityTriggers.responsibilityId),
-          )
-          .where(eq(responsibilityTriggers.id, id));
-        return row ? resolved(row) : null;
+        const trigger = await schedules().find("responsibility-triggers", id);
+        if (!live(trigger)) return null;
+        const goal = await schedules().find(
+          "responsibilities",
+          trigger.responsibilityId,
+        );
+        return live(goal) ? resolved(trigger, goal) : null;
       },
       async slackTriggers(teamId: string) {
-        const rows = await database
-          .select(resolvedColumns)
-          .from(responsibilityTriggers)
-          .innerJoin(
-            responsibilities,
-            eq(responsibilities.id, responsibilityTriggers.responsibilityId),
-          )
-          .where(eq(responsibilityTriggers.kind, "slack"));
-        const matching = rows.filter(
-          (row) => row.config.kind === "slack" && row.config.teamId === teamId,
+        // From memory: a Slack workspace's every message is asked here, and none of them waits on
+        // Intelligence. The store re-checks a trigger against Intelligence before recording anything.
+        const matching = schedules()
+          .live("responsibility-triggers")
+          .filter(
+            (trigger) =>
+              trigger.kind === "slack" &&
+              (trigger.config as TriggerConfig).kind === "slack" &&
+              (trigger.config as { teamId?: unknown }).teamId === teamId,
+          );
+        const found = await Promise.all(
+          matching.map(async (trigger) => {
+            const goal = await schedules().find(
+              "responsibilities",
+              trigger.responsibilityId,
+            );
+            return live(goal)
+              ? [{ ...(await resolved(trigger, goal)), agentId: goal.agentId }]
+              : [];
+          }),
         );
-        return Promise.all(
-          matching.map(async (row) => ({
-            ...(await resolved(row)),
-            agentId: row.agentId,
-          })),
-        );
+        return found.flat();
       },
     } satisfies TriggerDirectory,
   };

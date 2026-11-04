@@ -12,9 +12,10 @@
  *
  * Conversations go the way every other deletion of them does, soft, through the channel store, so
  * every open tab is told and the thread survives on the platform as it would for a manual delete.
- * Routines and responsibilities are deleted, and their runs with them through the foreign keys that
- * already cascade. Memory sources are deleted in Intelligence, which takes their imported memories with
- * them, after the local transaction commits: no OpenBot transaction is held across a call to it.
+ * Routines and responsibilities are deleted for good in Intelligence, which removes their runs (and a
+ * responsibility's triggers) with them, before the local transaction. Memory sources are deleted in
+ * Intelligence, which takes their imported memories with them, after it commits: no OpenBot
+ * transaction is held across a call to Intelligence.
  *
  * "STARTS FRESH" ALSO MEANS what the Bot learned and was allowed on its own: memories it formed for
  * this person, the background research it runs for them (its suggestions go with it, and any run
@@ -26,16 +27,10 @@
  * research they had turned off is recorded as turned down (`memory/defaults.ts`), so starting fresh
  * never switches back on what they switched off. What they left on comes back on by default.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { conversations as conversationDirectory } from "../conversations/directory";
 import type { Database } from "../db/client";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-  responsibilities,
-  routines,
-  workItems,
-} from "../db/schema";
+import { workItems } from "../db/schema";
 import {
   lockDefaults,
   recordOptOuts,
@@ -43,7 +38,12 @@ import {
 } from "../memory/defaults";
 import type { MemoryStore } from "../memory/store";
 import { policy } from "../policy/cache";
-import { PROACTIVE_RUN_KIND } from "../proactive/engine";
+import { checkInsOf, resetCheckInsOf } from "../proactive/store";
+import {
+  purgeResponsibilitiesOf,
+  responsibilitiesOf,
+} from "../responsibilities/store";
+import { purgeRoutinesOf, routinesOf } from "../routines/store";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
 
@@ -101,12 +101,6 @@ export function createBotReset(options: {
       sql`${workItems.payload}->>'agentId' = ${agentId}`,
     );
 
-  const research = (ownerUserId: string, agentId: string) =>
-    and(
-      eq(proactiveSettings.ownerUserId, ownerUserId),
-      eq(proactiveSettings.agentId, agentId),
-    );
-
   /**
    * Grants only: a rule that makes the Bot ask first or hand back is the person's protection. The rules
    * are Intelligence's (organization policy), held in memory on every server.
@@ -137,28 +131,8 @@ export function createBotReset(options: {
       sharedConversationsKept: conversationsFound.kept,
       memorySources: remembered.sources.length,
       memories: remembered.importedMemories,
-      routines: await count(
-        database
-          .select({ total })
-          .from(routines)
-          .where(
-            and(
-              eq(routines.ownerUserId, ownerUserId),
-              eq(routines.agentId, agentId),
-            ),
-          ),
-      ),
-      responsibilities: await count(
-        database
-          .select({ total })
-          .from(responsibilities)
-          .where(
-            and(
-              eq(responsibilities.ownerUserId, ownerUserId),
-              eq(responsibilities.agentId, agentId),
-            ),
-          ),
-      ),
+      routines: (await routinesOf(ownerUserId, agentId)).length,
+      responsibilities: (await responsibilitiesOf(ownerUserId, agentId)).length,
       followUps: await count(
         database
           .select({ total })
@@ -166,12 +140,7 @@ export function createBotReset(options: {
           .where(pendingFollowUps(ownerUserId, agentId)),
       ),
       formedMemories: remembered.formedMemoryIds.length,
-      backgroundResearch: await count(
-        database
-          .select({ total })
-          .from(proactiveSettings)
-          .where(research(ownerUserId, agentId)),
-      ),
+      backgroundResearch: checkInsOf(ownerUserId, agentId),
       standingApprovals: standingApprovals(ownerUserId, agentId).length,
     };
   }
@@ -190,60 +159,32 @@ export function createBotReset(options: {
       const { sources } = remembered;
 
       /*
-       * What this person had switched off, turned down for good, said in Intelligence BEFORE the
-       * deletes below (the sources' in Intelligence after the transaction): no adoption on any replica
-       * can then bring one back once it is gone (memory/defaults.ts), and no transaction here waits on
-       * Intelligence.
+       * The memory sources this person had switched off, turned down for good, said in Intelligence
+       * BEFORE the sources go (in Intelligence, after the transaction): no adoption on any replica can
+       * then bring one back once it is gone (memory/defaults.ts). Check-ins say theirs themselves.
        */
-      const optOutsOf = (
-        sources: { toolRef: string; enabled: boolean }[],
-        settings: { enabled: boolean }[],
-      ) => [
-        ...sources
+      await recordOptOuts(
+        ownerUserId,
+        sources
           .filter((source) => !source.enabled)
           .map((source) => ({
             agentId,
             feature: "memory_source" as const,
             scope: sourceServerId(source.toolRef),
           })),
-        ...(settings.some((setting) => !setting.enabled)
-          ? [{ agentId, feature: "proactive_research" as const }]
-          : []),
-      ];
-      const sayKey = (optOut: { feature: string; scope?: string }) =>
-        `${optOut.feature}\u001f${optOut.scope ?? ""}`;
-      const before = optOutsOf(
-        sources,
-        await database
-          .select({ enabled: proactiveSettings.enabled })
-          .from(proactiveSettings)
-          .where(research(ownerUserId, agentId)),
       );
-      await recordOptOuts(ownerUserId, before);
-      const said = new Set(before.map(sayKey));
-      let late: ReturnType<typeof optOutsOf> = [];
+      // Routines and check-ins live in Intelligence, so they go before the transaction rather than
+      // inside it: no OpenBot transaction waits on Intelligence. Removed for good, their runs (and a
+      // check-in's items) with them, as the reset always removed them. A check-in the person had
+      // switched off is recorded as turned down first, under the lease adoption takes.
+      const deletedRoutines = await purgeRoutinesOf(ownerUserId, agentId);
+      const research = await resetCheckInsOf(database, ownerUserId, agentId);
+      // Responsibilities likewise, their runs and triggers with them.
+      const deletedGoals = await purgeResponsibilitiesOf(ownerUserId, agentId);
 
       const result = await database.transaction(async (transaction) => {
-        // The lock defaults adoption takes, so no research default is adopted between these reads and the deletes.
+        // The lock defaults adoption takes, so no memory source is adopted while the follow-ups go.
         await lockDefaults(transaction, ownerUserId, agentId);
-        const deletedRoutines = await transaction
-          .delete(routines)
-          .where(
-            and(
-              eq(routines.ownerUserId, ownerUserId),
-              eq(routines.agentId, agentId),
-            ),
-          )
-          .returning({ id: routines.id });
-        const deletedGoals = await transaction
-          .delete(responsibilities)
-          .where(
-            and(
-              eq(responsibilities.ownerUserId, ownerUserId),
-              eq(responsibilities.agentId, agentId),
-            ),
-          )
-          .returning({ id: responsibilities.id });
         const followUps = await transaction
           .update(workItems)
           .set({
@@ -255,57 +196,18 @@ export function createBotReset(options: {
           })
           .where(pendingFollowUps(ownerUserId, agentId))
           .returning({ key: workItems.key });
-        const settings = await transaction
-          .select({
-            id: proactiveSettings.id,
-            enabled: proactiveSettings.enabled,
-          })
-          .from(proactiveSettings)
-          .where(research(ownerUserId, agentId));
-        // Switched off between the read above and this one: said once the transaction is done.
-        late = optOutsOf(sources, settings).filter(
-          (optOut) => !said.has(sayKey(optOut)),
-        );
-        if (settings.length > 0) {
-          const ids = settings.map((setting) => setting.id);
-          // A run already queued for the setting would find it gone; cancel it rather than fail it.
-          await transaction
-            .update(workItems)
-            .set({
-              finishedAt: sql`now()`,
-              claimedBy: null,
-              leaseUntil: null,
-              lastError: "Cancelled by reset",
-              updatedAt: sql`now()`,
-            })
-            .where(
-              and(
-                eq(workItems.kind, PROACTIVE_RUN_KIND),
-                isNull(workItems.finishedAt),
-                inArray(sql<string>`${workItems.payload}->>'settingId'`, ids),
-              ),
-            );
-          // Suggestions go with their setting through the foreign key.
-          await transaction
-            .delete(proactiveSuggestions)
-            .where(inArray(proactiveSuggestions.settingId, ids));
-          await transaction
-            .delete(proactiveSettings)
-            .where(inArray(proactiveSettings.id, ids));
-        }
         return {
           conversations: found.mine.length,
           sharedConversationsKept: found.kept,
           memorySources: sources.length,
           memories: remembered.importedMemories,
-          routines: deletedRoutines.length,
-          responsibilities: deletedGoals.length,
+          routines: deletedRoutines,
+          responsibilities: deletedGoals,
           followUps: followUps.length,
           formedMemories: 0,
-          backgroundResearch: settings.length,
+          backgroundResearch: research,
         };
       });
-      await recordOptOuts(ownerUserId, late);
       // The sources (with what they imported) and what the Bot formed itself, in Intelligence.
       result.formedMemories = await memory.resetBot(ownerUserId, remembered);
       /*

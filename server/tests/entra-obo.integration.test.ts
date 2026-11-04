@@ -13,7 +13,6 @@ import {
   SignJWT,
 } from "jose";
 import { createApp } from "../src/app";
-import { createPeopleStore } from "../src/people/store";
 import { createAuditStore } from "../src/audit";
 import { createAuth } from "../src/auth";
 import { createEntra, withEntraBearer } from "../src/auth/entra";
@@ -21,19 +20,15 @@ import { createRoleRepository } from "../src/auth/guards";
 import { loadConfig } from "../src/config";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  accounts,
-  auditEvents,
-  revokedAccess,
-  sessions,
-  users,
-} from "../src/db/schema";
+import { accounts, revokedAccess, sessions, users } from "../src/db/schema";
+import { createPeopleStore } from "../src/people/store";
 import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { createRequestActor } from "../src/request-actor";
+import { auditRows } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
@@ -613,16 +608,14 @@ describe("an app calls OpenBot with a person's Entra token", () => {
       .from(sessions)
       .where(eq(sessions.userId, (await userId(ADMIN)) ?? ""));
     expect(signedIn).toHaveLength(0);
-    // The sign-in itself is still on the trail.
-    const trail = await database
-      .select({ id: auditEvents.id })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "session.signed_in"),
-          eq(auditEvents.actorUserId, (await userId(ADMIN)) ?? ""),
-        ),
-      );
+    // The sign-in itself is still on the trail, read by her id (which no other run has).
+    const adminId = (await userId(ADMIN)) ?? "";
+    const trail = adminId
+      ? await auditRows({
+          eventType: "session.signed_in",
+          actorUserId: adminId,
+        })
+      : [];
     expect(trail).toHaveLength(1);
   });
 

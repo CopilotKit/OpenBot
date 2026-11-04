@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import {
   createHandoffRunner,
@@ -17,8 +17,9 @@ import { handoffTool } from "../src/agents/handoff-tool";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, workItems } from "../src/db/schema";
+import { workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows } from "./support/audit";
 import {
   changeAccess,
   grantBot,
@@ -234,13 +235,8 @@ describe("a hop, from the tool call to the delivery", () => {
     });
     await runner.sweep();
 
-    const rows = await database
-      .select({
-        eventType: auditEvents.eventType,
-        payload: auditEvents.payload,
-      })
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, TARGET));
+    // The trail is Intelligence's: read after the outbox is flushed, by this suite's own target.
+    const rows = await auditRows({ targetId: TARGET });
     const kinds = rows.map((row) => row.eventType);
     expect(kinds).toContain("agent.handoff_offered");
     expect(kinds).toContain("agent.handoff_delivered");

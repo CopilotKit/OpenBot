@@ -9,10 +9,10 @@
  * NOTHING HERE TOUCHES A BROWSER. Deciding whether a computer is idle by dialling it would wake the
  * computer, so every idle Bot anything asked about would come back up and the bill would never fall.
  * That is the known, invisible way to lose scale-to-zero: everything works, nothing ever suspends.
- * Idleness is read from the audit trail, which is a record of what a Bot did rather than a question
- * put to the thing that did it.
+ * Idleness is read from what the audit trail records a Bot did, rather than a question put to the
+ * thing that did it: the `computer_activity` bookmark every `computer.*` row moves forward.
  */
-import { and, inArray, like, sql } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import {
   type ComputerKey,
   computerKeyText,
@@ -20,7 +20,7 @@ import {
 } from "../computer/computer-key";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { auditEvents } from "../db/schema";
+import { computerActivity } from "../db/schema";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "./queue";
 
 export const CULL_KIND = "computer.suspend";
@@ -49,9 +49,11 @@ export type CullReport = {
 /**
  * When each computer was last asked to do anything, keyed by `person:<id>` or `bot:<id>`.
  *
- * The audit trail is the source: every acting call writes a row before the computer is touched, so
- * "last used" is already recorded, server-side, and survives a restart. A computer that has never
- * acted has no row and reads as idle since it started, which is the answer wanted.
+ * The audit trail is the source: every acting call writes a `computer.*` row before the computer is
+ * touched, and that write moves the computer's `computer_activity` bookmark forward in the same
+ * statement (`createAuditStore`). The trail itself lives in Intelligence; this is the one question
+ * asked of it on every sweep, so it is answered here, server-side, and survives a restart. A computer
+ * that has never acted has no bookmark and reads as idle since it started, which is the answer wanted.
  *
  * BY COMPUTER, NOT BY BOT. A person's computer carries every Bot they use, so it is in use while any
  * of them is: grouping by Bot would put it to sleep under one Bot because another had gone quiet.
@@ -65,29 +67,15 @@ export async function lastUsedByComputer(
   computers: string[],
 ): Promise<Map<string, Date>> {
   if (computers.length === 0) return new Map();
-  /*
-   * The computer is in the payload rather than in a column, so the grouping key is an expression.
-   * Written through the query builder rather than as one raw string, because a list parameter has
-   * to be bound as a list: handed to `= any($1)` as a JavaScript array it arrives as one opaque value
-   * and the query fails rather than matching nothing, which at least says so.
-   */
-  const computer = sql<string>`coalesce(${auditEvents.payload}->>'computer', 'bot:' || (${auditEvents.payload}->>'bot'))`;
   const rows = await database
-    .select({ computer, last: sql<string>`max(${auditEvents.createdAt})` })
-    .from(auditEvents)
-    .where(
-      and(
-        like(auditEvents.eventType, "computer.%"),
-        inArray(computer, computers),
-      ),
-    )
-    .groupBy(computer);
+    .select({
+      computer: computerActivity.computer,
+      last: computerActivity.lastActiveAt,
+    })
+    .from(computerActivity)
+    .where(inArray(computerActivity.computer, computers));
 
-  return new Map(
-    rows
-      .filter((row) => row.computer)
-      .map((row) => [row.computer, new Date(row.last)] as const),
-  );
+  return new Map(rows.map((row) => [row.computer, row.last] as const));
 }
 
 /**

@@ -14,6 +14,14 @@
  * apart: only the second one has anything to do with concurrency, and only the second one needs to be
  * reasoned about as a race.
  *
+ * WHERE IT LIVES. Routines and their runs are records in Intelligence's agent schedules now
+ * (`schedules/`), not rows here. A person's reads and writes go to Intelligence; the sweep reads the
+ * due routines from this instance's schedule directory, which Intelligence keeps fresh, and moves a
+ * routine's clock with Intelligence's compare-and-set (`advance`). What used to be a row lock or an
+ * advisory lock around a read and a write is a `withLocalLock` (`work/local-lock.ts`), because an
+ * OpenBot transaction may never stay open across an Intelligence call. Only the sweep's heartbeat
+ * (`routine_sweeps`) stays a row here: it is the sweeper's own bookmark, not anybody's data.
+ *
  * NO CLAIM OR LEASE MACHINERY, EVER. Firing mechanics belong to the shared `work_items` queue in
  * `server/src/work/queue.ts`, which already owns `for update skip locked`, leases on the database's
  * clock, and an attempt count. A second lease grown on the routines table — a `claimed_by`, a
@@ -22,23 +30,19 @@
  */
 
 import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  ne,
-  sql,
-} from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
 import { conversations } from "../conversations/directory";
 import { isMember } from "../conversations/types";
 import type { Database } from "../db/client";
-import { routineRuns, routineSweeps, routines } from "../db/schema";
+import { routineSweeps } from "../db/schema";
+import {
+  ScheduleAlreadyExistsError,
+  ScheduleVersionConflictError,
+} from "../schedules/client";
+import { schedules } from "../schedules/directory";
+import type { RoutineRecord, RoutineRunRecord } from "../schedules/types";
+import { withLocalLock } from "../work/local-lock";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -215,6 +219,29 @@ export type RoutineStore = {
   /** Open a run row. Its status stays null until something finishes it. */
   insertRun(routineId: string): Promise<{ runId: string }>;
   /**
+   * Open the run for one firing under an id derived from the firing's work item, so a firing whose
+   * worker died after opening it finds the same run again rather than opening a second. `finished`
+   * says the earlier attempt already ran it to the end.
+   */
+  openRunFor(
+    routineId: string,
+    firingKey: string,
+  ): Promise<{ runId: string; finished: boolean }>;
+  /** The open runs of the routines that post into these channels, started within `withinMs`. */
+  openRunsIn(
+    channelIds: readonly string[],
+    withinMs: number,
+  ): Promise<
+    {
+      runId: string;
+      routineId: string;
+      channelId: string;
+      ownerUserId: string;
+      botId: string;
+      startedAt: Date;
+    }[]
+  >;
+  /**
    * The runner's read: an opened run row, joined to the routine it fires.
    *
    * Not owner-scoped, like everything else in this half — a run id is not something a person names,
@@ -270,25 +297,37 @@ export type RoutineStore = {
   consecutiveFailures(routineId: string): Promise<number>;
 };
 
-type RoutineRow = typeof routines.$inferSelect;
+/** How often a write retries after Intelligence says the routine changed under it (a sweep moved its clock). */
+const VERSION_RETRIES = 5;
 
-/** What drizzle hands the callback of `database.transaction`. */
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-function toRoutine(row: RoutineRow): Routine {
+function toRoutine(record: RoutineRecord): Routine {
   return {
-    id: row.id,
-    ownerUserId: row.ownerUserId,
-    agentId: row.agentId,
-    channelId: row.channelId,
-    instruction: row.instruction,
-    cron: row.cron,
-    timezone: row.timezone,
-    enabled: row.enabled,
-    nextRunAt: row.nextRunAt,
-    lastRunAt: row.lastRunAt,
-    createdAt: row.createdAt,
+    id: record.id,
+    ownerUserId: record.ownerUserId,
+    agentId: record.agentId,
+    channelId: record.channelId,
+    instruction: record.instruction,
+    cron: record.cron,
+    timezone: record.timezone,
+    enabled: record.enabled,
+    nextRunAt: record.nextRunAt,
+    lastRunAt: record.lastRunAt,
+    createdAt: record.createdAt,
   };
+}
+
+/** Capped in code points, like `validInstruction`, so an emoji-bearing error is never cut mid-pair. */
+function capped(error: string): string {
+  return Array.from(error).slice(0, MAX_RUN_ERROR).join("");
+}
+
+/**
+ * The run id for one firing: the same firing, the same id, on every replica and every retry.
+ * Hashed because a work item key holds a routine id and a minute, and a record id is at most 200
+ * characters of a narrower alphabet.
+ */
+export function routineRunIdFor(firingKey: string): string {
+  return `routine_run_${createHash("sha256").update(firingKey).digest("hex").slice(0, 40)}`;
 }
 
 /** Trim, then measure in code points like channel activity does — not in UTF-16 units. */
@@ -351,7 +390,8 @@ export function createRoutineStore(database: Database): RoutineStore {
    * Discovery confirmed the conversation's own channel is not reachable at the tool layer, so a model
    * asked to make a routine either names a channel or names nothing. Both are resolved against what
    * the owner and this agent actually share, which is the only check that stops a routine posting
-   * one person's summary into another person's conversation.
+   * one person's summary into another person's conversation. Conversations are Intelligence's, read
+   * through the conversation directory.
    */
   async function resolveChannel(
     ownerUserId: string,
@@ -398,59 +438,88 @@ export function createRoutineStore(database: Database): RoutineStore {
   }
 
   /**
-   * How many of this person's routines are switched on. The cap counts these, not rows.
-   *
-   * Takes the transaction it must count on: a count made on another pooled connection would not see
-   * the uncommitted row a racing create is about to add, which is the exact blindness the lock below
-   * exists to remove.
+   * This person's live routines as Intelligence holds them now, not as this instance last heard.
+   * Every write that counts or checks reads this, so a routine made a moment ago on another replica
+   * is counted even before its announcement arrives here.
    */
-  async function countEnabled(
-    handle: Transaction,
-    ownerUserId: string,
-  ): Promise<number> {
-    const [row] = await handle
-      .select({ total: sql<number>`count(*)::int` })
-      .from(routines)
-      .where(
-        and(eq(routines.ownerUserId, ownerUserId), eq(routines.enabled, true)),
-      );
-    return row?.total ?? 0;
+  async function ownedNow(ownerUserId: string): Promise<RoutineRecord[]> {
+    const { items } = await schedules().client.all("routines", {
+      ownerUserId,
+    });
+    for (const record of items) schedules().remember("routines", record);
+    return items.filter((record) => record.deletedAt === null);
+  }
+
+  /** How many of this person's routines are switched on. The cap counts these, not records. */
+  async function countEnabled(ownerUserId: string): Promise<number> {
+    return (await ownedNow(ownerUserId)).filter((record) => record.enabled)
+      .length;
   }
 
   /**
-   * Serialize this owner's cap-guarded writes: count and write under one advisory lock.
+   * Serialize this owner's cap-guarded writes: count and write under one lock.
    *
    * The cap used to be a bare count-then-write, and two concurrent creates that both counted 19 both
-   * inserted — the person held 21. An advisory lock rather than a row lock because the thing being
-   * guarded is a COUNT: there is no one row whose `for update` covers "how many are enabled".
-   * Transaction-scoped (`_xact_`), so the commit or the rollback releases it and never us forgetting.
-   * `hashtext` collisions are harmless — two owners sharing a hash take turns, slower and not wrong.
+   * inserted — the person held 21. The lock is the person's, so their creates and switch-ons take
+   * turns; the count inside it reads Intelligence, which every replica writes to.
    */
   async function withEnabledCapLock<T>(
     ownerUserId: string,
-    work: (transaction: Transaction) => Promise<T>,
+    work: () => Promise<T>,
   ): Promise<T> {
-    return await database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select pg_advisory_xact_lock(hashtext(${`routine-cap-${ownerUserId}`}))`,
-      );
-      return await work(transaction);
+    return withLocalLock(database, `routine-cap:${ownerUserId}`, work, {
+      ttlMs: 60_000,
+      waitMs: 30_000,
     });
   }
 
+  /** The person's own live routine, read from Intelligence. Anybody else's does not exist. */
   async function loadOwned(
     ownerUserId: string,
     id: string,
-    handle: Database | Transaction = database,
-  ): Promise<RoutineRow> {
-    const [row] = await handle
-      .select()
-      .from(routines)
-      .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
-      .limit(1);
+  ): Promise<RoutineRecord> {
+    const record = await schedules().refresh("routines", id);
     // A routine that is not yours is a routine that does not exist: the `setPinned` rule.
-    if (!row) throw new RoutineNotFoundError();
-    return row;
+    if (
+      !record ||
+      record.deletedAt !== null ||
+      record.ownerUserId !== ownerUserId
+    )
+      throw new RoutineNotFoundError();
+    return record;
+  }
+
+  /**
+   * Apply `changes` derived from the record as Intelligence holds it now, again if a sweep moved the
+   * routine's clock in between. The old row lock made a person's edit wait for the sweep's update;
+   * here the edit is redone on the newer version instead.
+   */
+  async function rewrite(
+    ownerUserId: string,
+    id: string,
+    derive: (
+      current: RoutineRecord,
+    ) => Promise<Parameters<ReturnType<typeof schedules>["update"]>[3]>,
+  ): Promise<RoutineRecord> {
+    for (let attempt = 1; ; attempt++) {
+      const current = await loadOwned(ownerUserId, id);
+      const changes = await derive(current);
+      try {
+        return await schedules().update(
+          "routines",
+          id,
+          current.version,
+          changes,
+        );
+      } catch (error) {
+        if (
+          error instanceof ScheduleVersionConflictError &&
+          attempt < VERSION_RETRIES
+        )
+          continue;
+        throw error;
+      }
+    }
   }
 
   async function update(
@@ -469,57 +538,77 @@ export function createRoutineStore(database: Database): RoutineStore {
             patch.channelId,
           )
         : undefined;
-    const [row] = await withEnabledCapLock(ownerUserId, async (transaction) => {
-      // A waiting update must derive its transition and schedule from the row that now holds the lock.
-      const existing = await loadOwned(ownerUserId, id, transaction);
+    const record = await withEnabledCapLock(ownerUserId, () =>
+      rewrite(ownerUserId, id, async (existing) => {
+        const changes: Partial<RoutineRecord> = {};
+        if (patch.instruction !== undefined)
+          changes.instruction = validInstruction(patch.instruction);
+        if (resolvedChannel !== undefined) changes.channelId = resolvedChannel;
+        if (patch.enabled !== undefined) changes.enabled = patch.enabled;
 
-      const values: Partial<typeof routines.$inferInsert> = {
-        updatedAt: new Date(),
-      };
-      if (patch.instruction !== undefined) {
-        values.instruction = validInstruction(patch.instruction);
+        const enabling = patch.enabled === true && !existing.enabled;
+        const cron = patch.cron ?? existing.cron;
+        const timezone = patch.timezone ?? existing.timezone;
+        if (patch.cron !== undefined) changes.cron = patch.cron;
+        if (patch.timezone !== undefined) changes.timezone = timezone;
+        /*
+         * Recomputed for a new cron, a new zone, and for switching back on. That last one is the
+         * subtle case: a routine switched off in June still holds June's `nextRunAt`, and enabling
+         * it without recomputing hands the sweep a firing that was due months ago.
+         */
+        if (
+          patch.cron !== undefined ||
+          patch.timezone !== undefined ||
+          enabling
+        )
+          changes.nextRunAt = nextRunFor(cron, timezone, new Date());
+
+        if (
+          enabling &&
+          (await countEnabled(ownerUserId)) >= MAX_ENABLED_ROUTINES
+        )
+          throw new RoutineRefusedError(TOO_MANY_ENABLED);
+        // Switching back on starts a new streak; see `consecutiveFailures`.
+        if (enabling) changes.enabledAt = new Date();
+        return changes;
+      }),
+    );
+    return toRoutine(record);
+  }
+
+  /** One finish of an open run, or nothing when it already finished: a run finishes once. */
+  async function closeRun(
+    runId: string,
+    status: RoutineRunOutcome,
+    error: string | undefined,
+    waiting: HeadlessWaiting | undefined,
+  ): Promise<boolean> {
+    const client = schedules().client;
+    for (let attempt = 1; ; attempt++) {
+      const run = await client.get("routine-runs", runId);
+      // A run finishes once. The second call — succeeded, then a downstream throw whose catch calls
+      // finishRun("failed") — changes nothing, rather than relabeling what the first recorded.
+      if (!run || run.status !== null) return false;
+      try {
+        await client.update("routine-runs", runId, run.version, {
+          status,
+          finishedAt: new Date(),
+          ...(waiting
+            ? { waiting: waiting as unknown as Record<string, unknown> }
+            : {}),
+          // Left alone rather than nulled when there was no error.
+          ...(error === undefined ? {} : { error: capped(error) }),
+        });
+        return true;
+      } catch (failure) {
+        if (
+          failure instanceof ScheduleVersionConflictError &&
+          attempt < VERSION_RETRIES
+        )
+          continue;
+        throw failure;
       }
-      if (resolvedChannel !== undefined) values.channelId = resolvedChannel;
-      if (patch.enabled !== undefined) values.enabled = patch.enabled;
-
-      const enabling = patch.enabled === true && !existing.enabled;
-
-      const cron = patch.cron ?? existing.cron;
-      const timezone = patch.timezone ?? existing.timezone;
-      if (patch.cron !== undefined) values.cron = patch.cron;
-      if (patch.timezone !== undefined) values.timezone = timezone;
-      /*
-       * Recomputed for a new cron, a new zone, and for switching back on. That last one is the subtle
-       * case: a routine switched off in June still holds June's `next_run_at`, and enabling it without
-       * recomputing hands the sweep a firing that was due months ago.
-       */
-      if (
-        patch.cron !== undefined ||
-        patch.timezone !== undefined ||
-        enabling
-      ) {
-        values.nextRunAt = nextRunFor(cron, timezone, new Date());
-      }
-
-      if (
-        enabling &&
-        (await countEnabled(transaction, ownerUserId)) >= MAX_ENABLED_ROUTINES
-      ) {
-        throw new RoutineRefusedError(TOO_MANY_ENABLED);
-      }
-      return await transaction
-        .update(routines)
-        .set({
-          ...values,
-          // Switching back on starts a new streak; see `consecutiveFailures`. The database's clock,
-          // like the runs it is compared with, so no skew between hosts moves a run across the line.
-          ...(enabling ? { enabledAt: sql`now()` } : {}),
-        })
-        .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
-        .returning();
-    });
-    if (!row) throw new RoutineNotFoundError();
-    return toRoutine(row);
+    }
   }
 
   return {
@@ -535,101 +624,60 @@ export function createRoutineStore(database: Database): RoutineStore {
       );
       const nextRunAt = nextRunFor(input.cron, timezone, new Date());
 
-      // Counted and inserted under the owner's cap lock, so two creates racing at 19 cannot both
+      // Counted and created under the owner's cap lock, so two creates racing at 19 cannot both
       // count 19 and hand the person 21: the second waits, counts 20, and gets the refusal.
-      const [row] = await withEnabledCapLock(
-        input.ownerUserId,
-        async (transaction) => {
-          if (
-            (await countEnabled(transaction, input.ownerUserId)) >=
-            MAX_ENABLED_ROUTINES
-          ) {
-            throw new RoutineRefusedError(TOO_MANY_ENABLED);
-          }
-          return await transaction
-            .insert(routines)
-            .values({
-              id: `routine_${crypto.randomUUID()}`,
-              ownerUserId: input.ownerUserId,
-              agentId: input.agentId,
-              channelId,
-              instruction,
-              cron: input.cron,
-              timezone,
-              nextRunAt,
-            })
-            .returning();
-        },
-      );
-      // An insert that returned nothing is not a missing routine, it is a broken database: loud
-      // rather than folded into the not-found sentence a caller is meant to be able to trust.
-      if (!row) throw new Error("inserting a routine returned no row");
-      return toRoutine(row);
+      const record = await withEnabledCapLock(input.ownerUserId, async () => {
+        if ((await countEnabled(input.ownerUserId)) >= MAX_ENABLED_ROUTINES)
+          throw new RoutineRefusedError(TOO_MANY_ENABLED);
+        const now = new Date();
+        return schedules().create("routines", {
+          id: `routine_${crypto.randomUUID()}`,
+          ownerUserId: input.ownerUserId,
+          agentId: input.agentId,
+          channelId,
+          instruction,
+          cron: input.cron,
+          timezone,
+          enabled: true,
+          enabledAt: now,
+          nextRunAt,
+          lastRunAt: null,
+        });
+      });
+      return toRoutine(record);
     },
 
     async listFor(ownerUserId) {
-      /*
-       * The last-run join reads `routine_runs`, which only the sweep's half of this file writes to:
-       * the page stays empty here until a routine has actually fired.
-       *
-       * `distinct on (routine_id) ... order by started_at desc` gives one row per routine, the most
-       * recent, in a single index scan of `routine_runs_by_routine_idx`. Reading the runs in a
-       * separate statement rather than a lateral keeps the main query one flat join.
-       */
-      const routineRows = await database
-        .select()
-        .from(routines)
-        .where(eq(routines.ownerUserId, ownerUserId))
-        .orderBy(desc(routines.createdAt), desc(routines.id));
-      // The channel each one fires into, from Intelligence. A channel that is not there at all (a
-      // purge somewhere else) and one deleted both mean the target is unusable, and neither is
-      // allowed to hide the routine, which is why `channel_id` is not a foreign key.
-      const targets = await conversations().getMany(
-        routineRows.map((routine) => routine.channelId),
+      // Intelligence's answer, not this instance's memory: a page shows what the person just did,
+      // whichever replica they did it on. Newest first, as the page always listed them.
+      const owned = (await ownedNow(ownerUserId)).sort(
+        (left, right) =>
+          right.createdAt.getTime() - left.createdAt.getTime() ||
+          (right.id < left.id ? -1 : right.id > left.id ? 1 : 0),
       );
-      const rows = routineRows.map((routine) => {
-        const target = targets.get(routine.channelId);
-        return {
-          routine,
-          channelName: target?.name ?? null,
-          channelDeletedAt: target?.deletedAt ?? null,
-          channelExists: target ? target.id : null,
-        };
-      });
+      if (owned.length === 0) return [];
 
-      const routineIds = rows.map((row) => row.routine.id);
+      const channelIds = [...new Set(owned.map((record) => record.channelId))];
+      // The channel each one fires into, from Intelligence. A channel that is not there at all (a
+      // purge somewhere else) and one deleted both make the target unusable, and neither is allowed
+      // to hide the routine, which is why `channel_id` is not a foreign key.
+      const channelById = await conversations().getMany(channelIds);
+
       const lastRuns = new Map<
         string,
         { status: RoutineRunOutcome | null; finishedAt: Date | null }
       >();
-      if (routineIds.length > 0) {
-        const runRows = await database
-          .selectDistinctOn([routineRuns.routineId], {
-            routineId: routineRuns.routineId,
-            status: routineRuns.status,
-            finishedAt: routineRuns.finishedAt,
-          })
-          .from(routineRuns)
-          .where(inArray(routineRuns.routineId, routineIds))
-          .orderBy(
-            routineRuns.routineId,
-            desc(routineRuns.startedAt),
-            // The id breaks the tie. Two runs of one routine can share a `started_at` — a retry in
-            // the same instant, a clock with coarse resolution — and without a tiebreak `distinct
-            // on` picks whichever of them the scan reached first, so the page's "last ran" would
-            // flip between two rows for no reason a person could see.
-            desc(routineRuns.id),
-          );
-        for (const run of runRows) {
-          lastRuns.set(run.routineId, {
-            status: run.status,
-            finishedAt: run.finishedAt,
-          });
-        }
-      }
+      for (const run of await schedules().client.latestRoutineRuns(
+        owned.map((record) => record.id),
+      ))
+        lastRuns.set(run.routineId, {
+          status: run.status,
+          finishedAt: run.finishedAt,
+        });
 
-      return rows.map(
-        ({ routine, channelName, channelDeletedAt, channelExists }) => ({
+      return owned.map((routine) => {
+        const channel = channelById.get(routine.channelId);
+        return {
           id: routine.id,
           agentId: routine.agentId,
           instruction: routine.instruction,
@@ -638,20 +686,27 @@ export function createRoutineStore(database: Database): RoutineStore {
           enabled: routine.enabled,
           nextRunAt: routine.nextRunAt,
           channelId: routine.channelId,
-          channelName,
-          channelDeleted: channelExists === null || channelDeletedAt !== null,
+          channelName: channel?.name ?? null,
+          channelDeleted: !channel || channel.deletedAt !== null,
           lastRun: lastRuns.get(routine.id) ?? null,
-        }),
-      );
+        };
+      });
     },
 
     async remove(ownerUserId, id) {
-      // Hard, unlike a channel: nothing reads a routine that was deleted, and its runs cascade.
-      const deleted = await database
-        .delete(routines)
-        .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
-        .returning({ id: routines.id });
-      if (deleted.length === 0) throw new RoutineNotFoundError();
+      const record = await loadOwned(ownerUserId, id);
+      /*
+       * Deleted in Intelligence, where a deleted routine stays readable and stops firing at once:
+       * the sweep reads only live, enabled routines. Its runs stay, as history; only a purge (the
+       * Bot or the person removed for good) removes them.
+       */
+      await schedules()
+        .remove("routines", id, undefined, record.version)
+        .catch(async (error: unknown) => {
+          // A sweep moved its clock between the read and the delete: delete whatever is there now.
+          if (!(error instanceof ScheduleVersionConflictError)) throw error;
+          await schedules().remove("routines", id);
+        });
     },
 
     async startManualRun(ownerUserId, id) {
@@ -660,50 +715,54 @@ export function createRoutineStore(database: Database): RoutineStore {
         throw new RoutineRefusedError(
           "This routine is paused, and paused routines never run. Switch it on first.",
         );
-      return await database.transaction(async (transaction) => {
-        // Serialized per routine so two clicks cannot both see "nothing open" and both open a run.
-        await transaction.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${`routine-run-${id}`}))`,
+      // Serialized per routine so two clicks cannot both see "nothing open" and both open a run.
+      return withLocalLock(database, `routine-run:${id}`, async () => {
+        const client = schedules().client;
+        const { items: open } = await client.page(
+          "routine-runs",
+          {
+            routineId: id,
+            status: "open",
+            // Younger than the reaper's cutoff: an older open run is abandoned, not running.
+            startedAfter: new Date(Date.now() - 10 * 60_000),
+          },
+          null,
+          1,
         );
-        const [open] = await transaction
-          .select({ id: routineRuns.id })
-          .from(routineRuns)
-          .where(
-            and(
-              eq(routineRuns.routineId, id),
-              isNull(routineRuns.status),
-              // Younger than the reaper's cutoff: an older open row is abandoned, not running.
-              sql`${routineRuns.startedAt} > now() - interval '10 minutes'`,
-            ),
-          )
-          .limit(1);
-        if (open)
+        if (open.length > 0)
           throw new RoutineRefusedError(
             "This routine is already running. Wait for that run to finish.",
           );
-        const runId = `routine_run_${crypto.randomUUID()}`;
-        await transaction
-          .insert(routineRuns)
-          .values({ id: runId, routineId: id, source: "run_now" });
-        return { runId };
+        const run = await client.create("routine-runs", {
+          id: `routine_run_${crypto.randomUUID()}`,
+          routineId: id,
+          source: "run_now",
+          status: null,
+          startedAt: new Date(),
+          finishedAt: null,
+          waiting: null,
+          error: null,
+        });
+        return { runId: run.id };
       });
     },
 
     async listRuns(ownerUserId, id, limit = 50) {
       await loadOwned(ownerUserId, id);
-      return await database
-        .select({
-          id: routineRuns.id,
-          status: routineRuns.status,
-          startedAt: routineRuns.startedAt,
-          finishedAt: routineRuns.finishedAt,
-          error: routineRuns.error,
-          source: routineRuns.source,
-        })
-        .from(routineRuns)
-        .where(eq(routineRuns.routineId, id))
-        .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))
-        .limit(Math.min(Math.max(limit, 1), 100));
+      const { items } = await schedules().client.page(
+        "routine-runs",
+        { routineId: id },
+        null,
+        Math.min(Math.max(limit, 1), 100),
+      );
+      return items.map((run) => ({
+        id: run.id,
+        status: run.status,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        error: run.error,
+        source: run.source,
+      }));
     },
 
     async setEnabled(ownerUserId, id, enabled) {
@@ -715,154 +774,157 @@ export function createRoutineStore(database: Database): RoutineStore {
     /* =========================================================================================
      * THE SWEEP'S HALF STARTS HERE.
      *
-     * One store, because there is one table and one owner-guarding discipline to keep straight
-     * about it; but the two halves read nothing alike. Above, every method takes an owner and
-     * every failure is one person's — a bad cron, a channel they are not in — and none of them is
-     * about two things happening at once. Below, nobody asks a question: a sweep on a clock reads
-     * the ledger, and every method has to be read as a race between replicas.
-     *
-     * WHOSE CLOCK. The database's, for every moment these methods compare — the same discipline
-     * `server/src/work/queue.ts` states in its header, for the same reason: a node ninety seconds
-     * behind once wrote a lease Postgres considered expired on arrival, and two replicas ran the
-     * same item. `now()` in SQL, never `Date.now()`.
+     * Nobody asks a question below: a sweep on a clock reads the ledger, and every method has to be
+     * read as a race between replicas. The due list comes from this instance's schedule directory,
+     * which Intelligence keeps fresh; the clock moves only through Intelligence's compare-and-set,
+     * so however stale one replica's copy is, exactly one replica moves a routine past a stamp.
      * ========================================================================================= */
 
     async dueRoutines(limit) {
       /*
-       * NOT OWNER-SCOPED, ON PURPOSE. Every other method in this file is guarded by the owner, so
-       * an unguarded one reads like an oversight; this one is the sweep's read, and the sweep has
-       * no owner. It runs as no person and looks at every person's routines, which is exactly why
-       * it returns ids and stamps and nothing a person wrote.
+       * NOT OWNER-SCOPED, ON PURPOSE. The sweep has no owner: it looks at every person's routines,
+       * which is exactly why it returns ids and stamps and nothing a person wrote. From memory, so a
+       * sweep every minute on every replica costs Intelligence nothing.
        */
-      return await database
-        .select({ id: routines.id, nextRunAt: routines.nextRunAt })
-        .from(routines)
-        .where(
-          and(
-            eq(routines.enabled, true),
-            // The comparison Postgres makes against its own clock. A replica's `Date.now()` here
-            // would decide what is due from a clock the row was never written by.
-            lte(routines.nextRunAt, sql`now()`),
-          ),
-        )
-        // Oldest due first, so a backlog drains in the order it built up. The id is a tiebreak, so
-        // two routines due in the same instant come back in a fixed order rather than whichever
-        // the index happened to hand over.
-        .orderBy(asc(routines.nextRunAt), asc(routines.id))
-        .limit(limit);
+      const now = Date.now();
+      return (
+        schedules()
+          .live("routines")
+          .filter(
+            (record) => record.enabled && record.nextRunAt.getTime() <= now,
+          )
+          // Oldest due first, so a backlog drains in the order it built up; the id breaks ties.
+          .sort(
+            (left, right) =>
+              left.nextRunAt.getTime() - right.nextRunAt.getTime() ||
+              (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+          )
+          .slice(0, limit)
+          .map((record) => ({ id: record.id, nextRunAt: record.nextRunAt }))
+      );
     },
 
     async advanceNextRun(id, from, computeFrom) {
-      const [row] = await database
-        .select({ cron: routines.cron, timezone: routines.timezone })
-        .from(routines)
-        .where(eq(routines.id, id))
-        .limit(1);
-      if (!row) return false;
-
-      // `computeFrom` moves only where the next occurrence is measured from, never what the CAS
-      // compares against: the sweep uses it to make a month-stale clock current in one pass, and
-      // the guarantee that exactly one replica moves the row has to survive that.
-      const next = nextRunFor(row.cron, row.timezone, computeFrom ?? from);
-
+      const record =
+        schedules().peek("routines", id) ??
+        (await schedules().find("routines", id));
+      if (!record || record.deletedAt !== null) return false;
+      // `computeFrom` moves only where the next occurrence is measured from, never what the
+      // compare-and-set compares against: the sweep uses it to make a month-stale clock current in
+      // one pass, and the guarantee that exactly one replica moves the routine survives that.
+      const next = nextRunFor(
+        record.cron,
+        record.timezone,
+        computeFrom ?? from,
+      );
       /*
-       * THE COMPARE-AND-SET IS THE WHOLE MECHANISM. `where next_run_at = from` means the row only
-       * moves for the sweep that read that exact stamp: however many replicas see the same due
-       * routine in the same second, exactly one update matches and the rest change nothing. False
-       * means another sweep won, which is fine either way — the firing still happens once.
-       *
-       * And it happens AFTER the run is offered — `sweep.ts`'s ordering comment is the one to read
-       * for why. The old fear here was that advancing after offering would double-fire on a crash
-       * between the two; it doesn't, because the offer key carries the minute the firing was due, so
-       * a re-offer of the same due stamp collides on `work_items`' `(kind, key)` primary key rather
-       * than queueing a second run. That holds even for a firing that already finished: `finish`
-       * marks the row rather than deleting it, so a finished row still conflicts. The compare-and-set
-       * below is what makes the advance itself safe under the same race, which is a separate claim
-       * from the ordering.
-       *
-       * The equality is on a stamp that round-trips: every writer of `next_run_at` computes it from
-       * `nextOccurrence`, which lands on a cron boundary with no sub-second part, and the driver
-       * binds a `Date` at millisecond precision. The column is microsecond-precision, so
-       * `next_run_at = now()` written anywhere in SQL would put microseconds in a value this
-       * comparison reads back truncated — and the CAS would stop matching, silently, for ever. This
-       * one moment is the database's clock via a value the database gave us, not via `now()`.
+       * THE COMPARE-AND-SET IS THE WHOLE MECHANISM. Intelligence moves the clock only when it still
+       * reads `from`: however many replicas see the same due routine in the same second, exactly one
+       * succeeds and the rest learn the newer clock. And it happens AFTER the run is offered; the
+       * offer key carries the minute the firing was due, so a re-offer of the same stamp collides on
+       * `work_items`' `(kind, key)` rather than queueing a second run (see sweep.ts).
        */
-      const moved = await database
-        .update(routines)
-        .set({ nextRunAt: next, lastRunAt: from, updatedAt: sql`now()` })
-        .where(and(eq(routines.id, id), eq(routines.nextRunAt, from)))
-        .returning({ id: routines.id });
-      return moved.length > 0;
+      return (await schedules().advance("routines", id, from, next)) !== null;
     },
 
     async insertRun(routineId) {
-      const runId = `routine_run_${crypto.randomUUID()}`;
-      // `startedAt` defaults to the database's now, and `status` stays null: null is the in-flight
-      // state, which is the reason that column is nullable rather than defaulted to something.
-      const [row] = await database
-        .insert(routineRuns)
-        .values({ id: runId, routineId })
-        .returning({ id: routineRuns.id });
-      if (!row) throw new Error("inserting a routine run returned no row");
-      return { runId: row.id };
+      const run = await schedules().client.create("routine-runs", {
+        id: `routine_run_${crypto.randomUUID()}`,
+        routineId,
+        source: "schedule",
+        status: null,
+        startedAt: new Date(),
+        finishedAt: null,
+        waiting: null,
+        error: null,
+      });
+      return { runId: run.id };
+    },
+
+    async openRunFor(routineId, firingKey) {
+      const runId = routineRunIdFor(firingKey);
+      const client = schedules().client;
+      try {
+        await client.create(
+          "routine-runs",
+          {
+            id: runId,
+            routineId,
+            source: "schedule",
+            status: null,
+            startedAt: new Date(),
+            finishedAt: null,
+            waiting: null,
+            error: null,
+          },
+          `openbot:routine-run:${runId}`,
+        );
+        return { runId, finished: false };
+      } catch (error) {
+        if (!(error instanceof ScheduleAlreadyExistsError)) throw error;
+        // This firing's run was opened by an attempt that died: the same run, not a second one.
+        const run = await client.get("routine-runs", runId);
+        return { runId, finished: run !== null && run.status !== null };
+      }
+    },
+
+    async openRunsIn(channelIds, withinMs) {
+      const wanted = new Set(channelIds);
+      const routinesHere = schedules()
+        .live("routines")
+        .filter((record) => wanted.has(record.channelId));
+      // Most conversations have no routine at all, and they cost Intelligence nothing here.
+      if (routinesHere.length === 0) return [];
+      const byId = new Map(routinesHere.map((record) => [record.id, record]));
+      const { items } = await schedules().client.all("routine-runs", {
+        routineId: [...byId.keys()],
+        status: "open",
+        startedAfter: new Date(Date.now() - withinMs),
+      });
+      return items.flatMap((run) => {
+        const routine = byId.get(run.routineId);
+        return routine
+          ? [
+              {
+                runId: run.id,
+                routineId: routine.id,
+                channelId: routine.channelId,
+                ownerUserId: routine.ownerUserId,
+                botId: routine.agentId,
+                startedAt: run.startedAt,
+              },
+            ]
+          : [];
+      });
     },
 
     async runContext(runId) {
-      /*
-       * An inner join, so a run whose routine is gone reads as no row rather than as a firing with
-       * nothing to say. `remove` is a hard delete and the runs cascade with it, so in practice both
-       * sides disappear together; the join is what makes that one absence instead of two.
-       */
-      const [row] = await database
-        .select({
-          routineId: routines.id,
-          ownerUserId: routines.ownerUserId,
-          agentId: routines.agentId,
-          channelId: routines.channelId,
-          instruction: routines.instruction,
-          enabled: routines.enabled,
-        })
-        .from(routineRuns)
-        .innerJoin(routines, eq(routines.id, routineRuns.routineId))
-        .where(eq(routineRuns.id, runId))
-        .limit(1);
-      return row ?? null;
+      const run = await schedules().client.get("routine-runs", runId);
+      if (!run) return null;
+      // Read now rather than from memory: a routine switched off or deleted a moment ago on another
+      // replica must not run. A deleted routine reads as no context, as when its runs went with it.
+      const routine = await schedules().refresh("routines", run.routineId);
+      if (!routine || routine.deletedAt !== null) return null;
+      return {
+        routineId: routine.id,
+        ownerUserId: routine.ownerUserId,
+        agentId: routine.agentId,
+        channelId: routine.channelId,
+        instruction: routine.instruction,
+        enabled: routine.enabled,
+      };
     },
 
     async routineForFiring(id) {
-      // A single select, not owner-scoped — the sweep's read, like `dueRoutines`. A routine id here
-      // comes from a work item's own payload, not from a person, so there is no owner to check.
-      const [row] = await database
-        .select({ id: routines.id, enabled: routines.enabled })
-        .from(routines)
-        .where(eq(routines.id, id))
-        .limit(1);
-      return row ?? null;
+      // Intelligence's answer, not memory's: the consumer's re-read before firing is exactly the
+      // question "has it been deleted or switched off since the offer", asked of the source.
+      const routine = await schedules().refresh("routines", id);
+      if (!routine || routine.deletedAt !== null) return null;
+      return { id: routine.id, enabled: routine.enabled };
     },
 
     async finishRun(runId, status, error, waiting) {
-      await database
-        .update(routineRuns)
-        .set({
-          status,
-          ...(waiting ? { waiting } : {}),
-          // The database's clock closes the row, the same as it opened it.
-          finishedAt: sql`now()`,
-          // Left alone rather than nulled when there was no error, so finishing a run twice cannot
-          // erase what the first finish recorded — and the `status is null` guard below is what
-          // makes that true.
-          ...(error === undefined
-            ? {}
-            : {
-                // Measured in code points, like `validInstruction`, so an emoji-bearing error
-                // cannot be cut mid-surrogate-pair.
-                error: Array.from(error).slice(0, MAX_RUN_ERROR).join(""),
-              }),
-        })
-        // A run finishes once. The second call — succeeded, then a downstream throw whose catch
-        // calls finishRun("failed") — matches no row here and is a silent no-op, rather than
-        // relabeling what the first finish already recorded.
-        .where(and(eq(routineRuns.id, runId), isNull(routineRuns.status)));
+      await closeRun(runId, status, error, waiting);
     },
 
     async recordSweep(owner) {
@@ -886,102 +948,148 @@ export function createRoutineStore(database: Database): RoutineStore {
 
     async reapAbandonedRuns(olderThanMs, error) {
       /*
-       * One UPDATE, not a select-then-loop: every row this WHERE matches is abandoned, and there is
-       * nothing to decide per row that the age bound does not already decide. Both sides of the age
-       * comparison are the database's clock — `started_at` was written by its `now()`, so measuring
-       * it against a replica's `Date.now()` would let ninety seconds of skew reap a run some server
-       * is still running, which is this file's standing clock discipline.
+       * Every open run older than the cutoff is abandoned: a server that died mid-turn after the
+       * queue item was already finished, or a dispatch-failure close that itself failed. The age
+       * bound keeps this away from live work. "skipped" rather than "failed" so an infrastructure
+       * death is not counted by the fatigue rule as the routine's own failure.
        */
-      const closed = await database
-        .update(routineRuns)
-        .set({
-          status: "skipped",
-          finishedAt: sql`now()`,
-          // Same code-point cap as `finishRun`, so a reap reason cannot be cut mid-surrogate-pair.
-          error: Array.from(error).slice(0, MAX_RUN_ERROR).join(""),
-        })
-        .where(
-          and(
-            isNull(routineRuns.status),
-            lte(
-              routineRuns.startedAt,
-              sql`now() - (${olderThanMs} * interval '1 millisecond')`,
-            ),
-          ),
-        )
-        .returning({ id: routineRuns.id });
-      return closed.length;
+      const { items } = await schedules().client.all("routine-runs", {
+        status: "open",
+        startedBefore: new Date(Date.now() - olderThanMs),
+      });
+      let closed = 0;
+      for (const run of items)
+        if (await closeRun(run.id, "skipped", error, undefined)) closed += 1;
+      return closed;
     },
 
     async markUnschedulable(id, reason) {
-      const disabled = await database
-        .update(routines)
-        .set({ enabled: false, updatedAt: sql`now()` })
-        .where(eq(routines.id, id))
-        .returning({ id: routines.id });
-      // Deleted between the sweep's read and this write: gone is gone, and a run row inserted here
-      // would only violate the foreign key of a routine nobody can see any more.
-      if (disabled.length === 0) return;
-      // A finished "skipped" row rather than "failed": no turn ran, so the fatigue rule must not
+      const routine = await schedules().refresh("routines", id);
+      // Deleted between the sweep's read and this write: gone is gone.
+      if (!routine || routine.deletedAt !== null) return;
+      for (let attempt = 1; ; attempt++) {
+        const current = await schedules().refresh("routines", id);
+        if (!current || current.deletedAt !== null) return;
+        try {
+          await schedules().update("routines", id, current.version, {
+            enabled: false,
+          });
+          break;
+        } catch (error) {
+          if (
+            error instanceof ScheduleVersionConflictError &&
+            attempt < VERSION_RETRIES
+          )
+            continue;
+          throw error;
+        }
+      }
+      // A finished "skipped" run rather than "failed": no turn ran, so the fatigue rule must not
       // count this, and skipped is exactly the vocabulary for a firing that never became a turn.
-      await database.insert(routineRuns).values({
+      const now = new Date();
+      await schedules().client.create("routine-runs", {
         id: `routine_run_${crypto.randomUUID()}`,
         routineId: id,
+        source: "schedule",
         status: "skipped",
-        finishedAt: sql`now()`,
-        error: Array.from(reason).slice(0, MAX_RUN_ERROR).join(""),
+        startedAt: now,
+        finishedAt: now,
+        waiting: null,
+        error: capped(reason),
       });
     },
 
     async consecutiveFailures(routineId) {
+      const routine = await schedules().find("routines", routineId);
+      if (!routine) return 0;
       /*
-       * Bounded, then counted here. The bound is the point: this is read on every failed firing,
-       * for ever, and `select ... where routine_id = $1` with no limit gets slower for exactly the
-       * routines that fail most. The rule only acts on the first handful, so reading twice that
-       * many and stopping is the whole answer.
-       *
-       * Finished runs only — an in-flight run has no outcome yet and must not end the streak.
+       * Bounded, then counted here: read on every failed firing, for ever, and the rule only acts on
+       * the first handful. Finished runs only, and A SKIP IS NOT A FAILURE AND DOES NOT BREAK THE
+       * STREAK (it means no turn ran), so skips are left out of the window rather than eating slots
+       * in it. ONLY SINCE IT WAS LAST SWITCHED ON, so the first run after a person's fix does not
+       * switch it straight off again.
        */
-      const rows = await database
-        .select({ status: routineRuns.status })
-        .from(routineRuns)
-        .where(
-          and(
-            eq(routineRuns.routineId, routineId),
-            isNotNull(routineRuns.status),
-            /*
-             * A SKIP IS NOT A FAILURE, AND DOES NOT BREAK THE STREAK. It means no turn ran — the
-             * channel was gone, the dispatch never reached the server, or a restart abandoned the
-             * run — not that the turn failed, so it is not counted; and it does not reset the
-             * count either, because a routine whose channel flaps would otherwise never reach the
-             * fatigue rule — it would disable itself over ten missing channels, or never at all.
-             * Excluding it here, rather than reading it and skipping over it below, keeps it from
-             * consuming a slot in the bounded window: a routine that skips twice for every
-             * failure must still be able to count past ten failures, not top out around six or
-             * seven because skips ate two-thirds of the rows the window could hold.
-             */
-            ne(routineRuns.status, "skipped"),
-            /*
-             * ONLY SINCE IT WAS LAST SWITCHED ON. The rule switches a routine off after ten failures
-             * and says a person must switch it back on; counting across that would leave the eleventh
-             * run, the first after the person's fix, switching it straight off again with "failed ten
-             * times in a row", and never saying the first-failure line at all.
-             */
-            gte(
-              routineRuns.startedAt,
-              sql`(select ${routines.enabledAt} from ${routines} where ${routines.id} = ${routineId})`,
-            ),
-          ),
-        )
-        .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))
-        .limit(FAILURE_SCAN_LIMIT);
-
+      const { items } = await schedules().client.page(
+        "routine-runs",
+        {
+          routineId,
+          status: ["succeeded", "failed", "waiting"],
+          startedAfter: new Date(routine.enabledAt.getTime() - 1),
+        },
+        null,
+        FAILURE_SCAN_LIMIT,
+      );
       let failures = 0;
-      for (const run of rows) {
+      for (const run of items as RoutineRunRecord[]) {
         if (run.status !== "failed") break;
         failures += 1;
       }
       return failures;
     },
   };
+}
+
+/**
+ * A routine firing that stopped to wait on a person (an approval, a sign-in) is finished once that
+ * person's answer has run: every run still `waiting` on that request becomes `succeeded`.
+ *
+ * Waiting runs are few at any moment, so they are read and matched here rather than asked of
+ * Intelligence by a field inside `waiting`. Each is moved under its version, so a run something else
+ * finished a moment ago is left as that left it.
+ */
+export async function finishRoutineRunsWaitingOn(
+  field: "approvalId" | "signInRequestId",
+  requestId: string,
+): Promise<number> {
+  const client = schedules().client;
+  const { items } = await client.all("routine-runs", { status: "waiting" });
+  let finished = 0;
+  for (const run of items) {
+    if (run.waiting?.[field] !== requestId) continue;
+    try {
+      await client.update("routine-runs", run.id, run.version, {
+        status: "succeeded",
+        finishedAt: new Date(),
+        error: null,
+        waiting: null,
+      });
+      finished += 1;
+    } catch (error) {
+      if (!(error instanceof ScheduleVersionConflictError)) throw error;
+    }
+  }
+  return finished;
+}
+
+/** This person's live routines with this Bot, as Intelligence holds them now. */
+export async function routinesOf(
+  ownerUserId: string,
+  agentId: string,
+): Promise<RoutineRecord[]> {
+  const { items } = await schedules().client.all("routines", {
+    ownerUserId,
+    agentId,
+  });
+  return items.filter((record) => record.deletedAt === null);
+}
+
+/**
+ * Remove this person's routines with this Bot for good, runs included, as a reset of the Bot does:
+ * the person starts over, so nothing of the old routines stays behind. Returns how many there were.
+ */
+export async function purgeRoutinesOf(
+  ownerUserId: string,
+  agentId: string,
+): Promise<number> {
+  const { items } = await schedules().client.all("routines", {
+    ownerUserId,
+    agentId,
+    includeDeleted: true,
+  });
+  let live = 0;
+  for (const record of items) {
+    if (record.deletedAt === null) live += 1;
+    await schedules().purge("routines", record.id);
+  }
+  return live;
 }

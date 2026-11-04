@@ -1,4 +1,5 @@
-import { sql } from "drizzle-orm";
+import { createAuditReader } from "../audit";
+import { auditTrail, flushBeforeRead } from "../audit-trail/trail";
 import type { Database } from "../db/client";
 
 /**
@@ -19,7 +20,7 @@ import type { Database } from "../db/client";
  * Bounded rather than merely parsed, a report is a thing somebody watches load, so "how many days"
  * has a ceiling instead of trusting a number that arrived over the wire.
  *
- * These read the trail directly.
+ * These read the trail, which lives in Intelligence, after sending what this deployment just wrote.
  *
  * What these read. A fresh deployment has no connector and no documents, so the worked example reads
  * the one dataset that is always real and always present: this deployment's own audit trail. The seam
@@ -55,21 +56,21 @@ export const DATA_FUNCTIONS: DataFunction[] = [
     description:
       "How many actions each Bot has taken, counted from the audit trail.",
     reads: "the audit trail",
-    async run(database, args) {
+    async run(_database, args) {
       const days = bounded(args.days, { fallback: 7, min: 1, max: 90 });
-      // Counted in the database rather than fetched and counted here: the trail is the one table that
+      // Counted by Intelligence rather than fetched and counted here: the trail is the one record that
       // grows without limit, and a component asking for a chart must not pull a year of it across the
       // wire in order to add up seven days.
-      const rows = await database.execute<{ bot: string; actions: number }>(
-        sql`select payload->>'bot' as bot, count(*)::int as actions
-            from audit_events
-            where payload->>'bot' is not null
-              and created_at > now() - make_interval(days => ${days})
-            group by 1
-            order by actions desc
-            limit 12`,
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const agents = await trail.client.agentActivity(
+        new Date(Date.now() - days * 86_400_000).toISOString(),
+        12,
       );
-      return { days, rows: [...rows] };
+      return {
+        days,
+        rows: agents.map((row) => ({ bot: row.agentId, actions: row.events })),
+      };
     },
   },
   {
@@ -79,27 +80,30 @@ export const DATA_FUNCTIONS: DataFunction[] = [
     reads: "the audit trail",
     async run(database, args) {
       const limit = bounded(args.limit, { fallback: 10, min: 1, max: 50 });
-      const rows = await database.execute<{
-        at: string;
-        bot: string | null;
-        what: string;
-        reason: string | null;
-      }>(
-        sql`select created_at as at,
-                   payload->>'bot' as bot,
-                   event_type as what,
-                   coalesce(payload->>'reason', payload->'decision'->>'rule') as reason
-            from audit_events
-            where event_type in (
-              'computer.action_refused',
-              'component.refused',
-              'component.function_refused',
-              'bot.declined'
-            )
-            order by created_at desc
-            limit ${limit}`,
-      );
-      return { rows: [...rows] };
+      const { events } = await createAuditReader(database).list({
+        limit,
+        eventType: [
+          "computer.action_refused",
+          "component.refused",
+          "component.function_refused",
+          "bot.declined",
+        ].join(","),
+      });
+      return {
+        rows: events.map((event) => {
+          const decision = event.payload.decision as
+            | { rule?: unknown }
+            | undefined;
+          const reason = event.payload.reason ?? decision?.rule;
+          return {
+            at: event.createdAt,
+            bot:
+              typeof event.payload.bot === "string" ? event.payload.bot : null,
+            what: event.eventType,
+            reason: typeof reason === "string" ? reason : null,
+          };
+        }),
+      };
     },
   },
 ];
