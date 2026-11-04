@@ -88,7 +88,10 @@ export function SuggestionRow({
               >
                 <IconDots />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                className="w-max min-w-48 max-w-xs"
+              >
                 <DropdownMenuItem
                   disabled={stop.isPending}
                   onClick={() =>
