@@ -8,6 +8,8 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { deliverConversationChanges } from "../src/channels/live";
+import type { ConversationDirectory } from "../src/conversations/directory";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import {
@@ -24,18 +26,19 @@ import {
 } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+import { users } from "../src/db/schema";
 import {
   recordTestPackage,
   removeBots,
   removeTestPackages,
   useTestBots,
 } from "./support/bots";
+import {
+  addConversationMember,
+  otherReplica,
+  purgeConversations,
+  seedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 function event(overrides: Partial<ChannelActivityEvent> = {}) {
@@ -161,12 +164,7 @@ const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -183,10 +181,21 @@ afterAll(async () => {
 });
 
 /**
- * Delivery goes through Postgres so it survives more than one server instance. This proves the round
- * trip a second instance would take: a write announces, and a listener that shares nothing with the
- * writer but the database hears it.
+ * A conversation's stored facts are announced by Intelligence, so delivery survives more than one
+ * server instance. This proves the round trip a second instance takes: a write lands in Intelligence,
+ * and a directory of its own, sharing nothing with the writer but Intelligence, hears it and tells
+ * its connected browsers (channels/live.ts).
  */
+async function liveOnAnotherInstance(hub: ChannelEventHub) {
+  const replica: ConversationDirectory = await otherReplica();
+  const detach = deliverConversationChanges(replica, hub);
+  return {
+    stop: async () => {
+      detach();
+      replica.stop();
+    },
+  };
+}
 describe("channel activity delivery", () => {
   test("announces a recorded message to a listener on its own connection", async () => {
     const id = `${testPrefix}-user-${randomUUID()}`;
@@ -216,7 +225,7 @@ describe("channel activity delivery", () => {
         resolve();
       });
     });
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await store.recordActivity(owner, channel.id, {
@@ -266,18 +275,9 @@ async function createSharedChannel(owner: AgentActor, other: AgentActor) {
   createdAgentIds.push(profile.id);
   const channel = await store.create(owner, [profile.id]);
   createdChannelIds.push(channel.id);
-  // `create` writes the creator's membership only; the second member is added directly, with the
-  // thread mapping the roster join requires.
-  await database.insert(channelMemberships).values({
-    channelId: channel.id,
-    userId: other.id,
-  });
-  await database.insert(intelligenceChannelMappings).values({
-    userId: other.id,
-    channelId: channel.id,
-    // thread_id is globally unique, so the second member's mapping needs one of its own.
-    threadId: randomUUID(),
-  });
+  // `create` makes the creator the only member; the second is added with a thread of their own, as
+  // adding somebody to a group does.
+  await addConversationMember(channel.id, other.id);
   return channel;
 }
 
@@ -323,7 +323,7 @@ describe("channel change delivery", () => {
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id, other.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await store.softDelete(owner, channel.id);
@@ -350,29 +350,26 @@ describe("channel change delivery", () => {
       `${testPrefix}-tenant-${randomUUID()}`,
     );
     const channelId = `${testPrefix}-package-channel-${randomUUID()}`;
-    await database.insert(channels).values({
+    await seedConversation({
       id: channelId,
       name: "Package channel",
       description: "Defined by the tenant package.",
-      packageId: deploymentPackage.id,
+      managedBy: deploymentPackage.id,
+      members: [{ userId: owner.id, threadId: null }],
     });
     createdChannelIds.push(channelId);
-    await database
-      .insert(channelMemberships)
-      .values({ channelId, userId: owner.id });
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await expect(store.softDelete(owner, channelId)).rejects.toBeInstanceOf(
         ChannelPackageOwnedError,
       );
-      // The refusal rolls the transaction back, so there is nothing to wait for. A window long
-      // enough for a notify that did happen to arrive is what makes the empty assertion mean
-      // something.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Refused, so nothing changed and nothing is announced. A window long enough for an
+      // announcement that did happen to arrive is what makes the empty assertion mean something.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
     } finally {
       await listener.stop();
     }
@@ -388,7 +385,7 @@ describe("channel change delivery", () => {
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id, other.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await store.setPinned(owner, channel.id, true);
@@ -427,7 +424,7 @@ describe("channel change delivery", () => {
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id, other.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await expect(
@@ -437,9 +434,9 @@ describe("channel change delivery", () => {
           text: "Said into a channel that is gone.",
         }),
       ).rejects.toBeInstanceOf(ChannelNotFoundError);
-      // The refusal rolls back, so there is nothing to wait for; the window is what makes an empty
-      // assertion mean something.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Refused, so there is nothing to wait for; the window is what makes an empty assertion mean
+      // something.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
     } finally {
       await listener.stop();
     }
@@ -456,11 +453,11 @@ describe("channel change delivery", () => {
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id, other.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await expect(store.softDelete(owner, channel.id)).resolves.toBe(false);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
     } finally {
       await listener.stop();
     }
@@ -479,13 +476,13 @@ describe("channel change delivery", () => {
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await expect(
         store.setPinned(owner, channel.id, true),
       ).rejects.toBeInstanceOf(ChannelNotFoundError);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
     } finally {
       await listener.stop();
     }
@@ -501,7 +498,7 @@ describe("channel change delivery", () => {
 
     const hub = createChannelEventHub();
     const watched = watch(hub, [owner.id, other.id]);
-    const listener = await startChannelActivityListener(databaseUrl, hub);
+    const listener = await liveOnAnotherInstance(hub);
 
     try {
       await store.setPinned(owner, channel.id, false);

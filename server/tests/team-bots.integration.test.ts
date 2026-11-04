@@ -22,7 +22,7 @@ import {
   createComputerSeatResolver,
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
-import { channels, intelligenceChannelMappings, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { PluginRefusedError } from "../src/plugins/store";
 import {
   createTeamBots,
@@ -30,6 +30,7 @@ import {
   TeamBotRefusedError,
 } from "../src/team-bots/team-bots";
 import { changeBot, removeBots, useTestBots } from "./support/bots";
+import { purgeConversations } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -54,12 +55,7 @@ const teamBots = createTeamBots({
 });
 
 afterEach(async () => {
-  for (const id of createdChannels.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, id));
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  await purgeConversations(createdChannels.splice(0));
   const ids = createdAgents.splice(0);
   if (ids.length) {
     await removeBots(ids);

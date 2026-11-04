@@ -1340,10 +1340,10 @@ Each channel requires `id`, `name`, `description`, `permitted_agents`, and `allo
 deployment that writes one must not treat it as an access control. Both halves of that control are
 missing, not one: `users.groups` exists as a column and no sign-in path, claim mapping or admin
 screen ever populates it, so there is nothing for a channel's list to be compared against. Channel
-access is decided by membership alone — every channel route resolves the caller's row in
-`channel_memberships` and refuses without it.
+access is decided by membership alone — every channel route resolves the caller among the
+conversation's members in Intelligence and refuses when they are not one.
 
-Package-declared channels get no membership rows from `synchronizeTenantPackage`, so today they
+Package-declared channels get no members from `synchronizeTenantPackage`, so today they
 are unreachable rather than open. The field is kept because the enforcement it is named for needs
 the declaration and needs group membership arriving from the identity provider, and neither this
 column nor `users.groups` is the wrong shape for it.

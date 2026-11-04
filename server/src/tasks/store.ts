@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { conversations } from "../conversations/directory";
+import { writeKey } from "../conversations/http";
+import type { AgentTask, ConversationDraft } from "../conversations/types";
 import type { Database } from "../db/client";
-import { botTasks, channels, workItems } from "../db/schema";
+import { proactiveSuggestions, workItems } from "../db/schema";
 import type { BotTaskOrigin } from "../db/schema/tasks";
 import type { BotTaskCounts, TaskPayload } from "../proactive/contracts";
 import {
@@ -43,7 +46,6 @@ const LIST_LIMIT = 200;
 export type NewTask = {
   ownerUserId: string;
   agentId: string;
-  channelId: string;
   title: string;
   why: string | null;
   origin: BotTaskOrigin;
@@ -52,8 +54,73 @@ export type NewTask = {
   sourceLink: string | null;
 };
 
-/** The transaction a task row is written on, beside its conversation. */
-type TaskTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+/** A task as Intelligence holds it, under the names `bot_tasks` used. */
+/**
+ * Unlink every task whose check-in item is gone, as the old foreign key did (`on delete set null`).
+ *
+ * The items stay in this deployment's database and the tasks are in Intelligence, so no constraint
+ * joins them any more. Whatever removed an item (a person removing a Bot's research, a reset, a
+ * cascade), the next read of its task finds no item under its reference, unlinks it in Intelligence,
+ * and answers with it unlinked. A failed unlink is said and retried on the next read; the answer
+ * is unlinked either way.
+ */
+async function withLiveItems(
+  database: Database,
+  rows: TaskRow[],
+): Promise<TaskRow[]> {
+  const refs = [
+    ...new Set(
+      rows.flatMap((row) => (row.suggestionId ? [row.suggestionId] : [])),
+    ),
+  ];
+  if (refs.length === 0) return rows;
+  const live = new Set(
+    (
+      await database
+        .select({ id: proactiveSuggestions.id })
+        .from(proactiveSuggestions)
+        .where(inArray(proactiveSuggestions.id, refs))
+    ).map((row) => row.id),
+  );
+  const client = conversations().client;
+  return Promise.all(
+    rows.map(async (row) => {
+      if (!row.suggestionId || live.has(row.suggestionId)) return row;
+      await client.tasks
+        .unlinkOrigin(row.id, writeKey("task.unlink"))
+        .catch((error: unknown) =>
+          console.warn(
+            JSON.stringify({
+              type: "task-unlink-failed",
+              taskId: row.id,
+              note: "Its check-in item is gone; the next read of the task tries again.",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          ),
+        );
+      return { ...row, suggestionId: null };
+    }),
+  );
+}
+
+export function taskRowOf(task: AgentTask): TaskRow {
+  return {
+    id: task.id,
+    ownerUserId: task.userId,
+    agentId: task.agentId,
+    channelId: task.conversationId,
+    suggestionId: task.originRef,
+    title: task.title,
+    why: task.why,
+    sourceApp: task.sourceApp,
+    sourceLink: task.sourceLink,
+    origin: task.origin as BotTaskOrigin,
+    resolvedAt: task.resolvedAt,
+    resolvedAtExact: task.resolvedAtExact,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+}
 
 /** The first paragraph of an item's detail: why it matters, without the step after it. */
 export function whyOf(detail: string): string | null {
@@ -75,25 +142,81 @@ const askIn = (input: Record<string, unknown> | null) =>
 
 /*
  * Listed: every task not marked done, those marked done in the last week, and any marked done
- * longer ago that something reopened since (a turn queued, or the person speaking there). Exported
- * for the attention counts, which must count exactly the tasks this list shows.
+ * longer ago that something reopened since (a turn queued, or the person speaking there).
+ *
+ * The tasks live in Intelligence, which answers the first three (`listedSince`: open, done since,
+ * or spoken in since done). A turn queued since is in this deployment's own work queue, so those are
+ * found here: the person's task turns, and the tasks they belong to that were done before them,
+ * compared on this database's clock to the microsecond. Exported for the attention counts, which
+ * must count exactly the tasks this list shows.
  */
-export const listedTask = sql`(
-    ${botTasks.resolvedAt} is null
-    or ${botTasks.resolvedAt} > now() - make_interval(days => ${RESOLVED_FOR_DAYS})
-    or exists (
-      select 1 from ${workItems}
-      where ${workItems.kind} = ${PROACTIVE_TASK_KIND}
-        and ${workItems.payload}->>'taskId' = ${botTasks.id}
-        and ${workItems.createdAt} > ${botTasks.resolvedAt}
+export async function listedTasks(
+  database: Database,
+  owner: string,
+  now: Date,
+  limit = LIST_LIMIT,
+): Promise<TaskRow[]> {
+  const client = conversations().client;
+  const since = new Date(now.getTime() - RESOLVED_FOR_DAYS * 86_400_000);
+  const listed = (
+    await client.tasks.upTo({ userId: owner, listedSince: since }, limit)
+  ).map(taskRowOf);
+  const seen = new Set(listed.map((task) => task.id));
+
+  // Turns this person's tasks have had, for the ones Intelligence did not list.
+  const queued = await database
+    .selectDistinct({ taskId: sql<string>`${workItems.payload}->>'taskId'` })
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.kind, PROACTIVE_TASK_KIND),
+        sql`${workItems.payload}->>'ownerUserId' = ${owner}`,
+        sql`${workItems.payload}->>'taskId' is not null`,
+      ),
+    );
+  const unlisted = queued
+    .map((row) => row.taskId)
+    .filter((id) => !seen.has(id))
+    .slice(0, 500);
+  if (unlisted.length > 0) {
+    const done = (await client.tasks.many(unlisted))
+      .filter((task) => task.userId === owner && task.resolvedAtExact)
+      .map(taskRowOf);
+    if (done.length > 0) {
+      const resolvedAt = sql.join(
+        done.map(
+          (task) =>
+            sql`when ${task.id} then ${task.resolvedAtExact}::timestamptz`,
+        ),
+        sql` `,
+      );
+      const reopened = await database
+        .selectDistinct({
+          taskId: sql<string>`${workItems.payload}->>'taskId'`,
+        })
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, PROACTIVE_TASK_KIND),
+            inArray(
+              sql`${workItems.payload}->>'taskId'`,
+              done.map((task) => task.id),
+            ),
+            sql`${workItems.createdAt} > (case ${workItems.payload}->>'taskId' ${resolvedAt} end)`,
+          ),
+        );
+      const again = new Set(reopened.map((row) => row.taskId));
+      listed.push(...done.filter((task) => again.has(task.id)));
+    }
+  }
+  return (await withLiveItems(database, listed))
+    .sort(
+      (left, right) =>
+        right.createdAt.getTime() - left.createdAt.getTime() ||
+        (left.id < right.id ? 1 : left.id > right.id ? -1 : 0),
     )
-    or exists (
-      select 1 from ${channels}
-      where ${channels.id} = ${botTasks.channelId}
-        and ${channels.lastMessageSourceId} is null
-        and ${channels.lastMessageAt} > ${botTasks.resolvedAt}
-    )
-  )`;
+    .slice(0, limit);
+}
 
 export type TaskStore = ReturnType<typeof createTaskStore>;
 
@@ -102,8 +225,7 @@ export function createTaskStore(
   options: { now?: () => Date } = {},
 ) {
   const now = options.now ?? (() => new Date());
-  const owned = (owner: string, id: string) =>
-    and(eq(botTasks.ownerUserId, owner), eq(botTasks.id, id));
+  const client = () => conversations().client;
 
   function recordOf(row: TaskRow, state: TaskState | undefined): TaskPayload {
     const resolvedAt = state ? state.resolvedAt : row.resolvedAt;
@@ -141,12 +263,16 @@ export function createTaskStore(
     return rows.map((row) => recordOf(row, state.get(row.id)));
   }
 
+  /** The owner's task, or null: another person's task is the same as no task. */
+  async function owned(owner: string, id: string): Promise<TaskRow | null> {
+    const task = await client().tasks.get(id);
+    if (!task || task.userId !== owner) return null;
+    const [row] = await withLiveItems(database, [taskRowOf(task)]);
+    return row ?? null;
+  }
+
   async function oneWithState(owner: string, id: string) {
-    const [row] = await database
-      .select()
-      .from(botTasks)
-      .where(owned(owner, id))
-      .limit(1);
+    const row = await owned(owner, id);
     if (!row) throw new TaskNotFoundError();
     const state = (await readTaskStates(database, owner, [row], now())).get(id);
     if (!state) throw new TaskNotFoundError();
@@ -158,80 +284,89 @@ export function createTaskStore(
   }
 
   /*
-   * Marked done on the database's clock, the clock the work queue stamps a turn's acceptance with,
-   * and never before the last line said in its conversation: a line reported a moment before the
-   * person pressed done, by a server whose clock runs ahead, must not read as said after it.
+   * Marked done on this deployment's database clock, the clock the work queue stamps a turn's
+   * acceptance with, and never before the last line said in its conversation: a line reported a
+   * moment before the person pressed done, by a server whose clock runs ahead, must not read as
+   * said after it. Worked out here, to the microsecond, and stored in Intelligence as it is.
    */
   async function setResolved(owner: string, id: string, resolved: boolean) {
-    const [row] = await database
-      .update(botTasks)
-      .set({
-        resolvedAt: resolved
-          ? sql`greatest(now(), (select ${channels.lastMessageAt} from ${channels} where ${channels.id} = ${botTasks.channelId}))`
-          : null,
-        updatedAt: sql`now()`,
-      })
-      .where(owned(owner, id))
-      .returning({ id: botTasks.id });
+    const row = await owned(owner, id);
     if (!row) throw new TaskNotFoundError();
+    let resolvedAt: string | null = null;
+    if (resolved) {
+      const conversation = await conversations().refresh(row.channelId);
+      const lastSaid = conversation?.lastMessageAtExact ?? null;
+      const [stamp] = await database.execute<{ at: string }>(
+        sql`select to_char(greatest(now(), ${lastSaid}::timestamptz) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at`,
+      );
+      if (!stamp) throw new Error("The database did not say what time it is.");
+      resolvedAt = stamp.at;
+    }
+    if (
+      !(await client().tasks.resolve(id, resolvedAt, writeKey("task.resolve")))
+    )
+      throw new TaskNotFoundError();
     return one(owner, id);
   }
 
   /** The owner's tasks, newest first: open ones, and those marked done for a week after. */
   async function list(owner: string): Promise<TaskPayload[]> {
-    const rows = await database
-      .select()
-      .from(botTasks)
-      .where(and(eq(botTasks.ownerUserId, owner), listedTask))
-      .orderBy(desc(botTasks.createdAt), desc(botTasks.id))
-      .limit(LIST_LIMIT);
-    return withState(owner, rows);
+    return withState(owner, await listedTasks(database, owner, now()));
   }
 
   return {
     /**
-     * Write a task row, on the transaction that makes its conversation. An item already started
-     * keeps the task it opened: `null` here, and the caller rolls its conversation back.
+     * Write a task with its own new conversation, in one write in Intelligence, so the conversation
+     * is never there without the task that says what it is for. An item already started keeps the
+     * task it opened: that one comes back, and nothing new is made.
      */
     async create(
       input: NewTask,
-      transaction: TaskTransaction,
-    ): Promise<{ id: string; channelId: string } | null> {
+      conversation: ConversationDraft,
+    ): Promise<{ id: string; channelId: string }> {
       const at = now();
-      const [row] = await transaction
-        .insert(botTasks)
-        .values({ id: randomUUID(), ...input, createdAt: at, updatedAt: at })
-        .onConflictDoNothing({ target: botTasks.suggestionId })
-        .returning({ id: botTasks.id, channelId: botTasks.channelId });
-      return row ?? null;
+      const { task } = await client().tasks.create(
+        {
+          id: randomUUID(),
+          userId: input.ownerUserId,
+          agentId: input.agentId,
+          conversation,
+          originRef: input.suggestionId,
+          origin: input.origin,
+          title: input.title,
+          why: input.why,
+          sourceApp: input.sourceApp,
+          sourceLink: input.sourceLink,
+          createdAt: at,
+          updatedAt: at,
+        },
+        writeKey("task.create"),
+      );
+      return { id: task.id, channelId: task.conversationId };
     },
     /** The task an item opened, if it opened one. */
     async byItem(
       owner: string,
       itemId: string,
     ): Promise<{ id: string; channelId: string } | null> {
-      const [row] = await database
-        .select({ id: botTasks.id, channelId: botTasks.channelId })
-        .from(botTasks)
-        .where(
-          and(
-            eq(botTasks.ownerUserId, owner),
-            eq(botTasks.suggestionId, itemId),
-          ),
-        )
-        .limit(1);
-      return row ?? null;
+      const { tasks } = await client().tasks.page(
+        { userId: owner, originRef: itemId },
+        null,
+        1,
+      );
+      const task = tasks[0];
+      if (!task) return null;
+      // An item that is gone opened no task any more: its task is unlinked.
+      const [row] = await withLiveItems(database, [taskRowOf(task)]);
+      return row?.suggestionId === itemId
+        ? { id: task.id, channelId: task.conversationId }
+        : null;
     },
     list,
     get: one,
     /** Where a task lives, without working out what it is doing: for running its turn. */
     async locate(owner: string, id: string): Promise<TaskRow | null> {
-      const [row] = await database
-        .select()
-        .from(botTasks)
-        .where(owned(owner, id))
-        .limit(1);
-      return row ?? null;
+      return owned(owner, id);
     },
     /**
      * What a failed task's turn was asked, to run it again, and how many turns it has had: the ask

@@ -16,20 +16,16 @@ import {
   gte,
   inArray,
   isNull,
-  or,
   type SQL,
   sql,
 } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
+import { conversations } from "../conversations/directory";
+import { ownThread } from "../conversations/types";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
-  botTasks,
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
   proactivePings,
   proactiveSuggestions,
   responsibilities,
@@ -39,7 +35,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
-import { listedTask } from "../tasks/store";
+import { listedTasks } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
 export type ActivityKind =
@@ -94,18 +90,42 @@ const COMPLETED_LIMIT = 25;
  * What waits on the person there is counted once, as that task needing input (`tasks.counts`, which
  * reads the same approvals and questions by the same rule, tasks/state.ts), so the attention counts
  * leave it out of `approvals` and `questions`: a task waiting on one approval is one thing that needs
- * the person, not two.
+ * the person, not two. The listed tasks and their conversations are in Intelligence, so they are
+ * read first and the condition is built from them.
  */
-const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
-  sql`exists (
-    select 1 from ${botTasks}
-    left join ${intelligenceChannelMappings}
-      on ${intelligenceChannelMappings.channelId} = ${botTasks.channelId}
-      and ${intelligenceChannelMappings.userId} = ${ownerUserId}
-    where ${botTasks.ownerUserId} = ${ownerUserId}
-      and ${listedTask}
-      and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
-  )`;
+async function listedTaskPlaces(
+  database: Database,
+  ownerUserId: string,
+): Promise<{ channelIds: string[]; threadIds: string[] }> {
+  const tasks = await listedTasks(database, ownerUserId, new Date());
+  const channelIds = tasks.map((task) => task.channelId);
+  const held = await conversations().getMany(channelIds);
+  const threadIds = [...held.values()].flatMap((conversation) => {
+    const thread = ownThread(conversation, ownerUserId);
+    return thread ? [thread.threadId] : [];
+  });
+  return { channelIds, threadIds };
+}
+const inListedTask = (
+  places: { channelIds: string[]; threadIds: string[] },
+  channelId: SQL,
+  threadId: SQL,
+) =>
+  sql`(${
+    places.channelIds.length > 0
+      ? sql`coalesce(${channelId} in (${sql.join(
+          places.channelIds.map((id) => sql`${id}`),
+          sql`, `,
+        )}), false)`
+      : sql`false`
+  } or ${
+    places.threadIds.length > 0
+      ? sql`coalesce(${threadId} in (${sql.join(
+          places.threadIds.map((id) => sql`${id}`),
+          sql`, `,
+        )}), false)`
+      : sql`false`
+  })`;
 const clip = (text: string | null | undefined, max = 200) =>
   text ? Array.from(text).slice(0, max).join("") : null;
 const iso = (value: Date | string | null | undefined) =>
@@ -140,14 +160,14 @@ export function createActivityStore(database: Database) {
   ): Promise<Map<string, string>> {
     const unique = [...new Set(threadIds.filter(Boolean))];
     if (unique.length === 0) return new Map();
-    const rows = await database
-      .select({
-        threadId: intelligenceChannelMappings.threadId,
-        channelId: intelligenceChannelMappings.channelId,
-      })
-      .from(intelligenceChannelMappings)
-      .where(inArray(intelligenceChannelMappings.threadId, unique));
-    return new Map(rows.map((row) => [row.threadId, row.channelId]));
+    const threads = await conversations().client.lookupThreads(unique);
+    // A person's own thread in a channel, as `intelligence_channel_mappings` held; a Bot's thread
+    // in a group is not a channel's.
+    return new Map(
+      threads
+        .filter((thread) => thread.agentId === null)
+        .map((thread) => [thread.threadId, thread.conversationId]),
+    );
   }
 
   const handoffsFor = (ownerUserId: string, agentId: string) =>
@@ -508,6 +528,7 @@ export function createActivityStore(database: Database) {
         return found;
       };
 
+      const listed = await listedTaskPlaces(database, ownerUserId);
       const questions = await database
         .select({
           agentId: sql<string>`coalesce(${workItems.payload}->>'sourceBotId', ${workItems.payload}->>'botId')`,
@@ -520,7 +541,7 @@ export function createActivityStore(database: Database) {
             isNull(workItems.finishedAt),
             sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
             sql`not ${inListedTask(
-              ownerUserId,
+              listed,
               sql`${workItems.payload}->>'channelId'`,
               sql`${workItems.payload}->>'threadId'`,
             )}`,
@@ -543,7 +564,7 @@ export function createActivityStore(database: Database) {
             eq(approvalRequests.ownerUserId, ownerUserId),
             eq(approvalRequests.status, "pending"),
             sql`not ${inListedTask(
-              ownerUserId,
+              listed,
               sql`null`,
               sql`${approvalRequests.action}->>'threadId'`,
             )}`,
@@ -574,31 +595,9 @@ export function createActivityStore(database: Database) {
         if (row.agentId) entry(row.agentId).handoffs += row.total;
 
       // The same rule as the roster's unread dot: a Bot spoke after this person last looked.
-      const unread = await database
-        .select({
-          agentId: channelAgents.agentId,
-          total: sql<number>`count(distinct ${channels.id})::int`,
-        })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, ownerUserId),
-          ),
-        )
-        .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-        .where(
-          and(
-            isNull(channels.deletedAt),
-            sql`${channels.lastMessageAgentId} is not null`,
-            or(
-              isNull(channelMemberships.lastReadAt),
-              sql`${channels.lastMessageAt} > ${channelMemberships.lastReadAt}`,
-            ),
-          ),
-        )
-        .groupBy(channelAgents.agentId);
+      const unread = (await conversations().client.unread(ownerUserId)).map(
+        (row) => ({ agentId: row.agentId, total: row.conversations }),
+      );
       for (const row of unread) entry(row.agentId).unread += row.total;
 
       /*

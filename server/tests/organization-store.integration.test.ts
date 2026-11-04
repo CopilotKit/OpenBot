@@ -5,12 +5,12 @@ import { createOrganizationAuth } from "../src/auth/organization";
 import { organizationUserStore } from "../src/auth/organization-store";
 import { setRole } from "../src/auth/roles";
 import { createDatabase } from "../src/db/client";
+import { userRoles, users } from "../src/db/schema";
 import {
-  channelMemberships,
-  channels,
-  userRoles,
-  users,
-} from "../src/db/schema";
+  purgeConversations,
+  seedConversation,
+  storedConversation,
+} from "./support/conversations";
 import { changePreferences, storedPreferences } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -50,15 +50,14 @@ test("verified employee keeps the same-email local account and history identity 
     await changePreferences(localId, [
       { op: "setInstructions", instructions: history },
     ]);
-    await database.insert(channels).values({
+    // The person's history: a conversation in Intelligence, held under their local id.
+    await seedConversation({
       id: channelId,
       name: "Existing conversation",
       description: "Preserved",
       lastMessage: "Existing graphical Bot result",
+      members: [{ userId: localId, threadId: null }],
     });
-    await database
-      .insert(channelMemberships)
-      .values({ channelId, userId: localId });
     const auth = createOrganizationAuth({
       authorityUrl: authority.url.origin,
       materializeUser: organizationUserStore(database),
@@ -86,19 +85,9 @@ test("verified employee keeps the same-email local account and history identity 
       .select()
       .from(users)
       .where(eq(users.id, localId));
-    expect(
-      (
-        await database
-          .select()
-          .from(channelMemberships)
-          .where(eq(channelMemberships.channelId, channelId))
-      )[0]?.userId,
-    ).toBe(localId);
-    expect(
-      (
-        await database.select().from(channels).where(eq(channels.id, channelId))
-      )[0]?.lastMessage,
-    ).toBe("Existing graphical Bot result");
+    const conversation = await storedConversation(channelId);
+    expect(conversation.members[0]?.userId).toBe(localId);
+    expect(conversation.lastMessage).toBe("Existing graphical Bot result");
     expect(saved?.onboardingStep).toBe(4);
     expect(saved?.onboardingCompletedAt).not.toBeNull();
     expect(
@@ -115,7 +104,7 @@ test("verified employee keeps the same-email local account and history identity 
     ).toBe(localId);
   } finally {
     authority.stop(true);
-    await database.delete(channels).where(eq(channels.id, channelId));
+    await purgeConversations([channelId]);
     await database.delete(users).where(eq(users.id, localId));
     await database.delete(users).where(eq(users.id, authorityId));
   }

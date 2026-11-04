@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   AgentNotFoundError,
   createAgentProfileStore,
@@ -19,8 +19,14 @@ import {
 } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import { channels, intelligenceChannelMappings, users } from "../src/db/schema";
+import { writeKey } from "../src/conversations/http";
+import { users } from "../src/db/schema";
 import { removeBots, useTestBots } from "./support/bots";
+import {
+  conversationClient,
+  purgeConversations,
+  seedChannel,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -41,12 +47,7 @@ const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -142,15 +143,15 @@ describe("reading a person's channels", () => {
     const owner = await createUser();
     const agentId = await createAgent(owner);
     const expected: string[] = [];
-    for (let index = 0; index < 5; index += 1) {
-      expected.push((await createChannel(owner, [agentId])).id);
-    }
     // One transaction's worth of channels, as a package sync or an import makes them: the same
-    // instant, kept by PostgreSQL to the microsecond and by a JavaScript `Date` to the millisecond.
-    await database
-      .update(channels)
-      .set({ createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz` })
-      .where(inArray(channels.id, expected));
+    // instant, kept by Intelligence to the microsecond and by a JavaScript `Date` to the millisecond.
+    for (let index = 0; index < 5; index += 1) {
+      const channel = await seedChannel(owner.id, [agentId], {
+        createdAt: "2026-01-01T00:00:00.123456Z",
+      });
+      createdChannelIds.push(channel.id);
+      expected.push(channel.id);
+    }
 
     const seen: string[] = [];
     let cursor: string | undefined;
@@ -380,10 +381,11 @@ describe("channel activity", () => {
     });
     // Named the older, quieter conversation, which is the case that would expose a summary leaking
     // into the ordering: it sorts second before and must still sort second after.
-    await database
-      .update(channels)
-      .set({ summary: "An older subject", summaryAt: new Date() })
-      .where(eq(channels.id, quiet.id));
+    await (await conversationClient()).summary(
+      quiet.id,
+      "An older subject",
+      writeKey("test.summary"),
+    );
 
     const roster = (await store.list(owner)).channels;
 

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { channels } from "../src/db/schema";
+import { workItems } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -19,30 +19,31 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
-const channelId = `channel_jsonb_${suite}`;
+// A kind of work nothing claims, so no queue consumer ever picks this row up.
+const kind = `jsonb-encoding-${suite}`;
 
 afterAll(async () => {
-  await database.delete(channels).where(eq(channels.id, channelId));
+  await database.delete(workItems).where(eq(workItems.kind, kind));
 });
 
 describe("what a jsonb column actually stores", () => {
   test("an object written through the schema is stored as an object", async () => {
     // Every jsonb column goes through the same type, so any table's will do. This one wrote a Bot's
-    // configuration until Bots moved to Intelligence; a channel's override holds the same shape.
-    await database.insert(channels).values({
-      id: channelId,
-      name: channelId,
-      description: "A jsonb test.",
-      override: {
+    // configuration, then a channel's override, until both moved to Intelligence; a work item's
+    // payload is a table that stays here, read through JSON operators (`payload->>'threadId'`).
+    await database.insert(workItems).values({
+      kind,
+      key: "object",
+      payload: {
         endpoint: "https://example.test/ag-ui",
         nested: { a: 1 },
       },
     });
 
     const [row] = await database.execute<{ shape: string; endpoint: string }>(
-      sql`select jsonb_typeof(override) as shape,
-                 override->>'endpoint' as endpoint
-          from channels where id = ${channelId}`,
+      sql`select jsonb_typeof(payload) as shape,
+                 payload->>'endpoint' as endpoint
+          from work_items where kind = ${kind}`,
     );
 
     expect(row?.shape).toBe("object");

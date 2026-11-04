@@ -11,6 +11,10 @@ import {
 import { channels, users } from "./core";
 import { jsonb } from "./json";
 
+/**
+ * MOVED TO INTELLIGENCE: voice sessions are created and read through its conversations capability
+ * (voice/sessions.ts). Kept for one release with no writes, for the upgrade copy; then dropped.
+ */
 /** Spoken conversations are durable even when no agent/tool run was needed. */
 export const voiceSessions = pgTable(
   "voice_sessions",

@@ -14,6 +14,11 @@ import { proactiveSuggestions } from "./proactive";
 export type BotTaskOrigin = "check_in";
 
 /**
+ * MOVED TO INTELLIGENCE: tasks are agent tasks in its conversations capability (tasks/store.ts),
+ * made in one write with their own conversation. Kept for one release with no writes, for the
+ * upgrade copy; then dropped.
+ */
+/**
  * Work a Bot does for a person in a conversation of its own. Written when the person starts an item a
  * check-in raised (`tasks.startFromItem`), read by the task list and the "Needs you" counts.
  *

@@ -25,7 +25,7 @@ import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { auditEvents } from "../src/db/schema";
-import { channels, credentials, users } from "../src/db/schema/core";
+import { credentials, users } from "../src/db/schema/core";
 import {
   brokeredConnections,
   mcpServers,
@@ -63,6 +63,7 @@ import {
   seedBot,
   useTestConfiguration,
 } from "./support/bots";
+import { purgeConversations, seedChannel } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testMemory } from "./support/memory";
 
@@ -228,11 +229,9 @@ beforeAll(async () => {
   });
   await seedBot({ id: unconnected, name: "Lookout Bot", type: "built_in" });
   await seedBot({ id: tasker, name: "Task Bot", type: "built_in" });
-  await database
-    .insert(channels)
-    .values(
-      botIds.map((bot) => ({ id: channelOf(bot), name: bot, description: "" })),
-    );
+  // The person's own conversation with each Bot, where its check-ins live.
+  for (const bot of botIds)
+    await seedChannel(owner, [bot], { id: channelOf(bot), name: bot });
   await fixtures.install();
 });
 
@@ -285,10 +284,8 @@ afterAll(async () => {
     );
   await fixtures.remove();
   await database.delete(users).where(eq(users.id, owner));
+  await purgeConversations(botIds.map(channelOf));
   await removeBots(botIds);
-  await database
-    .delete(channels)
-    .where(inArray(channels.id, botIds.map(channelOf)));
   await database.$client.close();
 });
 

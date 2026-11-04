@@ -152,7 +152,7 @@ function unavailable(error: unknown): boolean {
  * theirs. Memories another app wrote for the person show here and can be edited or forgotten here.
  */
 export function createMemoryStore(
-  database: Database,
+  _database: Database,
   options: {
     intelligence: IntelligenceMemory;
     cache: MemoryCache;

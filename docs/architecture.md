@@ -176,15 +176,26 @@ A coworker is a durable Bot profile:
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
 
+Channels are held in Intelligence's conversations capability: the conversation, its members (with
+their pins and read markers), its Bots, and a pointer to the thread each member's turns run in. A
+group's shared transcript, voice sessions and tasks are there too, and so are delivery bindings
+and push devices, in its delivery bindings capability. Each server holds the conversations it read
+lately, and every binding and device, in memory, refreshed by Intelligence's change announcements
+(`server/src/conversations`, `server/src/delivery/directory.ts`); those announcements also carry a
+conversation's new last message, summary, pin or deletion to every open browser. Busy and "waiting
+on" signals come from this deployment's own work queue and stay on its Postgres notification
+channel, as do the delivery queues and pairing codes, which are operational state beside the work
+queue that runs them.
+
 For a message with no named Bot, the intent router chooses from the person's roster. If it cannot
 choose confidently, a unique app holder may receive the message instead of the default Bot. When
 different named apps point to different unique holders, that fallback is ambiguous and the default
 stays selected; roster order does not decide which Bot owns the conversation.
 
-A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (`group_bot_threads`), and what the people in it read is a shared transcript (`group_messages`) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
+A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (a Bot thread pointer of the conversation), and what the people in it read is a shared transcript (the conversation's messages) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
 
-Who may reach one is decided by membership: every channel route resolves the caller in
-`channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the
+Who may reach one is decided by membership: every channel route resolves the caller among the
+conversation's members and refuses when they are not one. `channels.allowed_groups` is declared in the
 tenant package and stored, and is not part of that decision — `users.groups` is never populated by
 any sign-in path, so a group-based rule has nothing to evaluate. Treat it as a declaration waiting
 on group membership from the identity provider, not as a control that is running.

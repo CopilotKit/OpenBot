@@ -114,6 +114,7 @@ function harness(options: {
 
   const channelStore: ChannelStore = {
     create: () => unreachable("channels.create"),
+    draft: () => unreachable("channels.draft"),
     list: () => unreachable("channels.list"),
     setPinned: () => unreachable("channels.setPinned"),
     markRead: () => unreachable("channels.markRead"),

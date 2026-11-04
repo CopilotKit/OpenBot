@@ -5,10 +5,14 @@ import {
   MAX_IMAGE_BYTES,
   namesNoFormat,
 } from "@openbot/shared/attachments";
-import { sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
+import {
+  channelOfThread as channelOfThreadInDirectory,
+  conversations,
+} from "../conversations/directory";
+import { isMember } from "../conversations/types";
 import type { Database } from "../db/client";
 import {
   CommitIncompleteError,
@@ -27,10 +31,10 @@ import type { StoredAttachment } from "./attachment-parts";
  * `batch` is the composer session that staged it. A staged attachment is a PENDING file, and a
  * sent one is COMMITTED: `committedAt` is what this module used to call `attachedAt`.
  *
- * Who may see a file is still decided HERE, against this deployment's own `channels` and
- * `channel_memberships` tables, exactly as before. Intelligence holds the bytes and the facts about
- * the file; it knows nothing of channels or members, and the project key that reaches it never
- * leaves this server.
+ * Who may see a file is still decided HERE, against the conversation and its members, exactly as
+ * before: the conversation directory this instance holds (conversations/directory.ts). The file store
+ * holds the bytes and the facts about the file; it knows nothing of channels or members, and the
+ * project key that reaches it never leaves this server.
  */
 export const ATTACHMENT_PURPOSE = "chat_attachment";
 
@@ -58,8 +62,8 @@ function isUuidShaped(value: string): boolean {
  * The channel a turn's thread belongs to, or null when it belongs to none.
  *
  * What a turn running in one conversation may touch: files that belong to THAT conversation's
- * channel. The thread-to-channel mapping is this deployment's (`intelligence_channel_mappings`) and
- * the file is Intelligence's, so this is now a lookup the caller does, read once per question and
+ * channel. The thread-to-channel mapping is the conversation directory's and the file is the file
+ * store's, so this is now a lookup the caller does, read once per question and
  * compared against the file's `collection`. It used to be a correlated subquery in the same
  * statement that read the row, which is not possible across two stores. What that shape protected
  * is kept the other way it was protected: the two callers take `threadId` in a NAMED FIELD. `actorId`
@@ -97,47 +101,54 @@ function isUuidShaped(value: string): boolean {
  * branch only opens for a thread nobody is shown.
  */
 async function channelOfThread(
-  database: Database,
+  _database: Database,
   threadId: string,
 ): Promise<string | null> {
-  const rows = (await database.execute(sql`
-    select channel_id as "channelId"
-    from intelligence_channel_mappings
-    where thread_id = ${threadId}::text
-    limit 1
-  `)) as unknown as { channelId: string }[];
-  return rows[0]?.channelId ?? null;
+  // The conversation this thread is a person's own thread in, read from the conversation directory
+  // (held in memory, read through on a miss). None: a thread nobody is shown, and no narrowing.
+  return channelOfThreadInDirectory(threadId);
+}
+
+/**
+ * Whether this person is a member of this live channel, from the conversation directory. A channel
+ * that is deleted counts as no channel: the conversation and every membership outlive a soft delete,
+ * so asking only "is this actor a member" would answer yes for ever afterwards.
+ */
+export async function memberOfLiveChannel(
+  channelId: string,
+  actorId: string,
+  options: { fresh?: boolean } = {},
+): Promise<boolean> {
+  const conversation = options.fresh
+    ? await conversations().refresh(channelId)
+    : await conversations().get(channelId);
+  return (
+    conversation !== null &&
+    conversation.deletedAt === null &&
+    isMember(conversation, actorId)
+  );
 }
 
 /**
  * Whether `actorId` may see what is in channel `channelId` at all: the channel exists, has not
- * been deleted, and they have a membership row on it.
+ * been deleted, and they are a member of it.
  *
- * `channels` is in the question, not only `channel_memberships`, and the difference is a channel
- * that has been deleted. Deletion here is soft — `channels.deletedAt` — so the channel row and every
- * membership on it survive it, and a question that asks only "is this actor a member" answers yes
- * for ever afterwards: the bytes would stay downloadable — and inlinable — after the channel they
- * belong to is gone.
+ * The deletion is in the question, not only the membership. Deletion is soft, so the conversation
+ * and every membership on it survive it, and a question that asks only "is this actor a member"
+ * answers yes for ever afterwards: the bytes would stay downloadable — and inlinable — after the
+ * channel they belong to is gone.
  *
- * One statement, so the channel and the membership are read from the same snapshot.
+ * Read from the conversation directory this instance holds; `fresh` reads Intelligence itself, past
+ * that copy, for a check that must not miss a removal another replica just made.
  */
 async function canOpenChannel(
-  database: Database,
+  _database: Database,
   actorId: string,
   channelId: string | null,
+  options: { fresh?: boolean } = {},
 ): Promise<boolean> {
   if (!channelId) return false;
-  const rows = (await database.execute(sql`
-    select 1 as "member"
-    from channels
-    join channel_memberships
-      on channel_memberships.channel_id = channels.id
-      and channel_memberships.user_id = ${actorId}::text
-    where channels.id = ${channelId}::text
-      and channels.deleted_at is null
-    limit 1
-  `)) as unknown as { member: number }[];
-  return rows.length > 0;
+  return memberOfLiveChannel(channelId, actorId, options);
 }
 
 /**
@@ -885,16 +896,16 @@ export function createChannelAttachmentRoutes(
        * window is as wide as reading an upload off the wire, not as wide as a scheduler tick. A
        * removal landing in it would put a file into a channel its uploader had just been taken out
        * of. When the insert lived beside the channel tables it selected its row FROM the
-       * membership join; the file now lives in Intelligence, which cannot see that join, so the
-       * question is asked again once the file exists and the file is taken back out if the answer
-       * changed. A removal that lands after this check is a removal of somebody whose upload had
+       * membership join; the file and the conversation now live in Intelligence, which no
+       * transaction here can hold, so the question is asked again once the file exists and the file
+       * is taken back out if the answer changed. A removal that lands after this check is a removal of somebody whose upload had
        * already finished, which is what it would have been before.
        */
-      const stillMember = await canOpenChannel(
-        database,
-        actor.id,
-        channelId,
-      ).catch((error: unknown) => {
+      // Asked of Intelligence itself, past this instance's copy: a removal another replica made
+      // while the file was coming off the wire must be seen here.
+      const stillMember = await canOpenChannel(database, actor.id, channelId, {
+        fresh: true,
+      }).catch((error: unknown) => {
         console.error(
           `Could not recheck ${actor.id}'s membership of ${channelId} after an upload.`,
           error,

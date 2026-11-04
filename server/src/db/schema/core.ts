@@ -301,6 +301,13 @@ export const agents = pgTable("agents", {
   updatedAt: updatedAt(),
 });
 
+/**
+ * A conversation. MOVED TO INTELLIGENCE, with `channel_memberships`, `channel_agents` and
+ * `intelligence_channel_mappings` below: conversations are created, read and changed through its
+ * conversations capability (conversations/). These tables are kept for one release, receiving no
+ * writes, so a deployment that upgrades still has the rows to copy (conversations/upgrade.ts); then
+ * dropped. Tables that stay here name a conversation by id with no foreign key.
+ */
 export const channels = pgTable(
   "channels",
   {
@@ -535,9 +542,8 @@ export const attachments = pgTable(
   "attachments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    channelId: text("channel_id")
-      .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+    /** The conversation, in Intelligence: named by id, with no foreign key. */
+    channelId: text("channel_id").notNull(),
     uploadedBy: text("uploaded_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

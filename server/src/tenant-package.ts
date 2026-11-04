@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { eq, inArray } from "drizzle-orm";
 import { parse } from "yaml";
 import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
 import {
@@ -11,10 +10,14 @@ import {
 } from "./configuration/client";
 import { botConfiguration } from "./configuration/directory";
 import type { BotAccessChange, SkillEntry } from "./configuration/types";
+import {
+  ConversationAlreadyExistsError,
+  ConversationVersionConflictError,
+} from "./conversations/client";
+import { conversations } from "./conversations/directory";
 import type { Database } from "./db/client";
 import { bots } from "./agents/bot-registry/directory";
 import type { Bot } from "./agents/bot-registry/types";
-import { channelAgents, channels as channelTable } from "./db/schema";
 
 const approvedThemeVariables = new Set([
   "--background",
@@ -807,7 +810,7 @@ export async function loadTenantPackage(
 }
 
 export async function synchronizeTenantPackage(
-  database: Database,
+  _database: Database,
   tenantPackage: LoadedTenantPackage,
 ) {
   /*
@@ -843,12 +846,10 @@ export async function synchronizeTenantPackage(
   // own is refused below, and refusing it here, before any Bot is written, leaves nothing behind.
   const declaredChannels = tenantPackage.channels.map((channel) => channel.id);
   if (declaredChannels.length > 0) {
-    const taken = await database
-      .select({ id: channelTable.id, packageId: channelTable.packageId })
-      .from(channelTable)
-      .where(inArray(channelTable.id, declaredChannels));
+    // Conversations live in Intelligence; deleted ones still hold their id.
+    const taken = await conversations().client.many(declaredChannels);
     const foreign = taken.find(
-      (channel) => !existingPackage || channel.packageId !== existingPackage.id,
+      (channel) => !existingPackage || channel.managedBy !== existingPackage.id,
     );
     if (foreign) {
       throw new Error(
@@ -890,53 +891,21 @@ export async function synchronizeTenantPackage(
     .filter((bot) => bot.packageId === deploymentPackage.id)
     .map((bot) => bot.id);
 
-  await database.transaction(async (transaction) => {
-    for (const channel of tenantPackage.channels) {
-      const [ownedChannel] = await transaction
-        .insert(channelTable)
-        .values({
-          id: channel.id,
-          name: channel.name,
-          description: channel.description,
-          allowedGroups: channel.allowedGroups,
-          packageId: deploymentPackage.id,
-        })
-        .onConflictDoUpdate({
-          target: channelTable.id,
-          setWhere: eq(channelTable.packageId, deploymentPackage.id),
-          set: {
-            name: channel.name,
-            description: channel.description,
-            allowedGroups: channel.allowedGroups,
-            packageId: deploymentPackage.id,
-            updatedAt: new Date(),
-          },
-        })
-        .returning({ id: channelTable.id });
-
-      if (!ownedChannel) {
-        throw new Error(
-          `Tenant package channel "${channel.id}" collides with a channel this package does not own`,
-        );
-      }
-
-      await transaction
-        .delete(channelAgents)
-        .where(eq(channelAgents.channelId, channel.id));
-      if (channel.permittedAgents.length) {
-        await transaction.insert(channelAgents).values(
-          channel.permittedAgents.map((agentId) => ({
-            channelId: channel.id,
-            agentId,
-          })),
-        );
-      }
-    }
-  });
+  /*
+   * The package's channels, in Intelligence: no OpenBot transaction stays open across an Intelligence
+   * write. Each write is keyed on the package checksum and what it writes, so replicas booting
+   * together send the same request and Intelligence answers the later ones with the first's result.
+   */
+  for (const channel of tenantPackage.channels)
+    await synchronizePackageChannel(
+      channel,
+      deploymentPackage.id,
+      tenantPackage.checksum,
+    );
 
   /*
    * The skills the package ships, and what each one declares it needs, then which of the package's
-   * Bots hold them: both in Intelligence, after the channels here, because no OpenBot transaction
+   * Bots hold them: both in Intelligence, after the channels, because no OpenBot transaction
    * waits on Intelligence. Every write is keyed on the package checksum, so replicas booting together
    * send the same requests, and a boot that stops part way is finished by the next one: the skills
    * are written before the grants that name them, and the grants are replaced in one change.
@@ -1240,4 +1209,80 @@ export function createPackageStatusReader(): PackageStatusReader {
         : null;
     },
   };
+}
+
+/**
+ * One channel the package declares, made or brought up to date in Intelligence. A channel of that id
+ * that the package does not own is refused, as the old upsert's `setWhere` refused it; one it owns is
+ * renamed, redescribed and given exactly the Bots the package names.
+ */
+async function synchronizePackageChannel(
+  channel: TenantChannel,
+  packageId: string,
+  checksum: string,
+): Promise<void> {
+  const directory = conversations();
+  const key = (operation: string, body: unknown) =>
+    `openbot-package:channel:${operation}:${createHash("sha256")
+      .update(JSON.stringify({ checksum, channel: channel.id, body }))
+      .digest("hex")}`;
+  const wanted = {
+    name: channel.name,
+    description: channel.description,
+    allowedGroups: channel.allowedGroups,
+    managedBy: packageId,
+    agentIds: [...channel.permittedAgents].sort(),
+  };
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await directory.refresh(channel.id);
+    if (!current) {
+      const draft = {
+        id: channel.id,
+        name: wanted.name,
+        description: wanted.description,
+        allowedGroups: wanted.allowedGroups,
+        managedBy: packageId,
+        agents: wanted.agentIds.map((agentId) => ({ agentId })),
+      };
+      try {
+        await directory.create(draft, key("create", draft));
+        return;
+      } catch (error) {
+        // Another replica made it between the read and here: read it again.
+        if (error instanceof ConversationAlreadyExistsError) continue;
+        throw error;
+      }
+    }
+    if (current.managedBy !== packageId) {
+      throw new Error(
+        `Tenant package channel "${channel.id}" collides with a channel this package does not own`,
+      );
+    }
+    // A package's channel cannot be deleted through OpenBot; one deleted some other way is left
+    // as it is rather than failing the boot over a conversation nobody can open.
+    if (current.deletedAt !== null) return;
+    const same =
+      current.name === wanted.name &&
+      current.description === wanted.description &&
+      JSON.stringify(current.allowedGroups) ===
+        JSON.stringify(wanted.allowedGroups) &&
+      JSON.stringify(current.agents.map((agent) => agent.agentId).sort()) ===
+        JSON.stringify(wanted.agentIds);
+    if (same) return;
+    try {
+      await directory.update(
+        channel.id,
+        current.version,
+        wanted,
+        key(`update:${current.version}`, wanted),
+      );
+      return;
+    } catch (error) {
+      if (error instanceof ConversationVersionConflictError) continue;
+      throw error;
+    }
+  }
+  throw new Error(
+    `Tenant package channel "${channel.id}" kept changing while it was written.`,
+  );
 }

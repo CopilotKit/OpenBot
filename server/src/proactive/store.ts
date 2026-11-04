@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import { conversations } from "../conversations/directory";
 import type { Database } from "../db/client";
 import { auditEvents, users } from "../db/schema/core";
 import {
@@ -13,7 +14,6 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../db/schema/proactive";
-import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
 import { lockDefaults, recordOptOut } from "../memory/defaults";
 import type {
@@ -225,10 +225,28 @@ async function insertSuggestion(
  * the person's lock when it is about to write, so an item any of their Bots opened a moment ago
  * counts too.
  */
+/**
+ * The person's unfinished tasks, newest first. Tasks live in Intelligence, so this is read before any
+ * transaction opens (a transaction here must not wait on Intelligence) and handed to
+ * {@link priorItemsOf}.
+ */
+async function openTasksOf(owner: string): Promise<PriorItems["tasks"]> {
+  const tasks = await conversations().client.tasks.upTo(
+    { userId: owner, open: true },
+    PRIOR_LIMIT,
+  );
+  return tasks.map((task) => ({
+    agentId: task.agentId,
+    title: task.title,
+    sourceLink: task.sourceLink,
+  }));
+}
+
 async function priorItemsOf(
   executor: Executor,
   owner: string,
   agentId: string,
+  tasks: PriorItems["tasks"],
 ): Promise<PriorItems> {
   const since = new Date(Date.now() - HIDDEN_DAYS * 86_400_000);
   const theirs = eq(proactiveSuggestions.ownerUserId, owner);
@@ -274,16 +292,6 @@ async function priorItemsOf(
     )
     .orderBy(desc(proactiveSuggestions.resolvedAt))
     .limit(20);
-  const tasks = await executor
-    .select({
-      agentId: botTasks.agentId,
-      title: botTasks.title,
-      sourceLink: botTasks.sourceLink,
-    })
-    .from(botTasks)
-    .where(and(eq(botTasks.ownerUserId, owner), isNull(botTasks.resolvedAt)))
-    .orderBy(desc(botTasks.createdAt))
-    .limit(PRIOR_LIMIT);
   return {
     open: open.map(({ id, agentId, title, sourceLink }) => ({
       id,
@@ -533,8 +541,8 @@ export function createProactiveStore(database: Database) {
      * What this person had: items still open, unfinished tasks and what they hid in the last thirty
      * days, from every one of their Bots, and what they started from this Bot. Newest first.
      */
-    priorItems: (owner: string, agentId: string) =>
-      priorItemsOf(database, owner, agentId),
+    priorItems: async (owner: string, agentId: string) =>
+      priorItemsOf(database, owner, agentId, await openTasksOf(owner)),
     /**
      * Open a new item a check-in raised, unless `refuse` finds it repeats something the person
      * already has (it gets what {@link priorItemsOf} reads, and answers why, or null).
@@ -548,10 +556,16 @@ export function createProactiveStore(database: Database) {
       input: NewSuggestion,
       refuse: (prior: PriorItems) => string | null,
     ): Promise<ProactiveSuggestion> {
+      const tasks = await openTasksOf(input.ownerUserId);
       return database.transaction(async (transaction) => {
         await lockItems(transaction, input.ownerUserId);
         const repeat = refuse(
-          await priorItemsOf(transaction, input.ownerUserId, input.agentId),
+          await priorItemsOf(
+            transaction,
+            input.ownerUserId,
+            input.agentId,
+            tasks,
+          ),
         );
         if (repeat) throw new ProactiveRefusedError(repeat);
         return insertSuggestion(transaction, input);
@@ -926,7 +940,13 @@ export function createProactiveStore(database: Database) {
             )
             .limit(1);
           if (!item) return;
-          const { open } = await priorItemsOf(transaction, owner, item.agentId);
+          // Only the open items are compared here, so no tasks are read for it.
+          const { open } = await priorItemsOf(
+            transaction,
+            owner,
+            item.agentId,
+            [],
+          );
           if (open.some((other) => sameThing(other, item))) return;
           await transaction
             .update(proactiveSuggestions)

@@ -25,7 +25,7 @@ import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { modelUsage } from "../src/db/schema/admin";
-import { channels, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import {
@@ -35,7 +35,6 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
-import { botTasks } from "../src/db/schema/tasks";
 import { workItems } from "../src/db/schema/work";
 import { createDeliveryRouter } from "../src/delivery/router";
 import { createDeliveryStore } from "../src/delivery/store";
@@ -66,6 +65,12 @@ import {
   setBotPreference,
   useTestConfiguration,
 } from "./support/bots";
+import {
+  purgeConversations,
+  seedChannel,
+  seedTask,
+  storedTasks,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
 import { testMemory } from "./support/memory";
@@ -138,13 +143,9 @@ beforeAll(async () => {
     .values({ id: owner, email: `${owner}@example.test` });
   await seedBot({ id: inboxBot, name: "Inbox Bot", type: "built_in" });
   await seedBot({ id: calendarBot, name: "Calendar Bot", type: "built_in" });
-  await database.insert(channels).values(
-    [inboxChannel, calendarChannel, taskChannel].map((id) => ({
-      id,
-      name: id,
-      description: "",
-    })),
-  );
+  // The person's own conversation with each Bot, where its check-ins live.
+  await seedChannel(owner, [inboxBot], { id: inboxChannel });
+  await seedChannel(owner, [calendarBot], { id: calendarChannel });
   await database.insert(mcpServers).values([
     {
       id: mail,
@@ -224,7 +225,10 @@ async function reset() {
         inArray(sql<string>`${workItems.payload}->>'settingId'`, settings),
       ),
     );
-  await database.delete(botTasks).where(eq(botTasks.ownerUserId, owner));
+  // A task goes with its conversation, in Intelligence.
+  await purgeConversations(
+    (await storedTasks(owner)).map((task) => task.conversationId),
+  );
   await database
     .delete(proactiveSuggestions)
     .where(eq(proactiveSuggestions.ownerUserId, owner));
@@ -259,11 +263,11 @@ beforeEach(reset);
 
 afterAll(async () => {
   await reset();
+  // The phone is in Intelligence, not gone with the person: signed out, as signing out does.
+  await deliveries.removeDevice(owner, device);
   await database.delete(users).where(eq(users.id, owner));
+  await purgeConversations([inboxChannel, calendarChannel, taskChannel]);
   await removeBots([inboxBot, calendarBot]);
-  await database
-    .delete(channels)
-    .where(inArray(channels.id, [inboxChannel, calendarChannel, taskChannel]));
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, [mail, diary]));
@@ -1267,13 +1271,12 @@ describe("what a check-in may raise", () => {
     await openItem(inbox, "Answer the supplier", {
       sourceLink: "https://Mail.example.test/m/7/",
     });
-    await database.insert(botTasks).values({
-      id: randomUUID(),
-      ownerUserId: owner,
+    await seedChannel(owner, [inboxBot], { id: taskChannel });
+    await seedTask({
+      userId: owner,
       agentId: inboxBot,
-      channelId: taskChannel,
+      conversationId: taskChannel,
       title: "Book the kiln technician",
-      origin: "check_in",
     });
     await hiddenDaysAgo(inbox, "Renew the market stall", 29);
     await hiddenDaysAgo(inbox, "Order more clay", 31);

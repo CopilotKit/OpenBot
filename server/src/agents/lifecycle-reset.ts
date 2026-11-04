@@ -27,11 +27,9 @@
  * never switches back on what they switched off. What they left on comes back on by default.
  */
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { conversations as conversationDirectory } from "../conversations/directory";
 import type { Database } from "../db/client";
 import {
-  channelAgents,
-  channelMemberships,
-  channels,
   proactiveSettings,
   proactiveSuggestions,
   responsibilities,
@@ -79,36 +77,19 @@ export function createBotReset(options: {
 
   /** Every live conversation this person is in that has this Bot in it, split by whether it is theirs alone. */
   async function conversations(ownerUserId: string, agentId: string) {
-    const rows = await database
-      .select({
-        id: channels.id,
-        packageId: channels.packageId,
-        otherBots: sql<number>`(select count(*) from ${channelAgents} other_bots where other_bots.channel_id = ${channels.id} and other_bots.agent_id <> ${agentId})::int`,
-        otherMembers: sql<number>`(select count(*) from ${channelMemberships} other_members where other_members.channel_id = ${channels.id} and other_members.user_id <> ${ownerUserId})::int`,
-      })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        and(
-          eq(channelMemberships.channelId, channels.id),
-          eq(channelMemberships.userId, ownerUserId),
-        ),
-      )
-      .innerJoin(
-        channelAgents,
-        and(
-          eq(channelAgents.channelId, channels.id),
-          eq(channelAgents.agentId, agentId),
-        ),
-      )
-      .where(isNull(channels.deletedAt));
-    const alone = rows.filter(
-      (row) =>
-        row.packageId === null && row.otherBots === 0 && row.otherMembers === 0,
+    const found = await conversationDirectory().client.all({
+      memberUserId: ownerUserId,
+      agentId,
+    });
+    const alone = found.filter(
+      (conversation) =>
+        conversation.managedBy === null &&
+        conversation.agents.every((agent) => agent.agentId === agentId) &&
+        conversation.members.every((member) => member.userId === ownerUserId),
     );
     return {
-      mine: alone.map((row) => row.id),
-      kept: rows.length - alone.length,
+      mine: alone.map((conversation) => conversation.id),
+      kept: found.length - alone.length,
     };
   }
 

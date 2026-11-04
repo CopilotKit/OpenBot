@@ -1,13 +1,10 @@
 import { approvalWords } from "@openbot/shared/tool-name";
 import { and, desc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
+import { conversations } from "../conversations/directory";
+import { ownThread } from "../conversations/types";
 import type { Database } from "../db/client";
-import {
-  approvalRequests,
-  botTasks,
-  channels,
-  intelligenceChannelMappings,
-  workItems,
-} from "../db/schema";
+import { approvalRequests, workItems } from "../db/schema";
+import type { BotTaskOrigin } from "../db/schema/tasks";
 import type { TaskStatus } from "../proactive/contracts";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
@@ -232,7 +229,26 @@ export const FAILED_LINE = ":failed";
 /** The suffix of the person's ask, recorded as their line when a task's turn starts. */
 export const ASK_LINE = ":input";
 
-export type TaskRow = typeof botTasks.$inferSelect;
+/**
+ * A task as this module reads it: what a `bot_tasks` row held, now an agent task in Intelligence.
+ * `resolvedAtExact` is the "done" to the microsecond, for comparing with the work queue's clock.
+ */
+export type TaskRow = {
+  id: string;
+  ownerUserId: string;
+  agentId: string;
+  channelId: string;
+  suggestionId: string | null;
+  title: string;
+  why: string | null;
+  sourceApp: string | null;
+  sourceLink: string | null;
+  origin: BotTaskOrigin;
+  resolvedAt: Date | null;
+  resolvedAtExact: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 /** What a task's conversation is doing, and its thread, as one read of the ledgers found them. */
 export type TaskState = {
@@ -291,31 +307,22 @@ export async function readTaskStates(
   const entryOfChannel = (channelId: string | null | undefined) =>
     state.get(taskOfChannel.get(channelId ?? "") ?? "");
 
-  const [lastSaid, threads] = await Promise.all([
-    // The last line said in each task's conversation, for its next step and for what came after.
-    database
-      .select({
-        id: channels.id,
-        lastMessage: channels.lastMessage,
-        lastMessageAt: channels.lastMessageAt,
-        byBot: sql<boolean>`${channels.lastMessageAgentId} is not null`,
-        sourceId: channels.lastMessageSourceId,
-      })
-      .from(channels)
-      .where(inArray(channels.id, channelIds)),
-    database
-      .select({
-        channelId: intelligenceChannelMappings.channelId,
-        threadId: intelligenceChannelMappings.threadId,
-      })
-      .from(intelligenceChannelMappings)
-      .where(
-        and(
-          eq(intelligenceChannelMappings.userId, owner),
-          inArray(intelligenceChannelMappings.channelId, channelIds),
-        ),
-      ),
-  ]);
+  // The last line said in each task's conversation, for its next step and for what came after, and
+  // the owner's own thread in each: both are the conversation, which Intelligence holds.
+  const held = await conversations().getMany(channelIds);
+  const lastSaid = [...held.values()].map((conversation) => ({
+    id: conversation.id,
+    lastMessage: conversation.lastMessage,
+    lastMessageAt: conversation.lastMessageAt,
+    byBot: conversation.lastMessageAgentId !== null,
+    sourceId: conversation.lastMessageSourceId,
+  }));
+  const threads = [...held.values()].flatMap((conversation) => {
+    const thread = ownThread(conversation, owner);
+    return thread
+      ? [{ channelId: conversation.id, threadId: thread.threadId }]
+      : [];
+  });
   const channelOfThread = new Map(
     threads.map((row) => [row.threadId, row.channelId]),
   );
@@ -348,6 +355,15 @@ export async function readTaskStates(
   };
 
   const taskIds = rows.map((row) => row.id);
+  // Each task's "done", to the microsecond, so a turn accepted in the same millisecond still follows
+  // it. Compared in SQL against the queue's own stamp.
+  const resolvedCases = rows
+    .filter((row) => row.resolvedAtExact)
+    .map((row) => sql`when ${row.id} then ${row.resolvedAtExact}::timestamptz`);
+  const afterResolution =
+    resolvedCases.length > 0
+      ? sql<boolean>`coalesce(${workItems.createdAt} > (case ${payload("taskId")} ${sql.join(resolvedCases, sql` `)} end), false)`
+      : sql<boolean>`false`;
   const [approvals, questions, turns, carriedOn] = await Promise.all([
     // Waiting on the person: an action its turn paused on for Allow once.
     database
@@ -399,7 +415,7 @@ export async function readTaskStates(
           Number,
         ),
         // Compared in SQL, so a turn accepted in the same millisecond still follows the "done".
-        afterResolution: sql<boolean>`coalesce(${workItems.createdAt} > ${botTasks.resolvedAt}, false)`,
+        afterResolution,
         // A crash fails at lease expiry, not its last heartbeat. Finished rows use their actual
         // completion; released rows use the release. Kept in PostgreSQL's sub-millisecond order.
         outcomeAt: sql`extract(epoch from coalesce(
@@ -416,7 +432,6 @@ export async function readTaskStates(
         leaseUntil: workItems.leaseUntil,
       })
       .from(workItems)
-      .innerJoin(botTasks, eq(botTasks.id, payload("taskId")))
       .where(
         and(
           eq(workItems.kind, PROACTIVE_TASK_KIND),

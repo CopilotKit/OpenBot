@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { channels, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import {
   deliveryChallenges,
   deliveryInbox,
@@ -38,9 +38,6 @@ beforeAll(async () => {
     type: "built_in",
     avatarSeed: `${prefix}-avatar`,
   });
-  await db
-    .insert(channels)
-    .values({ id: channel, name: "Delivery test", description: "" });
 });
 afterAll(async () => {
   if (workKeys.length)
@@ -53,7 +50,6 @@ afterAll(async () => {
         ),
       );
   await db.delete(users).where(inArray(users.id, [owner, stranger]));
-  await db.delete(channels).where(eq(channels.id, channel));
   await removeBots([bot]);
   await db.$client.end({ timeout: 5 });
 });

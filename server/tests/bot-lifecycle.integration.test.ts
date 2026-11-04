@@ -23,12 +23,7 @@ import {
 } from "../src/agents/wake-up";
 import { createDatabase } from "../src/db/client";
 import { approvalRequests } from "../src/db/schema/approvals";
-import {
-  channelAgents,
-  channelMemberships,
-  channels,
-  users,
-} from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
 import {
   proactiveSettings,
@@ -43,6 +38,12 @@ import {
   storedPreferences,
   useTestConfiguration,
 } from "./support/bots";
+import {
+  deleteConversation,
+  purgeConversations,
+  seedConversation,
+  storedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
 import { removeTestMemory, testMemory } from "./support/memory";
@@ -89,27 +90,22 @@ beforeAll(async () => {
       roleDescription: "Test",
       visibility: "public",
     });
-  await database.insert(channels).values(
-    [direct, shared, othersDirect].map((id) => ({
+  // Conversations live in Intelligence: each with the Bot in it, its last word the Bot's, unread.
+  for (const [id, members] of [
+    [direct, [owner]],
+    [shared, [owner, other]],
+    [othersDirect, [other]],
+  ] as const)
+    await seedConversation({
       id,
       name: id,
       description: "",
       lastMessage: "hello",
       lastMessageAt: new Date(),
       lastMessageAgentId: bot,
-    })),
-  );
-  await database.insert(channelMemberships).values([
-    { channelId: direct, userId: owner },
-    { channelId: shared, userId: owner },
-    { channelId: shared, userId: other },
-    { channelId: othersDirect, userId: other },
-  ]);
-  await database.insert(channelAgents).values([
-    { channelId: direct, agentId: bot },
-    { channelId: shared, agentId: bot },
-    { channelId: othersDirect, agentId: bot },
-  ]);
+      agentIds: [bot],
+      members: members.map((userId) => ({ userId, threadId: null })),
+    });
   for (const person of [owner, other]) {
     await database.insert(routines).values({
       id: `${prefix}-routine-${person}`,
@@ -233,9 +229,7 @@ afterAll(async () => {
   await database
     .delete(approvalRequests)
     .where(eq(approvalRequests.ownerUserId, owner));
-  await database
-    .delete(channels)
-    .where(inArray(channels.id, [direct, shared, othersDirect]));
+  await purgeConversations([direct, shared, othersDirect]);
   await removeBots([bot, helper]);
   await database
     .delete(users)
@@ -491,10 +485,7 @@ describe("reset", () => {
     memory: memory.store,
     softDeleteChannel: async (_actor, channelId) => {
       softDeleted.push(channelId);
-      await database
-        .update(channels)
-        .set({ deletedAt: new Date() })
-        .where(eq(channels.id, channelId));
+      await deleteConversation(channelId);
     },
   });
 
@@ -533,11 +524,7 @@ describe("reset", () => {
       ownMemoryId.get(owner) as string,
     );
     expect(kept?.invalidatedAt).toBeNull();
-    const [sharedRow] = await database
-      .select({ deletedAt: channels.deletedAt })
-      .from(channels)
-      .where(eq(channels.id, shared));
-    expect(sharedRow?.deletedAt).toBeNull();
+    expect((await storedConversation(shared)).deletedAt).toBeNull();
     const remaining = await database
       .select({ key: workItems.key })
       .from(workItems)

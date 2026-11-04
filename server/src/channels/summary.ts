@@ -9,16 +9,14 @@
  */
 
 import { readFiring } from "@openbot/shared/routine-firing";
-import { and, asc, eq, isNull, notExists, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { ConversationMissingError } from "../conversations/client";
+import { conversations } from "../conversations/directory";
+import { writeKey } from "../conversations/http";
+import { ownThread } from "../conversations/types";
 import type { Database } from "../db/client";
-import {
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  workItems,
-} from "../db/schema";
+import { workItems } from "../db/schema";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
-import { CHANNEL_ACTIVITY_TOPIC, type ChannelActivityEvent } from "./events";
 import { oneLine } from "./text";
 
 export const CHANNEL_SUMMARY_KIND = "channel.summary";
@@ -58,54 +56,65 @@ export type SummaryReport = {
   skipped: { channelId: string; reason: string }[];
 };
 
+/** How many pages of conversations awaiting a summary one pass reads before it stops looking. */
+const MAX_OFFER_PAGES = 5;
+
 /**
  * Offer every conversation that has been spoken in and has no name yet.
  *
- * `channels_awaiting_summary_idx` keeps this off a full scan; `offer` is idempotent on (kind, key),
- * so every replica and every later pass collapse onto one row.
+ * Intelligence answers which conversations those are (a partial index there keeps it off a full
+ * scan), most recently active first; `offer` is idempotent on (kind, key), so every replica and every
+ * later pass collapse onto one row.
  */
 export async function offerChannelsAwaitingSummary(
   options: Pick<ChannelSummaryOptions, "database" | "queue" | "limit">,
 ): Promise<{ offered: string[] }> {
-  const rows = await options.database
-    .select({ id: channels.id })
-    .from(channels)
-    .where(
-      and(
-        isNull(channels.summary),
-        isNull(channels.deletedAt),
-        sql`${channels.lastMessageAt} is not null`,
-        /*
-         * Not one the queue already holds a row for, pending or settled.
-         *
-         * Offering it again changes nothing, but it takes one of the `limit` places. A conversation
-         * this cannot name keeps no summary and so never leaves the set above, and enough of them
-         * ahead of a new conversation left the new one unoffered on every pass. Once its settled row
-         * is forgotten it is offered again, as before.
-         */
-        notExists(
-          options.database
+  const limit = options.limit ?? 20;
+  const wanted: string[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_OFFER_PAGES && wanted.length < limit; page++) {
+    const found = await conversations().client.page(
+      { summaryPending: true, order: "recent" },
+      cursor,
+      100,
+    );
+    const ids = found.conversations.map((conversation) => conversation.id);
+    /*
+     * Not one the queue already holds a row for, pending or settled.
+     *
+     * Offering it again changes nothing, but it takes one of the `limit` places. A conversation
+     * this cannot name keeps no summary and so never leaves the set above, and enough of them
+     * ahead of a new conversation left the new one unoffered on every pass. Once its settled row
+     * is forgotten it is offered again, as before.
+     */
+    const queued =
+      ids.length === 0
+        ? []
+        : await options.database
             .select({ key: workItems.key })
             .from(workItems)
             .where(
               and(
                 eq(workItems.kind, CHANNEL_SUMMARY_KIND),
-                eq(workItems.key, channels.id),
+                inArray(workItems.key, ids),
               ),
-            ),
-        ),
-      ),
-    )
-    .limit(options.limit ?? 20);
+            );
+    const held = new Set(queued.map((row) => row.key));
+    for (const id of ids) {
+      if (!held.has(id) && wanted.length < limit) wanted.push(id);
+    }
+    cursor = found.nextCursor;
+    if (!cursor) break;
+  }
 
   const offered: string[] = [];
-  for (const row of rows) {
+  for (const id of wanted) {
     await options.queue.offer({
       kind: CHANNEL_SUMMARY_KIND,
-      key: row.id,
-      payload: { channelId: row.id },
+      key: id,
+      payload: { channelId: id },
     });
-    offered.push(row.id);
+    offered.push(id);
   }
   return { offered };
 }
@@ -210,33 +219,18 @@ async function summariseOne(
   channelId: string,
 ): Promise<Attempt> {
   /* A queue key is not a foreign key, so work outlives its channel. Gone is final, not not-yet. */
-  const [existing] = await options.database
-    .select({ deletedAt: channels.deletedAt })
-    .from(channels)
-    .where(eq(channels.id, channelId));
+  const existing = await conversations().refresh(channelId);
   if (!existing || existing.deletedAt !== null)
     return "nothing to name it with";
 
   /* Threads are per person, so the one read must be chosen: the earliest member opened it. */
-  const [owner] = await options.database
-    .select({
-      userId: channelMemberships.userId,
-      threadId: intelligenceChannelMappings.threadId,
-    })
-    .from(channelMemberships)
-    .innerJoin(
-      intelligenceChannelMappings,
-      and(
-        eq(intelligenceChannelMappings.channelId, channelMemberships.channelId),
-        eq(intelligenceChannelMappings.userId, channelMemberships.userId),
-      ),
-    )
-    .where(eq(channelMemberships.channelId, channelId))
-    .orderBy(asc(channelMemberships.createdAt), asc(channelMemberships.userId))
-    .limit(1);
-
+  const first = existing.members.find((member) =>
+    ownThread(existing, member.userId),
+  );
+  const thread = first ? ownThread(existing, first.userId) : undefined;
   // No member holds a thread for this channel yet, so there is nothing to read — yet.
-  if (!owner) return "not yet";
+  if (!first || !thread) return "not yet";
+  const owner = { userId: first.userId, threadId: thread.threadId };
 
   const excerpt = await openingOf(options.transcript, owner);
   if (!excerpt) return "not yet";
@@ -248,53 +242,27 @@ async function summariseOne(
   const title = oneLine(stripWrappingQuotes(answer), MAX_SUMMARY_GRAPHEMES);
   if (!title) return "nothing to name it with";
 
-  return await options.database.transaction<Attempt>(
-    async (transaction) => {
-      // Conditional, not check-then-write: a second replica changes no rows and announces nothing.
-      const applied = await transaction
-        .update(channels)
-        .set({ summary: title, summaryAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(channels.id, channelId),
-            isNull(channels.summary),
-            isNull(channels.deletedAt),
-          ),
-        )
-        .returning({ id: channels.id });
-      if (applied.length === 0) {
-        // Another writer's title stands, but a conversation deleted while the model worked is gone.
-        // Both settle the queue item; only a surviving conversation counts as named.
-        const [remaining] = await transaction
-          .select({ id: channels.id })
-          .from(channels)
-          .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-          .limit(1);
-        return remaining ? "written" : "nothing to name it with";
-      }
-
-      const members = await transaction
-        .select({ userId: channelMemberships.userId })
-        .from(channelMemberships)
-        .where(eq(channelMemberships.channelId, channelId));
-
-      // Announced inside the transaction, so it is delivered on commit and a write that rolls back
-      // is never announced — the rule every other writer in this area follows.
-      const event: ChannelActivityEvent = {
-        channelId,
-        memberIds: members.map((member) => member.userId),
-        lastMessage: null,
-        lastMessageAt: null,
-        lastMessageAgentId: null,
-        summary: title,
-      };
-      await transaction.execute(
-        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-      );
-      return "written";
-    },
-    { isolationLevel: "read committed" },
-  );
+  try {
+    /*
+     * Conditional, not check-then-write: a second replica changes nothing and announces nothing.
+     * Every member hears of a summary that applied from Intelligence's change event (`summary`).
+     */
+    const { applied, conversation } = await conversations().client.summary(
+      channelId,
+      title,
+      writeKey("channel.summary"),
+    );
+    conversations().apply(conversation);
+    // Another writer's title stands, but a conversation deleted while the model worked is gone.
+    // Both settle the queue item; only a surviving conversation counts as named.
+    if (!applied && conversation.deletedAt !== null)
+      return "nothing to name it with";
+    return "written";
+  } catch (error) {
+    if (error instanceof ConversationMissingError)
+      return "nothing to name it with";
+    throw error;
+  }
 }
 
 /* The opening exchange only: a conversation that wandered is still filed under what it opened for. */
