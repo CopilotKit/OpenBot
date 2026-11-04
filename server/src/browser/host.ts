@@ -4,7 +4,12 @@ import {
   type BrowserWindow,
   isPersonBrowserId,
 } from "@openbot/shared/openbot-browser";
-import { botSeat, type ComputerSeat } from "../computer/computer-key";
+import {
+  botSeat,
+  type ComputerKey,
+  type ComputerSeat,
+} from "../computer/computer-key";
+import { computerTokenOf } from "../computer/computer-token";
 import type { ComputerGateway } from "../computer/gateway";
 import {
   type EgressPolicy,
@@ -129,6 +134,14 @@ export function withPersonBrowsers(
     // Unknown rather than the Bots' computer's run, which would say nothing about this one.
     sessionOf: async (seat: ComputerSeat) =>
       isPersonBrowserId(seat.botId) ? undefined : provider.sessionOf?.(seat),
+    /*
+     * OpenBot Desktop starts its host-side computer with the deployment's token: it runs the person's own browsers and
+     * no Bot, on their own machine. Bots' computers take whatever their provider gave them.
+     */
+    tokenFor: (key: ComputerKey, deploymentToken: string) =>
+      key.kind === "bot" && isPersonBrowserId(key.botId)
+        ? deploymentToken
+        : (computerTokenOf(provider, key, deploymentToken) ?? deploymentToken),
   });
 }
 
@@ -148,13 +161,14 @@ export function personBrowserShows(
  * same `browserUrl`): every address checked as a computer's, and the person's network policy pushed on the way
  * (`withPolicyPushOnWake`). */
 export function gatewayBrowserComputers(
-  gateway: Pick<ComputerGateway, "locate" | "status">,
+  gateway: Pick<ComputerGateway, "locate" | "status" | "tokenFor">,
   browserUrl: string | undefined,
 ): BrowserComputers {
   return {
     shows: personBrowserShows(browserUrl),
     // A person's browser is a computer of its own, never a seat on the person's computer beside their Bots.
     locate: (computerId) => gateway.locate(botSeat(computerId)),
+    tokenFor: (computerId) => gateway.tokenFor(botSeat(computerId)),
     running: async (computerId) =>
       (await gateway.status(botSeat(computerId))).state === "ready",
   };
@@ -201,6 +215,8 @@ export function directBrowserComputers(input: {
       }
       return input.browserUrl;
     },
+    // OpenBot Desktop's host-side computer, started with the deployment's token: see `withPersonBrowsers`.
+    tokenFor: () => input.token,
     running: async () => true,
   };
 }

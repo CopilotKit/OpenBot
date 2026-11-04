@@ -24,6 +24,7 @@ import { newId } from "../../lib/new-id";
 
 export function ConversationView({
   messages,
+  threadId,
   busy = false,
   notice,
   agents = [],
@@ -43,6 +44,7 @@ export function ConversationView({
   voiceCall,
 }: {
   messages: readonly Message[];
+  threadId?: string;
   busy?: boolean;
   /** Shown above the composer. An error, or why this conversation is read-only. */
   notice?: ReactNode;
@@ -432,6 +434,7 @@ export function ConversationView({
          * conversation to change nothing.
          */}
         <ChatTranscript
+          threadId={threadId}
           busy={busy}
           commandNames={(commands ?? [])
             .map((command) => command.name)

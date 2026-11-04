@@ -465,8 +465,39 @@ describe("deployment configuration", () => {
       clientId: "entra-client-id",
       clientSecret: "entra-client-secret",
       tenantId: "common",
+      apiScope: "api://entra-client-id/.default",
+      // No app may call OpenBot with a person's token until one is named.
+      allowedClients: [],
     });
     expect(configuredAuthProviders(config.auth)).toEqual(["microsoft"]);
+  });
+
+  test("takes the apps that may call with a person's Entra token by client id, and refuses anything else", () => {
+    const entra = {
+      ...withoutSignIn,
+      ...SESSION,
+      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
+      MICROSOFT_OAUTH_TENANT_ID: "8f2c1e40-0000-0000-0000-000000000000",
+    };
+    // Compared as Entra writes `azp`, lower case, whatever case the portal was copied in.
+    expect(
+      loadConfig({
+        ...entra,
+        MICROSOFT_OAUTH_ALLOWED_CLIENTS:
+          "6E74172B-BE56-4843-9FF4-E66A39BB12E3, 1b4f7c2d-0000-4000-8000-000000000001",
+      }).auth?.microsoft?.allowedClients,
+    ).toEqual([
+      "6e74172b-be56-4843-9ff4-e66a39bb12e3",
+      "1b4f7c2d-0000-4000-8000-000000000001",
+    ]);
+    // The app's API URI is the likely paste, and no token's `azp` is ever one.
+    expect(() =>
+      loadConfig({
+        ...entra,
+        MICROSOFT_OAUTH_ALLOWED_CLIENTS: "api://hr-portal",
+      }),
+    ).toThrow("MICROSOFT_OAUTH_ALLOWED_CLIENTS names `api://hr-portal`");
   });
 
   test("narrows Microsoft to one directory when given a tenant", () => {

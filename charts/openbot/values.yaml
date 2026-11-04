@@ -352,15 +352,16 @@ computers:
   # Who the browser and the Bot's shell run as.
   #
   # KUBERNETES ONLY, and that is the scope rather than the whole of #261. The chart runs the
-  # all-in-one image, whose `Dockerfile` creates `pwuser`, chowns `/workspace`, `/profiles` and
-  # `/app` to it, and drops to it through s6. A computer pod overrides the command to run the
-  # browser process alone, so it never reaches s6 and ran as uid 0. The Compose and supervisor
-  # paths run `agent-computer/Dockerfile`, which builds no such user and is still uid 0; that is
-  # the rest of #261's residual and is not this.
+  # all-in-one image, whose `Dockerfile` creates `pwuser`, chowns `/workspace` and `/profiles` to
+  # it, leaves `/app` root's, and drops to it through s6. A computer pod overrides the command to
+  # run the browser process alone, so it never reaches s6 and ran as uid 0. The Compose and
+  # supervisor paths run `agent-computer/Dockerfile`, which builds no such user and is still uid 0;
+  # that is the rest of #261's residual and is not this.
   #
   # WHAT IT BUYS, honestly. It is not a containment boundary against a Bot's own shell: the image
-  # grants `pwuser` passwordless sudo for apt-get/apt/dpkg, and those escalate to root by design
-  # (`-o APT::Update::Pre-Invoke=`). gVisor and a computer per Bot remain the actual boundary. What
+  # grants `pwuser` passwordless sudo for `openbot-apt`, which installs packages by name and refuses
+  # the arguments that make apt-get run a command as root, but a package's own scripts still run as
+  # root and root is one CVE away. gVisor and a computer per Bot remain the actual boundary. What
   # this does buy is real and separate: the org policies and admission rules that reject uid 0
   # outright, root-owned data stops accumulating in the volumes, and any bug yielding a constrained
   # primitive lands as 1001 rather than as root.
@@ -391,7 +392,7 @@ computers:
   # NOTHING ELSE IS SET HERE ON PURPOSE. A capability drop was proposed in #262 and declined,
   # because gVisor is the sandbox boundary this ships and `apt-get` in a Bot's shell needs CHOWN,
   # DAC_OVERRIDE, FOWNER, SETUID and SETGID. `allowPrivilegeEscalation: false` is the same question
-  # wearing a different hat: it is `no_new_privs`, which turns off the setuid bit `sudo apt-get`
+  # wearing a different hat: it is `no_new_privs`, which turns off the setuid bit `sudo openbot-apt`
   # depends on. The supervisor path already makes that trade (`docker.ts` sets
   # `no-new-privileges:true`), and can, because the image it runs installs no sudo at all. Add
   # either here if your deployment wants it and your Bots never install packages.
@@ -505,6 +506,9 @@ routines:
   # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
   # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
   enabled: false
+  # Pause new scheduled runs during an operator-controlled maintenance window. Existing Jobs
+  # retain their lease/timeout behavior; suspension does not cancel work already in flight.
+  suspend: false
   # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
   schedule: "*/5 * * * *"
 

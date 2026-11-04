@@ -238,6 +238,22 @@ pub(crate) fn write_checkpoint(
     std::fs::rename(temporary, target).map_err(|e| e.to_string())
 }
 
+/// Called only after candidate startup/readiness is verified and its pin is promoted. The stamp
+/// participates in the preparation fingerprint; rebind it without changing the selected engine,
+/// harness, credential records, or downloaded images.
+pub fn rebind_after_runtime_update(root: &Path) -> Result<(), Problem> {
+    if !root.join(FILE).exists() {
+        return Ok(());
+    }
+    let mut prepared: Prepared = serde_json::from_slice(
+        &std::fs::read(root.join(FILE)).map_err(|e| required(e.to_string()))?,
+    )
+    .map_err(|e| required(e.to_string()))?;
+    prepared.fingerprint = fingerprint(root)?;
+    write_record(root, FILE, &prepared)?;
+    record_launch(root, prepared.harness.as_ref())
+}
+
 pub fn invalidate(root: &Path) -> Result<(), Problem> {
     match std::fs::remove_file(root.join(FILE)) {
         Ok(()) => Ok(()),

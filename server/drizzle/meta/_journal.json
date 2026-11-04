@@ -512,6 +512,20 @@
       "when": 1793645107629,
       "tag": "0072_check_in_read_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1793651538578,
+      "tag": "0073_entra_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793655657340,
+      "tag": "0074_single_user_identity",
+      "breakpoints": true
     }
   ]
 }

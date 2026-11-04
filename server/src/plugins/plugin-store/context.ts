@@ -1,7 +1,12 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
+import { DEV_ACTOR } from "../../auth/dev-actor";
 import type { Database } from "../../db/client";
+import {
+  type EntraRefusal,
+  EntraTokenRefusedError,
+} from "../../auth/entra-refusal";
 import {
   type CredentialExecutor,
   CredentialUnusableError,
@@ -36,6 +41,7 @@ import {
   accountFor,
   personAccount,
 } from "../shared-accounts";
+import { filedUnder } from "../single-user-identity";
 import {
   type BrokeredDisconnectReason,
   CatalogueEntryUnknownError,
@@ -57,6 +63,26 @@ import {
   TokenRefusedError,
   type Transaction,
 } from "./model";
+
+/** What a person is told when Entra will not issue a token for them, in words they can act on. */
+function entraRefusal(reason: EntraRefusal, title: string): string {
+  switch (reason) {
+    case "not-admitted":
+      return `You no longer have access to OpenBot, so ${title} wasn't used.`;
+    case "no-sign-in":
+      return `${title} uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`;
+    case "sign-in-expired":
+      return `Your Microsoft sign-in has expired, so ${title} wasn't used. Sign in with Microsoft again and ask again.`;
+    case "no-consent":
+      return `An admin hasn't given OpenBot access to ${title} in Microsoft Entra. Ask an admin to grant it.`;
+    case "no-api-consent":
+      return `OpenBot doesn't have consent for its own API in Microsoft Entra, so it can't reach ${title} as you. Ask an admin to grant it.`;
+    case "no-api":
+      return `OpenBot isn't set up in Microsoft Entra to reach ${title} as you. Ask an admin to expose OpenBot's API there.`;
+    case "refused":
+      return `Microsoft wouldn't let OpenBot reach ${title} as you. Try again, or ask an admin if it keeps happening.`;
+  }
+}
 
 /**
  * What every group of plugin store methods shares: the options it was made with, and the helpers
@@ -240,6 +266,26 @@ export function createStoreContext(options: PluginStoreOptions) {
   }
 
   /**
+   * A person's own account at this deployment's broker: filed under their own id, or under the name
+   * `brokered_identities` holds for them, which only a single-user deployment's one person has.
+   *
+   * ASKED OF THE TABLE ONLY FOR THAT PERSON. `ensureSingleUserIdentity` is the table's one writer
+   * and writes `dev-local-user` and nobody else, so for anyone signed in the read could only ever
+   * answer nothing, and it is not made: every brokered call, confirm and connect on a deployment
+   * that signs people in resolves with no query here. For the single-user person it is one
+   * primary-key read through {@link filedUnder}, the same read startup settled the name with, so
+   * the two cannot disagree about it, and every replica answers from the one row the database holds.
+   */
+  async function personAccountOf(userId: string): Promise<AccountRef> {
+    return personAccount(
+      userId,
+      userId === DEV_ACTOR.id
+        ? await filedUnder(database, brokerProvider, userId)
+        : null,
+    );
+  }
+
+  /**
    * The account a call, a connect or a check acts for, from the row and the person — never from a
    * request. A Shared app answers with the deployment's stored identity whoever asks.
    */
@@ -323,10 +369,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         };
       /*
        * The actor's id is both the local id and the vendor id, deliberately and for both
-       * providers. See {@link personAccount} for why, before changing it.
+       * providers, except for a single-user deployment's one person. See {@link personAccount}
+       * for why, before changing it.
        */
       return {
-        ref: personAccount(actorId),
+        ref: await personAccountOf(actorId),
         title: row.title,
         mode: "personal",
         appId,
@@ -354,7 +401,9 @@ export function createStoreContext(options: PluginStoreOptions) {
    * begun under Shared identity A, the app flipped Shared → Personal → Shared (minting B) and B
    * connected, and the admin's return then withdrew A at the vendor, correctly, and deleted B's row
    * here, so the app read as disconnected while B stood live at Arcade. A person's row needs no
-   * such clause: their vendor id is their user id ({@link personAccount}).
+   * such clause: they have one vendor id, their user id or the one name
+   * `brokered_identities` holds for them, and it never changes while they hold a row
+   * ({@link personAccountOf}).
    */
   const accountRow = (toolkit: string, account: AccountRef) =>
     account.holder === "person"
@@ -489,12 +538,20 @@ export function createStoreContext(options: PluginStoreOptions) {
    * complete by construction rather than by cleanup. The other two paths have nothing to cache: a
    * `deployment-token` is decrypted out of the vault per call, and a `brokered` key is never held
    * here at all.
+   *
+   * A `person-entra` server is the exception, by design: the token Entra issues for a person is kept
+   * in memory until a few minutes before it expires (`auth/entra.ts`), because Entra's own guidance
+   * is to reuse a token for its lifetime. Removing the person here still stops it at once: every
+   * token is handed out only after the sign-in rules are asked again, and a refusal drops what is
+   * held for them.
    */
   async function connectionTokenFor(
     row: {
       id: string;
       title: string;
       credentialId: string | null;
+      /** The Entra scope a `person-entra` server is reached with; see `mcpServers.entraScope`. */
+      entraScope?: string | null;
       /*
        * NO `authScheme` HERE, DELIBERATELY. The scheme that decides whether a brokered call needs a
        * connection row is the APP'S, read through `brokeredAppScheme` below — and this row's own
@@ -669,6 +726,13 @@ export function createStoreContext(options: PluginStoreOptions) {
        * forces an arbitrary first consent before anybody knows which action they want. Here the
        * call proceeds and the vendor's own typed refusal is the authoritative answer.
        *
+       * NEITHER BROKER TAKES THIS WAIVER TODAY. Arcade declared `false` and took it until its grants
+       * were recorded here as Composio's are: with no row, this deployment could not say whose
+       * grants it had asked Arcade to use. It now declares `true`, a call needs its row as a
+       * Composio call does on every deployment, signed in or not, and Arcade still checks the
+       * action itself. The branch stays for a broker that declares otherwise, under the rules
+       * above.
+       *
        * ONLY A PRECONDITION IS REMOVED; THE IDENTITY IS UNCHANGED. The id returned is
        * `resolved.ref.vendorUserId` — the very value the branch below returns out of the row —
        * derived by {@link accountRefFor} from the session's actor and the app's own mode, Personal
@@ -730,6 +794,38 @@ export function createStoreContext(options: PluginStoreOptions) {
        * DEPLOYMENT_ID unable to move the account a call lands in.
        */
       return { vendorUserId: connected.vendorUserId };
+    }
+
+    /*
+     * A server reached as the signed-in person through Microsoft: a token Entra issues for the
+     * person asking, from their own Microsoft sign-in, for this server's scope. Never the
+     * deployment's credential, for the reason the `person-oauth` branch below gives, so every way it
+     * cannot be theirs is a refusal naming what they or an admin can do about it.
+     */
+    if (access.credential === "person-entra") {
+      if (!actorId) {
+        throw new PluginRefusedError(
+          `${row.title} answers as the person asking, and this run is not attributed to anybody.`,
+          null,
+        );
+      }
+      if (!options.entra || !row.entraScope) {
+        throw new PluginRefusedError(
+          `${row.title} needs Microsoft sign-in, and it isn't set up. Ask an admin to set it up.`,
+          null,
+        );
+      }
+      try {
+        return { token: await options.entra.tokenFor(actorId, row.entraScope) };
+      } catch (error) {
+        if (error instanceof EntraTokenRefusedError) {
+          throw new PluginRefusedError(
+            entraRefusal(error.reason, row.title),
+            null,
+          );
+        }
+        throw error;
+      }
     }
 
     if (access.credential !== "person-oauth") {
@@ -2120,6 +2216,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     toolsDeclaredBy,
     knownToolRefs,
     secretFor,
+    personAccountOf,
     accountRefFor,
     accountRow,
     connectionTokenFor,

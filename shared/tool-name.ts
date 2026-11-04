@@ -1,5 +1,6 @@
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
+import { SEARCH_TOOLS } from "./tool-search";
 
 /**
  * A tool call, named the way the person watching would name it.
@@ -143,6 +144,11 @@ const OWN_TOOLS: Record<string, { running: string; done: string }> = {
   [SHOW_APP_ACCESS_TOOL]: {
     running: "Checking app access",
     done: "Checked app access",
+  },
+  // Its answer is written for the model, so the line says what happened and shows no answer.
+  [SEARCH_TOOLS]: {
+    running: "Looking for a tool",
+    done: "Looked for a tool",
   },
 };
 

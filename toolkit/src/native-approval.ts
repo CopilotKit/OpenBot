@@ -22,8 +22,10 @@ type NativeRun = {
   messages: Message[];
   state: unknown;
   waiting?: HeadlessToolSuspension;
+  pending: Set<Promise<unknown>>;
+  abort(): void;
   waitForCall(id: string): Promise<void>;
-  suspend(error: HeadlessToolSuspension): void;
+  suspend(error: HeadlessToolSuspension): Promise<void>;
 };
 const nativeRuns = new AsyncLocalStorage<NativeRun>();
 
@@ -99,14 +101,20 @@ export async function executeNativeApprovalTool<T>(
     forwardedProps: run.input.forwardedProps,
     initiator,
   };
+  const pending = Promise.resolve().then(() =>
+    withApprovalContext(continuation, execute),
+  );
+  run.pending.add(pending);
   try {
-    return await withApprovalContext(continuation, execute);
+    return await pending;
   } catch (error) {
-    if (error instanceof HeadlessToolSuspension) {
+    if (error instanceof HeadlessToolSuspension && !run.waiting) {
       run.waiting = error;
-      run.suspend(error);
+      await run.suspend(error);
     }
     throw error;
+  } finally {
+    run.pending.delete(pending);
   }
 }
 
@@ -141,6 +149,8 @@ class NativeApprovalMiddleware extends Middleware {
         input,
         messages: input.messages,
         state: input.state,
+        pending: new Set(),
+        abort: () => subscriber.complete(),
         waitForCall(id) {
           if (captured.has(id)) return Promise.resolve();
           return new Promise<void>((resolve, reject) => {
@@ -155,7 +165,13 @@ class NativeApprovalMiddleware extends Middleware {
             awaiting.set(id, { resolve, reject, timer });
           });
         },
-        suspend(error) {
+        async suspend(error) {
+          // Stop the provider, then let every call it already started settle before ending the run.
+          // Unsubscribing alone cannot cancel a database transaction: another call may still be
+          // opening an approval. A subagent withdraws those requests after this terminal event.
+          subscription?.unsubscribe();
+          await Promise.allSettled(run.pending);
+          if (subscriber.closed) return;
           subscriber.next({
             type: EventType.CUSTOM,
             name: "openbot.headless.waiting",
@@ -191,7 +207,6 @@ class NativeApprovalMiddleware extends Middleware {
             },
           });
           subscriber.complete();
-          subscription?.unsubscribe();
         },
       };
       // Kept after the run ends: a call still arriving belongs to it, and finds it waiting or done.

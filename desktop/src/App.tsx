@@ -27,13 +27,14 @@ import {
   splitStopFailure,
 } from "./localEvalCli";
 import { OrganizationSignIn } from "./OrganizationSignIn";
-import { asProblem, Failure, type Problem } from "./Problem";
+import { asProblem, Failure, InlineFailure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
   type ModelChoice,
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
+import { RuntimeUpdates } from "./RuntimeUpdates";
 import { Sections } from "./Sections";
 import {
   type Progress,
@@ -233,25 +234,60 @@ function Setup() {
   // Running-screen actions that wait on the native side, said while they do.
   const [stopping, setStopping] = useState(false);
   const [showing, setShowing] = useState(false);
+  const managedAttempt = useRef(0);
+  /*
+   * This installation's apps, connected after a managed sign-in has already succeeded.
+   *
+   * A follow-on step that can only add a key. It used to run inside the sign-in, so a failure to
+   * connect apps failed the whole CopilotKit sign-in. Now sign-in and Start never wait on it, and a
+   * failure leaves apps unavailable with Connect apps to try again.
+   */
+  const [apps, setApps] = useState<
+    | { state: "connecting" }
+    | { state: "ready" }
+    | { state: "unavailable"; problem: Problem }
+    | null
+  >(null);
+
+  async function connectApps(attempt = managedAttempt.current) {
+    setApps({ state: "connecting" });
+    try {
+      await invoke("connect_intelligence_apps", { root: root.trim() });
+      if (managedAttempt.current === attempt) setApps({ state: "ready" });
+    } catch (error) {
+      if (managedAttempt.current === attempt)
+        setApps({ state: "unavailable", problem: asProblem(error) });
+    }
+  }
 
   async function signInToCopilotKit() {
     await cancelSelfHostedSignIn();
+    const attempt = ++managedAttempt.current;
     setIntelligenceSignInKind("managed");
     setSigningIn(true);
     setFailure(null);
     setSignInUrl(null);
+    setApps(null);
     try {
-      setSignInUrl(await invoke<string>("begin_intelligence_sign_in"));
-      setProjects(
-        await invoke<{ id: string; name: string }[]>(
-          "finish_intelligence_sign_in",
-        ),
+      const url = await invoke<string>("begin_intelligence_sign_in", {
+        root: root.trim(),
+      });
+      if (managedAttempt.current !== attempt) return;
+      setSignInUrl(url);
+      const available = await invoke<{ id: string; name: string }[]>(
+        "finish_intelligence_sign_in",
+        { root: root.trim() },
       );
+      if (managedAttempt.current !== attempt) return;
+      setProjects(available);
+      void connectApps(attempt);
     } catch (error) {
-      setFailure(asProblem(error));
+      if (managedAttempt.current === attempt) setFailure(asProblem(error));
     } finally {
-      setSigningIn(false);
-      setSignInUrl(null);
+      if (managedAttempt.current === attempt) {
+        setSigningIn(false);
+        setSignInUrl(null);
+      }
     }
   }
 
@@ -268,7 +304,7 @@ function Setup() {
         selfHosted
           ? "finish_self_hosted_intelligence_sign_in"
           : "intelligence_key_for",
-        selfHosted ? { root, project: id } : { project: id },
+        selfHosted ? { root, project: id } : { root: root.trim(), project: id },
       );
       if (selfHosted && selfHostedAttempt.current !== attempt) return;
       setApiKey(key);
@@ -298,7 +334,7 @@ function Setup() {
     try {
       const project = await invoke<{ id: string; name: string }>(
         "create_intelligence_project",
-        { name },
+        { root: root.trim(), name },
       );
       setProjects((current) => [...(current ?? []), project]);
       setProjectName("");
@@ -697,9 +733,13 @@ function Setup() {
         return next;
       });
     });
+    const updateStopped = listen<void>("runtime:update-stopped", () => {
+      if (active) setRunning(false);
+    });
     return () => {
       active = false;
       stop.then((unlisten) => unlisten());
+      updateStopped.then((unlisten) => unlisten());
     };
   }, [loadConfiguredRoot, recoverFromStart]);
 
@@ -838,6 +878,58 @@ function Setup() {
         .catch(() => undefined);
     }
   }
+
+  async function applyRuntimeUpdate() {
+    setBusy(true);
+    setFailure(null);
+    setSteps([]);
+    try {
+      const result = await invoke("apply_runtime_update", {
+        root: root.trim(),
+        apiUrl,
+        gatewayWsUrl: wsUrl,
+        apiKey,
+        model,
+        harness,
+        ...(organizationAuthorityUrl !== null
+          ? { organizationAuthUrl: organizationAuthorityUrl }
+          : {}),
+        backupAcknowledged: true,
+      });
+      setRunning(true);
+      setRecoveryFailure(null);
+      return result;
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyShellUpdate(version: string) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      return await invoke("apply_shell_update", {
+        root: root.trim(),
+        version,
+        restartAcknowledged: true,
+      });
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const runtimeUpdates = (
+    <RuntimeUpdates
+      key={root}
+      root={root}
+      onApply={applyRuntimeUpdate}
+      onShellApply={applyShellUpdate}
+    />
+  );
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
@@ -1141,6 +1233,12 @@ function Setup() {
                 value={root}
                 onChange={(event) => {
                   configuredRunRef.current += 1;
+                  managedAttempt.current += 1;
+                  setSigningIn(false);
+                  setSignInUrl(null);
+                  // A sign-in belongs to the folder it was for. Its projects and apps do too.
+                  setProjects(null);
+                  setApps(null);
                   setRoot(event.target.value);
                   setModel(null);
                   setPreparation(null);
@@ -1235,6 +1333,7 @@ function Setup() {
               : undefined
           }
         />
+        {runtimeUpdates}
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
@@ -1380,6 +1479,7 @@ function Setup() {
               )}
             </div>
           )}
+          {!localStarting && runtimeUpdates}
           {!localStarting && (
             <details>
               <summary>Installation options</summary>
@@ -1467,6 +1567,7 @@ function Setup() {
   return (
     <main>
       <div className="sheet connection-sheet">
+        {returningToInstallation && runtimeUpdates}
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
@@ -1676,6 +1777,27 @@ function Setup() {
                 )}
               </>
             )}
+            {intelligenceSignInKind === "managed" &&
+              !signInUrl &&
+              (apps?.state === "connecting" ? (
+                <p className="footnote" role="status">
+                  Connecting your apps…
+                </p>
+              ) : apps?.state === "unavailable" ? (
+                <>
+                  <InlineFailure problem={apps.problem} />
+                  <p className="footnote">
+                    You can start OpenBot without them.
+                  </p>
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() => void connectApps()}
+                  >
+                    Connect apps
+                  </button>
+                </>
+              ) : null)}
             {/*
             This used to be headed "Self-hosted Intelligence" over two fields pre-filled with the
             MANAGED service's addresses, which says the opposite of what it does: somebody opening

@@ -6,17 +6,19 @@
  * `Promise.race([call(signal), deadline])`, a call that throws SYNCHRONOUSLY threw out of the
  * helper before the race existed: no `.finally` was ever attached, so the timer stayed armed, and
  * ten seconds after the person had been answered it aborted nothing anybody was waiting on and
- * rejected a promise nobody held — an unhandled rejection in a deployment that had already replied.
+ * rejected a promise nobody held, an unhandled rejection in a deployment that had already replied.
  *
- * REACHABLE, NOT HYPOTHETICAL. The Composio connect route builds its return address INSIDE the
- * deadline's callback, and `brokerReturnUrl` throws synchronously on an `OPENBOT_APP_URL` with its
- * scheme left off — `app.example` rather than `https://app.example`. The route still answers its
- * refusal (the throw lands in the handler's `try`), which is why nothing on the response shows it;
- * what shows it is the timer, so the timer is what this asserts on.
+ * ONCE REACHED THROUGH A ROUTE, NOW ASSERTED ON THE HELPER. The Composio connect route used to
+ * build its return address inside the deadline's callback, and `brokerReturnUrl` throws
+ * synchronously on an `OPENBOT_APP_URL` with its scheme left off (`app.example` rather than
+ * `https://app.example`). Connect now checks that address before anything is asked of the broker,
+ * so the route no longer arms a deadline for it at all, which the second test pins. The helper's
+ * own promise still matters for the next call that throws while it is built, so the first test
+ * drives the helper with exactly that.
  *
  * HOW THE TIMER IS WATCHED. Only timers armed for the deadline's own bound are captured, and they
  * are captured WITHOUT being scheduled, so this file does not wait ten seconds to see one fire. Any
- * capture the route did not clear is then fired by hand, which is exactly what the event loop would
+ * capture that was not cleared is then fired by hand, which is exactly what the event loop would
  * have done, and the rejection it produces is caught by an `unhandledRejection` listener rather
  * than taking the test runner with it.
  */
@@ -28,8 +30,9 @@ import type { ComposioBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { SharedUseStore } from "../src/plugins/shared-use-store";
 import type { PluginStore } from "../src/plugins/store";
+import { withVendorDeadline } from "../src/plugins/vendor-deadline";
 
-/** `VENDOR_CALL_TIMEOUT_MS` in `routes.ts`. Not exported, and a timer of any other length is not this one. */
+/** `VENDOR_CALL_TIMEOUT_MS` in `vendor-deadline.ts`. Not exported, and a timer of any other length is not this one. */
 const VENDOR_CALL_TIMEOUT_MS = 10_000;
 const SERVER_ID = "brokered-gmail";
 
@@ -159,7 +162,33 @@ function deployment() {
   };
 }
 
-test("a return address that throws while the call is built leaves no deadline armed", async () => {
+test("a call that throws while it is built still has its deadline cleared", async () => {
+  const thrown = new Error("the call could not be built");
+  const answered = await withVendorDeadline(() => {
+    throw thrown;
+  }).then(
+    () => null,
+    (error: unknown) => error,
+  );
+
+  // The caller's own rejection, not one that escaped before the race existed.
+  expect(answered).toBe(thrown);
+
+  // The deadline WAS armed, otherwise the next assertion is about nothing.
+  expect(captured.length).toBe(1);
+  const leftArmed = captured.filter((entry) => !entry.cleared).length;
+
+  // Fire whatever was not cleared, as the event loop would have ten seconds later.
+  for (const entry of captured) if (!entry.cleared) entry.fire();
+  await new Promise((resolve) => realSetTimeout(resolve, 0));
+
+  // It was cleared, so nothing is left to fire after the caller has been answered...
+  expect(leftArmed).toBe(0);
+  // ...and nothing rejects later with nobody holding the promise.
+  expect(unhandled).toEqual([]);
+});
+
+test("a return address that is not an address is refused before any deadline is armed", async () => {
   const it = deployment();
   const response = await it.connect();
 
@@ -168,16 +197,7 @@ test("a return address that throws while the call is built leaves no deadline ar
   expect(response.status).not.toBe(500);
   expect(it.authorized).toEqual([]);
 
-  // The deadline WAS armed — otherwise the next assertion is about nothing.
-  expect(captured.length).toBe(1);
-  const leftArmed = captured.filter((entry) => !entry.cleared).length;
-
-  // Fire whatever was not cleared, as the event loop would have ten seconds later.
-  for (const entry of captured) if (!entry.cleared) entry.fire();
-  await new Promise((resolve) => realSetTimeout(resolve, 0));
-
-  // It was cleared, so nothing is left to fire after the person has been answered...
-  expect(leftArmed).toBe(0);
-  // ...and nothing rejects later with nobody holding the promise.
+  // Checked before the broker is called, so there was no deadline to arm or to leave armed.
+  expect(captured).toEqual([]);
   expect(unhandled).toEqual([]);
 });

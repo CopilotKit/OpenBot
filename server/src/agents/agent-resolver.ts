@@ -10,6 +10,7 @@ import {
   type LoadToolsForBot,
   type MarkAttachmentsSent,
   onOpenBotRunner,
+  type RecordToolLimitRefusal,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
@@ -19,11 +20,17 @@ import type { AcquireLearnedSkills } from "../learning/runtime";
 import type { LoadPersonalMemory } from "../memory/tools";
 import { NameContextMiddleware } from "../people/name-context";
 import { isProactiveInitiator } from "../proactive/initiator";
+import type { ProductTelemetry } from "../telemetry/product";
 import type { AgentActor } from "./profile-types";
 
 export type AgentResolutionContext = {
   initiator?: AuditInitiator;
   depth?: number;
+  /**
+   * A subagent's run (agents/subagent.ts): the same Bot with no coordination at all, so it can
+   * neither start a subagent of its own nor reach past itself to another Bot or a person.
+   */
+  subagent?: boolean;
 };
 
 export class CoworkerUnavailableError extends Error {}
@@ -40,6 +47,7 @@ export type ActorAgentResolver = {
 };
 
 export type ActorAgentResolverDependencies = {
+  productTelemetry?: Pick<ProductTelemetry, "middleware">;
   loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
@@ -74,6 +82,11 @@ export type ActorAgentResolverDependencies = {
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
   acquireLearnedSkills?: AcquireLearnedSkills;
   loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory;
+  /** Writes the row for a run refused for sending more tools than its model accepts. */
+  recordToolLimitRefusalForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => RecordToolLimitRefusal;
 };
 
 /**
@@ -129,7 +142,9 @@ export function createActorAgentResolver(
       deps.loadVendors,
       checkIn ? undefined : deps.selectionForActor?.(actor.id),
       deps.agentFetch,
-      deps.handoffForActor?.(actor.id, context?.initiator, context?.depth),
+      context?.subagent
+        ? undefined
+        : deps.handoffForActor?.(actor.id, context?.initiator, context?.depth),
       onlyAgentId,
       deps.loadInstructionsForActor?.(actor.id),
       context?.initiator,
@@ -137,6 +152,7 @@ export function createActorAgentResolver(
       deps.markAttachmentsSentForActor?.(actor.id),
       acquireForActor,
       deps.loadPersonalMemoryForActor?.(actor.id),
+      deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {
@@ -147,6 +163,10 @@ export function createActorAgentResolver(
           );
         }
       }
+      if (deps.productTelemetry)
+        for (const agent of Object.values(agents)) {
+          agent.use(deps.productTelemetry.middleware(actor.id));
+        }
       return agents;
     });
   };

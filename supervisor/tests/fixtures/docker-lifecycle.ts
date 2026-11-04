@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import type Docker from "dockerode";
+import { environmentFor } from "../../src/environment";
 import { legacyNamesFor, NAMESPACE, namesFor } from "../../src/names";
 
 // Launched by docker.integration.test.ts in a fresh process: names.ts reads its namespace once.
@@ -266,6 +267,31 @@ async function inVolumes(binds: string[], script: string): Promise<string> {
   }
 }
 
+/** Run inside the actual supervisor-created computer, keeping both output and its exit status. */
+async function inComputer(script: string): Promise<string> {
+  const execution = await withDocker()
+    .docker.getContainer(names.container)
+    .exec({
+      Cmd: ["sh", "-c", script],
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+    });
+  const stream = await execution.start({ Detach: false, Tty: true });
+  let output = "";
+  await new Promise<void>((resolve, reject) => {
+    stream.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    stream.on("end", resolve);
+    stream.on("error", reject);
+  });
+  const result = await execution.inspect();
+  if (result.ExitCode !== 0)
+    throw new Error(`Computer command exited ${result.ExitCode}: ${output}`);
+  return output.trim();
+}
+
 describe("a name held by somebody else", () => {
   test("is refused rather than adopted, and never started", async () => {
     // The container this supervisor did not make. Ownership is checked everywhere else so that a
@@ -411,6 +437,65 @@ describe("a computer built from an older image", () => {
     expect(after.State.Health?.Status).toBe("healthy");
   }, 180_000);
 
+  /*
+   * The upgrade that takes the deployment's token off every computer.
+   *
+   * Every computer used to be handed the deployment's `COMPUTER_TOKEN` itself, which a Bot could read off its own
+   * computer's process and use on every other computer it could reach. Now each is given its own (environment.ts), so a
+   * computer from before holds a token this supervisor no longer hands out. It is replaced the next time it is asked
+   * for, with the volumes holding the person's sign-ins and files kept, as any other upgrade replaces one.
+   */
+  test("made before computers had their own token is replaced onto its own, keeping its files and sign-ins", async () => {
+    const deployment = `deployment-${crypto.randomUUID()}`;
+    // As the supervisor before this made it: the deployment's token, unchanged.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [`COMPUTER_TOKEN=${deployment}`],
+    });
+    const before = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(before.Config.Env).toContain(`COMPUTER_TOKEN=${deployment}`);
+    await inComputer(
+      "echo saved-login > /profiles/keep; echo saved-work > /workspace/keep",
+    );
+
+    // Asked for again by today's supervisor, whose environment for it is `environmentFor`'s.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: environmentFor(names, { COMPUTER_TOKEN: deployment }),
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    expect(after.Id).not.toBe(before.Id);
+    expect(after.State.Health?.Status).toBe("healthy");
+    const tokens = (after.Config.Env ?? []).filter((line) =>
+      line.startsWith("COMPUTER_TOKEN="),
+    );
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).not.toContain(deployment);
+    expect(tokens).toEqual(
+      environmentFor(names, { COMPUTER_TOKEN: deployment }).filter((line) =>
+        line.startsWith("COMPUTER_TOKEN="),
+      ),
+    );
+    expect(await inComputer("cat /profiles/keep /workspace/keep")).toBe(
+      "saved-login\r\nsaved-work",
+    );
+
+    // And once it holds its own, it is kept.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: environmentFor(names, { COMPUTER_TOKEN: deployment }),
+    });
+    const kept = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(kept.Id).toBe(after.Id);
+  }, 180_000);
+
   test("is left alone when it holds the token asked for", async () => {
     /*
      * The half that keeps this from replacing a working browser on every request, which is the same
@@ -465,6 +550,103 @@ describe("a computer built from an older image", () => {
     expect(second).not.toBeNull();
     expect(after.Id).toBe(before.Id);
   }, 180_000);
+});
+
+describe("package installation on a computer", () => {
+  test("updates APT and installs a package without privileged container mode", async () => {
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    // A local repository exercises APT's _apt user and dpkg's ownership changes without relying
+    // on an external package mirror. The executable really comes from an installed .deb.
+    const output = await inComputer(String.raw`
+set -eu
+repo=/tmp/openbot-packages
+mkdir -p "$repo/build/DEBIAN" "$repo/build/usr/local/bin"
+cat > "$repo/build/DEBIAN/control" <<'CONTROL'
+Package: openbot-test-tool
+Version: 1.0
+Architecture: all
+Maintainer: OpenBot Tests <test@example.invalid>
+Description: Local package installation regression fixture
+CONTROL
+cat > "$repo/build/usr/local/bin/openbot-test-tool" <<'TOOL'
+#!/bin/sh
+echo installed-by-apt
+TOOL
+chmod 755 "$repo/build/usr/local/bin/openbot-test-tool"
+chown 65534:65534 "$repo/build/usr/local/bin/openbot-test-tool"
+dpkg-deb --build "$repo/build" "$repo/tool.deb" >/dev/null
+cp "$repo/build/DEBIAN/control" "$repo/Packages"
+printf 'Filename: ./tool.deb\nSize: %s\nSHA256: %s\n' "$(stat -c %s "$repo/tool.deb")" "$(sha256sum "$repo/tool.deb" | cut -d ' ' -f 1)" >> "$repo/Packages"
+printf 'deb [trusted=yes] file:%s ./\n' "$repo" > "$repo/sources.list"
+apt-get -o Dir::Etc::sourcelist="$repo/sources.list" -o Dir::Etc::sourceparts=- update
+DEBIAN_FRONTEND=noninteractive apt-get -o Dir::Etc::sourcelist="$repo/sources.list" -o Dir::Etc::sourceparts=- install -y openbot-test-tool
+[ "$(stat -c %u:%g /usr/local/bin/openbot-test-tool)" = 65534:65534 ]
+# Root must still be able to work with files a package installed for another user.
+chmod 700 /usr/local/bin/openbot-test-tool
+/usr/local/bin/openbot-test-tool
+`);
+    expect(output).toContain("installed-by-apt");
+    const info = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(info.HostConfig.SecurityOpt).toContain("no-new-privileges:true");
+    expect(info.HostConfig.CapDrop).toEqual(["ALL"]);
+    expect(
+      info.HostConfig.CapAdd?.map((capability) =>
+        capability.replace(/^CAP_/, ""),
+      ).toSorted(),
+    ).toEqual(["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]);
+    expect(info.HostConfig.Privileged).toBe(false);
+  }, 90_000);
+
+  test("replaces a same-image computer missing package permissions and keeps its files", async () => {
+    for (const volume of [names.profileVolume, names.workspaceVolume]) {
+      await withDocker().docker.createVolume({ Name: volume, Labels: OURS });
+    }
+    await inVolumes(
+      [
+        `${names.profileVolume}:/profiles`,
+        `${names.workspaceVolume}:/workspace`,
+      ],
+      "echo saved-login > /profiles/keep; echo saved-work > /workspace/keep",
+    );
+    const before = await withDocker().docker.createContainer({
+      name: names.container,
+      Image: IMAGE,
+      Labels: OURS,
+      HostConfig: {
+        Binds: [
+          `${names.profileVolume}:/profiles`,
+          `${names.workspaceVolume}:/workspace`,
+        ],
+        SecurityOpt: ["no-new-privileges:true"],
+        CapDrop: ["ALL"],
+      },
+    });
+    await before.start();
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(after.Id).not.toBe(before.id);
+    expect(await inComputer("cat /profiles/keep /workspace/keep")).toBe(
+      "saved-login\r\nsaved-work",
+    );
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    const reused = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(reused.Id).toBe(after.Id);
+  }, 90_000);
 });
 
 describe("one computer per person", () => {

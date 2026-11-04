@@ -8,7 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Seventeen things change for an existing deployment:
+- Code and markdown in a Bot's interface are drawn the way a reply draws them: highlighted in the light and dark themes, with the same copy and download buttons, tables and Doc links. They were plain monospace before, and nearly unreadable in dark mode.
+- The Computer panel's Activity lists every command the Bot runs and every file it reads, saves or lists, with what it printed, whether the step ran at once, after you allowed it, or before the page was opened. It had stayed empty for anything that went through approval. A step that was not done shows why in your words ("You declined it."), not the sentence the Bot is told, and the line in the conversation says the same. A command you decline on the Bot's own approval card is listed too. A step you did yourself shows as done by you. A step shows the time it ran only when the page saw it run, never the time the page was opened. Resetting a computer from Admin clears the Activity of every Bot that ran on it, and a reload or another tab no longer brings it back.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, the app's port on this machine) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, and the app's port on this machine and on each of those hosts) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+
+- Each person's computer, and each Isolated Bot's, now holds a token of its own, derived from `COMPUTER_TOKEN`, and the server calls it with that token rather than the deployment's. A Bot that reads its own computer's token can open that computer and no other. Existing per-person and per-Bot computers are recreated the first time they are used after upgrading, keeping their files and sign-ins. Helm `sandbox` writes each Sandbox its own token. The one shared computer (no supervisor) is unchanged.
+
+- A Bot's endpoint no longer receives the `Authorization` header, or any `x-*` header, from the request of the person running it. A Bot's own key and the deployment's agent token are still sent. A remote Bot that read a header the person's client sent has to be given it as one of the Bot's own headers instead.
+
+- OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
+
+**Before upgrading.** Twenty things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -84,6 +95,60 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
   the previous release fails to save a newly formed Bot memory until it is replaced; nothing else is
   affected.
+- Migration `0074_single_user_identity` adds one table, `brokered_identities`, and lets
+  `pending_authorizations.action` be null (an Arcade Connect asks for the whole app, not one
+  action). Every single-user deployment with a Composio or Arcade key gets its own user id there at
+  its next start (below), so it stops seeing and using connections another single-user OpenBot made
+  on the same key. **A single-user deployment connects each of its apps once more after upgrading.**
+  Its connections recorded under `dev-local-user` are removed from OpenBot at that start, because
+  neither broker can move a connection to another user id. Nothing is ended at Composio or Arcade,
+  since other OpenBots on the same key may be using those accounts. Deployments that sign people in
+  keep their ids.
+- On Arcade, a Bot's call now needs the person's connection recorded in OpenBot, as on Composio, on
+  every deployment including those that sign people in. A consent finished through OpenBot was
+  always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
+  the person opens the app under Connections, or presses Connect where Arcade already holds
+  everything the app asks for.
+
+### A Bot can hold hundreds of tools
+
+A Bot that holds more than 50 tools is no longer sent all of them on every step. Its own tools stay
+in front of the model, and an app's tools wait behind one search tool: the model searches in a few
+words and calls what it found from its next step, by the tool's real name. Every call still goes
+through the grant, the approval rules and the audit trail. A Bot holding 279 tools after approving
+Shopify, which stopped answering, now answers. A question that needs an app's tool makes one more
+model call than before. Bots at or under 50 tools are sent exactly what they were.
+
+A run that would still send more than 128 tools at once, counting the room it keeps for a search's
+answer, is refused before the model is called. Chat Completions refuses more than 128 itself, and
+search never sends more. The person is told why, and the audit log records it under Blocked as "Too
+many tools for its model".
+
+### A Bot's shell in the one-container image installs packages and nothing else as root
+
+In the `openbot` image (one container, and Helm's computer pods), a Bot installs a package with
+`sudo openbot-apt update` and `sudo openbot-apt install <package>` (`-y` is accepted and changes
+nothing), which is what its tool description now says. `sudo apt-get`, `sudo dpkg` and the other package commands are refused: with
+any arguments they ran any command as root, and root there reads the deployment's secrets. The
+helper takes package names only. `/app` is no longer owned by the Bot's user, so a Bot cannot change
+the API's code or the page it serves. Computers that run as root keep using `apt-get` directly.
+
+### Bots can install packages on their computers
+
+Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
+with the old permissions are replaced when next used, keeping their saved files and browser profiles.
+
+### Every Bot gives parts of its work to subagents
+
+A Bot, built in or an AG-UI agent somebody brings, can now hand a piece of its work to a subagent: a
+fresh run of the same Bot, as the same person, with the same tools, approval rules and standing
+instructions, that sees none of the conversation and hands back only its answer. Bots are told to
+work this way by default, giving anything that needs many tool calls or a lot of reading to
+subagents (up to five at once for one answer) and keeping the decisions and the answer themselves,
+so a question that needs several lookups makes more model calls than before. A subagent never waits
+on the person: an action that needs approval is handed back, and the Bot asks in the conversation.
+Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
+OpenBot runs the tool itself, so a remote agent needs no change.
 
 ### Bots tell you when something needs you
 
@@ -216,6 +281,42 @@ name. Docker's network DNS answers only for names of up to 63 characters, and an
 longer `COMPUTER_NAMESPACE` made every isolated Bot's computer start healthy while the server, unable
 to resolve its name, reported it as not running on every action. The supervisor now gives the server the container's short
 id, which Docker also answers for, whenever the name is too long. Names that fit are used as before.
+
+### Each single-user OpenBot has its own Composio and Arcade identity
+
+Every single-user OpenBot signs its person in as `dev-local-user`, and that was also the user id
+Composio and Arcade filed their connections under. So two single-user OpenBots on one
+`COMPOSIO_API_KEY` were one Composio user: each listed and used the other's Gmail, a disconnect in
+one ended the account in both, and a call that named no account could run in whichever Gmail was
+connected last. On one `ARCADE_API_KEY` one OpenBot's consent to Google was the grant the other's
+Bots ran on. Each single-user deployment now has its own user id at its broker, `dev-local-user:`
+and a random part, given at its first start with that broker and kept in its database, so a
+restart or a second replica uses the same one. Threads and memory stay with `dev-local-user`. A
+deployment that already had connections under `dev-local-user` gets its own id too, and connects
+each app once more: those connections cannot be moved to the new id, and the broker cannot say
+whether one was this deployment's or another's on the same key. See
+[configuration.md](docs/configuration.md#authentication).
+
+### Arcade apps connect with one press, and their connections are recorded like Composio's
+
+An Arcade app now has Connect, under Connections and on a Bot's app card, which asks Arcade for
+everything the app's actions need in one consent. The action list still approves one action at a
+time. Every Arcade connection is recorded in OpenBot when it is made or confirmed and removed when
+it is disconnected, and a Bot's call needs it, exactly as on Composio. A call Arcade refuses shows
+the Reconnect card, instead of a plain error. The connection is cleared only when Arcade holds
+nothing for the app, as a lost Composio account is, so actions already approved go on working. The
+card's Reconnect goes to the app's page under Connections, as on Composio, and the Reconnect there
+adds what was missing in one press. See
+[Arcade](docs/plugins/arcade.md#connect-asks-for-the-whole-app-and-each-action-can-still-be-approved-alone).
+
+### Company systems behind Microsoft Entra, reached as the signed-in person
+
+An admin can mark a server added by URL with an Entra scope, and each call then carries a token
+Entra issues for the person asking through the on-behalf-of exchange, from their app's Entra token
+or, for routines, their stored Microsoft sign-in. Apps listed in `MICROSOFT_OAUTH_ALLOWED_CLIENTS`
+can also call OpenBot's API with a person's Entra token; a token issued to any other app is refused.
+Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
+without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
 ### An unreconciled app authorization always reaches the audit trail
 
@@ -422,6 +523,13 @@ mark for what happened, with blocked rows tinted red and actions that did not ha
 The newest come first, and a press on When turns the order round. A search box and Outcome, Bot and
 Started by buttons narrow the events already loaded, and the count says how many of them match. A
 row about a Bot (a message routed to it, say) now names it under Bot.
+
+### The desktop app starts OpenBot when it is opened from Finder
+
+Opened from Finder or the Dock, the desktop app stopped at Start with "OpenBot did not start", and
+the app's log said `bun: command not found`. The app part of OpenBot runs as a package script that
+starts `bun` again by name, and an app opened that way has no `bun` on its `PATH`. The desktop now
+hands every process it starts the directory of the Bun it installed.
 
 ### The desktop setup page does not freeze when it loads during an install
 

@@ -18,6 +18,10 @@ tauri-build = { version = "2", features = [] }
 # Pins a bundled Intelligence CLI to the bytes the app was built with. See build.rs.
 sha2 = "0.10"
 
+[features]
+default = []
+shell-updater = ["dep:tauri-plugin-updater"]
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
@@ -36,6 +40,8 @@ tauri-plugin-single-instance = "2.0.0-rc.5"
 portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
+# Native shell signing is an opt-in distributor feature, independent of runtime updates.
+tauri-plugin-updater = { version = "=2.10.1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

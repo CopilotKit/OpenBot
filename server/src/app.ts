@@ -134,9 +134,14 @@ import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
 } from "./provider-oauth";
-import { createRequireRecorder } from "./recorder/guard";
+import {
+  createRequireRecorder,
+  RECORDER_BEARER_PREFIX,
+} from "./recorder/guard";
 import { createRecorderRoutes } from "./recorder/routes";
+import { createReleaseStatusRoutes } from "./release-status";
 import type { RecorderExtensionDeps } from "./recorder/wiring";
+import { createOriginGuard, createSingleUserGate } from "./request-trust";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
 import type { ResponsibilityEngine } from "./responsibilities/engine";
 import { createGithubResponsibilityRoutes } from "./responsibilities/github";
@@ -148,6 +153,8 @@ import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
+import type { ProductTelemetry } from "./telemetry/product";
+import { createProductTelemetryRoutes } from "./telemetry/product-routes";
 import type { SelfHostBanner } from "./self-host-banner";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
@@ -415,6 +422,7 @@ export function createApp(
   voiceSessions?: VoiceSessionServices,
   learning?: LearningAdminDependencies,
   coworker?: {
+    productTelemetry?: ProductTelemetry;
     approvals?: ApprovalService;
     /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
     recorder?: RecorderExtensionDeps;
@@ -483,10 +491,14 @@ export function createApp(
   profileStore?: ProfileStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
+  // First, in every auth mode: a page from another website changes nothing here and opens no socket.
+  // See request-trust.ts for what passes and why.
+  app.use("/api/*", createOriginGuard(config));
   mountDesktopConnectionFailure(app, desktopHostToken);
   mountProviderOAuthProxy(app, modelProviderProxy);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
+  app.route("/", createReleaseStatusRoutes());
   // The public key Bots' browsers sign their requests with, where Cloudflare and any other verifier
   // look for it. Public by design, and absent when Web Bot Auth is off. See web-bot-auth.ts.
   const webBotAuth = config.webBotAuth;
@@ -654,15 +666,21 @@ export function createApp(
   }> = async (context) =>
     context.json({ error: "No identity provider is configured." }, 503);
   // One administrator, when nothing is configured to sign anybody in. Checked first, and only ever
-  // true when there is no provider, so a configured deployment cannot fall back to it.
+  // true when there is no provider, so a configured deployment cannot fall back to it. Admitted only
+  // from where that one person can be: see `singleUserRefusal`.
   const requireUser = config.singleUser
-    ? createDevRequireUser()
+    ? createDevRequireUser(config.singleUserAccess)
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
   // Enterprise controls: capability switches and the model allowlist in front of the routes they
   // govern, the admin screen's API, and the SCIM verbs the GET/POST auth handler above does not take.
   app.use("/api/*", createEnterpriseGate(requireUser));
+  if (coworker?.productTelemetry)
+    app.route(
+      "/api/telemetry",
+      createProductTelemetryRoutes(requireUser, coworker.productTelemetry),
+    );
   app.route("/api/admin/enterprise", createEnterpriseAdminRoutes(requireUser));
   app.route("/api/admin/proactive", createProactiveAdminRoutes(requireUser));
   app.on(["PUT", "PATCH", "DELETE"], "/api/auth/scim/*", (context) =>
@@ -1395,6 +1413,23 @@ export function createApp(
   // The CopilotKit runtime, behind the same session guard as every other API route. Mounted last so
   // its own routing under /api/copilotkit cannot shadow an OpenBot route declared above.
   if (copilotHandler) {
+    /*
+     * The runtime admits the single-user administrator by itself (`resolveRequestActor`), from a
+     * request its hooks may already have copied, so the connection it came on is checked here, in
+     * front of it. A Recorder bearer is not the administrator: it resolves to its own connection and
+     * is refused everywhere but the capture pass.
+     */
+    if (config.singleUser)
+      app.use(
+        "/api/copilotkit/*",
+        createSingleUserGate(config.singleUserAccess, (request) =>
+          Boolean(
+            request.headers
+              .get("authorization")
+              ?.startsWith(RECORDER_BEARER_PREFIX),
+          ),
+        ),
+      );
     // Mounted at the ROOT with the handler carrying its own basePath. Mounting it at
     // "/api/copilotkit" as well double-prefixes it: Hono strips the prefix before the handler sees
     // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The browser
@@ -2022,8 +2057,9 @@ export function createApp(
   /*
    * The built app, served by the API that serves it.
    *
-   * WHY THE SAME PROCESS. There is no CORS anywhere in this server, deliberately, so the app has to
-   * reach `/api` on its own origin. Two containers behind one ingress does that too, and costs a
+   * WHY THE SAME PROCESS. The app's API calls get no CORS from this server, deliberately, so the app
+   * has to reach `/api` on its own origin. (The runtime answers CORS for this deployment's own origins
+   * and the Recorder only; see `cors` in copilot.ts.) Two containers behind one ingress does that too, and costs a
    * path rule on every deployment plus a way for the two to disagree about which host they are on.
    * One process cannot disagree with itself.
    *

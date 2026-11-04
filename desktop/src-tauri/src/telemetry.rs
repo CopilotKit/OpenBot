@@ -717,6 +717,8 @@ pub enum Harness {
 pub enum Provider {
     Openai,
     Anthropic,
+    Google,
+    Xai,
     Compatible,
     None,
 }
@@ -726,6 +728,7 @@ pub enum Provider {
 pub enum CredentialPath {
     Subscription,
     ApiKey,
+    Oauth,
     None,
 }
 
@@ -804,7 +807,7 @@ pub fn schema_json() -> serde_json::Value {
         "events": {
             "step_viewed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] },
             "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
-            "model_chosen": { "provider": ["openai", "anthropic", "compatible", "none"], "credential_path": ["subscription", "api_key", "none"], "custom_base_url": "bool" },
+            "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
@@ -994,6 +997,60 @@ mod tests {
             "error_class": "raw user-facing error"
         }))
         .is_err());
+    }
+
+    #[test]
+    fn model_provider_categories_round_trip_and_match_the_closed_schema() {
+        let schema = schema_json();
+        assert_eq!(
+            schema["events"]["model_chosen"]["provider"],
+            serde_json::json!(["openai", "anthropic", "google", "xai", "compatible", "none"])
+        );
+        assert_eq!(
+            schema["events"]["model_chosen"]["credential_path"],
+            serde_json::json!(["subscription", "api_key", "oauth", "none"])
+        );
+        for (provider, credential_path) in [
+            ("openai", "subscription"),
+            ("openai", "api_key"),
+            ("anthropic", "subscription"),
+            ("anthropic", "api_key"),
+            ("google", "oauth"),
+            ("xai", "oauth"),
+            ("compatible", "api_key"),
+            ("compatible", "none"),
+            ("none", "none"),
+        ] {
+            let value = serde_json::json!({
+                "kind": "model_chosen",
+                "provider": provider,
+                "credential_path": credential_path,
+                "custom_base_url": provider == "compatible"
+            });
+            let event = serde_json::from_value::<EventData>(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(event).unwrap(), value);
+            assert_string_values_are_listed(&value, &schema["events"]["model_chosen"]);
+        }
+    }
+
+    #[test]
+    fn model_provider_events_reject_unknown_categories_and_private_properties() {
+        let event = serde_json::json!({
+            "kind": "model_chosen",
+            "provider": "google",
+            "credential_path": "oauth",
+            "custom_base_url": false
+        });
+        for property in ["apiKey", "token", "model", "baseUrl", "containerBaseUrl"] {
+            let mut private_event = event.clone();
+            private_event[property] = serde_json::json!("synthetic-private-value");
+            assert!(serde_json::from_value::<EventData>(private_event).is_err());
+        }
+        for property in ["provider", "credential_path"] {
+            let mut unknown_event = event.clone();
+            unknown_event[property] = serde_json::json!("private-category");
+            assert!(serde_json::from_value::<EventData>(unknown_event).is_err());
+        }
     }
 
     #[test]

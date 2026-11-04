@@ -6254,7 +6254,11 @@ test("a catalogue entry declaring the broker's transport is refused, not dialled
 
   expect(() =>
     accessFor(
-      { provenance: "first-party", url: "https://mcp.example.com/mcp" },
+      {
+        provenance: "first-party",
+        url: "https://mcp.example.com/mcp",
+        authScheme: null,
+      },
       brokered,
     ),
   ).toThrow(CatalogueTransportUnroutableError);
@@ -6263,7 +6267,11 @@ test("a catalogue entry declaring the broker's transport is refused, not dialled
   // per-person vendor does, so what is refused is the value and not the fixture.
   expect(
     accessFor(
-      { provenance: "first-party", url: "https://mcp.example.com/mcp" },
+      {
+        provenance: "first-party",
+        url: "https://mcp.example.com/mcp",
+        authScheme: null,
+      },
       { ...brokered, transport: undefined },
     ),
   ).toEqual({

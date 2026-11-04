@@ -13,6 +13,8 @@
  * of the spacing that makes it readable. The path is relative to this file.
  */
 @source "../node_modules/streamdown/dist/*.js";
+/* Its code plugin, which Streamdown's docs say to scan the same way. */
+@source "../node_modules/@streamdown/code/dist/*.js";
 
 /*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
@@ -179,6 +181,30 @@
   from {
     opacity: 0;
   }
+}
+
+/*
+ * A component a Bot draws keeps its reading width (max-w-2xl) wherever it is previewed, but in a
+ * conversation it fills the answer column, which is wider than the composer, so a chart or table
+ * lines up with the code and tool cards around it. Unlayered, so it outranks the utility.
+ */
+[data-transcript-column] [data-slot="gallery-frame"] {
+  max-width: none;
+}
+
+/*
+ * Markdown and code in an interface a Bot generates are drawn by a reply's renderer (see
+ * lib/copilot/a2ui-markdown.tsx), inside a surface that also carries CopilotKit's own stylesheet.
+ * That stylesheet is in no layer, so its heading sizes, and the `color: inherit` it gives every
+ * button inside a Card, outrank Tailwind's utilities however specific those are: headings came out
+ * smaller than in a reply and the copy buttons lost their muted colour. `revert-layer` hands exactly
+ * those properties back to the layered rules, which are the ones a reply is drawn with.
+ */
+.a2ui-surface
+  .openbot-markdown
+  :is(h1, h2, h3, h4, h5, h6, button, input, select, textarea) {
+  font: revert-layer;
+  color: revert-layer;
 }
 
 /*

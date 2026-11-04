@@ -152,6 +152,10 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
     "That app's account changed while the authorization was open, so nothing was recorded. Access given to the old account was removed. Start again from the app's page.",
   ],
   [
+    "name-changed",
+    "That authorization was started before an update changed how OpenBot signs you in to the app, so nothing was recorded. Press Connect on the app's page to start again.",
+  ],
+  [
     "not-permitted",
     "You can't connect that app's account anymore, so nothing was recorded. Your access or the app's setup changed while the authorization was open. Ask an admin if you expected to finish it.",
   ],

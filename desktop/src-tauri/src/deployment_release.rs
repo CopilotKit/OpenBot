@@ -6,8 +6,6 @@ use serde::Deserialize;
 
 use crate::deployment;
 
-const LATEST_RELEASE: &str = "https://api.github.com/repos/CopilotKit/OpenBot/releases/latest";
-
 /// Only new deployments consult GitHub. The fetcher records the exact tag after the source and
 /// image manifest have both downloaded successfully; restarts and repairs retain that pin.
 ///
@@ -17,7 +15,8 @@ const LATEST_RELEASE: &str = "https://api.github.com/repos/CopilotKit/OpenBot/re
 /// Uses blocking HTTP, so callers in an async runtime must use a blocking task.
 pub fn resolve_version(root: &Path) -> Result<String, String> {
     resolve_version_with(root, || {
-        let body = deployment::get(LATEST_RELEASE)
+        let policy = crate::updates::distribution(root)?;
+        let body = deployment::get(&crate::updates::latest_url(&policy))
             .map_err(|error| format!("could not find the latest OpenBot release: {error}"))?;
         release_tag(&body)
     })
