@@ -23,8 +23,10 @@ describe("supervisor environment hardening", () => {
   });
 
   test("trims a padded token", () => {
+    // The computer's own token, derived from the trimmed one: `HMAC-SHA256("secret",
+    // "openbot computer token v1\nbot:bot-1")`, worked out with openssl rather than the code.
     expect(environmentFor(BOT, { COMPUTER_TOKEN: "  secret  " })).toContain(
-      "COMPUTER_TOKEN=secret",
+      "COMPUTER_TOKEN=e6cd32e1c8314337711d1a37faeedaea7410a0cd4c13ce7712af71c1d182d113",
     );
   });
 

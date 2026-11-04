@@ -79,13 +79,15 @@ export function startHttpServer(deps: {
   const toStreamUrl = (
     baseUrl: string,
     seat: { botId: string; personId?: string },
+    token: string | undefined,
   ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
     // computer to read and every call it serves is per Bot. So does the person, on the one computer
     // many people share, where the seat is the pair. The secret travels the same way and for the
     // same reason, this socket is the one a person can type into, so it is the last thing that should
-    // be reachable without it.
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
+    // be reachable without it. The secret of that computer, which on a computer of one person's own
+    // is its own token and never the deployment's (computer/computer-token.ts).
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
 
   const trusted = trustedOrigin(config);
 
@@ -186,7 +188,11 @@ export function startHttpServer(deps: {
               status: 503,
             });
           }
-          upstream = toStreamUrl(streamBase, computerGateway.addressOf(seat));
+          upstream = toStreamUrl(
+            streamBase,
+            computerGateway.addressOf(seat),
+            computerGateway.tokenFor(seat),
+          );
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
           // whole path exists to prevent.

@@ -19,6 +19,10 @@ RUN bun install --frozen-lockfile
 COPY --from=spire /opt/spire/bin/spire-server /usr/local/bin/spire-server
 
 COPY supervisor/src ./src
+# environment.ts imports ../../shared/computer-token, the one derivation of each computer's own token
+# that the server uses too, so it goes where that path resolves from /app/src. It imports only
+# node:crypto, so it needs no dependency tree of its own.
+COPY shared/computer-token.ts /shared/computer-token.ts
 
 EXPOSE 4300
 CMD ["bun", "src/index.ts"]
