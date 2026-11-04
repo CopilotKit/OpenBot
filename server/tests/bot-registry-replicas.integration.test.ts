@@ -38,11 +38,13 @@ function replica(): BotDirectory {
 const a = replica();
 const b = replica();
 
+// Its own budget: starting both replicas and waiting up to 8 s for their subscriptions does not fit bun's 5 s hook
+// default, which failed the whole file whenever the gateway took longer than that to join.
 beforeAll(async () => {
   await Promise.all([a.start(), b.start()]);
   // Both subscriptions joined before anything is written, so announcements have somewhere to go.
   await eventually(() => a.subscribed() && b.subscribed());
-});
+}, 30_000);
 
 afterAll(async () => {
   for (const directory of replicas) directory.stop();
