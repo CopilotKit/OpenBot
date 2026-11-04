@@ -389,6 +389,8 @@ if identifies_as_openbot "$SERVER_PORT" server; then
       ;;
   esac
 fi
+# Redirect the whole background group. Redirecting only Bun inside `(command &)` leaves its
+# waiting Bash wrapper holding the updater's captured stdout/stderr open after this script exits.
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
@@ -396,11 +398,11 @@ if ! identifies_as_openbot "$SERVER_PORT" server; then
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
   else
     (cd server && PORT="$SERVER_PORT" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
@@ -430,7 +432,7 @@ if [ "$worker_running" = false ]; then
     DATABASE_URL="$WORKER_DATABASE_URL" \
     SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
     WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-    bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
+    bun worker/src/index.ts) >"$LOGS/worker.log" 2>&1 &
   info "  worker: started (routine sweep loop)"
   sleep 1
   if running_here "bun worker/src/index.ts" "$ROOT"; then
@@ -470,7 +472,7 @@ JS
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app
 if ! identifies_as_openbot "$APP_PORT" app; then
-  (cd app && bun run dev --port "$APP_PORT" --strictPort >"$LOGS/app.log" 2>&1 &)
+  (cd app && bun run dev --port "$APP_PORT" --strictPort) >"$LOGS/app.log" 2>&1 &
 fi
 wait_for_openbot "$APP_PORT" app
 
