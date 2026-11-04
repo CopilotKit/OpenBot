@@ -1,4 +1,5 @@
 import { markFor } from "@/lib/marks";
+import { cn } from "@/lib/utils";
 
 /**
  * A framework's own mark, beside its name.
@@ -14,7 +15,16 @@ import { markFor } from "@/lib/marks";
 /** The column every row reserves, marked or not, so the names beside it line up. */
 export const MARK_TILE = "size-5 shrink-0";
 
-export function HarnessMark({ id, name }: { id: string | null; name: string }) {
+export function HarnessMark({
+  id,
+  name,
+  className,
+}: {
+  id: string | null;
+  name: string;
+  /** A smaller tile where the row is smaller, such as the model picker's. Merged over the default. */
+  className?: string;
+}) {
   const uri = markFor(id);
   /*
    * An empty box of the same size, not nothing. A row with no mark ("An agent you already run", or
@@ -22,7 +32,8 @@ export function HarnessMark({ id, name }: { id: string | null; name: string }) {
    * the rest — a ragged list rather than a row without artwork. Reserving the column draws no mark and invents none, which is
    * what the README forbids; it only keeps the names in line.
    */
-  if (!uri) return <span aria-hidden="true" className={MARK_TILE} />;
+  if (!uri)
+    return <span aria-hidden="true" className={cn(MARK_TILE, className)} />;
   return (
     /*
      * ON A WHITE TILE IN DARK MODE, BECAUSE SOME MARKS DISAPPEAR WITHOUT ONE. A mark drawn in
@@ -34,7 +45,11 @@ export function HarnessMark({ id, name }: { id: string | null; name: string }) {
     <img
       alt=""
       aria-hidden="true"
-      className={`${MARK_TILE} rounded-sm dark:bg-white dark:p-0.5`}
+      className={cn(
+        MARK_TILE,
+        "rounded-sm dark:bg-white dark:p-0.5",
+        className,
+      )}
       data-mark={name}
       src={uri}
     />
