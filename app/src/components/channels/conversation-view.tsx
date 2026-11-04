@@ -19,6 +19,7 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
+import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { newId } from "../../lib/new-id";
 
@@ -468,6 +469,14 @@ export function ConversationView({
           >
             {attached}
           </div>
+        ) : null}
+        {/*
+         * Notifications are offered once this person has started a task: a Bot is working for them,
+         * so what a notification is for is plain. Read off the transcript, so the conversation a
+         * first message from home opens offers it too.
+         */}
+        {messages.some((message) => message.role === "user") ? (
+          <NotifyPrompt />
         ) : null}
         <Composer
           agents={agents}
