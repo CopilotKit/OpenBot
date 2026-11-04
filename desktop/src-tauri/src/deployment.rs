@@ -294,7 +294,11 @@ pub type Download<'a> = &'a dyn Fn(&str) -> Result<Vec<u8>, String>;
 pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), String> {
     crate::updates::require_no_interruption(root)?;
     let policy = crate::updates::distribution(root)?;
-    if let Some(installed) = installed(root) {
+    // A release from before the server and worker were Compose services cannot run in this app,
+    // so `deployment_release` moves it to the latest release. That move is not a runtime update:
+    // it is the whole layout again, as for a new deployment.
+    let installed = installed(root).filter(|_| !predates_containers(root));
+    if let Some(installed) = installed {
         if installed.version != version {
             return Err(
                 "Use the explicit runtime update controls to change an installed release".into(),
@@ -819,6 +823,66 @@ mod tests {
         );
         // A different version still goes through the explicit update controls.
         assert!(fetch_with(&root, "v0.0.8", &get).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A release from before the server was a container is moved to the latest release by
+    /// `deployment_release`. The runtime update guard must not refuse that move, or such an
+    /// installation could never Install or Start again.
+    #[test]
+    fn a_release_whose_server_ran_on_the_host_is_laid_out_at_the_latest_version() {
+        let root = crate::test_support::temp_root("deployment-host-server-move");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v0.0.15").unwrap();
+        assert!(predates_containers(&root));
+
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
+            // The latest release's Compose file is a file, with the server and worker in it.
+            let (path, body) = if *entry == "docker-compose.yml" {
+                (
+                    format!("OpenBot-0.0.16/{entry}"),
+                    "services:\n  server: {}\n  worker: {}\n".to_string(),
+                )
+            } else {
+                (
+                    format!("OpenBot-0.0.16/{entry}/release.txt"),
+                    format!("release {entry}"),
+                )
+            };
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tarball
+                .append_data(&mut header, path, body.as_bytes())
+                .unwrap();
+        }
+        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
+        let images = serde_json::to_vec(&manifest(&published)).unwrap();
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            match url {
+                "https://github.com/CopilotKit/OpenBot/archive/refs/tags/v0.0.16.tar.gz" => {
+                    Ok(tarball.clone())
+                }
+                "https://github.com/CopilotKit/OpenBot/releases/download/v0.0.16/container-images.json" => {
+                    Ok(images.clone())
+                }
+                other => Err(format!("unexpected download {other}")),
+            }
+        };
+        fetch_with(&root, "v0.0.16", &get).expect("a host-server release moves to latest");
+        assert_eq!(installed(&root).unwrap().version, "v0.0.16");
+        assert!(!predates_containers(&root));
+        assert!(!needs_fetch(&root, "v0.0.16"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 
