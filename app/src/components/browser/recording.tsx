@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconCircleCheck,
   IconPlayerRecordFilled,
+  IconTrash,
 } from "@tabler/icons-react";
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
@@ -260,6 +261,7 @@ function heldIn(stopped: Stopped): string {
 
 /** What the page says once Stop ended a recording, naming it. The sidebar's Browser button says the same. */
 export function stoppedSentence(stopped: Stopped): string {
+  if (stopped.discarded) return `Discarded “${stopped.title}”.`;
   return stopped.empty
     ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
     : `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
@@ -272,6 +274,13 @@ export function StoppedIcon({
   stopped: Stopped;
   className?: string;
 }) {
+  if (stopped.discarded)
+    return (
+      <IconTrash
+        aria-hidden="true"
+        className={cn("text-muted-foreground", className)}
+      />
+    );
   return stopped.empty ? (
     <IconAlertTriangle
       aria-hidden="true"
@@ -297,9 +306,11 @@ export function StoppedRow({
   stopped: Stopped;
   ended?: string;
 }) {
-  const held = stopped.empty
-    ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
-    : `Saved to your Learning space: ${heldIn(stopped)}.`;
+  const held = stopped.discarded
+    ? "Discarded. You chose not to save it."
+    : stopped.empty
+      ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
+      : `Saved to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">

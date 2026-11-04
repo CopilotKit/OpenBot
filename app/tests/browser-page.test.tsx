@@ -15,6 +15,7 @@ import {
   browserNavigateRequestSchema,
   browserRecordingRequestSchema,
   browserTabsRequestSchema,
+  type LauncherState,
 } from "@openbot/shared/openbot-browser";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -465,6 +466,28 @@ test("on OpenBot Desktop Start recording opens the browser, then starts a record
   const saved = await view.findByRole("status");
   expect(saved.textContent).toBe(
     "Submit an expense reportSaved to your Learning space: 7 actions.",
+  );
+});
+
+test("on OpenBot Desktop a recording discarded from the Recorder's mark in the browser is said to be discarded, never saved", async () => {
+  state = {
+    ...nativeState(),
+    recorder: {
+      ...(nativeState().recorder as LauncherState),
+      lastStopped: {
+        recordingId: "rec-1",
+        title: "Submit an expense report",
+        stoppedAt: Date.now(),
+        actions: 7,
+        phrases: 0,
+        discarded: true,
+      },
+    },
+  };
+  const view = draw(<BrowserPage />);
+  const said = await view.findByRole("status");
+  expect(said.textContent).toBe(
+    "Submit an expense reportDiscarded. You chose not to save it.",
   );
 });
 
