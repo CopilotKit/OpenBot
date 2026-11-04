@@ -290,6 +290,33 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     readTools: FIRECRAWL_READ_TOOLS,
     docsUrl: "https://docs.firecrawl.dev/mcp-server",
   },
+  {
+    key: "keenable",
+    title: "Keenable",
+    vendor: "Keenable",
+    summary:
+      "Public-web search and page reading. Free rate-limited access without a key.",
+    host: "https://api.keenable.ai",
+    // Keenable's keyless endpoint for catalogue entries: the same server and tools as `/mcp`, with
+    // no OAuth discovery metadata, so a client never stops to offer a sign-in.
+    path: "/mcp-public",
+    auth: { kind: "none" },
+    writeTools: Object.freeze([]),
+    docsUrl: "https://docs.keenable.ai/mcp-server",
+  },
+  {
+    key: "keenable-authenticated",
+    title: "Keenable (API key)",
+    vendor: "Keenable",
+    summary:
+      "Public-web search and page reading using this deployment's Keenable API key.",
+    host: "https://api.keenable.ai",
+    path: "/mcp",
+    // Keenable reads its key from `X-API-Key`, not from `Authorization`.
+    auth: { kind: "deployment-bearer", header: "x-api-key" },
+    writeTools: Object.freeze([]),
+    docsUrl: "https://docs.keenable.ai/mcp-server",
+  },
 
   {
     key: "google-drive",
