@@ -149,6 +149,12 @@ function installedClient(): CopilotKitIntelligence {
   });
 }
 
+/**
+ * How long a stop's record takes before it reaches Intelligence. Long enough that a terminal event
+ * the runner did not hold behind the record would arrive first, every time rather than by chance.
+ */
+const RECORD_ROUND_TRIP_MS = 25;
+
 /** The client as the release that records stops has it: `ɵrecordRunStop` asks for a join token first. */
 function recordingStops(client: CopilotKitIntelligence) {
   const recorded: Record<string, unknown>[] = [];
@@ -164,6 +170,8 @@ function recordingStops(client: CopilotKitIntelligence) {
         signal?: AbortSignal;
       }) => {
         const { signal, ...run } = params;
+        // A real record is a request and a socket join; it is never instant, so it takes this long.
+        await Bun.sleep(RECORD_ROUND_TRIP_MS);
         recorded.push({ ...run, signalled: signal instanceof AbortSignal });
         const response = await fetch(
           `http://127.0.0.1:${platform.port}/api/threads/${encodeURIComponent(params.threadId)}/connect`,
@@ -185,33 +193,80 @@ function recordingStops(client: CopilotKitIntelligence) {
   return { client: withMethod, recorded };
 }
 
-/** The Intelligence runner as the release that records stops has it. See the file's note. */
+/**
+ * The Intelligence runner as the release that records stops has it (1.84.1, `runner/intelligence.ts`),
+ * on top of the installed one where that does not record stops itself. Asked to stop a run, it starts
+ * the record and aborts the run's agent at once, and holds only the run's end, which is what its
+ * terminal event follows, until the record settles or two seconds pass. A record that fails never
+ * keeps the run going. Something else aborting the agent first, as a turn's own stop does, cannot
+ * get the terminal event out ahead of the record, because the end it waits on is held.
+ */
 class StopRecordingRunner extends IntelligenceAgentRunner {
   readonly armed: boolean[] = [];
   private readonly records = new Map<
     string,
-    (signal: AbortSignal) => Promise<void>
+    { record: (signal: AbortSignal) => Promise<void>; agent: AbstractAgent }
   >();
+  private readonly recording = new Map<string, Promise<void>>();
 
   override run(request: Parameters<IntelligenceAgentRunner["run"]>[0]) {
     const recordStop = (
       request as { recordStop?: (signal: AbortSignal) => Promise<void> }
     ).recordStop;
     this.armed.push(recordStop !== undefined);
-    if (recordStop) this.records.set(request.threadId, recordStop);
+    if (recordStop && !runtimeRecordsStops) {
+      const { threadId, agent } = request;
+      this.records.set(threadId, { record: recordStop, agent });
+      const runAgent = agent.runAgent.bind(agent);
+      agent.runAgent = (async (...args: Parameters<typeof runAgent>) => {
+        try {
+          return await runAgent(...args);
+        } finally {
+          await this.recording.get(threadId);
+        }
+      }) as typeof agent.runAgent;
+    }
     return super.run(request);
   }
 
   override async stop(request: Parameters<IntelligenceAgentRunner["stop"]>[0]) {
-    const record = this.records.get(request.threadId);
-    if (record && !runtimeRecordsStops) {
-      const deadline = new AbortController();
-      const timer = setTimeout(() => deadline.abort(), 2_000);
-      await record(deadline.signal).catch(() => undefined);
-      clearTimeout(timer);
-    }
+    const run = this.records.get(request.threadId);
+    if (!run || this.recording.has(request.threadId))
+      return super.stop(request);
+    const recorded = recordWithin(run.record, 2_000);
+    this.recording.set(request.threadId, recorded);
+    try {
+      run.agent.abortRun();
+    } catch {}
+    await recorded;
     return super.stop(request);
   }
+}
+
+/** A stop's record, bounded by the runner's deadline. Never rejects: an unrecorded stop still stops. */
+function recordWithin(
+  record: (signal: AbortSignal) => Promise<void>,
+  deadlineMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => {
+      deadline.abort();
+      resolve();
+    }, deadlineMs);
+    Promise.resolve()
+      .then(() => record(deadline.signal))
+      .then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+      );
+  });
 }
 
 function runnerFor(client: CopilotKitIntelligence) {
