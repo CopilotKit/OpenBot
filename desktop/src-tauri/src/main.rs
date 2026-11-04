@@ -872,6 +872,15 @@ fn ensure_linux_podman_api(shell: &Shell, address: &engine::Address) -> Result<(
 /// A customer build keeps an installed deployment's exact tag without consulting GitHub again.
 /// An internal or candidate build instead installs the deployment it was compiled with over any
 /// deployment already there, and keeps the data.
+/// Whether Install lays the deployment out again before preparing it.
+///
+/// A deployment of the other kind at the same version would otherwise stay, and Start refuses it,
+/// so the person would be sent back to Install with nothing Install changes.
+fn deployment_needs_laying_out(root: &Path, version: &str, pin: Option<&deployment::Pin>) -> bool {
+    deployment::needs_fetch(root, version)
+        || preparation::other_release(deployment::installed(root).as_ref(), pin).is_some()
+}
+
 async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
@@ -884,7 +893,7 @@ async fn deployment_ready<R: tauri::Runtime>(
     let version = tauri::async_runtime::spawn_blocking(move || {
         let pin = deployment::pinned();
         let version = deployment_release::resolve_version(&target)?;
-        if deployment::needs_fetch(&target, &version) {
+        if deployment_needs_laying_out(&target, &version, pin.as_ref()) {
             report_running(
                 &handle,
                 "deployment",
@@ -5226,6 +5235,26 @@ mod tests {
 
     // A pinned build installs its own pin, so the unpinned keep-the-installed-release behaviour does not apply.
     #[cfg(not(openbot_pinned))]
+    /// Start refuses a deployment of the other kind, so Install must replace it even when the
+    /// version matches; otherwise the person is sent back to Install with nothing it will change.
+    #[test]
+    fn install_lays_out_again_a_deployment_of_the_other_kind_at_the_same_version() {
+        let root = temp_root("deployment-kind");
+        write_installed_deployment(&root);
+        let pin = deployment::Pin {
+            version: "v0.3.0".into(),
+            commit: "0".repeat(40),
+            images: "{}",
+        };
+        deployment::record(&root, "v0.3.0", false).unwrap();
+        assert!(!deployment_needs_laying_out(&root, "v0.3.0", None));
+        assert!(deployment_needs_laying_out(&root, "v0.3.0", Some(&pin)));
+        deployment::record(&root, "v0.3.0", true).unwrap();
+        assert!(!deployment_needs_laying_out(&root, "v0.3.0", Some(&pin)));
+        assert!(deployment_needs_laying_out(&root, "v0.3.0", None));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn deployment_ready_preserves_the_installed_release() {
         let root = temp_root("deployment-ready-pinned");
