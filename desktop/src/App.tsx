@@ -36,6 +36,7 @@ import {
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
 import {
+  INSTALL_BLURB,
   type Progress,
   plainInstallSteps,
   SetupProgress,
@@ -1125,7 +1126,7 @@ function Setup() {
             {installationReady
               ? "OpenBot’s local software is ready. Next, connect your AI and CopilotKit accounts."
               : localFlow
-                ? "OpenBot is installing what it needs on this computer. This can take a few minutes."
+                ? INSTALL_BLURB
                 : "Install the software OpenBot needs on this computer. This can take a few minutes. You’ll sign in after installation finishes."}
           </p>
           {!localFlow && !installationReady && engine?.responding && (

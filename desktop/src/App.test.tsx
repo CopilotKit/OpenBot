@@ -18,6 +18,13 @@ type ProgressEvent = {
   detail: string;
   running?: boolean;
   downloadBytes?: number;
+  downloads?: {
+    done: number;
+    total: number;
+    bytes: number;
+    bytesPerSecond?: number;
+    pulling: Array<{ name: string; bytes: number; size?: number }>;
+  };
 };
 type Deferred<T> = {
   promise: Promise<T>;
@@ -675,6 +682,8 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     view.getByRole("heading", { name: "Installing OpenBot" }),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Install");
+  // Says this is the whole platform, so a large download is expected.
+  expect(view.getByText(/installs the full OpenBot platform/)).toBeTruthy();
   expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
   expect(view.queryByText(/Pick a Bot|Which Bot/i)).toBeNull();
   expect(invokeCalls.some((call) => call.command === "harnesses")).toBe(false);
@@ -741,6 +750,25 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     installing.getByText(/Downloading local software \(2\/4\)\./),
   ).toBeTruthy();
   expect(installing.getByText(/2.4 MB downloaded/)).toBeTruthy();
+  // The native side's per-image report: what is downloading now, and the whole download.
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software.",
+    downloadBytes: 52_000_000,
+    downloads: {
+      done: 2,
+      total: 7,
+      bytes: 52_000_000,
+      bytesPerSecond: 3_000_000,
+      pulling: [{ name: "agent-bot", bytes: 12_000_000, size: 40_000_000 }],
+    },
+  });
+  expect(
+    installing.getByText("52.0 MB downloaded · 3.0 MB/s · 2 of 7 images done"),
+  ).toBeTruthy();
+  expect(installing.getByText("12.0 MB of 40.0 MB")).toBeTruthy();
   expectPlain(view);
   expect(
     setupEvents().filter(
