@@ -8,7 +8,7 @@ Set `OPENBOT_PRODUCT_TELEMETRY=1` to opt in on self-hosted, organization-hosted 
 
 `deployment_id` uses the existing `DEPLOYMENT_ID`, then `CPK_TELEMETRY_ID`, or the literal `unknown`. `user_id` is an HMAC of authenticated actor and deployment scope using the server's already-required `KEY_ENCRYPTION_KEY`; the key and raw actor ID are never exported. Changing that key or deployment identifier changes the pseudonym. Unknown deployment scope is reported separately, not presented as a known deployment or globally unique person. API-key ownership does not establish the identity of an end user.
 
-The runtime retains `app_id=openbot`. OpenBot adds current execution context at its authenticated run boundary; it does not invent Intelligence project/tenant attribution. Intelligence must independently validate, persist and export matching context before cross-repository joins can be claimed complete.
+CopilotKit's own runtime events always carry `app_id=openbot`, and carry this deployment's `deployment_id` only while product telemetry is on. OpenBot adds current execution context at its authenticated run boundary; it does not invent Intelligence project/tenant attribution. Intelligence must independently validate, persist and export matching context before cross-repository joins can be claimed complete.
 
 ## Intelligence run context
 

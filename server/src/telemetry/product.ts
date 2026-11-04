@@ -620,10 +620,14 @@ export async function createProductTelemetry(options: {
     middleware,
     recordAudit,
     enabled: () => enabled,
-    deploymentProperties: () => ({
-      app_id: "openbot",
-      deployment_id: deploymentId,
-    }),
+    /*
+     * What CopilotKit's own runtime events carry for OpenBot. The app always, so OpenBot's traffic
+     * is separable; this deployment's ID only while product telemetry is on.
+     */
+    deploymentProperties: (): { app_id: "openbot"; deployment_id?: string } =>
+      enabled
+        ? { app_id: "openbot", deployment_id: deploymentId }
+        : { app_id: "openbot" },
     flush: async () => {
       await Promise.allSettled([...pending]);
     },
