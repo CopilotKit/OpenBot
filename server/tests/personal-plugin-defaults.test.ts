@@ -6,15 +6,15 @@ import {
   withPersonalDefaults,
 } from "../src/plugins/personal-defaults";
 
-type Tool = { ref: string; read: boolean };
+type Tool = { ref: string };
 
 const ROUTINES: Tool[] = [
-  { ref: "routines/list_routines", read: true },
-  { ref: "routines/create_routine", read: false },
+  { ref: "routines/list_routines" },
+  { ref: "routines/create_routine" },
 ];
 const NOTION: Tool[] = [
-  { ref: "notion/search", read: true },
-  { ref: "notion/create_page", read: false },
+  { ref: "notion/search" },
+  { ref: "notion/create_page" },
 ];
 
 /**
@@ -24,6 +24,8 @@ const NOTION: Tool[] = [
 function fakeStore(vendors: Record<string, Tool[]>) {
   const listed = new Map<string, Tool[]>();
   const grants: string[] = [];
+  /** Who the trail names for each grant, by `agent:ref`. */
+  const grantedBy = new Map<string, string>();
   const added: string[] = [];
   const store = {
     async refreshTools(serverId: string, _actorId = "") {
@@ -34,10 +36,11 @@ function fakeStore(vendors: Record<string, Tool[]>) {
       _kind: "mcp",
       ref: string,
       agentId: string,
-      _by: string,
+      by: string,
       _as: "admin" | "owner" = "admin",
     ) {
       grants.push(`${agentId}:${ref}`);
+      grantedBy.set(`${agentId}:${ref}`, by);
     },
     /** Methods call each other through `this`, as the real store's do. */
     async addServer(input: { key: string; by: string }) {
@@ -63,7 +66,7 @@ function fakeStore(vendors: Record<string, Tool[]>) {
     servers: async () => added,
   };
   const wrapped = withPersonalDefaults(store, deps);
-  return { store: wrapped, grants, added, deps };
+  return { store: wrapped, grants, grantedBy, added, deps };
 }
 
 afterEach(() => setEdition("team"));
@@ -101,6 +104,23 @@ describe("a connected app in the personal edition", () => {
       "travel:routines/create_routine",
       "travel:routines/list_routines",
     ]);
+  });
+
+  test("the trail says why a Bot made later holds each app", async () => {
+    setEdition("personal");
+    const { store, deps, grantedBy } = fakeStore({
+      notion: NOTION,
+      routines: ROUTINES,
+    });
+    await ensureAlwaysOnApp(store, deps);
+    await store.addServer({ key: "notion", by: "me" });
+    await store.listForAgent("travel");
+    expect(grantedBy.get("travel:notion/search")).toBe(
+      "openbot:personal-defaults",
+    );
+    expect(grantedBy.get("travel:routines/list_routines")).toBe(
+      "openbot:always-on",
+    );
   });
 });
 

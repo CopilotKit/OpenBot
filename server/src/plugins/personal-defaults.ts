@@ -3,9 +3,8 @@ import type { Database } from "../db/client";
 import { agentProfiles } from "../db/schema/coworker";
 import { mcpServers, mcpTools, pluginGrants } from "../db/schema/plugins";
 import { currentEdition } from "../edition";
-import { catalogueEntry, classifyTool } from "./catalogue";
 
-type ListedTool = { ref: string; read: boolean };
+type ListedTool = { ref: string };
 
 type Store = {
   refreshTools(serverId: string, actorId?: string): Promise<{ tools: number }>;
@@ -20,7 +19,7 @@ type Store = {
 };
 
 export type PersonalDefaultsDeps = {
-  /** What this deployment has recorded for an app, each tool classified read or write. */
+  /** The tools this deployment has recorded for an app. */
   tools(serverId: string): Promise<ListedTool[]>;
   /** Every Bot there is. */
   bots(): Promise<string[]>;
@@ -56,8 +55,9 @@ export const EVERY_BOT_REFUSAL =
   "In OpenBot Personal every Bot can use every app you connect. Turn the app off to take it from all of them.";
 
 /**
- * Gives Bots every tool of these apps they don't hold yet, as `by`. Writes nothing when they hold
- * them all, so asking on every run costs reads and no trail rows.
+ * Gives Bots every tool of these apps they don't hold yet. Writes nothing when they hold them all,
+ * so asking on every run costs reads and no trail rows. The trail names why: Routines' grants as
+ * always on, any other app's as `by`.
  */
 async function grantEveryTool(
   store: Pick<Store, "grant">,
@@ -69,10 +69,12 @@ async function grantEveryTool(
   for (const app of apps) {
     const tools = await deps.tools(app);
     if (tools.length === 0) continue;
+    const grantedBy = isAlwaysOn(app) ? ALWAYS_ON_BY : by;
     for (const bot of bots) {
       const held = await deps.granted(bot, app);
       for (const tool of tools)
-        if (!held.has(tool.ref)) await store.grant("mcp", tool.ref, bot, by);
+        if (!held.has(tool.ref))
+          await store.grant("mcp", tool.ref, bot, grantedBy);
     }
   }
 }
@@ -103,7 +105,7 @@ export async function ensureAlwaysOnApp(
     deps,
     await everyBotApps(deps),
     await deps.bots(),
-    ALWAYS_ON_BY,
+    GRANTED_BY,
   );
 }
 
@@ -153,7 +155,7 @@ export function withPersonalDefaults<S extends Store>(
       deps,
       await everyBotApps(deps),
       [agentId],
-      ALWAYS_ON_BY,
+      GRANTED_BY,
     );
     return list.call(this, agentId);
   } as S["listForAgent"];
@@ -164,15 +166,11 @@ export function withPersonalDefaults<S extends Store>(
 export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
   return {
     async tools(serverId) {
-      const entry = catalogueEntry(serverId);
       const rows = await database
-        .select({ name: mcpTools.name, effect: mcpTools.effect })
+        .select({ name: mcpTools.name })
         .from(mcpTools)
         .where(eq(mcpTools.serverId, serverId));
-      return rows.map((row) => ({
-        ref: `${serverId}/${row.name}`,
-        read: classifyTool(entry, row.name, true, row.effect) === "read",
-      }));
+      return rows.map((row) => ({ ref: `${serverId}/${row.name}` }));
     },
     async bots() {
       const rows = await database

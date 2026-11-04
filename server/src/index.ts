@@ -1064,8 +1064,8 @@ await ensureSingleUserIdentity(database, {
   provider: composio?.provider ?? null,
 });
 
-// In the personal edition, an app's newly listed read-only tools go to every Bot; in every edition,
-// Routines is given to every Bot. See personal-defaults.ts.
+// In the personal edition, every tool an app lists goes to every Bot; in every edition, Routines
+// is given to every Bot. See personal-defaults.ts.
 const pluginStore = withPersonalDefaults(
   createPluginStore({
     database,
