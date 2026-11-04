@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Choosing Anthropic in the Desktop setup screen, or setting `BOT_PROVIDER=anthropic` without a `BOT_MODEL`, now runs `claude-sonnet-5-5` instead of `claude-sonnet-4-5`, which Anthropic retires on 2026-11-30. A deployment that pins `BOT_MODEL` is unaffected.
 - OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
 
 **Before upgrading.** Twenty things change for an existing deployment:
