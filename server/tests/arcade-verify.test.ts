@@ -64,13 +64,18 @@ import {
  */
 const database = createDatabase(testDatabaseUrl(), { max: 6 });
 const suite = randomUUID().slice(0, 8);
-const APP = `arcade-verify-${suite}`;
 /**
  * ONE APP PER TEST, because the audit trail is APPEND-ONLY and cannot be cleaned between them. A
  * fixed name would let a completion's event be counted by the next case's "nothing was written",
  * which is the exact assertion this suite is built on. The app is keyed on its toolkit, so a fresh
  * toolkit per test is a fresh everything.
+ *
+ * And a fresh app id per test, not one id removed and made again: apps live in Intelligence, and the
+ * removal of the last case's app reaches every listening replica as an announcement that removes the
+ * rows here naming it. Arriving late under load, it took the next case's attempt row with it.
  */
+let APP = "";
+const appsMade: string[] = [];
 let TOOLKIT = "";
 let apps = 0;
 const ACTOR = `verifier-${suite}`;
@@ -303,7 +308,7 @@ const refusedTo = (reason: string) =>
   `${APP_URL}/connections?authorized=${reason}`;
 
 /** Where a completion lands: the app's own page, built from the attempt row's `server_id`. */
-const LANDING = `${APP_URL}/connections/${APP}?action=${encodeURIComponent(ACTION)}`;
+let LANDING = "";
 
 /**
  * A refusal, named by its code and not merely by the fact that something redirected.
@@ -467,10 +472,14 @@ beforeEach(async () => {
   authProviderAnswer = async () => "google";
   apps += 1;
   TOOLKIT = `Gmail-${suite}-${apps}`;
+  APP = `arcade-verify-${suite}-${apps}`;
+  LANDING = `${APP_URL}/connections/${APP}?action=${encodeURIComponent(ACTION)}`;
   await database
     .delete(pendingAuthorizations)
     .where(eq(pendingAuthorizations.actorId, ACTOR));
-  await removeServers([APP]);
+  // The last case's app goes now, under its own id, so its removal can only reach its own rows.
+  await removeServers(appsMade.splice(0));
+  appsMade.push(APP);
   await seedServer({
     id: APP,
     title: "Gmail",
@@ -494,7 +503,7 @@ afterAll(async () => {
   await removeConnectionsWhere(
     (row) => row.kind === "brokered" && row.app.startsWith(`Gmail-${suite}-`),
   );
-  await removeServers([APP]);
+  await removeServers(appsMade.splice(0));
   await removePeople(database, [ACTOR, STRANGER]);
   await database.$client.close();
 });
