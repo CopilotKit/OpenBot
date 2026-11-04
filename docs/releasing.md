@@ -5,16 +5,22 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 
 ## Cutting one
 
-1. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
+1. Before cutting, rebuild the changelog from the code. Entries added to `## Unreleased` since the
+   last release are claims, not evidence, so none is trusted as written. Go through every change
+   since the last tag (`git log vX.Y.Z..origin/main` and each one's diff), check it in the code, and
+   write `## Unreleased` from what the code shows: keep an entry only where the code proves it,
+   rewrite one that overstates, understates or misdescribes the change, drop one the code does not
+   do, and add one for any change no entry mentions. Land it as a pull request like any other.
+2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
-2. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Use
+3. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Use
    `dry_run` first if you want to see the version and the notes without opening anything.
-3. Review the pull request it opens. It updates `package.json`, promotes the changelog's
+4. Review the pull request it opens. It updates `package.json`, promotes the changelog's
    `## Unreleased` heading to `## X.Y.Z`, and moves the Helm chart's `appVersion` and the desktop
    Cargo package/lockfile to the same version. Tauri reads its version directly from the root
    `package.json`.
-4. Merge it. That is the publish.
+5. Merge it. That is the publish.
 
 Merging is the trigger, so a release is always a reviewed commit on `main`.
 
