@@ -70,6 +70,16 @@ export type PeopleDirectory = {
   ): Promise<Person>;
   /** Delete a person for good, in Intelligence and here (and with them every row that names them). */
   purge(id: string): Promise<void>;
+  /**
+   * Hear of every person deleted for good: what Intelligence holds of them beyond the directory
+   * (their memory, Learning space, schedules) is the listener's to remove, as the old foreign keys to
+   * `users` removed it. Called once per person across the replicas: by the one that purges them, or
+   * by the one whose read removed their row. A person purged before any listener is registered (at
+   * boot, by the first full read) is handed to the first one when it registers.
+   */
+  onPurged(listener: (id: string) => Promise<void>): Promise<void>;
+  /** Tell the listeners a person is gone for good: for a purge made outside this directory (Better Auth's). */
+  purged(id: string): Promise<void>;
   /** Read this person from Intelligence now and bring the row in line. Null when they are gone. */
   refresh(id: string): Promise<Person | null>;
   /** Send a row Better Auth wrote to Intelligence. Null when there was nothing pending. */
@@ -215,6 +225,30 @@ export function createPeopleDirectory(options: {
   onChange?: (change: DirectoryChange) => void;
 }): PeopleDirectory {
   const { client, database } = options;
+  /** Who hears of a person deleted for good, and the purges heard before anybody listened. */
+  const purgedListeners: ((id: string) => Promise<void>)[] = [];
+  const purgedBeforeListening = new Set<string>();
+  const purged = async (id: string) => {
+    if (purgedListeners.length === 0) {
+      purgedBeforeListening.add(id);
+      return;
+    }
+    for (const listener of purgedListeners) {
+      try {
+        await listener(id);
+      } catch (error) {
+        // The person is gone here and in the directory already; what is left is said, not thrown.
+        console.error(
+          JSON.stringify({
+            type: "person-purge-cascade-failed",
+            personId: id,
+            note: "The person was deleted for good, and some of what Intelligence holds of them beyond the directory could not be removed. Remove it by hand.",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+  };
   /** When each person was last confirmed by Intelligence, so a full read can tell a purge from a newcomer. */
   const seenAt = new Map<string, number>();
   let subscription: DirectoryChangeSubscription | undefined;
@@ -296,7 +330,7 @@ export function createPeopleDirectory(options: {
       .delete(users)
       .where(and(eq(users.id, id), isNotNull(users.directoryVersion)))
       .returning({ id: users.id });
-    if (removed.length > 0)
+    if (removed.length > 0) {
       console.warn(
         JSON.stringify({
           type: "person-purged-locally",
@@ -304,6 +338,9 @@ export function createPeopleDirectory(options: {
           note: "Intelligence deleted this person for good; their row and every row that named them were removed.",
         }),
       );
+      // The row is shared: only the replica whose delete removed it tells the listeners.
+      await purged(id);
+    }
   };
 
   const refresh = async (id: string): Promise<Person | null> => {
@@ -653,7 +690,17 @@ export function createPeopleDirectory(options: {
       await client.purgePerson(id, idempotencyKey("purge-person"));
       seenAt.delete(id);
       await database.delete(users).where(eq(users.id, id));
+      await purged(id);
     },
+
+    async onPurged(listener) {
+      purgedListeners.push(listener);
+      const waiting = [...purgedBeforeListening];
+      purgedBeforeListening.clear();
+      for (const id of waiting) await purged(id);
+    },
+
+    purged,
 
     refresh,
     push,

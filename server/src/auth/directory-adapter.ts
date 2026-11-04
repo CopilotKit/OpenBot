@@ -163,6 +163,8 @@ async function settle(
         id,
         `openbot-directory:purge:${createHash("sha256").update(id).digest("hex")}`,
       );
+      // Better Auth removed the row itself, so no full read will: the listeners hear it from here.
+      await directory.purged(id);
     } catch (error) {
       console.error(
         JSON.stringify({

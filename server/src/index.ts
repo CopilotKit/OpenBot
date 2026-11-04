@@ -294,6 +294,7 @@ import {
 import { copyLocalPeopleToIntelligence } from "./people/directory/upgrade";
 import { createOnboardingStore } from "./people/onboarding";
 import { createProfileStore } from "./people/profile";
+import { createPersonPurgeCascade } from "./people/purge-cascade";
 import { createPeopleStore } from "./people/store";
 import { BROKERED_PROFILE } from "./plugins/access";
 import { createAccountModeSwitch } from "./plugins/account-mode";
@@ -1812,6 +1813,16 @@ botDirectory.onPurged((botId) => personalMemoryStore.forgetBot(botId));
 // And of a Bot purged while no instance was running to hear it.
 await personalMemoryStore.sweepPurgedBots(
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
+// A person deleted for good takes what Intelligence holds of them beyond the directory: their memory,
+// their Learning space and their schedules, as the old foreign keys to `users` did. Registered once
+// all three exist; a person purged earlier in boot is handed over now (people/purge-cascade.ts).
+await peopleDirectory.onPurged(
+  createPersonPurgeCascade({
+    memory: personalMemoryStore,
+    learning: learningIntelligence,
+    schedules: scheduleDirectory.client,
+  }),
 );
 const recorderExtension = createRecorderExtension({
   config,
