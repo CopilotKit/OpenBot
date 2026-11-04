@@ -244,13 +244,20 @@ test("a run sends a remote Bot its own key, and none of the request's headers", 
   const keyed = seen.filter((request) => request.bot === "keyed");
   expect(keyed).toHaveLength(1);
   expect(keyed[0]?.headers["x-api-key"]).toBe("the-bot's-own-key");
-  expect(keyed[0]?.headers.authorization).toBeUndefined();
-  expect(keyed[0]?.headers["x-leak"]).toBeUndefined();
+  // Mapped rather than `keyed[0]?.`, so a request that never arrived fails here instead of passing.
+  expect(keyed.map((request) => request.headers.authorization)).toEqual([
+    undefined,
+  ]);
+  expect(keyed.map((request) => request.headers["x-leak"])).toEqual([
+    undefined,
+  ]);
 
   const bearer = seen.filter((request) => request.bot === "bearer");
   expect(bearer).toHaveLength(1);
   expect(bearer[0]?.headers.authorization).toBe("Bearer the-bot's-own-token");
-  expect(bearer[0]?.headers["x-leak"]).toBeUndefined();
+  expect(bearer.map((request) => request.headers["x-leak"])).toEqual([
+    undefined,
+  ]);
 });
 
 test("a suggestion sends a remote Bot its own key, and none of the request's headers", async () => {
@@ -268,6 +275,10 @@ test("a suggestion sends a remote Bot its own key, and none of the request's hea
   const suggesting = seen.filter((request) => request.bot === "suggesting");
   expect(suggesting).toHaveLength(1);
   expect(suggesting[0]?.headers["x-api-key"]).toBe("the-bot's-own-key");
-  expect(suggesting[0]?.headers.authorization).toBeUndefined();
-  expect(suggesting[0]?.headers["x-leak"]).toBeUndefined();
+  expect(suggesting.map((request) => request.headers.authorization)).toEqual([
+    undefined,
+  ]);
+  expect(suggesting.map((request) => request.headers["x-leak"])).toEqual([
+    undefined,
+  ]);
 });
