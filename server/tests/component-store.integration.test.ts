@@ -1,13 +1,6 @@
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   ComponentNotFoundError,
   type ComponentStore,
@@ -15,11 +8,15 @@ import {
 } from "../src/components/store";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   componentExclusions,
   componentFunctions,
   components,
 } from "../src/db/schema";
+import {
+  type SeedAuditEvent,
+  seedAuditEvents,
+  useTestAuditTrail,
+} from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -61,75 +58,106 @@ beforeAll(async () => {
   await makeComponent(otherName, false);
 });
 
-describe("component data functions against PostgreSQL", () => {
-  // One connection keeps this temporary table visible to every query. Copy the migrated table
-  // shape so the production SQL runs unchanged, without depending on other suites' audit rows.
-  const reportsDatabase = createDatabase(testDatabaseUrl(), { max: 1 });
-  const reports = createComponentStore(reportsDatabase);
+describe("component data functions against the trail in Intelligence", () => {
+  /*
+   * The trail they read is Intelligence's, shared by every run of every suite and append-only, so
+   * nothing can be cleaned and nothing can be isolated by a temporary table any more. Each case makes
+   * its own Bots and places its rows so the assertion is exact all the same: activity rows outnumber
+   * the busiest Bot already in the window, so they are the top of the ranking whatever else is
+   * there, and refusal rows are dated ahead of every refusal already there, so they are the newest.
+   */
+  useTestAuditTrail();
+  const reports = createComponentStore(database);
   const day = 86_400_000;
+  /**
+   * A moment to date a case's refusals back from, `spanMs` deep, so every one of them is newer than
+   * any refusal already in the trail: earlier cases and earlier runs dated theirs ahead of now too.
+   */
+  async function aheadOfEveryRefusal(spanMs: number): Promise<number> {
+    const { rows } = (await reports.callFunction("recentRefusals", {
+      limit: 1,
+    })) as { rows: { at: string }[] };
+    const newest = rows[0] ? Date.parse(rows[0].at) : 0;
+    return Math.max(Date.now() + 60 * 60_000, newest + spanMs + 60_000);
+  }
 
-  beforeAll(async () => {
-    await reportsDatabase.execute(
-      sql`create temporary table audit_events (like public.audit_events including all)`,
-    );
-  });
-
-  beforeEach(async () => {
-    await reportsDatabase.execute(sql`truncate table pg_temp.audit_events`);
-  });
-
-  afterAll(async () => {
-    await reportsDatabase.$client.close();
-  });
-
-  function event(overrides: Partial<typeof auditEvents.$inferInsert>) {
+  function event(
+    overrides: Partial<SeedAuditEvent> & { at: number },
+  ): SeedAuditEvent {
+    const { at, ...rest } = overrides;
     return {
       eventType: "component.rendered",
       targetType: "component",
       payload: { bot: "active-bot" },
-      createdAt: new Date(Date.now() - day),
-      ...overrides,
+      occurredAt: new Date(at),
+      ...rest,
     };
   }
 
-  test("bot activity aggregates recent actions and excludes older and unattributed rows", async () => {
-    await reportsDatabase
-      .insert(auditEvents)
-      .values([
-        event({}),
-        event({}),
-        event({ payload: { bot: "other-bot" } }),
-        event({ createdAt: new Date(Date.now() - 8 * day) }),
-        event({ payload: {} }),
-      ]);
+  /** The busiest Bot's count in the last `days` days, before this case adds anything. */
+  async function busiest(days: number): Promise<number> {
+    const before = (await reports.callFunction("botActivity", { days })) as {
+      rows: { actions: number }[];
+    };
+    return before.rows[0]?.actions ?? 0;
+  }
 
-    expect(await reports.callFunction("botActivity", {})).toEqual({
-      days: 7,
-      rows: [
-        { bot: "active-bot", actions: 2 },
-        { bot: "other-bot", actions: 1 },
-      ],
-    });
+  /** `n` copies of one row, seeded in batches Intelligence takes. */
+  async function seedMany(rows: SeedAuditEvent[]) {
+    for (let start = 0; start < rows.length; start += 500) {
+      await seedAuditEvents(rows.slice(start, start + 500));
+    }
+  }
+
+  test("bot activity aggregates recent actions and excludes older and unattributed rows", async () => {
+    const active = `active-bot-${randomUUID()}`;
+    const other = `other-bot-${randomUUID()}`;
+    const base = await busiest(7);
+    // Late in the window, so they leave it for the next run soon after.
+    const inWindow = Date.now() - 6.9 * day;
+    await seedMany([
+      ...Array.from({ length: base + 2 }, () =>
+        event({ payload: { bot: active }, at: inWindow }),
+      ),
+      ...Array.from({ length: base + 1 }, () =>
+        event({ payload: { bot: other }, at: inWindow }),
+      ),
+      // Older than the window: counted, it would make the first Bot base + 3.
+      event({ payload: { bot: active }, at: Date.now() - 8 * day }),
+      event({ payload: {}, at: inWindow }),
+    ]);
+
+    const result = (await reports.callFunction("botActivity", {})) as {
+      days: number;
+      rows: { bot: string | null; actions: number }[];
+    };
+    expect(result.days).toBe(7);
+    expect(result.rows.slice(0, 2)).toEqual([
+      { bot: active, actions: base + 2 },
+      { bot: other, actions: base + 1 },
+    ]);
+    // A row naming no Bot is nobody's activity.
+    expect(result.rows.every((row) => typeof row.bot === "string")).toBe(true);
   });
 
   test("bot activity caps the window at 90 days and returns only the 12 busiest bots", async () => {
+    const run = randomUUID().slice(0, 8);
+    const base = await busiest(90);
     const ranked = Array.from({ length: 13 }, (_, index) => ({
-      bot: `ranked-bot-${index}`,
-      actions: 13 - index,
+      bot: `ranked-bot-${run}-${index}`,
+      actions: base + 13 - index,
     }));
-    await reportsDatabase.insert(auditEvents).values([
+    const inWindow = Date.now() - 89.9 * day;
+    await seedMany([
       ...ranked.flatMap(({ bot, actions }) =>
         Array.from({ length: actions }, () =>
-          event({
-            payload: { bot },
-            createdAt: new Date(Date.now() - 30 * day),
-          }),
+          event({ payload: { bot }, at: inWindow }),
         ),
       ),
       // If the time bound is ignored, this changes the highest-ranked bot's count.
       event({
-        payload: { bot: "ranked-bot-0" },
-        createdAt: new Date(Date.now() - 91 * day),
+        payload: { bot: ranked[0]?.bot },
+        at: Date.now() - 91 * day,
       }),
     ]);
 
@@ -142,74 +170,82 @@ describe("component data functions against PostgreSQL", () => {
   });
 
   test("recent refusals filters event types, orders newest first and reads both reason formats", async () => {
-    const now = Date.now();
+    const run = randomUUID().slice(0, 8);
+    const ahead = await aheadOfEveryRefusal(5_000);
     const fixtures = [
       {
         eventType: "computer.action_refused",
-        payload: { bot: "computer-bot", reason: "Permission denied" },
+        payload: { bot: `computer-bot-${run}`, reason: "Permission denied" },
       },
       {
         eventType: "component.refused",
         payload: {
-          bot: "component-bot",
+          bot: `component-bot-${run}`,
           decision: { rule: "Component withheld" },
         },
       },
       {
         eventType: "component.function_refused",
         payload: {
-          bot: "function-bot",
+          bot: `function-bot-${run}`,
           reason: "Explicit reason",
           decision: { rule: "Fallback reason" },
         },
       },
       { eventType: "bot.declined", payload: {} },
     ];
-    await reportsDatabase
-      .insert(auditEvents)
-      .values([
-        ...fixtures.map((fixture, index) =>
-          event({ ...fixture, createdAt: new Date(now - (index + 1) * 1000) }),
-        ),
-        event({ eventType: "component.rendered", createdAt: new Date(now) }),
-      ]);
+    await seedAuditEvents([
+      ...fixtures.map((fixture, index) =>
+        event({ ...fixture, at: ahead - (index + 1) * 1000 }),
+      ),
+      // Newer than all of them, and not a refusal.
+      event({ eventType: "component.rendered", at: ahead }),
+    ]);
 
-    expect(await reports.callFunction("recentRefusals", {})).toEqual({
-      rows: [
-        expect.objectContaining({
-          bot: "computer-bot",
-          what: "computer.action_refused",
-          reason: "Permission denied",
-        }),
-        expect.objectContaining({
-          bot: "component-bot",
-          what: "component.refused",
-          reason: "Component withheld",
-        }),
-        expect.objectContaining({
-          bot: "function-bot",
-          what: "component.function_refused",
-          reason: "Explicit reason",
-        }),
-        expect.objectContaining({
-          bot: null,
-          what: "bot.declined",
-          reason: null,
-        }),
-      ],
-    });
+    const { rows } = (await reports.callFunction("recentRefusals", {})) as {
+      rows: unknown[];
+    };
+    expect(rows.slice(0, 4)).toEqual([
+      expect.objectContaining({
+        bot: `computer-bot-${run}`,
+        what: "computer.action_refused",
+        reason: "Permission denied",
+      }),
+      expect.objectContaining({
+        bot: `component-bot-${run}`,
+        what: "component.refused",
+        reason: "Component withheld",
+      }),
+      expect.objectContaining({
+        bot: `function-bot-${run}`,
+        what: "component.function_refused",
+        reason: "Explicit reason",
+      }),
+      expect.objectContaining({
+        bot: null,
+        what: "bot.declined",
+        reason: null,
+      }),
+    ]);
+    expect(rows).not.toContainEqual(
+      expect.objectContaining({ what: "component.rendered" }),
+    );
   });
 
   test("recent refusals defaults to 10 and clamps the requested limit to 1 through 50", async () => {
-    const now = Date.now();
+    const run = randomUUID().slice(0, 8);
+    const ahead = await aheadOfEveryRefusal(51_000);
     const fixtures = Array.from({ length: 51 }, (_, index) =>
       event({
         eventType: "bot.declined",
-        payload: { bot: `refusal-bot-${index}`, reason: `Reason ${index}` },
-        createdAt: new Date(now - index * 1000),
+        payload: {
+          bot: `refusal-bot-${run}-${index}`,
+          reason: `Reason ${index}`,
+        },
+        at: ahead - index * 1000,
       }),
     );
-    await reportsDatabase.insert(auditEvents).values(fixtures);
+    await seedAuditEvents(fixtures);
     for (const { args, count } of [
       { args: {}, count: 10 },
       { args: { limit: 100_000 }, count: 50 },
@@ -218,7 +254,7 @@ describe("component data functions against PostgreSQL", () => {
       expect(await reports.callFunction("recentRefusals", args)).toEqual({
         rows: fixtures.slice(0, count).map((_, index) =>
           expect.objectContaining({
-            bot: `refusal-bot-${index}`,
+            bot: `refusal-bot-${run}-${index}`,
             what: "bot.declined",
             reason: `Reason ${index}`,
           }),
@@ -239,6 +275,7 @@ afterAll(async () => {
     .where(inArray(componentExclusions.componentName, names));
   await database.delete(components).where(inArray(components.name, names));
   await removeBots([...fixtureAgentIds]);
+  await database.$client.close();
 });
 
 describe("deciding whether a Bot may use a component", () => {

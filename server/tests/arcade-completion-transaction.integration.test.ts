@@ -1,11 +1,11 @@
 // server/tests/arcade-completion-transaction.integration.test.ts
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   brokeredConnections,
   mcpServers,
   pendingAuthorizations,
@@ -13,6 +13,7 @@ import {
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
 
@@ -75,15 +76,21 @@ const storeOn = (handle: typeof database) =>
 
 const store = storeOn(database);
 
+/** Whether a statement handed to `execute` is the audit row's write to the local outbox. */
+const dialect = new PgDialect();
+const writesAuditOutbox = (query: unknown) =>
+  /insert into audit_outbox/i.test(dialect.sqlToQuery(query as SQL).sql);
+
 /**
  * The same store with the AUDIT INSERT made to throw, and nothing else changed.
  *
  * The failure is injected at the DATABASE HANDLE rather than at the store's `auditStore` option,
  * because the audit write that has to be atomic with the connection write is the one bound to the
  * transaction — a throwing `auditStore` passed into `createPluginStore` would never be the object
- * that write goes through, and the test would prove nothing. This proxy lets the connection upsert
- * through and refuses the `audit_events` insert, so it fires BETWEEN the two writes, which is where
- * the rollback has to hold.
+ * that write goes through, and the test would prove nothing. The audit row is written to the local
+ * `audit_outbox` (the drainer carries it to Intelligence afterwards) through the transaction's
+ * `execute`, so this proxy lets the connection upsert through and refuses that outbox statement,
+ * so it fires BETWEEN the two writes, which is where the rollback has to hold.
  */
 const brokenAuditDatabase = new Proxy(database, {
   get(target, property, receiver) {
@@ -96,11 +103,11 @@ const brokenAuditDatabase = new Proxy(database, {
         work(
           new Proxy(transaction, {
             get(txTarget, txProperty, txReceiver) {
-              if (txProperty === "insert") {
-                return (table: unknown) => {
-                  if (table === auditEvents)
+              if (txProperty === "execute") {
+                return (query: unknown) => {
+                  if (writesAuditOutbox(query))
                     throw new Error("injected audit failure");
-                  return txTarget.insert(table as never);
+                  return txTarget.execute(query as never);
                 };
               }
               const value = Reflect.get(txTarget, txProperty, txReceiver);
@@ -166,15 +173,7 @@ const connectionsFor = (app: string) =>
     );
 
 const connectedEventsFor = (app: string) =>
-  database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_connected"),
-        eq(auditEvents.targetId, app),
-      ),
-    );
+  auditRows({ eventType: "mcp.account_connected", targetId: app });
 
 const attemptRow = async (actorId: string) => {
   const [row] = await database
@@ -196,7 +195,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Cascades to the attempts. The connections are keyed on the app, not the server, so they go
-  // separately; the audit rows cannot go at all, which is what `audit_events_append_only` is for.
+  // separately; the audit rows cannot go at all, because Intelligence's trail is append-only.
   await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
   await database
     .delete(brokeredConnections)
@@ -576,15 +575,10 @@ describe("failAuthorizationAttempt / markAuthorizationUnreconciled", () => {
 
 describe("unreconciled authorization audit", () => {
   const eventsFor = async (actorId: string) => {
-    const rows = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.authorization_unreconciled"),
-          eq(auditEvents.targetId, serverId),
-        ),
-      );
+    const rows = await auditRows({
+      eventType: "mcp.authorization_unreconciled",
+      targetId: serverId,
+    });
     return rows.filter((row) => row.payload.actor === actorId);
   };
 

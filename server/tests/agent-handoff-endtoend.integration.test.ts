@@ -17,8 +17,9 @@ import { handoffTool } from "../src/agents/handoff-tool";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, pluginGrants, workItems } from "../src/db/schema";
+import { pluginGrants, workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -237,13 +238,8 @@ describe("a hop, from the tool call to the delivery", () => {
     });
     await runner.sweep();
 
-    const rows = await database
-      .select({
-        eventType: auditEvents.eventType,
-        payload: auditEvents.payload,
-      })
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, TARGET));
+    // The trail is Intelligence's: read after the outbox is flushed, by this suite's own target.
+    const rows = await auditRows({ targetId: TARGET });
     const kinds = rows.map((row) => row.eventType);
     expect(kinds).toContain("agent.handoff_offered");
     expect(kinds).toContain("agent.handoff_delivered");

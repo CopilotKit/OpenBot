@@ -24,7 +24,6 @@ import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { modelUsage } from "../src/db/schema/admin";
 import { channels, users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
 import { botLifecycle } from "../src/db/schema/lifecycle";
@@ -54,6 +53,7 @@ import {
 } from "../src/proactive/types";
 import { CHECK_IN_OPENING } from "../src/proactive/window";
 import { createWorkQueue } from "../src/work/queue";
+import { modelUsageRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import {
   changeCheckIn,
@@ -75,7 +75,12 @@ import { testScheduleClient, useTestSchedules } from "./support/schedules";
  * the real work queue and the real headless turn runner. The model is the only fake: a scripted
  * AG-UI agent that reads (the audit row a successful connector read writes) and calls the
  * check-in's tools as a model would.
+ *
+ * That audit row, and the model usage a check-in leaves, live in Intelligence: the engine reads a
+ * run's reads from the trail there, and the usage case below reads its rows back from it.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -2100,8 +2105,12 @@ describe("what a check-in costs and how it is asked", () => {
       builtInModel: "openai/gpt-check-in",
       env: {},
     });
-    const usage = () =>
-      database.select().from(modelUsage).where(eq(modelUsage.userId, owner));
+    // The owner's usage, across the Bots this suite made for them. Model usage lives in Intelligence,
+    // shared by every run and append-only, so it is read by this suite's own Bots and never deleted.
+    const usage = async () =>
+      (await Promise.all([inboxBot, calendarBot].map(modelUsageRows)))
+        .flat()
+        .filter((row) => row.userId === owner);
     try {
       await due(inbox);
       const nothing = replica({ readableApps: async () => [] });
@@ -2125,7 +2134,6 @@ describe("what a check-in costs and how it is asked", () => {
         },
       ]);
     } finally {
-      await database.delete(modelUsage).where(eq(modelUsage.userId, owner));
       await controls.stop();
     }
   });

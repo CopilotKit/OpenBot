@@ -20,6 +20,7 @@
 
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import postgres from "postgres";
+import { bots } from "../agents/bot-registry/directory";
 import {
   type AuditStore,
   addAuditTap,
@@ -41,7 +42,6 @@ import {
 } from "../computer/policy-network";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { bots } from "../agents/bot-registry/directory";
 import type { ProactiveAdmin } from "../proactive/contracts";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
@@ -646,20 +646,8 @@ export async function installEnterpriseControls(
           }),
         ),
       );
-      void store
-        .purgeActions(
-          new Date(
-            Date.now() - ACTION_RECORD_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-          ),
-        )
-        .catch((error) =>
-          console.error(
-            JSON.stringify({
-              type: "action-record-purge-failed",
-              error: String(error),
-            }),
-          ),
-        );
+      // Action records past ACTION_RECORD_RETENTION_DAYS are removed by Intelligence, which holds
+      // them, at the window this deployment sets at boot (audit-trail/retention.ts).
     }, 60 * 60_000),
   ];
   for (const timer of timers) timer.unref?.();

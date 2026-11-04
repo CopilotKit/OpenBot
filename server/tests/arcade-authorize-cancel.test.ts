@@ -14,7 +14,6 @@ import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   brokeredConnections,
   mcpServers,
   mcpTools,
@@ -24,6 +23,7 @@ import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
 
@@ -589,16 +589,18 @@ describe("DELETE /servers/:id/authorize on a deployment whose broker runs no aut
  * used to leave nothing at all: the row was deleted and no record said who withdrew what.
  *
  * Read by the ACTOR in the payload, which is where every writer on this lifecycle puts who did it,
- * so another test's rows on the same app can neither satisfy nor spoil these.
+ * so another test's rows on the same app can neither satisfy nor spoil these. The trail is
+ * Intelligence's and shared by every run, so the read asks for this run's app (`P${suite}`) and
+ * picks the actor out of the payload here.
  */
 describe("DELETE /servers/:id/authorize — the audit row", () => {
-  const cancellationsBy = (actorId: string) =>
-    database
-      .select()
-      .from(auditEvents)
-      .where(
-        sql`${auditEvents.eventType} = 'mcp.authorization_cancelled' and ${auditEvents.payload}->>'actor' = ${actorId}`,
-      );
+  const cancellationsBy = async (actorId: string) =>
+    (
+      await auditRows({
+        eventType: "mcp.authorization_cancelled",
+        targetId: `P${suite}`,
+      })
+    ).filter((row) => row.payload.actor === actorId);
 
   test("cancelling a live attempt files one mcp.authorization_cancelled row against the app", async () => {
     const actor = await person("audited");

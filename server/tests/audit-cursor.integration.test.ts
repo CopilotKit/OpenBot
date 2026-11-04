@@ -1,30 +1,30 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditReader } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
+import { seedAuditEvents, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 /**
- * What a hand-edited cursor does to the admin trail, asked of the database that parses it.
+ * What a hand-edited cursor does to the admin trail, asked of the trail that parses it.
  *
- * `audit-cursor.test.ts` pins the refusal itself and runs against a stub reader, which is the wrong
- * witness for this one: a stub takes any cursor at all, so the failure it cannot show is the only
- * failure there was. `audit_events.id` is a `uuid`, the cursor's `id` goes into
- * `lt(auditEvents.id, cursor.id)`, and an id that is not a uuid is PostgreSQL raising `invalid
- * input syntax for type uuid` from inside `createAuditReader.list` — past the route's
- * `AuditQueryError` catch, which knows only about the sentence `decodeCursor` throws, and out as a
- * 500 on a request whose only fault was a stale bookmark.
+ * `audit-cursor.test.ts` pins the refusal of cursors no page could issue and runs against a stub
+ * reader, which is the wrong witness for this one: a stub takes any cursor at all, so the failure it
+ * cannot show is the only failure there was. The trail is Intelligence's, and so is the cursor: it
+ * names the last row's moment and id, and Intelligence reads both. A cursor whose id is not a uuid,
+ * or whose `createdAt` is a number, used to reach PostgreSQL as `invalid input syntax for type uuid`
+ * or as a page from fifty years away, past the route's `AuditQueryError` catch and out as a 500 (or
+ * worse, a 200) on a request whose only fault was a stale bookmark.
  *
- * So this drives the real cursor through the real route over the real database, and asserts the
+ * So this drives the real cursor through the real route to the real Intelligence, and asserts the
  * STATUS CODE, because the status code is the whole difference between "you sent something I cannot
  * read" and "this deployment is broken".
  */
 
 const config = loadConfig({ ...testEnvironment() });
+useTestAuditTrail();
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
@@ -78,21 +78,79 @@ describe("a cursor the trail's own columns have to parse", () => {
     expect(response.status).toBe(400);
   });
 
-  test("a cursor the endpoint itself would issue still pages", async () => {
+  test("every shape of hand-edited cursor answers 400, never 500 or a page from the wrong end", async () => {
     /*
-     * THE LIMIT ON THE REFUSAL, against the reader that builds the query rather than a stub that
-     * records it: a uuid id and an ISO timestamp — which is exactly what `encodeCursor` writes out
-     * of a row — still reaches the database and answers a page.
+     * The shapes `audit-cursor.test.ts` used to refuse here, before any query: the trail's cursor is
+     * Intelligence's now, so these are refused by Intelligence, and must still leave as the same 400
+     * with the same sentence. A number for `createdAt` is the one that once answered 200 with a page
+     * from 1970.
      */
-    const response = await adminApp().request(
-      `http://openbot.local/api/admin/audit-events?cursor=${cursorOf({
+    const cases = [
+      ...[
+        "event-1",
+        "6f1b7f28-6b2d-4d1b-9a2a",
+        7,
+        true,
+        { value: "6f1b7f28-6b2d-4d1b-9a2a-1c0b4b2c8a11" },
+        ["6f1b7f28-6b2d-4d1b-9a2a-1c0b4b2c8a11"],
+      ].map((id) => ({ id, createdAt: "2026-08-13T12:00:00.000Z" })),
+      ...[
+        2020,
+        1_760_000_000_000,
+        { iso: "2026-08-13T12:00:00.000Z" },
+        ["2026-08-13T12:00:00.000Z"],
+        true,
+        null,
+      ].map((createdAt) => ({
+        id: "6f1b7f28-6b2d-4d1b-9a2a-1c0b4b2c8a11",
+        createdAt,
+      })),
+      // The shape this endpoint used to issue: a bookmark from before the trail moved.
+      {
         id: "6f1b7f28-6b2d-4d1b-9a2a-1c0b4b2c8a11",
         createdAt: "2026-08-13T12:00:00.000Z",
-      })}&limit=1`,
+      },
+    ];
+    for (const page of cases) {
+      const response = await adminApp().request(
+        `http://openbot.local/api/admin/audit-events?cursor=${cursorOf(page)}`,
+      );
+      expect(`${JSON.stringify(page)}: ${response.status}`).toBe(
+        `${JSON.stringify(page)}: 400`,
+      );
+      await expect(response.json()).resolves.toEqual({
+        error: "cursor must be a valid audit page cursor",
+      });
+    }
+  });
+
+  test("a cursor the endpoint itself issued still pages", async () => {
+    /*
+     * THE LIMIT ON THE REFUSAL, against the real trail rather than a stub that records it: the cursor
+     * the endpoint hands out reaches Intelligence and answers the next page.
+     */
+    const targetId = `cursor-issued-${crypto.randomUUID()}`;
+    await seedAuditEvents(
+      [1, 2].map(() => ({
+        eventType: "configuration.changed",
+        targetType: "audit_cursor_test",
+        targetId,
+      })),
+    );
+    const first = await adminApp().request(
+      `http://openbot.local/api/admin/audit-events?targetId=${targetId}&limit=1`,
+    );
+    expect(first.status).toBe(200);
+    const { nextCursor } = (await first.json()) as { nextCursor?: string };
+    expect(nextCursor).toEqual(expect.any(String));
+
+    const response = await adminApp().request(
+      `http://openbot.local/api/admin/audit-events?targetId=${targetId}&cursor=${nextCursor}&limit=1`,
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toHaveProperty("events");
+    const body = (await response.json()) as { events: unknown[] };
+    expect(body.events).toHaveLength(1);
   });
 });
 
@@ -107,20 +165,18 @@ describe("a cursor the trail's own columns have to parse", () => {
 describe("a cursor over rows written within one millisecond", () => {
   const reader = createAuditReader(database);
 
-  /** Rows in one statement, so they share `now()`, at the given microsecond offsets into its millisecond. */
+  /** Rows sharing one millisecond, at the given microsecond offsets into it, newest first back. */
   async function rowsAt(targetId: string, micros: number[]) {
-    return database
-      .insert(auditEvents)
-      .values(
-        micros.map((offset) => ({
-          eventType: "configuration.changed",
-          targetType: "audit_cursor_test",
-          targetId,
-          payload: {},
-          createdAt: sql`date_trunc('milliseconds', now()) + ${offset}::int * interval '1 microsecond'`,
-        })),
-      )
-      .returning({ id: auditEvents.id });
+    const millisecond = new Date().toISOString().slice(0, 23);
+    const ids = await seedAuditEvents(
+      micros.map((offset) => ({
+        eventType: "configuration.changed",
+        targetType: "audit_cursor_test",
+        targetId,
+        occurredAt: `${millisecond}${String(offset).padStart(3, "0")}Z`,
+      })),
+    );
+    return ids.map((id) => ({ id }));
   }
 
   async function walk(targetId: string) {

@@ -27,6 +27,7 @@ const fresh = () => {
 afterAll(async () => {
   for (const name of names)
     await database.delete(localLocks).where(eq(localLocks.name, name));
+  await database.$client.close();
 });
 
 describe("local locks", () => {

@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
@@ -18,7 +18,6 @@ import type {
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   brokeredConnections,
   mcpServers,
   mcpTools,
@@ -41,6 +40,7 @@ import {
   type BrokeredProbe,
   createPluginStore,
 } from "../src/plugins/store";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -514,6 +514,7 @@ for (const padded of PADDED_SCHEMES) {
  * a real row at that id, and a run that died before its cleanup would redden the file for everybody.
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 const suite = randomUUID().slice(0, 8);
 const person = `user_kinds_${suite}`;
@@ -1892,13 +1893,13 @@ describe("scheme classifier coverage", () => {
  * WHAT A ROW OF THE TRAIL IS ALLOWED TO CARRY, asserted against the trail itself rather than
  * against the return value of the method that wrote it.
  *
- * `audit_events` is append-only by trigger — `0000_schema.sql` refuses every UPDATE and DELETE on
- * it, and `0012_truncate_is_not_a_way_around_append_only.sql` closes the one way round that — it is
- * carried out of the deployment by an export, and it is kept for the whole retention window. So
- * everything below is about the one property those three facts make non-negotiable: whatever a row
- * carries cannot be tidied up afterwards, and a foreign string is exactly the thing nobody here
- * bounds. Read back out of the table rather than off a spy, because the claim is about what is
- * STORED: a payload capped on its way to a stub proves nothing about the row an auditor reads.
+ * The trail lives in Intelligence, which takes rows and never edits or deletes them; it is carried
+ * out of the deployment by an export, and it is kept for the whole retention window. So everything
+ * below is about the one property those three facts make non-negotiable: whatever a row carries
+ * cannot be tidied up afterwards, and a foreign string is exactly the thing nobody here bounds. Read
+ * back out of the trail (the outbox flushed, then Intelligence asked) rather than off a spy, because
+ * the claim is about what is STORED: a payload capped on its way to a stub proves nothing about the
+ * row an auditor reads.
  *
  * SCOPED TO THIS RUN'S OWN APPS. Every `targetId` below is a run-suffixed slug, so these reads name
  * rows this file wrote and nothing else — which matters more here than anywhere else in the file,
@@ -1910,17 +1911,9 @@ describe("what a brokered connection writes into the append-only trail", () => {
     eventType: string,
     toolkit: string,
   ): Promise<Record<string, unknown>[]> {
-    const rows = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, eventType),
-          eq(auditEvents.targetId, toolkit),
-        ),
-      )
-      .orderBy(asc(auditEvents.createdAt), asc(auditEvents.id));
-    return rows.map((row) => row.payload as Record<string, unknown>);
+    // The trail answers newest first; reversed, it is the old oldest-first order.
+    const rows = await auditRows({ eventType, targetId: toolkit });
+    return rows.reverse().map((row) => row.payload);
   }
 
   /**
@@ -1960,7 +1953,7 @@ describe("what a brokered connection writes into the append-only trail", () => {
 
     /*
      * EVERY SUCH ROW THIS RUN FILED, not the one this test just wrote, and the difference is not
-     * fussiness. Nothing may be deleted from this table, so the earlier probe cells' rows are still
+     * fussiness. Nothing may be deleted from the trail, so the earlier probe cells' rows are still
      * here under the same app — which makes "the row I just wrote" unidentifiable and makes the
      * whole-run claim the honest one to assert. It is also the stronger claim: no `unreachable` any
      * path of this file can produce exceeds the cap.
@@ -2011,8 +2004,8 @@ describe("what a brokered connection writes into the append-only trail", () => {
     });
 
     /*
-     * EVERY ROW EITHER WRITER FILED THIS RUN, for the reason the cap test reads them all: this
-     * table cannot be pruned, the earlier cells wrote their own rows under the same two apps, and
+     * EVERY ROW EITHER WRITER FILED THIS RUN, for the reason the cap test reads them all: the
+     * trail cannot be pruned, the earlier cells wrote their own rows under the same two apps, and
      * "the row I just wrote" is not a thing a reader of the trail can identify either. What a
      * querier actually needs is that NO row of this type is missing the key, which is what the
      * disagreement cost them.

@@ -7,12 +7,12 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { LLMock } from "@copilotkit/aimock";
 import {
   COMPONENT_GUIDANCE,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
-import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Observable } from "rxjs";
@@ -24,7 +24,6 @@ import type { ActionPolicy } from "../src/computer/policy";
 import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
 import { channels, credentials, users } from "../src/db/schema/core";
 import {
   brokeredConnections,
@@ -52,6 +51,7 @@ import { createProactiveStore } from "../src/proactive/store";
 import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import {
   changeCheckIn,
@@ -71,7 +71,12 @@ import { testScheduleClient, useTestSchedules } from "./support/schedules";
  * agent resolver building the real built-in Bot, the real turn runner and the real check-in engine.
  * The model is the only fake: `@copilotkit/aimock`, answering the built-in Bot's own requests the
  * way a model would, and recording what it was offered.
+ *
+ * What a check-in read, and what the dispatcher refused, is on the audit trail in Intelligence: the
+ * engine reads a run's reads from it, and so does one case below.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -793,16 +798,15 @@ describe("a check-in reads what the person connected, through the tools that say
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
     expect(vendorCalls).toEqual([]);
-    const [refusal] = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.call_rejected"),
-          eq(auditEvents.targetId, ref(NOTES, notionDigest)),
-          sql`${auditEvents.payload} ->> 'bot' = ${unconnected}`,
-        ),
-      );
+    // Oldest first, as the rows were written; the trail answers newest first.
+    const [refusal] = (
+      await auditRows({
+        eventType: "mcp.call_rejected",
+        targetId: ref(NOTES, notionDigest),
+      })
+    )
+      .reverse()
+      .filter((row) => row.payload.bot === unconnected);
     expect(refusal?.payload).toMatchObject({ refusal: "check_in_not_a_read" });
   });
 

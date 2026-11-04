@@ -171,7 +171,7 @@ describe("pruning the check-in ledger", () => {
     await run("old", 45, "quiet");
     await ping("older", 60);
     await ping("newest", 40);
-    const sweeps = startRetentionSweeps(databaseUrl, undefined, undefined, {
+    const sweeps = startRetentionSweeps(undefined, {
       firstRunMs: 10,
       intervalMs: 3_600_000,
       proactive: store,

@@ -11,10 +11,11 @@ import {
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
-import { eq } from "drizzle-orm";
+import { isNull, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import postgres from "postgres";
 import { createAuditStore } from "../src/audit";
+import { createAuditDrainer } from "../src/audit-trail/drainer";
 import {
   createDevRequireUser,
   DEV_ACTOR,
@@ -24,7 +25,7 @@ import type { AppVariables } from "../src/auth/guards";
 import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
 import {
-  auditEvents,
+  auditOutbox,
   brokeredConnections,
   brokeredIdentities,
   mcpServers,
@@ -37,6 +38,7 @@ import { createPluginRoutes } from "../src/plugins/routes";
 import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { seedPeople } from "./support/people";
@@ -706,6 +708,43 @@ const rowsIn = (database: Database) =>
     })
     .from(brokeredConnections);
 
+/** The ids of every record a deployment's outbox has carried to Intelligence, and the first moment. */
+const carried = new WeakMap<Database, { ids: Set<string>; since: number }>();
+
+/**
+ * One deployment's own trail for one event type, OLDEST FIRST, as Intelligence holds it.
+ *
+ * Each deployment here has a database of its own, and so an outbox of its own, which the test trail
+ * (`support/audit.ts`, over the shared test database) never drains. So it is carried here by the
+ * server's own drainer over that database, and read back from Intelligence by the ids it carried.
+ * The ids are what make the rows this deployment's: Intelligence's trail is shared by every run and
+ * every file, and an app named Gmail, a `dev-local-user` and this file's Bot are in every run of it.
+ */
+async function trailOf(database: Database, eventType: string) {
+  const sent = carried.get(database) ?? { ids: new Set(), since: Date.now() };
+  carried.set(database, sent);
+  const waiting = await database
+    .select({
+      id: sql<string>`${auditOutbox.id}::text`,
+      occurredAt: auditOutbox.occurredAt,
+    })
+    .from(auditOutbox)
+    .where(isNull(auditOutbox.refusedAt));
+  for (const row of waiting) {
+    sent.ids.add(row.id);
+    sent.since = Math.min(sent.since, row.occurredAt.getTime());
+  }
+  const drained = await createAuditDrainer({
+    database,
+    client: useTestAuditTrail().client,
+  }).flush({ waitMs: 15_000, budgetMs: 60_000 });
+  if (drained.busy) throw new Error("the deployment's outbox stayed busy");
+  return (await auditRows({ eventType, from: new Date(sent.since - 1_000) }))
+    .filter((row) => sent.ids.has(row.id))
+    .reverse()
+    .map((row) => ({ payload: row.payload }));
+}
+
 /** The browser coming back from Arcade to the verifier, and where it is sent on to. */
 async function returnFrom(
   deployment: Deployment,
@@ -1069,11 +1108,7 @@ describe("Connect on an Arcade app", () => {
     expect(
       await returnFrom(deployment, authorizationUrl, "me@example.test"),
     ).toBe(`${APP_URL}/connections/${ROW}`);
-    const filed = await deployment.database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "mcp.account_connected"))
-      .orderBy(auditEvents.createdAt);
+    const filed = await trailOf(deployment.database, "mcp.account_connected");
     expect(filed).toMatchObject([
       { payload: { server: TOOLKIT, action: READ, holder: "person" } },
       {
@@ -1362,10 +1397,7 @@ describe("a Bot's call on an Arcade grant that is gone", () => {
     });
     // The row went with it, so every screen says not connected, and the trail says why.
     expect(await rowsIn(deployment.database)).toEqual([]);
-    const failed = await deployment.database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "mcp.call_failed"));
+    const failed = await trailOf(deployment.database, "mcp.call_failed");
     expect(failed).toMatchObject([
       {
         payload: {

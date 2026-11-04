@@ -9,7 +9,6 @@ import type {
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
-  auditEvents,
   brokeredConnections,
   mcpServers,
   mcpTools,
@@ -25,6 +24,7 @@ import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -61,6 +61,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 const suite = randomUUID().slice(0, 8);
 /** The app: its `mcp_servers.id`, and the slug in its url, which is what a connection is keyed on. */
@@ -262,7 +263,7 @@ const enabledId = `composio-${enabledToolkit}`;
 /**
  * The app somebody CONNECTS TWICE, which is the only shape that can tell a first key from a second.
  *
- * Its own name rather than {@link enabledToolkit}'s, because `audit_events` is append-only and no
+ * Its own name rather than {@link enabledToolkit}'s, because the audit trail is append-only and no
  * cleanup in this file can reach it: the test below that asserts ONE `mcp.account_connected` row
  * under that app would be reading this test's rows too, and the two would pass or fail on whichever
  * order the runner happened to pick.
@@ -276,7 +277,7 @@ const rekeyedId = `composio-${rekeyedToolkit}`;
  * Its own name rather than {@link enabledToolkit}'s, for {@link rekeyedToolkit}'s reason and not a
  * different one. The disconnect test below connects with a key FOR REAL, so it files an
  * `mcp.account_connected` row of its own — and the secrecy test, which owns {@link enabledToolkit},
- * asserts there is EXACTLY ONE such row under the app it connects. `audit_events` is append-only
+ * asserts there is EXACTLY ONE such row under the app it connects. The audit trail is append-only
  * and no cleanup here can reach it, so sharing a slug had each of the two reading the other's row,
  * and the pair passed or failed on whichever order the runner happened to walk them in. It passed,
  * on declaration order alone; moving the disconnect test above the secrecy test answered
@@ -371,7 +372,7 @@ const consentId = `composio-${consentToolkit}`;
  * FOUR APPS NOBODY ELSE IN THIS FILE CONNECTS, one per test about a check that reached no verdict.
  *
  * A slug of its own for each, on {@link enabledToolkit}'s reasoning taken one step further. Those
- * tests assert on `audit_events`, which is append-only and which nothing here can sweep — so a
+ * tests assert on the audit trail, which is append-only and which nothing here can sweep — so a
  * count or a single-row read under a shared slug is the runner's answer rather than the
  * implementation's, and it reads as passing until somebody adds a test above. Each of these is
  * connected by exactly one test, so "one row under this app" is that test's own act.
@@ -430,8 +431,8 @@ const admin = "admin@openbot.local";
  * THE SECRET A PERSON TYPES, which the test below looks for everywhere it must not be.
  *
  * A RUN-UNIQUE SPELLING, for the same reason every id here carries one and for one more. The
- * assertions about it are ABSENCE assertions read out of two shared tables, and `audit_events` is
- * append-only — nothing in this file can sweep it — so a fixed spelling would have one run's rows
+ * assertions about it are ABSENCE assertions read out of two shared stores, and the audit trail is
+ * append-only (nothing in this file can sweep it), so a fixed spelling would have one run's rows
  * answering another run's question. With the suffix, "this string is nowhere" is a sentence about
  * rows this run wrote.
  *
@@ -497,18 +498,16 @@ const credentialsStub: CredentialSecretReader & CredentialStore = {
  * A store over the real database, keeping every event it writes.
  *
  * Recorded ALONGSIDE the real insert rather than instead of it: the payloads are what these tests
- * assert about, and a store whose audit insert never touched the database would not be exercising
- * the one it has.
+ * assert about, and a store whose audit insert never reached the trail would not be exercising the
+ * one it has. The real insert writes the outbox, and the drainer carries it to Intelligence, where
+ * these tests read it back.
  *
  * AND THOSE ROWS OUTLIVE THE RUN, WHICH {@link clean} CANNOT CHANGE. Every other table this file
- * touches is swept on the way out; `audit_events` is not, and the omission is the database's rule
- * rather than an oversight here. The trail is append-only, enforced by a trigger rather than by the
- * application (`0007_audit_retention_window.sql`): a plain `delete` raises "Audit events are
- * append-only", and the one exemption — a session that sets `openbot.audit_retention_days` to a
- * positive whole number — still refuses any row younger than that many days. The rows this file
- * writes are seconds old at the moment it would sweep them, so NO setting makes them deletable;
- * `3650` is refused for the same reason `1` is. A cleanup here would be a statement that always
- * throws.
+ * touches is swept on the way out; the audit trail is not, and the omission is the trail's rule
+ * rather than an oversight here. The trail lives in Intelligence, which takes rows and never edits
+ * or deletes them on request; only its retention sweep removes a row, and only once it is older
+ * than the deployment's window. The rows this file writes are seconds old, so nothing this file
+ * could ask would remove them. A cleanup here would be a request that cannot be made.
  *
  * What that leaves is bounded rather than unbounded. Every row this file writes is keyed on an id
  * carrying this run's suffix — `targetId` is {@link toolkit}, {@link secondToolkit},
@@ -3725,11 +3724,11 @@ test("a duplicate row recording no-auth does not take the gate off an app", asyn
  * their own, and the whole design of it is that the credential travels in one direction: off the
  * request, into `connectWithFields`, out to Composio. Every other participant here is a long-lived,
  * widely-readable record. `composio_connections` is read by offboarding, by disconnect and by the
- * gate on every brokered call; `audit_events` is append-only by trigger, exported, and kept for as
- * long as a deployment's retention window says — so a key that lands in either is not a leak
+ * gate on every brokered call; the audit trail is append-only, held in Intelligence, exported, and
+ * kept for as long as a deployment's retention window says — so a key that lands in either is not a leak
  * somebody can clean up afterwards, it is a leak with a schedule.
  *
- * WHICH IS WHY THIS ASSERTS ABSENCE OUT OF THE TABLES RATHER THAN OFF THE RETURN VALUE. A method
+ * WHICH IS WHY THIS ASSERTS ABSENCE OUT OF THE RECORDS RATHER THAN OFF THE RETURN VALUE. A method
  * can be read for what it puts in a payload; what a reviewer cannot read is what some later writer
  * on the same path adds. Stringifying the rows themselves is the assertion that survives that, and
  * it is not saved by the redactor: neither `values` nor `generic_api_key` is on `sensitiveKeys`, so
@@ -3775,10 +3774,10 @@ test("the values reach Composio and nothing else", async () => {
   expect(schemesSent).toEqual(["API_KEY"]);
 
   /*
-   * THE TRAIL, READ OUT OF THE TABLE RATHER THAN OFF THE RECORDING STORE. The rows are what a
+   * THE TRAIL, READ OUT OF INTELLIGENCE RATHER THAN OFF THE RECORDING STORE. The rows are what a
    * reader of the trail will actually see — after the redactor, after the insert — and this file's
    * `auditStore` keeps a copy of the input beside it, not instead of it. Narrowed to this app
-   * because `audit_events` is append-only: no cleanup here can reach it, so the other tests in this
+   * because the trail is append-only: no cleanup here can reach it, so the other tests in this
    * run have already written `mcp.account_connected` rows under {@link toolkit}.
    *
    * AND THE ONE IS AN ASSERTION RATHER THAN AN ACCIDENT OF ORDER, which it has to be said out loud
@@ -3789,15 +3788,10 @@ test("the values reach Composio and nothing else", async () => {
    * runner's answer rather than the implementation's, and it reads as passing until somebody moves
    * a test.
    */
-  const trail = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_connected"),
-        eq(auditEvents.targetId, enabledToolkit),
-      ),
-    );
+  const trail = await auditRows({
+    eventType: "mcp.account_connected",
+    targetId: enabledToolkit,
+  });
   expect(trail).toHaveLength(1);
   expect(trail[0].payload).toMatchObject({
     actor: askerId,
@@ -5036,15 +5030,10 @@ test("a connect whose check could not reach the vendor keeps the account and acc
   // AND THE TRAIL SAYS WHICH OF THE TWO NULLS THIS IS, which the row itself cannot: an app that
   // publishes nothing to try and a check that could not be made read the same on the row, and only
   // here is the second one named.
-  const trail = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.connection_verified"),
-        eq(auditEvents.targetId, outageToolkit),
-      ),
-    );
+  const trail = await auditRows({
+    eventType: "mcp.connection_verified",
+    targetId: outageToolkit,
+  });
   expect(trail).toHaveLength(1);
   expect(trail[0].payload).toMatchObject({
     actor: askerId,
@@ -5122,15 +5111,10 @@ test("a re-check that could not reach the vendor leaves the last check's record 
   // is not filed for it.
   expect(reached).toEqual([probeAction]);
   expect(
-    await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.connection_verified"),
-          eq(auditEvents.targetId, recheckedToolkit),
-        ),
-      ),
+    await auditRows({
+      eventType: "mcp.connection_verified",
+      targetId: recheckedToolkit,
+    }),
   ).toEqual([]);
 });
 

@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
-import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -22,7 +22,6 @@ import {
 } from "../src/credentials";
 import { createDatabase, type Database } from "../src/db/client";
 import {
-  auditEvents,
   brokeredConnections,
   credentials as credentialRows,
   credentials,
@@ -64,6 +63,7 @@ import {
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import fileActions from "./fixtures/composio-file-actions.json";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -77,6 +77,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 const suite = randomUUID().slice(0, 8);
 const holderId = `agent_plugin_holder_${suite}`;
@@ -172,49 +173,53 @@ const store = createPluginStore({
 /**
  * When this run began, by the DATABASE's clock, so every audit query can exclude what came before.
  *
- * The trail is the one table this file cannot tidy up after itself: `audit_events` is append-only,
- * and 0012 closed the last way around that, so every row every previous run wrote is still there and
- * still matches. The refusals are recorded against `google-drive/search_files` and named by rules
+ * The trail is the one record this file cannot tidy up after itself: it lives in Intelligence, which
+ * keeps every row and deletes none on request, so every row every previous run wrote is still there
+ * and still matches. The refusals are recorded against `google-drive/search_files` and named by rules
  * about `google-drive` — production spellings, forced for the same reason the fixtures are — so a
  * query narrowed only by target and rule matches nine hundred rows this run had nothing to do with,
  * and an assertion that one exists is answered by a run that finished yesterday. That is a test
  * which cannot fail: deleting the code that writes the row would leave it green.
  *
  * Postgres's clock rather than this process's, because the two are not the same clock and the
- * comparison happens against a column the server stamps.
+ * comparison happens against the moment the database stamps on each outbox row, which is the moment
+ * Intelligence keeps.
  *
  * Read through {@link sinceThisRun}, which refuses rather than defaulting: a bound of "the beginning
  * of time" is the unscoped query back again, silently.
  */
 let runStartedAt: Date | null = null;
 
-function sinceThisRun() {
+/** The `from` bound for {@link auditRows}: only rows written after this run began. */
+function sinceThisRun(): Date {
   if (!runStartedAt) {
     throw new Error(
       "the run's start was never recorded, so no audit query can be narrowed to it",
     );
   }
-  return gte(auditEvents.createdAt, runStartedAt);
+  return runStartedAt;
 }
 
+/**
+ * This run's rows under one tool for one Bot and one actor, oldest first. The trail filters by
+ * target and moment; the Bot and the actor live in the payload, so they are checked here.
+ */
 async function auditRowsFor(targetId: string, botId: string, actorId: string) {
-  return database
-    .select({
-      eventType: auditEvents.eventType,
-      payload: auditEvents.payload,
-      initiatorKind: auditEvents.initiatorKind,
-      initiatorId: auditEvents.initiatorId,
+  return (
+    await auditRows({
+      targetType: "mcp_tool",
+      targetId,
+      from: sinceThisRun(),
     })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.targetType, "mcp_tool"),
-        eq(auditEvents.targetId, targetId),
-        sinceThisRun(),
-        eq(sql<string>`${auditEvents.payload} ->> 'bot'`, botId),
-        eq(sql<string>`${auditEvents.payload} ->> 'actor'`, actorId),
-      ),
-    );
+  )
+    .filter((row) => row.payload.bot === botId && row.payload.actor === actorId)
+    .reverse()
+    .map((row) => ({
+      eventType: row.eventType,
+      payload: row.payload,
+      initiatorKind: row.initiatorKind,
+      initiatorId: row.initiatorId,
+    }));
 }
 
 /**
@@ -898,25 +903,17 @@ describe("removing an MCP server", () => {
       .from(mcpServers)
       .where(eq(mcpServers.id, removalServerId));
     expect(row).toBeUndefined();
-    const audit = await database
-      .select({
-        eventType: auditEvents.eventType,
-        payload: auditEvents.payload,
-      })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.targetType, "credential"),
-          eq(auditEvents.targetId, credentialId),
-        ),
-      );
+    const audit = await auditRows({
+      targetType: "credential",
+      targetId: credentialId,
+    });
     expect(audit).toHaveLength(1);
     expect(audit[0]?.eventType).toBe("credential.revoked");
     expect((audit[0]?.payload as { reason?: string })?.reason).toBe(
       "mcp_server_removed",
     );
-    // Audit is append-only in Postgres; leaving the row is fine because
-    // `credentialId` is suite-scoped, so re-runs never collide.
+    // The trail is append-only in Intelligence; leaving the row is fine because
+    // `credentialId` is unique to this run, so re-runs never collide.
   });
 
   /**
@@ -983,20 +980,17 @@ describe("removing an MCP server", () => {
       expect(row?.revokedAt).not.toBeNull();
 
       // And the trail says whose access ended and why, which is the row an auditor reaches for.
-      const trail = await database
-        .select({
-          eventType: auditEvents.eventType,
-          owner: sql<string>`payload ->> 'owner'`,
-          reason: sql<string>`payload ->> 'reason'`,
+      const trail = (
+        await auditRows({
+          targetType: "mcp_server",
+          targetId: removalServerId,
+          eventType: "mcp.account_disconnected",
         })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.targetType, "mcp_server"),
-            eq(auditEvents.targetId, removalServerId),
-            eq(auditEvents.eventType, "mcp.account_disconnected"),
-          ),
-        );
+      ).map((row) => ({
+        eventType: row.eventType,
+        owner: row.payload.owner,
+        reason: row.payload.reason,
+      }));
       expect(trail).toHaveLength(1);
       expect(trail[0]?.owner).toBe(connectedUserId);
       expect(trail[0]?.reason).toBe("mcp_server_removed");
@@ -1067,15 +1061,12 @@ describe("removing an MCP server", () => {
     // No second revocation in the trail either: a row saying access ended twice is a row an
     // auditor has to reconcile against nothing having happened.
     expect(
-      await database
-        .select({ id: auditEvents.id })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.eventType, "credential.revoked"),
-            eq(auditEvents.targetId, credentialId),
-          ),
-        ),
+      (
+        await auditRows({
+          eventType: "credential.revoked",
+          targetId: credentialId,
+        })
+      ).map((row) => ({ id: row.id })),
     ).toEqual([]);
   });
 
@@ -1109,28 +1100,28 @@ describe("the trail can be read by a second reader", () => {
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await database
-      .select({
-        bot: sql<string>`payload ->> 'bot'`,
-        server: sql<string>`payload ->> 'server'`,
-        tool: sql<string>`payload ->> 'tool'`,
-        refusal: sql<string>`payload ->> 'refusal'`,
+    const rows = (
+      await auditRows({
+        targetType: "mcp_tool",
+        eventType: "mcp.call_rejected",
+        targetId: ref,
+        from: sinceThisRun(),
       })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.targetType, "mcp_tool"),
-          eq(auditEvents.eventType, "mcp.call_rejected"),
-          eq(auditEvents.targetId, ref),
-          sinceThisRun(),
-          // The catalogue ref is shared; only this call used this actor and suite-owned Bot.
-          eq(sql<string>`payload ->> 'actor'`, actorId),
-          eq(sql<string>`payload ->> 'bot'`, strangerId),
-        ),
-      );
+    )
+      // The catalogue ref is shared; only this call used this actor and suite-owned Bot.
+      .filter(
+        (row) =>
+          row.payload.actor === actorId && row.payload.bot === strangerId,
+      )
+      .map((row) => ({
+        bot: row.payload.bot,
+        server: row.payload.server,
+        tool: row.payload.tool,
+        refusal: row.payload.refusal,
+      }));
 
-    // Asserted in SQL rather than through the application, because the stored payload shape is the
-    // property under test.
+    // Asserted on the stored row as the trail answers it rather than through the application,
+    // because the stored payload shape is the property under test.
     expect(rows).toHaveLength(1);
     const [row] = rows;
     expect(row?.server).toBe(serverId);
@@ -1445,17 +1436,13 @@ describe("refresh token rotation", () => {
   /** How many times this person is recorded as having connected their account. */
   async function connectedRows() {
     return (
-      await database
-        .select({ actor: sql<string>`payload ->> 'actor'` })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.eventType, "mcp.account_connected"),
-            eq(auditEvents.targetId, rotationServerId),
-            sql`payload ->> 'actor' = ${rotationUserId}`,
-          ),
-        )
-    ).length;
+      await auditRows({
+        eventType: "mcp.account_connected",
+        targetId: rotationServerId,
+        // `notion` is a fixed spelling; the actor below is this run's, so no earlier row is lost.
+        from: sinceThisRun(),
+      })
+    ).filter((row) => row.payload.actor === rotationUserId).length;
   }
 
   /** Waiting for something the other call does, rather than for a duration. */
@@ -1837,7 +1824,7 @@ describe("refresh token rotation", () => {
    * A stored OAuth client whose decrypted bytes are not a client at all.
    *
    * CRITERION: neither the decrypted plaintext nor a parser's account of it may reach
-   * `audit_events` or `mcp_servers.last_error`. REASON: that plaintext IS the deployment's OAuth
+   * the audit trail or `mcp_servers.last_error`. REASON: that plaintext IS the deployment's OAuth
    * client secret, and `JSON.parse` reports failure by quoting the input it choked on — so an
    * unguarded parse writes a fragment of the secret into two durable stores, both of which the
    * Plugins page draws for an administrator.
@@ -2500,20 +2487,17 @@ describe("a dynamic client the vendor has evicted", () => {
 
   /** What the trail says about clients registered for this server, and by whom. */
   async function registeredRows() {
-    return database
-      .select({
-        actor: sql<string>`payload ->> 'actor'`,
-        clientId: sql<string>`payload ->> 'clientId'`,
+    return (
+      await auditRows({
+        eventType: "mcp.oauth_client_registered",
+        targetId: dynamicServerId,
+        // `notion` and `dyn-1` are fixed spellings, so without this the count is every run's.
+        from: sinceThisRun(),
       })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.oauth_client_registered"),
-          eq(auditEvents.targetId, dynamicServerId),
-          // `notion` and `dyn-1` are fixed spellings, so without this the count is every run's.
-          sinceThisRun(),
-        ),
-      );
+    ).map((row) => ({
+      actor: row.payload.actor as string,
+      clientId: row.payload.clientId as string,
+    }));
   }
 
   /**
@@ -2861,11 +2845,13 @@ describe("a dynamic client the vendor has evicted", () => {
     issue = () => {
       throw vendorFailure;
     };
+    // Under this run's person: the trail is shared by every run.
     const readFailures = () =>
-      database
-        .select()
-        .from(auditEvents)
-        .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
+      auditRows({
+        eventType: "mcp.oauth_client_read_failed",
+        actorUserId: dynamicUserId,
+        targetId: dynamicServerId,
+      });
     const before = await readFailures();
     const routes = createPluginRoutes(
       dynamicStore,
@@ -2912,10 +2898,12 @@ describe("a dynamic client the vendor has evicted", () => {
       registrations.length = 0;
       const sentinel = "private-client-secret-must-not-escape";
       const audit = createAuditStore(database);
-      const beforeEvents = await database
-        .select()
-        .from(auditEvents)
-        .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
+      // Under this run's person: the trail is shared by every run.
+      const beforeEvents = await auditRows({
+        eventType: "mcp.oauth_client_read_failed",
+        actorUserId: dynamicUserId,
+        targetId: dynamicServerId,
+      });
       const [before] = await database
         .select({ credentialId: mcpServers.credentialId })
         .from(mcpServers)
@@ -2990,10 +2978,11 @@ describe("a dynamic client the vendor has evicted", () => {
           },
         ]);
         expect(said.join("\n")).not.toContain(sentinel);
-        const events = await database
-          .select()
-          .from(auditEvents)
-          .where(eq(auditEvents.eventType, "mcp.oauth_client_read_failed"));
+        const events = await auditRows({
+          eventType: "mcp.oauth_client_read_failed",
+          actorUserId: dynamicUserId,
+          targetId: dynamicServerId,
+        });
         const written = events.filter(
           (event) => !beforeEvents.some((before) => before.id === event.id),
         );
@@ -3325,25 +3314,21 @@ describe("a dynamic client the vendor has evicted", () => {
     // Read after the restore, because the audit trail is what the refresh leaves that the restore
     // does not take back.
     const named = (
-      await database
-        .select({ payload: auditEvents.payload })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.eventType, "configuration.changed"),
-            eq(auditEvents.targetId, dynamicServerId),
-            sql`payload ->> 'change' = 'unlisted_tools_advertised'`,
-            /*
-             * `named` is what THIS refresh recorded, not the union over every refresh there has
-             * ever been. `notion` and `notion-create-pages` are both fixed spellings, so both
-             * assertions below were being answered partly by rows older code wrote: the negative
-             * one would report today's classification as wrong on the strength of a row from
-             * before the write list covered that name.
-             */
-            sinceThisRun(),
-          ),
-        )
-    ).flatMap((row) => (row.payload as { tools?: string[] }).tools ?? []);
+      await auditRows({
+        eventType: "configuration.changed",
+        targetId: dynamicServerId,
+        /*
+         * `named` is what THIS refresh recorded, not the union over every refresh there has
+         * ever been. `notion` and `notion-create-pages` are both fixed spellings, so both
+         * assertions below were being answered partly by rows older code wrote: the negative
+         * one would report today's classification as wrong on the strength of a row from
+         * before the write list covered that name.
+         */
+        from: sinceThisRun(),
+      })
+    )
+      .filter((row) => row.payload.change === "unlisted_tools_advertised")
+      .flatMap((row) => (row.payload as { tools?: string[] }).tools ?? []);
 
     /*
      * Notion names its reads, so the tool neither list names is a write, offered to nobody as a
@@ -3839,16 +3824,16 @@ describe("a dynamic client the vendor has evicted", () => {
      * ordering finer than the millisecond these rows are written in.
      */
     async function failureRows() {
-      return database
-        .select({ id: auditEvents.id, payload: auditEvents.payload })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.eventType, "mcp.call_failed"),
-            eq(auditEvents.targetType, "mcp_tool"),
-            eq(auditEvents.targetId, dynamicRef),
-          ),
-        );
+      return (
+        await auditRows({
+          eventType: "mcp.call_failed",
+          targetType: "mcp_tool",
+          targetId: dynamicRef,
+          // A fixed spelling, so every earlier run's rows are under it too; the ids separate this
+          // call's from this run's, and nothing older can be this call's.
+          from: sinceThisRun(),
+        })
+      ).map((row) => ({ id: row.id, payload: row.payload }));
     }
 
     /** Which credential the server row names, which is the thing a re-registration replaces. */
@@ -4478,9 +4463,9 @@ async function freshDatabase(): Promise<Database> {
  * A store over the clean database, recording every event it writes.
  *
  * `recorded()` alongside the real insert rather than instead of it: the payload is what these tests
- * assert about, and reading it back out of `audit_events` would assert what the column round-trips
+ * assert about, and reading it back out of the trail would assert what Intelligence round-trips
  * rather than what the store said. The row is still written, because a store whose audit insert
- * never touched the database would not be exercising the one it has.
+ * never reached the outbox would not be exercising the one it has.
  *
  * NO `callVendor`. Whose account a call runs as and which transport a row resolves to are the
  * properties under test, and both are decided on the way to the vendor — so the real path has to
@@ -6958,7 +6943,7 @@ describe("a query of this deployment's own that failed", () => {
     /*
      * The reason, because "is this connector working" is asked of this row and the driver's
      * complaint answers it. Not the statement and not the values bound to it: on this path those
-     * are credential ids, user ids and server ids, and `audit_events` is read by an operator and
+     * are credential ids, user ids and server ids, and the audit trail is read by an operator and
      * carried out of the deployment by an export.
      */
     expect(failure).toContain("canceling statement due to statement timeout");

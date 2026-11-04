@@ -15,8 +15,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { createAuditReader } from "../audit";
 import type { Database } from "../db/client";
-import { auditEvents, users } from "../db/schema/core";
+import { users } from "../db/schema/core";
 import { botLifecycle } from "../db/schema/lifecycle";
 import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
@@ -476,6 +477,27 @@ export type NewSuggestion = Omit<
 >;
 
 export function createProactiveStore(database: Database) {
+  const trail = createAuditReader(database);
+  /**
+   * One run's audit rows of one type from the last day, up to 200, read from the trail in
+   * Intelligence: the run is the initiator its calls were recorded under.
+   */
+  async function runEvents(runId: string, eventType: string) {
+    const rows: Awaited<ReturnType<typeof trail.list>>["events"] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await trail.list({
+        limit: 100,
+        eventType,
+        initiatorId: `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
+        from: new Date(Date.now() - 86_400_000).toISOString(),
+        ...(cursor ? { cursor } : {}),
+      });
+      rows.push(...page.events);
+      cursor = page.nextCursor;
+    } while (cursor && rows.length < 200);
+    return rows.slice(0, 200);
+  }
   async function get(owner: string, id: string): Promise<ProactiveSetting> {
     const record = await liveSetting(id);
     if (!record || record.ownerUserId !== owner)
@@ -651,22 +673,11 @@ export function createProactiveStore(database: Database) {
     },
     /** Successful connector reads this proactive run made, from the audit trail. */
     async readsFor(runId: string): Promise<ProactiveRead[]> {
-      const rows = await database
-        .select({ ref: auditEvents.targetId, at: auditEvents.createdAt })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(
-              auditEvents.initiatorId,
-              `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
-            ),
-            eq(auditEvents.eventType, "mcp.call_succeeded"),
-            gte(auditEvents.createdAt, new Date(Date.now() - 86_400_000)),
-          ),
-        )
-        .limit(200);
+      const rows = await runEvents(runId, "mcp.call_succeeded");
       return rows.flatMap((row) =>
-        row.ref ? [{ ref: row.ref, at: row.at }] : [],
+        row.targetId
+          ? [{ ref: row.targetId, at: new Date(row.createdAt) }]
+          : [],
       );
     },
     /**
@@ -675,21 +686,10 @@ export function createProactiveStore(database: Database) {
      * deployment refused before it left (a write a check-in may not make) is not one of them.
      */
     async failedReadsFor(runId: string): Promise<string[]> {
-      const rows = await database
-        .selectDistinct({ ref: auditEvents.targetId })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(
-              auditEvents.initiatorId,
-              `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
-            ),
-            eq(auditEvents.eventType, "mcp.call_failed"),
-            gte(auditEvents.createdAt, new Date(Date.now() - 86_400_000)),
-          ),
-        )
-        .limit(200);
-      return rows.flatMap((row) => (row.ref ? [row.ref] : []));
+      const rows = await runEvents(runId, "mcp.call_failed");
+      return [
+        ...new Set(rows.flatMap((row) => (row.targetId ? [row.targetId] : []))),
+      ];
     },
     async countSuggestions(runId: string) {
       return (await client().all("check-in-suggestions", { runId })).items

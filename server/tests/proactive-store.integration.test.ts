@@ -17,10 +17,14 @@ import {
   ProactiveRefusedError,
 } from "../src/proactive/types";
 import { ScheduleError } from "../src/schedules/client";
+import { useTestAuditTrail } from "./support/audit";
 import { removeBots, seedBot } from "./support/bots";
 import { makeDue, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testScheduleClient, useTestSchedules } from "./support/schedules";
+
+// A run's reads are its audit rows, which live in Intelligence: `readsFor` reads the trail there.
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `proactive-${randomUUID()}`;

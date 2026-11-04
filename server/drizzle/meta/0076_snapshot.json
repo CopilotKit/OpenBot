@@ -1,5 +1,5 @@
 {
-  "id": "a19723bf-5cb6-4144-bf03-0b839009db4e",
+  "id": "e5985cc8-539d-43da-9cca-3df33c38ed34",
   "prevId": "13bc559a-3ce1-40e4-8d71-95002e38cba6",
   "version": "7",
   "dialect": "postgresql",
@@ -2003,6 +2003,51 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.intelligence_copy_progress": {
+      "name": "intelligence_copy_progress",
+      "schema": "",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "after_created_at": {
+          "name": "after_created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "after_id": {
+          "name": "after_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copied": {
+          "name": "copied",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.routine_runs": {
       "name": "routine_runs",
       "schema": "",
@@ -3853,6 +3898,109 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.audit_outbox": {
+      "name": "audit_outbox",
+      "schema": "",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "record": {
+          "name": "record",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refused_at": {
+          "name": "refused_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refusal": {
+          "name": "refusal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "audit_outbox_pending_idx": {
+          "name": "audit_outbox_pending_idx",
+          "columns": [
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"audit_outbox\".\"refused_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "audit_outbox_kind_check": {
+          "name": "audit_outbox_kind_check",
+          "value": "\"audit_outbox\".\"kind\" IN ('event', 'action', 'usage')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.computer_activity": {
+      "name": "computer_activity",
+      "schema": "",
+      "columns": {
+        "computer": {
+          "name": "computer",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_active_at": {
+          "name": "last_active_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -7017,19 +7165,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "bot_tasks_suggestion_id_proactive_suggestions_id_fk": {
-          "name": "bot_tasks_suggestion_id_proactive_suggestions_id_fk",
-          "tableFrom": "bot_tasks",
-          "tableTo": "proactive_suggestions",
-          "columnsFrom": [
-            "suggestion_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
