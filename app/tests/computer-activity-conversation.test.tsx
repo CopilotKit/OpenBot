@@ -681,6 +681,11 @@ test("a command the person declines shows as declined in their words, not in the
     await pane.findByText("rm -rf build", {}, { timeout: 3000 }),
   ).toBeTruthy();
   expect(pane.getByText("You declined it.")).toBeTruthy();
+  // Said as declined, not as what it would have done: "Ran" read as if it had run.
+  const [declinedEntry] = entries(view);
+  if (declinedEntry === undefined)
+    throw new Error("The declined command was not listed.");
+  expect(declinedEntry.startsWith("Declined")).toBe(true);
   // The sentence written to the model never reaches the person, in the pane or in the transcript.
   expect(view.container.textContent).not.toContain("Do not try this action");
   expect(entries(view)).toHaveLength(1);
@@ -941,6 +946,11 @@ test("a command the person declines on the Bot's own approval card is listed onc
     await pane.findByText("rm -f notes.md", {}, { timeout: 3000 }),
   ).toBeTruthy();
   expect(pane.getByText("You declined it.")).toBeTruthy();
+  // Said as declined, not as what it would have done: "Ran" read as if it had run.
+  const [declinedEntry] = entries(view);
+  if (declinedEntry === undefined)
+    throw new Error("The declined command was not listed.");
+  expect(declinedEntry.startsWith("Declined")).toBe(true);
   expect(entries(view)).toHaveLength(1);
   // Declined here, so it says when.
   expect(
@@ -949,8 +959,10 @@ test("a command the person declines on the Bot's own approval card is listed onc
   // Nothing reached the computer or its gate.
   expect(gated).toEqual([]);
   expect(direct.filter((route) => route === "/exec")).toEqual([]);
-  // The card says the same: declined, the command shown once.
-  expect(view.getByText("Declined")).toBeTruthy();
+  // The card says the same: declined, the command shown once. Activity's line says it too, so the
+  // word appears twice, once on the card and once in the pane.
+  expect(view.getAllByText("Declined")).toHaveLength(2);
+  expect(activityOf(view).getAllByText("Declined")).toHaveLength(1);
   expect(
     view.container.querySelectorAll("code").length -
       view.getByRole("region", { name: "Activity" }).querySelectorAll("code")
@@ -1021,6 +1033,11 @@ test("reopened, a command declined on an approval card is still listed, once, wi
     await pane.findByText("rm -f notes.md", {}, { timeout: 5000 }),
   ).toBeTruthy();
   expect(pane.getByText("You declined it.")).toBeTruthy();
+  // Said as declined, not as what it would have done: "Ran" read as if it had run.
+  const [declinedEntry] = entries(view);
+  if (declinedEntry === undefined)
+    throw new Error("The declined command was not listed.");
+  expect(declinedEntry.startsWith("Declined")).toBe(true);
   expect(entries(view)).toHaveLength(1);
   expect(
     view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
