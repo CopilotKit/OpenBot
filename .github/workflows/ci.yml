@@ -697,6 +697,8 @@ jobs:
           refused 'sudo -n /usr/local/sbin/openbot-apt update -o APT::Update::Pre-Invoke::="touch /tmp/openbot-ran-as-root"'
           refused 'sudo -n openbot-apt update extra'
           refused 'sudo -n openbot-apt install -o DPkg::Pre-Invoke::="touch /tmp/openbot-ran-as-root" jq'
+          refused 'sudo -n openbot-apt install -y -o DPkg::Pre-Invoke::="touch /tmp/openbot-ran-as-root" jq'
+          refused 'sudo -n openbot-apt install -yo DPkg::Pre-Invoke::="touch /tmp/openbot-ran-as-root" jq'
           refused 'sudo -n openbot-apt install -c apt.conf jq'
           refused 'sudo -n openbot-apt install --allow-unauthenticated jq'
           refused 'sudo -n openbot-apt install ./x.deb'
@@ -718,6 +720,12 @@ jobs:
           # And the feature itself, which is the reason sudo is here at all.
           if ! output="$(bot 'sudo -n openbot-apt update && sudo -n openbot-apt install jq && jq --version' 2>&1)"; then
             echo "::error::sudo openbot-apt install jq did not install jq."
+            printf '%s\n' "$output" | tail -20
+            failed=1
+          fi
+          # The way a model writes it out of habit, with `-y`, which the helper always answers anyway.
+          if ! output="$(bot 'sudo -n openbot-apt install -y tree && tree --version' 2>&1)"; then
+            echo "::error::sudo openbot-apt install -y tree did not install tree."
             printf '%s\n' "$output" | tail -20
             failed=1
           fi

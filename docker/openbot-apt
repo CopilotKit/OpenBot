@@ -33,6 +33,10 @@
 # `dpkg --configure -a` first, because a command that runs too long is stopped, and an install
 # stopped halfway leaves dpkg refusing every later one until it is finished. With sudo for dpkg
 # itself gone, this is the only way it gets finished.
+#
+# `-y` (or `--yes`, `--assume-yes`) is accepted and dropped, because a model writes
+# `install -y <package>` out of habit, and this always answers yes anyway. It is matched whole,
+# so it changes nothing about what else an option may be: every other one is still refused.
 set -eu
 
 refuse() {
@@ -50,6 +54,16 @@ cd /
 [ "$#" -ge 1 ] || refuse "say update or install"
 action=$1
 shift
+
+# The yes flags out, everything else kept in order. `for` walks the list as it was when it started,
+# so rebuilding it with `set --` as it goes is safe.
+for arg do
+  shift
+  case $arg in
+    -y | --yes | --assume-yes) ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+done
 
 case $action in
   update)
