@@ -20,6 +20,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import {
+  openAndStartBrowserRecordingMutationOptions,
   startBrowserRecordingMutationOptions,
   stopBrowserRecordingMutationOptions,
 } from "@/lib/browser/mutations";
@@ -75,11 +76,15 @@ export type RecordingHooks = {
 /**
  * Record and Stop for the person's browser, from the Recorder's own report in `state`. Record asks about narration
  * first when the person has never said (`useRecordingWith`).
+ *
+ * With `opens` (OpenBot Desktop, where the browser is a window on the person's desktop), Record opens the browser, or
+ * brings it forward, and starts recording in it, so a closed browser holds nothing back.
  */
 export function useRecording(
   state: BrowserApiState,
   choice: NarrationChoice,
   hooks: RecordingHooks = {},
+  { opens = false }: { opens?: boolean } = {},
 ) {
   return useRecordingWith({
     recorder: state.recorder,
@@ -87,8 +92,13 @@ export function useRecording(
      * A Recorder that reports itself disconnected does not hold Record back: the server connects the person's own
      * browser again before it starts (a Disconnect in Settings, Browsers leaves it signed out until then).
      */
-    waiting: !state.open ? "Your browser is closed. Open it to record." : null,
-    start: startBrowserRecordingMutationOptions(queryClient),
+    waiting:
+      !opens && !state.open
+        ? "Your browser is closed. Open it to record."
+        : null,
+    start: opens
+      ? openAndStartBrowserRecordingMutationOptions(queryClient)
+      : startBrowserRecordingMutationOptions(queryClient),
     stop: stopBrowserRecordingMutationOptions(queryClient),
     choice,
     ...hooks,
@@ -353,9 +363,15 @@ function progressLine(recording: Recording): string {
 export function RecordingRow({
   recording,
   placeholder = "Name the task, like Submit an expense report",
+  recordLabel = "Record",
+  whileRecording,
 }: {
   recording: Recording;
   placeholder?: string;
+  /** What the button that starts a recording says. */
+  recordLabel?: string;
+  /** More actions beside Stop while a recording runs. */
+  whileRecording?: ReactNode;
 }) {
   if (recording.phase !== "idle") {
     return (
@@ -370,6 +386,7 @@ export function RecordingRow({
           </ItemDescription>
         </ItemContent>
         <ItemActions>
+          {whileRecording}
           <Button
             size="sm"
             disabled={recording.stopping || recording.phase !== "recording"}
@@ -412,7 +429,7 @@ export function RecordingRow({
       <ItemActions>
         {/* Base UI's Button defaults to type="button", which never submits the form. */}
         <Button disabled={!recording.canRecord} size="sm" type="submit">
-          {recording.starting ? "Starting…" : "Record"}
+          {recording.starting ? "Starting…" : recordLabel}
         </Button>
       </ItemActions>
     </Item>

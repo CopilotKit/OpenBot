@@ -1,4 +1,3 @@
-import type { RealBrowser } from "@openbot/shared/openbot-browser";
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import { IconChalkboardTeacher } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -36,20 +35,6 @@ export function BrowserNavItem() {
 
 /** The one toast that says the Recorder's store page opened. */
 const STORE_TOAST = "browser-store-opened";
-
-const REAL_BROWSER_NAMES: Record<RealBrowser, string> = {
-  chrome: "Google Chrome",
-  msedge: "Microsoft Edge",
-};
-
-/**
- * What the person is told when Open opened the Recorder's page in the store of their own browser, rather than a browser
- * with the Recorder in it: the page is there, in the browser named, and adding it is what lets them record in that
- * browser. Once it is added and connected, the same Open brings that browser forward.
- */
-export function storeOpenedSentence(browser: RealBrowser): string {
-  return `The OpenBot Recorder's page is open in ${REAL_BROWSER_NAMES[browser]}. Add it there to record in your own browser.`;
-}
 
 const STORE_NAMES: Record<RecorderStore, string> = {
   chrome: "Google Chrome",
