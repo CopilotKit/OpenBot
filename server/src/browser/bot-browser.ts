@@ -235,10 +235,13 @@ export type BotBrowserRouteDeps = {
   /** Where the Bot's computer is, and whether it is up, without starting it; and what follows a clear on this side. */
   gateway: Pick<
     ComputerGateway,
-    "locate" | "status" | "browserCleared" | "seatFor" | "addressOf"
+    | "locate"
+    | "status"
+    | "browserCleared"
+    | "seatFor"
+    | "addressOf"
+    | "tokenFor"
   >;
-  /** The computer token, the same one every computer requires. */
-  token?: string;
   /** The Recorder's connections and what goes with them (recorder/wiring.ts). */
   recorder: Pick<
     RecorderExtensionDeps,
@@ -386,10 +389,23 @@ function labelFor(name: string | null): string {
 export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
   const routes = new Hono<{ Variables: AppVariables }>();
   const audit = recorderAudit(deps.auditStore);
-  const ask = computerCaller(deps, {
+  const call = computerCaller(deps, {
     slow: SENTENCES.slow,
     unreachable: SENTENCES.unreachable,
   });
+  /** One call to the computer this seat is on, under the token that computer takes (the gateway's `tokenFor`). */
+  const ask = (
+    base: string,
+    seat: ComputerSeat,
+    path: string,
+    options: Omit<NonNullable<Parameters<typeof call>[3]>, "token"> = {},
+  ) => {
+    const token = deps.gateway.tokenFor(seat);
+    return call(base, deps.gateway.addressOf(seat), path, {
+      ...options,
+      ...(token ? { token } : {}),
+    });
+  };
   const connections = deps.recorder.connections;
   const notSetUp = deps.singleUser
     ? SENTENCES.notSetUpSingleUser
@@ -434,14 +450,14 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       return null;
     };
     const [control, state] = await Promise.all([
-      ask(base, deps.gateway.addressOf(seat), CONTROL_PATH, {
+      ask(base, seat, CONTROL_PATH, {
         timeoutMs: STATE_TIMEOUT_MS,
       }).then(
         (answer) =>
           answer.status === 200 ? (answer.body as ComputerControlState) : null,
         unanswered,
       ),
-      ask(base, deps.gateway.addressOf(seat), botBrowserComputerPaths.state, {
+      ask(base, seat, botBrowserComputerPaths.state, {
         timeoutMs: STATE_TIMEOUT_MS,
       }).then(
         (answer) => (answer.status === 200 ? stateOf(answer.body) : null),
@@ -604,7 +620,7 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if (!wheel.ok) return wheel.response;
     let taken: { status: number; body: unknown };
     try {
-      taken = await ask(wheel.base, deps.gateway.addressOf(seat), path, {
+      taken = await ask(wheel.base, seat, path, {
         body,
       });
     } catch (error) {
@@ -765,15 +781,10 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     await pushPolicy(seat, "recording");
     let answer: { status: number; body: unknown };
     try {
-      answer = await ask(
-        wheel.base,
-        deps.gateway.addressOf(seat),
-        botBrowserComputerPaths.recording,
-        {
-          body: body.data,
-          timeoutMs: START_TIMEOUT_MS,
-        },
-      );
+      answer = await ask(wheel.base, seat, botBrowserComputerPaths.recording, {
+        body: body.data,
+        timeoutMs: START_TIMEOUT_MS,
+      });
     } catch (error) {
       return unmade(failed(error));
     }
@@ -828,15 +839,10 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     }
     let answer: { status: number; body: unknown };
     try {
-      answer = await ask(
-        base,
-        deps.gateway.addressOf(seat),
-        botBrowserComputerPaths.recording,
-        {
-          body: { action: "stop" } satisfies BotBrowserComputerRecordingRequest,
-          timeoutMs: STOP_TIMEOUT_MS,
-        },
-      );
+      answer = await ask(base, seat, botBrowserComputerPaths.recording, {
+        body: { action: "stop" } satisfies BotBrowserComputerRecordingRequest,
+        timeoutMs: STOP_TIMEOUT_MS,
+      });
     } catch (error) {
       return failed(error);
     }
@@ -873,15 +879,10 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
     if (!wheel.ok) return wheel.response;
     let answer: { status: number; body: unknown };
     try {
-      answer = await ask(
-        wheel.base,
-        deps.gateway.addressOf(seat),
-        botBrowserComputerPaths.clear,
-        {
-          body: { by: actor.id } satisfies BotBrowserComputerClearRequest,
-          timeoutMs: CLEAR_TIMEOUT_MS,
-        },
-      );
+      answer = await ask(wheel.base, seat, botBrowserComputerPaths.clear, {
+        body: { by: actor.id } satisfies BotBrowserComputerClearRequest,
+        timeoutMs: CLEAR_TIMEOUT_MS,
+      });
     } catch (error) {
       return failed(error);
     }
@@ -1017,14 +1018,9 @@ export function createBotBrowser(deps: BotBrowserRouteDeps): BotBrowser {
       );
     let taken: { status: number; body: unknown };
     try {
-      taken = await ask(
-        base,
-        deps.gateway.addressOf(seat),
-        botBrowserComputerPaths.narration,
-        {
-          body: read.narration,
-        },
-      );
+      taken = await ask(base, seat, botBrowserComputerPaths.narration, {
+        body: read.narration,
+      });
     } catch (error) {
       return failed(error);
     }

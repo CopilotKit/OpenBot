@@ -7,6 +7,8 @@
 # difference between the container working and the operator reading a runbook.
 set -eu
 [ "${EMBEDDED_POSTGRES:-off}" = "on" ] || exit 0
+# Started is not ready: see wait-for-postgres.sh.
+"$(dirname "$0")/wait-for-postgres.sh"
 cd /app/server
 export HOME=/home/apiuser
 # `scripts/migrate.ts`, not `drizzle-kit`. The CLI is a development dependency and needs esbuild to

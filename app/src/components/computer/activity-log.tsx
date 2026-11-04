@@ -6,9 +6,11 @@
  * answer to "what is it doing" was "something, on a machine holding your logins". This is the other
  * half: every command, what it printed, and what it exited with, as it happens.
  *
- * This session only. The record is the audit trail, which is on the server and survives a reload;
- * this is a window, and it is allowed to be empty when a tab is opened on a conversation that
- * already happened.
+ * Read from the conversation, so it is the same whichever way a call ran: in the browser, at the
+ * server's gate, or after a person allowed it. A conversation opened again, after a reload too,
+ * shows what was already done in it. What this page watched happen says when; what was done before
+ * the page opened it does not, because when it ran is not something the conversation says. The
+ * record is still the audit trail on the server; this is the window beside the screen.
  */
 import { IconFile, IconFolder, IconTerminal2 } from "@tabler/icons-react";
 import { useSyncExternalStore } from "react";
@@ -69,14 +71,23 @@ function Entry({ entry }: { entry: ComputerActivity }) {
         <code className="min-w-0 break-all font-mono text-xs">
           {entry.subject}
         </code>
-        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground tabular-nums">
-          {timeOf(entry.at)}
-        </span>
+        {entry.at === undefined ? null : (
+          <time
+            className="ml-auto shrink-0 text-[10px] text-muted-foreground tabular-nums"
+            dateTime={new Date(entry.at).toISOString()}
+          >
+            {timeOf(entry.at)}
+          </time>
+        )}
       </div>
 
       {entry.refused === true ? (
         <p className="mt-1 pl-5 text-destructive text-xs">
           {entry.output || "A boundary refused it."}
+        </p>
+      ) : entry.doneByPerson === true ? (
+        <p className="mt-1 pl-5 text-muted-foreground text-xs">
+          {entry.output || "You did it yourself."}
         </p>
       ) : (
         <div className="mt-1 max-h-64 overflow-auto pl-5">

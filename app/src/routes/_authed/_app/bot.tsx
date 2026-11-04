@@ -16,6 +16,7 @@ import {
 } from "@/lib/agents/queries";
 import { tryClient } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
+import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { searchTextEntry } from "@/lib/search-text";
@@ -159,6 +160,8 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
    * a provider this app does not mount.
    */
   const stopped = useStoppedTurn(agentId);
+  // What the Bot did on its computer in this conversation, for the Activity pane beside its screen.
+  useBotActivity(agentId);
   const { watch } = Route.useSearch();
   const navigate = Route.useNavigate();
   const showComputer = (open: boolean) =>

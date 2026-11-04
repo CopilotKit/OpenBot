@@ -9,6 +9,15 @@ import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
+import {
+  CROSS_SITE_REFUSAL,
+  crossSiteRequest,
+  type FrontDoorBindings,
+  isWebSocketUpgrade,
+  type NetworkCaller,
+  singleUserRefusal,
+  trustedOrigin,
+} from "./request-trust";
 
 /**
  * The server's front door: one Bun server that hands ordinary requests to the Hono app, proxies the
@@ -43,7 +52,7 @@ export function startHttpServer(deps: {
   app: {
     fetch: (
       request: Request,
-      env: { server: unknown },
+      env: FrontDoorBindings,
     ) => Response | Promise<Response>;
   };
 }): { stop(closeActiveConnections?: boolean): Promise<void> } {
@@ -70,13 +79,17 @@ export function startHttpServer(deps: {
   const toStreamUrl = (
     baseUrl: string,
     seat: { botId: string; personId?: string },
+    token: string | undefined,
   ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
     // computer to read and every call it serves is per Bot. So does the person, on the one computer
     // many people share, where the seat is the pair. The secret travels the same way and for the
     // same reason, this socket is the one a person can type into, so it is the last thing that should
-    // be reachable without it.
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
+    // be reachable without it. The secret of that computer, which on a computer of one person's own
+    // is its own token and never the deployment's (computer/computer-token.ts).
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
+
+  const trusted = trustedOrigin(config);
 
   const isProxiedStream = (data: SocketData): data is StreamData =>
     typeof (data as StreamData).upstream === "string";
@@ -90,6 +103,24 @@ export function startHttpServer(deps: {
     port,
     async fetch(request, server) {
       const url = new URL(request.url);
+      /*
+       * The connection this came on, read here because only the server that accepted it can say. Handed
+       * to the app as a binding and never on the request: see `callerOf`.
+       */
+      const caller: NetworkCaller = {
+        address: server.requestIP(request)?.address ?? null,
+      };
+      /*
+       * Every socket, before anything answers it: the live screen below, the channel events Hono
+       * upgrades, and whatever upgrades next. A browser lets any page open a socket to any address,
+       * with the person's cookies, and leaves it to the server to look at `Origin`.
+       */
+      if (
+        isWebSocketUpgrade(request.headers) &&
+        crossSiteRequest(request, trusted)
+      ) {
+        return Response.json({ error: CROSS_SITE_REFUSAL }, { status: 403 });
+      }
       if (url.pathname === "/api/audio/transcriptions") {
         server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
       }
@@ -111,6 +142,11 @@ export function startHttpServer(deps: {
         if (!config.computer) {
           return new Response("No computer is configured.", { status: 503 });
         }
+        // On a single-user OpenBot the guard below admits everybody, so first: is this somebody it may admit.
+        const notHere = config.singleUser
+          ? singleUserRefusal(request, caller, config.singleUserAccess)
+          : null;
+        if (notHere) return new Response(notHere, { status: 403 });
         // The session guard, applied by hand because middleware does not run on an upgrade. An
         // unauthenticated socket here would be the whole point of the proxy defeated.
         const actor = await resolveRequestActor(request).catch(() => null);
@@ -152,7 +188,11 @@ export function startHttpServer(deps: {
               status: 503,
             });
           }
-          upstream = toStreamUrl(streamBase, computerGateway.addressOf(seat));
+          upstream = toStreamUrl(
+            streamBase,
+            computerGateway.addressOf(seat),
+            computerGateway.tokenFor(seat),
+          );
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
           // whole path exists to prevent.
@@ -168,7 +208,7 @@ export function startHttpServer(deps: {
         }
         return new Response("Expected a WebSocket upgrade.", { status: 400 });
       }
-      return app.fetch(request, { server });
+      return app.fetch(request, { server, caller });
     },
     websocket: {
       open(ws) {
