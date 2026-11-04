@@ -31,11 +31,12 @@ import {
   users,
 } from "../src/db/schema";
 import {
+  recordTestPackage,
   removeBots,
+  removeTestPackages,
   seedBot,
   storedPreferences,
   useTestBots,
-  useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -67,6 +68,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeTestPackages();
   await database.$client.close();
 });
 
@@ -87,12 +89,7 @@ async function createUser(role: AgentActor["role"] = "user") {
 
 /** A tenant package, recorded in Intelligence as the server records the one it applies. */
 async function createPackage() {
-  const configuration = await useTestConfiguration();
-  return configuration.client.packages.record(
-    id("tenant"),
-    { source: "test/profile-store", checksum: randomUUID() },
-    `test:${randomUUID()}`,
-  );
+  return recordTestPackage(id("tenant"), { source: "test/profile-store" });
 }
 
 async function createProfileFixture(options: {

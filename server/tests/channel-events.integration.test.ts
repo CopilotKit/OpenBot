@@ -30,7 +30,12 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { recordTestPackage, removeBots, useTestBots } from "./support/bots";
+import {
+  recordTestPackage,
+  removeBots,
+  removeTestPackages,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 function event(overrides: Partial<ChannelActivityEvent> = {}) {
@@ -173,6 +178,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeTestPackages();
   await database.$client.close();
 });
 

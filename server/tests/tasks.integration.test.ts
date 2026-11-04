@@ -1147,7 +1147,7 @@ describe("what needs the person", () => {
       "/api/bots",
       createBotLifecycleRoutes(
         {
-          lifecycle: createBotLifecycleStore(database),
+          lifecycle: createBotLifecycleStore(),
           reset: {} as never,
           activity: createActivityStore(database),
           wakeUps: {} as never,

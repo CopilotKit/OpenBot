@@ -24,6 +24,7 @@ import { auditEvents, capabilitySettings, users } from "../src/db/schema";
 import {
   recordTestPackage,
   removeBots,
+  removeTestPackages,
   seedBot,
   useTestBots,
 } from "./support/bots";
@@ -92,6 +93,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await controls?.stop();
   await cleanSwitch();
+  await removeTestPackages();
   // Every Bot this file made, through the routes or by hand, deleted ones included.
   const people: (string | null)[] = [admin.id, owner.id, colleague.id];
   const made = (await useTestBots())

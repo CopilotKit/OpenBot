@@ -114,6 +114,7 @@ describe("the Bot configuration's old tables", () => {
       auditStore,
       credentials: { readSecret: async () => null } as never,
       encryptionKey: "x".repeat(44),
+      policy: () => ({ mode: "enforce", allow: ["true"], deny: [] }),
     });
     const slug = `frozen-${suite}`;
     await plugins.installSkill({

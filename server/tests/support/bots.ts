@@ -285,15 +285,42 @@ export async function setBotPreference(
   await changePreferences(userId, [{ op: "setBot", botId, ...values }]);
 }
 
+/** Every package name a test in this process recorded, and has not removed yet. */
+const testPackages = new Set<string>();
+
+/**
+ * Note a package name a test is about to record some other way than `recordTestPackage` (by running
+ * the real sync, say), so `removeTestPackages` purges it too.
+ */
+export function trackTestPackage(name: string): string {
+  testPackages.add(name);
+  return name;
+}
+
+/**
+ * Purge the package records this process's tests made, so a run leaves Intelligence's package list as
+ * it found it. A name already gone is fine.
+ */
+export async function removeTestPackages(
+  names: Iterable<string> = testPackages,
+): Promise<void> {
+  const configuration = await useTestConfiguration();
+  for (const name of [...names]) {
+    await configuration.client.packages.remove(name, `test:${randomUUID()}`);
+    testPackages.delete(name);
+  }
+}
+
 /**
  * A tenant package, recorded in Intelligence as the server records the one it applies, for a test
  * that needs a package's id (a package's Bots and channels name it). The local row the old tests
- * inserted into `deployment_packages`.
+ * inserted into `deployment_packages`. `removeTestPackages` purges it.
  */
 export async function recordTestPackage(
   name: string,
   input: { source?: string; checksum?: string } = {},
 ): Promise<{ id: string }> {
+  trackTestPackage(name);
   return (await useTestConfiguration()).client.packages.record(
     name,
     {

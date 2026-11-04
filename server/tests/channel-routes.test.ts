@@ -42,6 +42,7 @@ import {
 import {
   deleteBot,
   recordTestPackage,
+  removeTestPackages,
   removeBots,
   seedBot,
   useTestBots,
@@ -912,6 +913,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeTestPackages();
   await database.$client.close();
 });
 

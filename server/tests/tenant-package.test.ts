@@ -36,9 +36,11 @@ import {
   deleteBot,
   recordTestPackage,
   removeBots,
+  removeTestPackages,
   seedBot,
   storedAccess,
   storedBot,
+  trackTestPackage,
   useTestBots,
   useTestConfiguration,
 } from "./support/bots";
@@ -53,8 +55,8 @@ afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
     await database.delete(channels).where(eq(channels.id, channelId));
   }
-  // A package's record stays in Intelligence, which has no delete for one: each test's tenant is
-  // its own random name, so nothing reads another's.
+  // Each test's tenant is its own random name, so nothing reads another's package record; they are
+  // purged once the file is done.
   await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
@@ -62,6 +64,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  await removeTestPackages();
   await database.$client.close();
 });
 
@@ -83,7 +86,7 @@ function packageAgent(
 function loadedPackage(
   agent: LoadedTenantPackage["agents"][number] = packageAgent(),
 ): LoadedTenantPackage {
-  const tenantId = randomUUID();
+  const tenantId = trackTestPackage(randomUUID());
   return {
     tenantId,
     productName: "Package Test",
@@ -1725,7 +1728,7 @@ test("blank package endpoint disables only its owned agent and restores it when 
     const rename = (id: string) => `${id}-${suffix}`;
     const isolate = (loaded: LoadedTenantPackage): LoadedTenantPackage => ({
       ...loaded,
-      tenantId: suffix,
+      tenantId: trackTestPackage(suffix),
       skills: [],
       channels: [],
       agents: loaded.agents.map((agent) => ({
