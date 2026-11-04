@@ -255,6 +255,7 @@ import {
   vendorAnswer,
 } from "./plugins/tools";
 import { createProactiveEngine } from "./proactive/engine";
+import { checkInOfferTools } from "./proactive/offer-tool";
 import {
   createPrivateShareCheck,
   PRIVATE_SHARE_TOOL_REF,
@@ -1568,6 +1569,17 @@ const loadToolsForActor =
       composioConfigured: Boolean(composio),
       ...(composio ? { directory: () => composio.broker.listApps() } : {}),
       sharedAudience: sharedUseStore.admitsPerson,
+    }),
+    /*
+     * Held by every Bot: offering a check-in on what the person just looked at, which the card turns
+     * on only if they accept. A read; see the file. The engine is made further down, and a tool is
+     * only ever built for a run, long after.
+     */
+    ...checkInOfferTools({
+      ownerUserId: actorId,
+      agentId: botId,
+      allowed: (owner) => proactiveEngine.allowed(owner),
+      list: (owner) => proactiveStore.list(owner),
     }),
     ...(await grantedTools({
       store: pluginStore,
