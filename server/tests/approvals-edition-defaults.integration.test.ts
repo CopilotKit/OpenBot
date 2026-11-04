@@ -12,7 +12,13 @@ const prefix = `approval-edition-${randomUUID()}`;
 const fresh = `${prefix}-fresh`,
   chose = `${prefix}-chose`;
 const store = createApprovalStore(database);
-const { policy } = store;
+const policy = policyOf(store);
+
+/** The store's preferences and team settings, which every approval store made here has. */
+function policyOf(store: ReturnType<typeof createApprovalStore>) {
+  if (!store.policy) throw new Error("the approval store has no policy");
+  return store.policy;
+}
 
 beforeAll(async () => {
   await database.insert(users).values([
@@ -66,7 +72,7 @@ const untouchable = new Proxy({} as typeof database, {
 // A team deployment's settings and rules have no screen in the personal edition, so they are not read.
 test("the personal edition ignores team approval settings and team rules", async () => {
   setEdition("personal");
-  const { policy: personal } = createApprovalStore(untouchable);
+  const personal = policyOf(createApprovalStore(untouchable));
   expect(await personal.teamSettings()).toEqual({
     enforceAutoReview: false,
     customRulesEnabled: true,
