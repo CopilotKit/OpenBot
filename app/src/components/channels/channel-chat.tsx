@@ -387,6 +387,19 @@ export function ChannelChat({
   }
   const joinGatePromise = joinGate.current;
 
+  /**
+   * Opened once the thread join is over, before stored history is restored. A refresh waits for it (`pull`, below):
+   * merged while the join is still replaying, a stored reply is doubled by the replay.
+   */
+  const openJoined = useRef<() => void>(() => {});
+  const joined = useRef<Promise<void> | null>(null);
+  if (joined.current === null) {
+    joined.current = new Promise<void>((resolve) => {
+      openJoined.current = resolve;
+    });
+  }
+  const joinedPromise = joined.current;
+
   /** Promise gate so messages typed before runtime readiness wait instead of being discarded. */
   const openReadyGate = useRef<() => void>(() => {});
   const readyGate = useRef<Promise<void> | null>(null);
@@ -460,6 +473,7 @@ export function ChannelChat({
          * rather than degrade it. History is restored below either way.
          */
       }
+      openJoined.current();
 
       try {
         const stored = await readThreadMessages(
@@ -490,6 +504,7 @@ export function ChannelChat({
         // never coming.
         if (current) setRestoring(false);
         // Release even on join/restore failure; the gate orders messages, not withholds them.
+        openJoined.current();
         openJoinGate.current();
       }
     })();
@@ -549,6 +564,14 @@ export function ChannelChat({
       const isCurrent = () =>
         !cancelled && version === historyReadVersion.current;
       void (async () => {
+        /*
+         * NOT BEFORE THE JOIN IS OVER. The roster can hear about this channel's last Bot turn while the thread join is
+         * still replaying it. Merged then, the stored reply was in the agent before the replay reached it, and the
+         * replay appended each of its text deltas to that complete reply: the reply showed twice in one bubble, and
+         * its tool result twice. After the join, the merge is by id and adds nothing the replay already has.
+         */
+        await joinedPromise;
+        if (!isCurrent()) return;
         let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
@@ -614,7 +637,13 @@ export function ChannelChat({
       unsubscribe();
       offFinishedAway();
     };
-  }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
+  }, [
+    channel.id,
+    channel.threadId,
+    joinGatePromise,
+    joinedPromise,
+    runtimeAgentId,
+  ]);
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);

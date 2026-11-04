@@ -58,6 +58,8 @@ let originalFetch: typeof fetch;
 let history: (threadId: string) => Promise<Response>;
 let historyReads: string[];
 let gatewaySnapshot: readonly Message[] = [];
+/** The thread join's answer, when a test needs a slower or event-by-event one than the snapshot. */
+let connectResponse: (() => Promise<Response>) | undefined;
 let runRequests: { path: string; input: RunAgentInput }[] = [];
 let activityRequests: ActivityRequest[] = [];
 let runEvents: (input: RunAgentInput) => unknown[];
@@ -114,6 +116,8 @@ beforeAll(() => {
           mode: "sse",
           telemetryDisabled: true,
         });
+      if (url.pathname.endsWith("/connect") && connectResponse)
+        return connectResponse();
       if (url.pathname.endsWith("/connect"))
         return sse([
           { type: "RUN_STARTED", threadId: channel.threadId, runId: "join" },
@@ -159,6 +163,7 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   core = undefined;
+  connectResponse = undefined;
 });
 afterAll(() => {
   globalThis.fetch = originalFetch;
@@ -897,6 +902,70 @@ test("a cached Bot activity before mount retries stale durable history and resto
     later.id,
   ]);
   expect(view.queryByText(unavailable)).toBeNull();
+});
+
+/*
+ * FOUND IN THE BROWSER: reloading a conversation sometimes showed the Bot's reply twice, run together in one bubble,
+ * though Intelligence stored it once. The roster's activity for the conversation arrived while the thread join was
+ * still under way, and the refresh it starts put the stored reply into the agent then. Against Intelligence, the join
+ * then replayed the same run event by event on top of it, and each text delta was appended to the stored reply, which
+ * already had all of it (the tool result was added a second time too). Nothing may merge stored history into the agent
+ * until the join is over; after it, the merge is by id and adds nothing the replay already has.
+ */
+test("a refresh announced during the thread join waits for the join before it reads history", async () => {
+  const question = {
+    id: "question",
+    role: "user",
+    content: "Please remember my favourite fruit.",
+  } satisfies Message;
+  const reply = {
+    id: "reply",
+    role: "assistant",
+    content: "I have remembered it.",
+  } satisfies Message;
+  const join = delayedResponse();
+  connectResponse = () => join.promise;
+  const view = mounting(async () => stored([question, reply]));
+
+  // The roster hears about the Bot's turn while the join is still on its way.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await announce(1);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(historyReads).toEqual([]);
+  expect(currentAgent().messages).toEqual([]);
+
+  // The gateway replays the run as it streamed it.
+  join.resolve(
+    sse([
+      { type: "RUN_STARTED", threadId: channel.threadId, runId: "replay" },
+      { type: "TEXT_MESSAGE_START", messageId: question.id, role: "user" },
+      {
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: question.id,
+        delta: question.content,
+      },
+      { type: "TEXT_MESSAGE_END", messageId: question.id },
+      { type: "TEXT_MESSAGE_START", messageId: reply.id, role: "assistant" },
+      {
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: reply.id,
+        delta: reply.content,
+      },
+      { type: "TEXT_MESSAGE_END", messageId: reply.id },
+      { type: "RUN_FINISHED", threadId: channel.threadId, runId: "replay" },
+    ]),
+  );
+
+  await view.findByText(reply.content);
+  // The refresh still happens, once the join is over, and adds nothing the replay already put there.
+  await waitFor(() => expect(historyReads.length).toBeGreaterThanOrEqual(2));
+  expect(
+    currentAgent().messages.map((message) => [message.id, message.content]),
+  ).toEqual([
+    [question.id, question.content],
+    [reply.id, reply.content],
+  ]);
+  expect(view.getAllByText(reply.content)).toHaveLength(1);
 });
 
 test("a first ready stale refresh still retries and renders a later stored message", async () => {
