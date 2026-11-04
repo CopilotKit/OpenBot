@@ -4917,3 +4917,75 @@ test("self-hosted provisioning failure offers a fresh sign-in without retaining 
   ).toHaveProperty("disabled", false);
   expect(view.getByLabelText("Project key")).toHaveProperty("value", "");
 });
+
+const INSTALL_REQUIRED =
+  "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
+
+function withAnthropicPlan(begin: () => unknown) {
+  withLocalCli({
+    providers: [
+      {
+        id: "anthropic",
+        name: "Anthropic",
+        summary: "Sign in with a Claude plan.",
+        logins: ["plan", "api-key"],
+        mark: null,
+        caution: null,
+      },
+    ],
+    begin_claude_sign_in: begin,
+    finish_claude_sign_in: "synthetic-plan-token",
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+}
+
+test("a plan sign-in refused for a stale installation goes back to Install and returns to the same provider", async () => {
+  setupRootConfiguration("/tmp/stale-install", async () =>
+    emptyConfiguration(),
+  );
+  let refused = true;
+  withAnthropicPlan(() => {
+    if (refused)
+      throw {
+        said: INSTALL_REQUIRED,
+        detail:
+          "The deployment folder or Bot selection changed after installation.",
+      };
+    return "https://claude.example/authorize";
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await userEvent.click(await view.findByRole("radio", { name: /Anthropic/ }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  expect((await view.findByRole("alert")).textContent).toContain(
+    INSTALL_REQUIRED,
+  );
+  expect(stepLabel(view)).toContain("Install");
+  refused = false;
+  await userEvent.click(view.getByRole("button", { name: "Install OpenBot" }));
+  const radio = await view.findByRole("radio", { name: /Anthropic/ });
+  expect((radio as HTMLInputElement).checked).toBe(true);
+  expect(stepLabel(view)).toContain("AI");
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("any other plan sign-in failure still shows inline on the AI step", async () => {
+  setupRootConfiguration("/tmp/other-failure", async () =>
+    emptyConfiguration(),
+  );
+  withAnthropicPlan(() => {
+    throw { said: "Sign-in was interrupted." };
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await userEvent.click(await view.findByRole("radio", { name: /Anthropic/ }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await view.findByText("Sign-in was interrupted.");
+  expect(stepLabel(view)).toContain("AI");
+});

@@ -541,6 +541,18 @@ pub fn image_settings(
 mod tests {
     use super::*;
 
+    // The setup window recognises this refusal by its exact sentence (ProviderPicker's
+    // INSTALL_REQUIRED) to send the person back to Install; rewording it here alone would
+    // silently leave them stuck on the AI step again.
+    #[test]
+    fn the_setup_window_knows_the_required_sentence() {
+        let picker = include_str!("../../src/ProviderPicker.tsx");
+        assert!(
+            picker.contains(&format!("\"{REQUIRED}\"")),
+            "desktop/src/ProviderPicker.tsx INSTALL_REQUIRED must equal preparation::REQUIRED"
+        );
+    }
+
     /// A Compose file from a release that runs the server and worker as services.
     const COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
 
