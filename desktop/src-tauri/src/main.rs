@@ -5307,7 +5307,7 @@ fn main() {
             // and stays silent. A `shell-updater` build may also have filled the block in from its
             // compiled trust before the app was built (see above); either way the block decides,
             // and this is the one place the plugin is registered.
-            if shell_updates::updater_configured(&app.config().plugins) {
+            if app.config().plugins.0.contains_key("updater") {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             } else {
