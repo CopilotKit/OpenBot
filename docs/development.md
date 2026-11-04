@@ -140,6 +140,16 @@ Integration tests expect a PostgreSQL database with pgvector. Point `TEST_DATABA
 
 They refuse to use the application `openbot` database. `DATABASE_URL` is still the application setting, and the database client removes it from the process environment after opening a connection to preserve the Windows Bun connection fix, so tests use `TEST_DATABASE_URL` as their immutable fixture address. Running them against a deployment you are using puts test Bots in its audit trail and its activity reports, so create a separate database and migrate that before running the integration suite.
 
+The tests that touch Bots, policy, the vault, files, memory, audit, schedules, conversations or people also need a real Intelligence, named by `TEST_INTELLIGENCE_API_URL`, `TEST_INTELLIGENCE_GATEWAY_WS_URL`, `TEST_INTELLIGENCE_API_KEY` and `TEST_INTELLIGENCE_API_KEY_2` (a second project), plus `TEST_INTELLIGENCE_DATABASE_URL` and `TEST_INTELLIGENCE_REDIS_URL` for the change-feed suite. Without them those tests fail and name what is missing. `scripts/test-intelligence.sh up` starts a throwaway, self-hosted one in Docker from the image CI pins, and prints those variables:
+
+```sh
+export $(scripts/test-intelligence.sh up)
+bun run test
+scripts/test-intelligence.sh down
+```
+
+Set `INTELLIGENCE_IMAGE` to run one built from an Intelligence checkout instead.
+
 CI uses `bun run test:ci` to verify the expected test count in addition to normal tests.
 
 `bun run test:smoke` is separate and needs a deployment that is up, and a session on it:
