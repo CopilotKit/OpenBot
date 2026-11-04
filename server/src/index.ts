@@ -63,6 +63,10 @@ import {
   sweepRemovedPeopleEvery,
 } from "./configuration/people-sweep";
 import { copyLocalConfigurationToIntelligence } from "./configuration/upgrade";
+import { removeBotPolicy, sweepPurgedBotPolicy } from "./policy/bot-rows";
+import { createPolicyCache, installPolicyCache } from "./policy/cache";
+import { createOrgPolicyClient } from "./policy/client";
+import { copyLocalPolicyToIntelligence } from "./policy/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -486,6 +490,36 @@ await copyLocalConfigurationToIntelligence(database, botConfigurationHub, () =>
 // What Intelligence holds about people this deployment no longer has, as the old cascades removed it.
 await sweepRemovedPeople(database, botConfigurationHub);
 sweepRemovedPeopleEvery(database, botConfigurationHub);
+
+/**
+ * The organization policy (capability switches, enterprise settings, network rules, the computer-action
+ * boundary, approval settings and rules, Shared app approvals), from Intelligence, held in memory on
+ * this instance and kept fresh by Intelligence's change announcements (policy/cache.ts). Fatal when
+ * Intelligence cannot answer: a server that read no policy would enforce none of it.
+ */
+const policyCache = installPolicyCache(
+  createPolicyCache({
+    client: createOrgPolicyClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await policyCache.start();
+// An upgraded deployment's policy, copied from the local tables once (policy/upgrade.ts).
+await copyLocalPolicyToIntelligence(database, policyCache);
+// A Bot deleted for good takes its Shared app approvals with it, here and for any purged while down.
+const botStillGone = async (botId: string) =>
+  (await botDirectory.registry.get(botId)) === null;
+botDirectory.onPurged(async (botId) => {
+  await removeBotPolicy(policyCache, [botId], botStillGone);
+});
+await sweepPurgedBotPolicy(
+  policyCache,
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+  botStillGone,
+);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -685,7 +719,7 @@ if (computerProvider?.warm) {
 // administrator can change it while running, and a restart returns to the configured one.
 const policyStore = createPolicyStore(
   config.computer?.policy ?? DEFAULT_ACTION_POLICY,
-  database,
+  policyCache,
 );
 // A boundary an administrator set is read back before the first action is decided, so a restart no
 // longer silently returns to the configured default.
@@ -697,10 +731,7 @@ const policySource = await policyStore.load();
  * enforcing what it read at boot, so a new deny rule stops roughly one action in N while the screen
  * and the audit row both report success. See policy-listener.ts.
  */
-const policyListener = await startPolicyListener(
-  config.databaseUrl,
-  policyStore,
-);
+const policyListener = await startPolicyListener(policyCache, policyStore);
 
 /*
  * Record which boundary this process started with.
@@ -1131,6 +1162,8 @@ const pluginStore = createPluginStore({
   policy: () => policyStore.get(),
   approvalGate: approvalService.gate,
   sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
+  removeSharedApprovals: (serverId) =>
+    sharedUseStore.deleteApprovalsAt([serverId]),
   // A connector send to other people asks the owner first. See plugins/share-target.ts.
   privateShareCheck: createPrivateShareCheck({
     approvals: approvalService.store,
@@ -1318,13 +1351,13 @@ void recordAuditEvent(bootAuditStore, {
   payload: {
     ...policyStore.get(),
     source:
-      policySource === "the database"
-        ? "an administrator, saved in this deployment"
+      policySource === "intelligence"
+        ? "an administrator, saved in Intelligence"
         : config.computer?.policy
           ? "configuration"
           : "the built-in default",
     note:
-      policySource === "the database"
+      policySource === "intelligence"
         ? "Set while running and kept. A restart returns to this."
         : "The deployment default. Anything an administrator sets from here is kept.",
   },
@@ -2999,6 +3032,7 @@ if (config.singleUser) {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     botDirectory.stop();
+    policyCache.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();

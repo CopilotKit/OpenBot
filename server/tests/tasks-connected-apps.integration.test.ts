@@ -59,6 +59,7 @@ import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { changeAccess, removeBots, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /*
  * A task started from a check-in, working with the apps the person connected: it reads their own
@@ -267,6 +268,7 @@ const realFetch = globalThis.fetch;
 let environmentBefore: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
+  await useTestPolicy();
   await useTestBots();
   llm.on({ predicate: () => true }, (request) => script(request));
   const model = await llm.start();

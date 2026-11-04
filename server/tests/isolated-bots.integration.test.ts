@@ -20,7 +20,7 @@ import {
   seatOf,
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, capabilitySettings, users } from "../src/db/schema";
+import { auditEvents, users } from "../src/db/schema";
 import {
   recordTestPackage,
   removeBots,
@@ -29,6 +29,7 @@ import {
   useTestBots,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /**
  * Isolated Bots, through the routes a person and an administrator use, against a real PostgreSQL.
@@ -69,13 +70,15 @@ let controls: EnterpriseControls;
 let packageId: string | undefined;
 
 async function cleanSwitch() {
-  await database
-    .delete(capabilitySettings)
-    .where(eq(capabilitySettings.capability, "isolatedComputers"));
+  const cache = await useTestPolicy();
+  for (const rule of cache.capabilityRules())
+    if (rule.capability === "isolatedComputers")
+      await cache.deleteCapabilityRule(rule);
 }
 
 beforeAll(async () => {
   await useTestBots();
+  await useTestPolicy();
   await cleanSwitch();
   await database.insert(users).values([
     { id: admin.id, email: admin.email, name: "Admin" },
@@ -471,14 +474,10 @@ describe("whether it is in effect", () => {
       expect(await runsIsolated(database, agent.id)).toBe(true);
     } finally {
       await setSwitch(null);
-      await database
-        .delete(capabilitySettings)
-        .where(
-          and(
-            eq(capabilitySettings.scopeKind, "group"),
-            eq(capabilitySettings.scopeId, group),
-          ),
-        );
+      const cache = await useTestPolicy();
+      for (const rule of cache.capabilityRules())
+        if (rule.scopeKind === "group" && rule.scopeId === group)
+          await cache.deleteCapabilityRule(rule);
     }
   });
 

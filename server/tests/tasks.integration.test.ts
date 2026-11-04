@@ -49,6 +49,7 @@ import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, useTestBots } from "./support/bots";
 import { testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /**
  * Tasks through the paths a person's Start takes: the real stores, the real work queue, the real
@@ -428,6 +429,7 @@ async function conversation(channelId: string) {
 }
 
 beforeAll(async () => {
+  await useTestPolicy();
   await useTestBots();
 });
 

@@ -22,6 +22,7 @@ import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { removeBots, seedBot, useTestBots } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -137,6 +138,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
 
 // The grant routes ask the Bot directory whether a Bot exists and who owns it.
 beforeAll(async () => {
+  await useTestPolicy();
   await useTestBots();
 });
 

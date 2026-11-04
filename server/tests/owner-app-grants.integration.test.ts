@@ -24,7 +24,6 @@ import {
   brokeredConnections,
   mcpServers,
   mcpTools,
-  sharedUseApprovals,
   users,
 } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
@@ -46,6 +45,11 @@ import {
   useTestBots,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  resetTestPolicy,
+  storedConnectionApprovals,
+  useTestPolicy,
+} from "./support/policy";
 import { stubBroker } from "./support/stub-broker";
 
 /**
@@ -237,6 +241,8 @@ async function clear() {
 
 beforeAll(async () => {
   await useTestBots();
+  await useTestPolicy();
+  await resetTestPolicy();
   for (const user of people)
     await database.insert(users).values({
       id: user,
@@ -517,17 +523,17 @@ describe("a Shared app whose rule lets Bot owners decide", () => {
       })
     ).allowed;
 
+  /** The approval as Intelligence holds it, past any server's memory. */
   async function approvalRow(botId: string) {
-    const [row] = await database
-      .select({
-        audience: sharedUseApprovals.audience,
-        outsideInput: sharedUseApprovals.outsideInput,
-        approvedBy: sharedUseApprovals.approvedBy,
-        approvedAs: sharedUseApprovals.approvedAs,
-      })
-      .from(sharedUseApprovals)
-      .where(eq(sharedUseApprovals.agentId, botId));
-    return row ?? null;
+    const [row] = await storedConnectionApprovals({ agentId: botId });
+    return row
+      ? {
+          audience: row.audience,
+          outsideInput: row.outsideInput,
+          approvedBy: row.approvedBy,
+          approvedAs: row.approvedAs,
+        }
+      : null;
   }
 
   const publishToTeam = (botId: string) =>

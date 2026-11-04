@@ -1,5 +1,12 @@
 // server/tests/shared-use-store.integration.test.ts
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -7,6 +14,7 @@ import { createDatabase } from "../src/db/client";
 import {
   mcpServers,
   responsibilities,
+  sharedUseApprovals,
   sharedUseRequests,
   users,
 } from "../src/db/schema";
@@ -34,6 +42,16 @@ async function publishTo(
   ]);
 }
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  createTestPolicyCache,
+  storedConnectionApprovals,
+  useTestPolicy,
+} from "./support/policy";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -340,7 +358,12 @@ describe("approval members", () => {
 });
 
 describe("decision durability", () => {
-  test("a direct approval and an administrator decision complete without a lock-order deadlock", async () => {
+  test("a direct approval made while a decision waits on its request stands, and both complete", async () => {
+    /*
+     * The decision and a direct approval used to be serialized by an advisory lock, and the one that
+     * came later won. There is no lock now: the decision is written over the approval stored when it
+     * began, so an administrator's approval stored while it waits is never replaced by it.
+     */
     await call("stranger");
     const [pending] = await store.pendingFor(bot);
     const blocker = createDatabase(testDatabaseUrl(), { max: 1 });
@@ -406,6 +429,9 @@ describe("decision durability", () => {
         "fulfilled",
       ]);
       expect((await store.approvalFor(bot, app))?.audience).toBe("team");
+      expect(
+        (await storedConnectionApprovals({ agentId: bot }))[0]?.audience,
+      ).toBe("team");
       expect(await store.pendingFor(bot)).toHaveLength(0);
     } finally {
       release.resolve();
@@ -418,60 +444,69 @@ describe("decision durability", () => {
     }
   }, 15000);
 
-  test.each(["shared_use_approvals", "shared_use_approval_members"] as const)(
-    "a failed %s write leaves an approval request pending and retryable",
-    async (table) => {
-      await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
-      await call("newhire");
-      const [pending] = await store.pendingFor(bot);
-      const fault = `approval_fault_${suite}`;
-      await database.execute(
-        sql.raw(
-          `CREATE FUNCTION ${fault}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic approval write fault'; END $$`,
-        ),
-      );
-      await database.execute(
-        sql.raw(
-          `CREATE TRIGGER ${fault} BEFORE INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION ${fault}()`,
-        ),
-      );
-      try {
-        await expect(
-          store.decide({
-            id: pending!.id,
-            by: id("admin"),
-            decision: "approve",
-          }),
-        ).rejects.toThrow();
-        const [row] = await database
-          .select()
-          .from(sharedUseRequests)
-          .where(eq(sharedUseRequests.id, pending!.id));
-        expect(row?.status).toBe("pending");
-        expect(row?.decidedAt).toBeNull();
-        expect(await store.approvalFor(bot, app)).toBeNull();
-      } finally {
-        await database.execute(sql.raw(`DROP TRIGGER ${fault} ON ${table}`));
-        await database.execute(sql.raw(`DROP FUNCTION ${fault}()`));
-      }
-      await store.decide({
+  test("an approval Intelligence refuses leaves the request pending and retryable", async () => {
+    await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
+    await call("newhire");
+    const [pending] = await store.pendingFor(bot);
+    // A group name longer than Intelligence keeps, so the approval write is refused after the claim.
+    await database
+      .update(sharedUseRequests)
+      .set({ proposedMembers: [{ kind: "group", value: "x".repeat(501) }] })
+      .where(eq(sharedUseRequests.id, pending!.id));
+    await expect(
+      store.decide({
         id: pending!.id,
         by: id("admin"),
         decision: "approve",
-      });
-      expect(await store.pendingFor(bot)).toHaveLength(0);
-      expect((await store.approvalFor(bot, app))?.members).toEqual([
-        { kind: "group", value: "platform" },
-      ]);
-      expect((await call("newhire")).allowed).toBe(true);
-      expect((await call("stranger")).allowed).toBe(false);
-    },
-  );
+      }),
+    ).rejects.toThrow();
+    const [row] = await database
+      .select()
+      .from(sharedUseRequests)
+      .where(eq(sharedUseRequests.id, pending!.id));
+    expect(row?.status).toBe("pending");
+    expect(row?.decidedAt).toBeNull();
+    expect(await store.approvalFor(bot, app)).toBeNull();
+    expect(await storedConnectionApprovals({ agentId: bot })).toHaveLength(0);
+
+    await database
+      .update(sharedUseRequests)
+      .set({ proposedMembers: [{ kind: "group", value: "platform" }] })
+      .where(eq(sharedUseRequests.id, pending!.id));
+    await store.decide({
+      id: pending!.id,
+      by: id("admin"),
+      decision: "approve",
+    });
+    expect(await store.pendingFor(bot)).toHaveLength(0);
+    expect((await store.approvalFor(bot, app))?.members).toEqual([
+      { kind: "group", value: "platform" },
+    ]);
+    expect((await call("newhire")).allowed).toBe(true);
+    expect((await call("stranger")).allowed).toBe(false);
+  });
+
+  test("approving writes Intelligence and never this deployment's own tables", async () => {
+    await call("stranger");
+    const [pending] = await store.pendingFor(bot);
+    await store.decide({
+      id: pending!.id,
+      by: id("admin"),
+      decision: "approve",
+    });
+    expect(await storedConnectionApprovals({ agentId: bot })).toHaveLength(1);
+    expect(
+      await database
+        .select()
+        .from(sharedUseApprovals)
+        .where(eq(sharedUseApprovals.agentId, bot)),
+    ).toHaveLength(0);
+  });
 });
 
 describe("owner approvals", () => {
   test.each(["owner", "people"] as const)(
-    "a concurrent owner grant cannot replace an administrator's %s approval",
+    "an owner's grant on a server that has not heard of an administrator's %s approval cannot replace it",
     async (audience) => {
       const approval = {
         audience,
@@ -486,85 +521,37 @@ describe("owner approvals", () => {
         .set({ ownerGrants: "any" })
         .where(eq(mcpServers.id, app));
       await changeBot(bot, { visibility: "public" });
-      const request = await store.fileRequest({
-        botId: bot,
-        serverId: app,
-        reason: "grant",
-        requestedBy: id("owner"),
-        proposed: approval,
-      });
-      const blocker = createDatabase(testDatabaseUrl(), { max: 1 });
-      const admin = createDatabase(testDatabaseUrl(), { max: 1 });
-      const owner = createDatabase(testDatabaseUrl(), { max: 1 });
-      const adminName = `owner_grant_admin_${suite}`;
-      const ownerName = `owner_grant_owner_${suite}`;
-      await admin.execute(
-        sql`select set_config('application_name', ${adminName}, false)`,
-      );
-      await owner.execute(
-        sql`select set_config('application_name', ${ownerName}, false)`,
-      );
-      const locked = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const gate = blocker.transaction(async (tx) => {
-        await tx
-          .select()
-          .from(sharedUseRequests)
-          .where(eq(sharedUseRequests.id, request.id))
-          .for("update");
-        locked.resolve();
-        await release.promise;
-      });
-      void gate.catch(locked.reject);
-      const adminStore = createSharedUseStore(admin, "composio");
-      const ownerStore = createSharedUseStore(owner, "composio");
-      const operations: Promise<unknown>[] = [];
-      async function waitForDatabaseLock(name: string) {
-        const deadline = Date.now() + 5000;
-        while (Date.now() < deadline) {
-          const rows = await database.execute(
-            sql`select wait_event_type from pg_stat_activity where application_name = ${name} and datname = current_database()`,
-          );
-          if (rows.some((row) => row.wait_event_type === "Lock")) return;
-        }
-        throw new Error(
-          `The database did not report the expected lock wait for ${name}`,
-        );
-      }
+      // Another server, read before the administrator's approval and deaf to announcements since.
+      const behind = createTestPolicyCache({ subscribe: false });
+      await behind.start();
+      behind.stop();
       try {
-        await locked.promise;
-        const adminWork = adminStore.setApproval({
+        await store.setApproval({
           botId: bot,
           serverId: app,
           by: id("admin"),
           approval,
         });
-        operations.push(adminWork);
-        await waitForDatabaseLock(adminName);
-        const ownerWork = ownerStore.approveOwnerGrant({
-          botId: bot,
-          serverId: app,
-          by: id("owner"),
-        });
-        operations.push(ownerWork);
-        await waitForDatabaseLock(ownerName);
-        release.resolve();
-        await gate;
-        await adminWork;
-        expect(await ownerWork).toBeNull();
+        // It still believes there is no approval, so the owner's grant tries to fill the absence.
+        expect(
+          behind.connectionApproval({ agentId: bot, connectionId: app }),
+        ).toBeUndefined();
+        const ownerStore = createSharedUseStore(database, "composio", behind);
+        expect(
+          await ownerStore.approveOwnerGrant({
+            botId: bot,
+            serverId: app,
+            by: id("owner"),
+          }),
+        ).toBeNull();
         expect(await store.approvalSource(bot, app)).toBe("admin");
         expect(await store.approvalFor(bot, app)).toEqual(approval);
+        const [stored] = await storedConnectionApprovals({ agentId: bot });
+        expect(stored?.approvedAs).toBe("admin");
       } finally {
-        release.resolve();
-        await Promise.allSettled([gate, ...operations]);
-        await Promise.all([
-          blocker.$client.end(),
-          admin.$client.end(),
-          owner.$client.end(),
-        ]);
+        behind.stop();
       }
     },
-    15000,
   );
 });
 

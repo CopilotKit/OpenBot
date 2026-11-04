@@ -22,7 +22,7 @@ import {
   wakeUpTools,
 } from "../src/agents/wake-up";
 import { createDatabase } from "../src/db/client";
-import { approvalRequests, approvalRules } from "../src/db/schema/approvals";
+import { approvalRequests } from "../src/db/schema/approvals";
 import {
   channelAgents,
   channelMemberships,
@@ -45,6 +45,7 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /**
  * Pause, reset, Activity, attention, follow-ups and update routing against a real PostgreSQL.
@@ -64,6 +65,7 @@ const shared = `${prefix}-shared`;
 const othersDirect = `${prefix}-others-direct`;
 
 beforeAll(async () => {
+  await useTestPolicy();
   await useTestConfiguration();
   configureBotLifecycle({ pauses: configuredPauses });
   await database.insert(users).values([
@@ -575,27 +577,26 @@ describe("reset", () => {
         title: "Review the PR",
         detail: "It waits on you",
       });
-      await database.insert(approvalRules).values([
-        {
-          id: `${prefix}-allow-${person}`,
-          ownerUserId: person,
-          botId: bot,
-          toolRef: "mail/send",
-          effect: "send",
-          scope: "*",
-          behaviour: "allow",
-        },
-        // A rule that makes the Bot ask first protects the person, so a reset leaves it.
-        {
-          id: `${prefix}-ask-${person}`,
-          ownerUserId: person,
-          botId: bot,
-          toolRef: "files/delete",
-          effect: "delete",
-          scope: "*",
-          behaviour: "ask",
-        },
-      ]);
+      const rules = await useTestPolicy();
+      await rules.createApprovalRule({
+        id: `${prefix}-allow-${person}`,
+        ownerUserId: person,
+        agentId: bot,
+        tool: "mail/send",
+        effect: "send",
+        scope: "*",
+        behaviour: "allow",
+      });
+      // A rule that makes the Bot ask first protects the person, so a reset leaves it.
+      await rules.createApprovalRule({
+        id: `${prefix}-ask-${person}`,
+        ownerUserId: person,
+        agentId: bot,
+        tool: "files/delete",
+        effect: "delete",
+        scope: "*",
+        behaviour: "ask",
+      });
     }
 
     const plan = await reset.plan(owner, bot);
@@ -625,15 +626,10 @@ describe("reset", () => {
               .select({ id: proactiveSuggestions.id })
               .from(proactiveSuggestions)
               .where(eq(proactiveSuggestions.ownerUserId, person))
-          : database
-              .select({ id: approvalRules.id })
-              .from(approvalRules)
-              .where(
-                and(
-                  eq(approvalRules.ownerUserId, person),
-                  sql`${approvalRules.revokedAt} is null`,
-                ),
-              );
+          : // As Intelligence holds them now, past this process's memory.
+            (await useTestPolicy()).client
+              .approvalRules({ ownerUserId: person })
+              .then(({ items }) => items.map((rule) => ({ id: rule.id })));
     expect(await left("memory", owner)).toHaveLength(0);
     expect(await left("research", owner)).toHaveLength(0);
     expect((await left("rules", owner)).map((row) => row.id)).toEqual([

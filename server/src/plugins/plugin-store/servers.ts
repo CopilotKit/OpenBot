@@ -1451,6 +1451,8 @@ export function serverMethods(context: StoreContext) {
         .map((grant) => ({ ref: grant.ref, agentId: grant.botId }))
         .sort((left, right) => left.ref.localeCompare(right.ref));
       await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+      // Its Shared app approvals went with the row by a foreign key; they live in Intelligence now.
+      await options.removeSharedApprovals?.(serverId);
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",

@@ -34,8 +34,6 @@ import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   auditEvents,
-  capabilitySettings,
-  enterpriseSettings,
   modelUsage,
   proactivePeople,
   proactivePings,
@@ -71,6 +69,7 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /*
  * The admin's say over check-ins, through the real path: real Postgres, the real enterprise controls
@@ -118,6 +117,7 @@ const settingOf = (person: { id: string }, bot: string) =>
 
 beforeAll(async () => {
   await useTestConfiguration();
+  await useTestPolicy();
   await database.insert(users).values([
     { ...admin, name: "Admin" },
     { ...seller, name: "Seller", groups: [`sales-${suite}`] },
@@ -158,12 +158,12 @@ const settingIds = () => [...settings.values()].map((setting) => setting.id);
 
 /** Every switch back to untouched, every setting on and not due, and nothing in the ledger. */
 async function reset() {
-  await database
-    .delete(capabilitySettings)
-    .where(eq(capabilitySettings.capability, "proactive"));
-  await database
-    .delete(enterpriseSettings)
-    .where(eq(enterpriseSettings.key, "proactive_daily_runs"));
+  const cache = await useTestPolicy();
+  for (const rule of cache.capabilityRules())
+    if (rule.capability === "proactive") await cache.deleteCapabilityRule(rule);
+  await cache.patchSettings({
+    proactiveDailyRuns: DEFAULT_ENTERPRISE_SETTINGS.proactiveDailyRuns,
+  });
   await controls.refresh();
   await database
     .delete(workItems)

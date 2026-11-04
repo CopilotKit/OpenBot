@@ -20,8 +20,8 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                                                                        |
 | `agent-harness`          | 4202                       | The Bot framework harness chosen during setup, one of the `agent-<framework>` images, behind the `harness` compose profile.                 |
 | `supervisor`             | 4500 host / 4300 container | Creates, stops, resets, and lists per-Bot computer containers.                                                                              |
-| PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, policy, grants, channels, and components.                                           |
-| CopilotKit Intelligence  | external                   | Durable threads, memory, and realtime gateway.                                                                                              |
+| PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, grants, channels, and components.                                                                    |
+| CopilotKit Intelligence  | external                   | Durable threads, memory, Bots, organization policy, and realtime gateway.                                                                   |
 
 `scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-langgraph`, `agent-bot` (skipped when `BOT_PROVIDER=anthropic`, since that sample only takes OpenAI keys) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server`, the routines worker (`bun worker/src/index.ts`, the local stand-in for the routines CronJob) and `app` on the host.
 
@@ -71,6 +71,13 @@ allow rule does not permit. OpenBot's shipped startup default is explicit:
 `deny: []` and `allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved
 administrator policy replaces it. A malformed configured policy stops server
 startup.
+
+An administrator's policy lives in CopilotKit Intelligence's organization policy: the saved
+action boundary, the capability switches, the enterprise settings, the network rules, approval
+preferences and rules, and the approvals for a Bot to use a Shared app. Every server holds all of
+it in memory, because it is read on every action and every tool call that may need approval, and
+refreshes it from Intelligence's change announcements and a full read every minute
+(`server/src/policy`). A change saved on one server reaches every other within a moment.
 
 ## Computers
 

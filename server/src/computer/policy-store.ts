@@ -6,37 +6,25 @@
  * boundary held at a moment when it did not, and a form going through after a restart is
  * indistinguishable from a rule that never applied.
  *
- * Memory is the cache, and the table is the record. The gateway asks for the policy on every single
- * action, so `get` stays synchronous and reads from memory; the write goes through to the database
- * and the memory copy is only updated once it has. A store that answered from the database on every
- * click would put a query on the path of every keystroke a Bot makes.
+ * Memory is the cache, and Intelligence is the record: the boundary is the organization policy's
+ * action boundary (`policy/`). The gateway asks for the policy on every single action, so `get` stays
+ * synchronous and reads from memory; the write goes through to Intelligence and the memory copy is
+ * only updated once it has. A store that answered from Intelligence on every click would put a round
+ * trip on the path of every keystroke a Bot makes.
  *
  * Memory is a cache of a shared record, not a per-process copy of it. OpenBot runs several servers
  * behind a load balancer, and an administrator's new rule arrives at exactly one of them. Kept only
  * in that process, the rule applies to roughly one action in N while the admin screen and the audit
  * row both report success, which is the boundary silently not applying: the failure this whole file
- * exists to prevent, in a different shape. So a write announces itself on Postgres and every server
- * re-reads. Same mechanism as channel activity, for the same reason.
+ * exists to prevent, in a different shape. So Intelligence announces every change and every server
+ * re-reads (`policy-listener.ts`).
  *
- * Without a database it still works in memory. Tests that only care about decision logic do not need
- * Postgres.
+ * Without the policy cache it still works in memory. Tests that only care about decision logic do not
+ * need Intelligence.
  */
-import { eq, sql } from "drizzle-orm";
-import type { Database } from "../db/client";
-import { actionPolicy } from "../db/schema";
+import type { PolicyCache } from "../policy/cache";
+import type { ActionBoundaryRecord } from "../policy/types";
 import type { ActionPolicy, RuleLabel } from "./policy";
-
-/** There is one boundary per deployment, so there is one row. */
-const CURRENT = "current";
-
-/**
- * What a server announces on when the boundary changes, and what every server listens to.
- *
- * The payload is deliberately empty: it says "re-read", not what to read. A rule list can outgrow
- * NOTIFY's 8000-byte cap, and a listener that took the payload as truth would be enforcing whatever
- * fitted rather than what was saved.
- */
-export const ACTION_POLICY_TOPIC = "action_policy_changed";
 
 /**
  * What a deployment allows when it has not said otherwise.
@@ -63,7 +51,7 @@ export type PolicyStore = {
   /** Back to what configuration says, forgetting the saved one. */
   reset: () => Promise<void>;
   /** Read the saved policy at boot. Returns where the live policy came from. */
-  load: () => Promise<"the database" | "configuration">;
+  load: () => Promise<"intelligence" | "configuration">;
   /**
    * Re-read because another server changed it.
    *
@@ -75,120 +63,69 @@ export type PolicyStore = {
 
 export function createPolicyStore(
   initial: ActionPolicy,
-  /** Absent keeps everything in memory, which is what a test without a database wants. */
-  database?: Database,
+  /** Absent keeps everything in memory, which is what a test without Intelligence wants. */
+  cache?: PolicyCache,
 ): PolicyStore {
   const configured = clone(initial);
   let current = clone(initial);
+
+  /** What the held record says is in force: the saved boundary, or configuration's when none is. */
+  const fromRecord = (record: ActionBoundaryRecord): ActionPolicy =>
+    record.boundary
+      ? {
+          mode: record.boundary.mode,
+          deny: [...record.boundary.deny],
+          allow: [...record.boundary.allow],
+          labels: { ...record.boundary.labels },
+        }
+      : clone(configured);
 
   return {
     get: () => current,
 
     set: async (policy, by) => {
       const next = clone(policy);
-      if (database) {
+      if (cache) {
         // Written before it is enforced. If the write fails this throws and the caller reports a
         // failure, which is the honest outcome: an administrator who is told a rule was saved must
-        // not be enforcing a rule that will disappear at the next restart.
-        //
-        // The announcement goes in the same transaction, so it is delivered on commit: a write that
-        // rolls back announces nothing, and there is no window where the row has changed and the
-        // other servers have not been told. Same shape as `channels/routes.ts`.
-        await database.transaction(async (transaction) => {
-          await transaction
-            .insert(actionPolicy)
-            .values({
-              id: CURRENT,
-              mode: next.mode,
-              deny: next.deny,
-              allow: next.allow,
-              labels: next.labels ?? {},
-              updatedBy: by ?? null,
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: actionPolicy.id,
-              set: {
-                mode: next.mode,
-                deny: next.deny,
-                allow: next.allow,
-                labels: next.labels ?? {},
-                updatedBy: by ?? null,
-                updatedAt: new Date(),
-              },
-            });
-
-          // Every server hears it, including this one, which re-reads and arrives at what it
-          // already has.
-          await announce(transaction);
-        });
+        // not be enforcing a rule that will disappear at the next restart. Intelligence announces it
+        // to every server, including this one, which re-reads and arrives at what it already has.
+        await cache.putActionBoundary(
+          {
+            mode: next.mode,
+            deny: next.deny,
+            allow: next.allow,
+            labels: next.labels ?? {},
+          },
+          by ?? null,
+        );
       }
       current = next;
     },
 
     reset: async () => {
-      // The saved policy is removed rather than overwritten with the configured one, so "reset" means
+      // The saved boundary is cleared rather than overwritten with the configured one, so "reset" means
       // this deployment has no boundary of its own again, and changing what configuration says then
       // changes what it enforces, which is what an operator expects of a reset.
-      if (database) {
-        await database.transaction(async (transaction) => {
-          await transaction
-            .delete(actionPolicy)
-            .where(eq(actionPolicy.id, CURRENT));
-          await announce(transaction);
-        });
-      }
+      if (cache) await cache.resetActionBoundary();
       current = clone(configured);
     },
 
     load: async () => {
-      if (!database) return "configuration";
-      const [row] = await database
-        .select()
-        .from(actionPolicy)
-        .where(eq(actionPolicy.id, CURRENT))
-        .limit(1);
-      if (!row) return "configuration";
-
-      current = fromRow(row);
-      return "the database";
+      if (!cache) return "configuration";
+      const record = cache.actionBoundary();
+      current = fromRecord(record);
+      return record.boundary ? "intelligence" : "configuration";
     },
 
     refresh: async () => {
-      if (!database) return;
-      const [row] = await database
-        .select()
-        .from(actionPolicy)
-        .where(eq(actionPolicy.id, CURRENT))
-        .limit(1);
-
-      // No row means somebody reset it, and reset means this deployment goes back to what
+      if (!cache) return;
+      // No boundary means somebody reset it, and reset means this deployment goes back to what
       // configuration says. Leaving the last saved rules in memory here would make a reset apply on
       // the server that served it and nowhere else, which is the bug this function exists to fix.
-      current = row ? fromRow(row) : clone(configured);
+      current = fromRecord(cache.actionBoundary());
     },
   };
-}
-
-/**
- * Tell every server the boundary moved.
- *
- * Never fatal. The rule is already saved and this process is already enforcing it, so a failed
- * announcement costs the other servers their update until their next restart, which is worth a loud
- * log and is not worth failing a write an administrator has been told succeeded.
- */
-async function announce(database: Pick<Database, "execute">): Promise<void> {
-  try {
-    await database.execute(sql`select pg_notify(${ACTION_POLICY_TOPIC}, '')`);
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "action-policy-notify-failed",
-        note: "The boundary was saved but other servers were not told. They keep enforcing the previous rules until they restart.",
-        error: String(error),
-      }),
-    );
-  }
 }
 
 function clone(policy: ActionPolicy): ActionPolicy {
@@ -197,15 +134,6 @@ function clone(policy: ActionPolicy): ActionPolicy {
     deny: [...policy.deny],
     allow: [...policy.allow],
     ...(policy.labels ? { labels: { ...policy.labels } } : {}),
-  };
-}
-
-function fromRow(row: typeof actionPolicy.$inferSelect): ActionPolicy {
-  return {
-    mode: row.mode as ActionPolicy["mode"],
-    deny: [...row.deny],
-    allow: [...row.allow],
-    labels: { ...row.labels },
   };
 }
 

@@ -25,6 +25,7 @@ import { auditEvents } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /**
  * The interactive path, over HTTP: a person's own chat asks the browser to click, the browser posts
@@ -169,6 +170,7 @@ const resume = async (id: string) => {
 };
 
 beforeAll(async () => {
+  await useTestPolicy();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: stranger, email: `${stranger}@example.test` },

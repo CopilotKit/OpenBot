@@ -20,6 +20,12 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
