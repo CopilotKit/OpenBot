@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComponentType, ReactNode } from "react";
@@ -119,21 +119,26 @@ function serving(grant: string) {
 
 type Renderer = ComponentType<Record<string, unknown>>;
 type Handler = (args: unknown, context: unknown) => Promise<unknown>;
-type Kept = {
-  renderers: Map<string, Renderer>;
-  handlers: Map<string, Handler>;
-};
-
-function Capture({ kept, names }: { kept: Kept; names: string[] }) {
-  const { copilotkit } = useCopilotKit();
-  for (const name of names) {
-    const entry = copilotkit.renderToolCalls.find(
+/**
+ * Read from the SDK when asked, not when Capture renders: the provider does not re-render its
+ * consumers when a tool is added, so a read at render time sees the registry before the tool did.
+ */
+class Registry {
+  copilotkit?: ReturnType<typeof useCopilotKit>["copilotkit"];
+  renderer(name: string) {
+    return this.copilotkit?.renderToolCalls.find(
       (candidate) => candidate.name === name,
-    );
-    if (entry) kept.renderers.set(name, entry.render as Renderer);
-    const tool = copilotkit.getTool({ toolName: name });
-    if (tool?.handler) kept.handlers.set(name, tool.handler as Handler);
+    )?.render as Renderer | undefined;
   }
+  handler(name: string) {
+    return this.copilotkit?.getTool({ toolName: name })?.handler as
+      | Handler
+      | undefined;
+  }
+}
+
+function Capture({ kept }: { kept: Registry }) {
+  kept.copilotkit = useCopilotKit().copilotkit;
   return null;
 }
 
@@ -157,22 +162,22 @@ function Providers({ children }: { children: ReactNode }) {
 
 test("a proposed coworker named like an existing one says so", async () => {
   const release = serving(BOT_CREATOR_SLUG);
-  const kept: Kept = { renderers: new Map(), handlers: new Map() };
+  const kept = new Registry();
   const tree = render(
     <Providers>
       <BotTools />
-      <Capture kept={kept} names={["save_bot"]} />
+      <Capture kept={kept} />
     </Providers>,
   );
-  await waitFor(() => expect(kept.renderers.get("save_bot")).toBeDefined());
+  await waitFor(() => expect(kept.renderer("save_bot")).toBeDefined());
 
   // The roster arrives after the grant turned the tool on.
   release();
-  const Kept = kept.renderers.get("save_bot") as Renderer;
+  const Kept = kept.renderer("save_bot") as Renderer;
   tree.rerender(
     <Providers>
       <BotTools />
-      <Capture kept={kept} names={["save_bot"]} />
+      <Capture kept={kept} />
       <Kept
         name="save_bot"
         args={{ name: "Researcher" }}
@@ -194,19 +199,18 @@ test("a proposed coworker named like an existing one says so", async () => {
 
 async function skillToolsLoaded() {
   const release = serving(SKILL_CREATOR_SLUG);
-  const kept: Kept = { renderers: new Map(), handlers: new Map() };
-  const names = ["save_skill", "list_skills", "read_skill"];
+  const kept = new Registry();
   const drawn = (card?: ReactNode) => (
     <Providers>
       <SkillTools />
-      <Capture kept={kept} names={names} />
+      <Capture kept={kept} />
       {card}
     </Providers>
   );
   const tree = render(drawn());
   await waitFor(() => {
-    expect(kept.renderers.get("save_skill")).toBeDefined();
-    expect(kept.handlers.get("list_skills")).toBeDefined();
+    expect(kept.renderer("save_skill")).toBeDefined();
+    expect(kept.handler("list_skills")).toBeDefined();
   });
 
   // The skills arrive after the grant turned the tools on.
@@ -216,7 +220,7 @@ async function skillToolsLoaded() {
 
 test("a proposed skill that would overwrite an existing one says so", async () => {
   const { kept, tree, drawn } = await skillToolsLoaded();
-  const Kept = kept.renderers.get("save_skill") as Renderer;
+  const Kept = kept.renderer("save_skill") as Renderer;
   tree.rerender(
     drawn(
       <Kept
@@ -241,9 +245,9 @@ test("a proposed skill that would overwrite an existing one says so", async () =
 test("the skill reads tell the Bot about skills that loaded after the tools turned on", async () => {
   const { kept } = await skillToolsLoaded();
   // What the model is told, from the handlers the SDK kept.
-  const listed = await kept.handlers.get("list_skills")?.({}, {});
+  const listed = await kept.handler("list_skills")?.({}, {});
   expect(String(listed)).toContain("/weekly-summary — Weekly summary (yours)");
-  const read = await kept.handlers.get("read_skill")?.(
+  const read = await kept.handler("read_skill")?.(
     { slug: "weekly-summary" },
     {},
   );

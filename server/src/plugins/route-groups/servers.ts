@@ -218,6 +218,7 @@ export function mountServerRoutes({
       title?: unknown;
       url?: unknown;
       credentialId?: unknown;
+      entraScope?: unknown;
     } | null;
     if (
       typeof body?.id !== "string" ||
@@ -243,6 +244,23 @@ export function mountServerRoutes({
         400,
       );
     }
+    /*
+     * Marks the server as reached as the signed-in person through Microsoft, with this scope. Null
+     * puts it back on the deployment's credential; absent leaves it as it is.
+     */
+    if (
+      body.entraScope !== undefined &&
+      body.entraScope !== null &&
+      (typeof body.entraScope !== "string" || !body.entraScope.trim())
+    ) {
+      return context.json(
+        {
+          error:
+            "An Entra scope must be a non-empty string, or null to stop reaching the server as the signed-in person.",
+        },
+        400,
+      );
+    }
 
     try {
       const server = await store.addCustomServer({
@@ -253,7 +271,14 @@ export function mountServerRoutes({
           typeof body.credentialId === "string"
             ? body.credentialId.trim()
             : undefined,
+        entraScope:
+          typeof body.entraScope === "string"
+            ? body.entraScope.trim()
+            : body.entraScope === null
+              ? null
+              : undefined,
         by: actorEmail(context),
+        actorId: context.var.actor.id,
       });
       return context.json({ server });
     } catch (error) {

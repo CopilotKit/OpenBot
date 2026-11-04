@@ -1,0 +1,184 @@
+{
+  "name": "run-error",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"broken\"},\"body\":{\"threadId\":\"3a283c98-c95d-47fd-8efd-42069d83dc26\",\"runId\":\"9ed26ec6-e9f5-4010-8a13-f12032d09d14\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"96a00fbd-f7e9-4222-900c-e7048754f84a\",\"role\":\"user\",\"content\":\"Hello?\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 98,
+          "text": "{\"threadId\":\"3a283c98-c95d-47fd-8efd-42069d83dc26\",\"runId\":\"9ed26ec6-e9f5-4010-8a13-f12032d09d14\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:3a283c98-c95d-47fd-8efd-42069d83dc26\"}}"
+        }
+      ],
+      "end": {
+        "at": 98,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 101,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:3a283c98-c95d-47fd-8efd-42069d83dc26",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "9ed26ec6-e9f5-4010-8a13-f12032d09d14"
+      }
+    },
+    {
+      "at": 154,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:3a283c98-c95d-47fd-8efd-42069d83dc26",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Hello?",
+              "id": "96a00fbd-f7e9-4222-900c-e7048754f84a",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+          "state": {},
+          "threadId": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "254b1659-69fd-4595-808f-fed0b0d7c560",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-ecd3-70e2-b82c-7534e35128c1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+        "run_id": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+        "threadId": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+        "thread_id": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 158,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:3a283c98-c95d-47fd-8efd-42069d83dc26",
+      "event": "replay_complete"
+    },
+    {
+      "at": 5590,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:3a283c98-c95d-47fd-8efd-42069d83dc26",
+      "event": "ag_ui_event",
+      "payload": {
+        "message": "The model `gpt-recorder-no-such-model` does not exist or you do not have access to it.",
+        "metadata": {
+          "cpki_event_id": "77aaf04e-1923-44e0-9737-54283591a561",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9e-0241-7daf-83f6-039d6ef23db8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+        "run_id": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+        "threadId": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+        "thread_id": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+        "type": "RUN_ERROR"
+      }
+    },
+    {
+      "at": 5591,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:3a283c98-c95d-47fd-8efd-42069d83dc26",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "3222fe6b-78b3-4e7f-aa50-7ae092c554ce",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538438774
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "96a00fbd-f7e9-4222-900c-e7048754f84a",
+            "runId": null,
+            "threadId": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+            "agentId": "broken",
+            "role": "user",
+            "textLength": 6,
+            "text": "Hello?",
+            "seq": 2
+          },
+          "timestamp": 1792538438826
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+            "threadId": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+            "agentId": "broken",
+            "seq": 3
+          },
+          "timestamp": 1792538438930
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "3222fe6b-78b3-4e7f-aa50-7ae092c554ce",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "error",
+            "runId": "9ed26ec6-e9f5-4010-8a13-f12032d09d14",
+            "threadId": "3a283c98-c95d-47fd-8efd-42069d83dc26",
+            "agentId": "broken",
+            "seq": 4
+          },
+          "timestamp": 1792538444365
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

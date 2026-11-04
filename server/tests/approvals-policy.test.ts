@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import {
   createCoordinationTools,
   handoffTool,
@@ -29,7 +30,6 @@ import {
 } from "../src/approvals/types";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 const candidate = (
   over: Partial<ApprovalCandidate> = {},
@@ -223,6 +223,144 @@ describe("built-in safety requirements", () => {
         }),
       ),
     ).toBeUndefined();
+  });
+
+  test("what a Bot types into a field is content: the field and the page say what the action is", () => {
+    // As the computer describes a typing action: the field it types into and the page it is on.
+    const typing = (text: string, field: string, pageUrl: string) =>
+      safetyRequirement(
+        candidate({
+          toolRef: "computer_type",
+          scope: new URL(pageUrl).host,
+          args: { ref: "f1e145", text, submit: false, snapshotId: 3 },
+          target: {
+            element: { ref: "f1e145", name: field, role: "textbox" },
+            pageUrl,
+            snapshotId: 3,
+          },
+        }),
+      )?.id;
+    const crm = "http://host.docker.internal:4900/accounts/new";
+    // A new CRM account, filled in from research: its notes and source name purchase orders,
+    // a payments company, a news wire. None of it is paying.
+    expect(
+      typing(
+        "Expanded its AI agents for purchase orders, detention and dock workflows.",
+        "Notes",
+        crm,
+      ),
+    ).toBeUndefined();
+    expect(typing("Business Wire; LinkedIn", "Source", crm)).toBeUndefined();
+    expect(
+      typing("Payments platform for freight billing", "Notes", crm),
+    ).toBeUndefined();
+    // A payment field or a checkout page still goes to the person, whatever is typed.
+    expect(
+      typing(
+        "4111 1111 1111 1111",
+        "Card number",
+        "https://shop.example/account",
+      ),
+    ).toBe("payments");
+    expect(typing("1", "Quantity", "https://shop.example/checkout")).toBe(
+      "payments",
+    );
+    expect(
+      typing("hunter2", "New password", "https://mail.example/settings"),
+    ).toBe("credentials");
+  });
+
+  test("a news wire is not a wire of money", () => {
+    const clicking = (name: string) =>
+      safetyRequirement(
+        candidate({
+          toolRef: "computer_click",
+          scope: "news.example",
+          args: { ref: "e7" },
+          target: { element: { ref: "e7", name, role: "link" } },
+        }),
+      )?.id;
+    // Press releases go out on Business Wire; following one is not paying.
+    expect(clicking("Read the release on Business Wire")).toBeUndefined();
+    expect(clicking("news wire")).toBeUndefined();
+    // Moving money by wire still goes to the person.
+    expect(clicking("Wire the deposit to the vendor")).toBe("payments");
+    expect(clicking("Send a wire")).toBe("payments");
+    expect(clicking("Start a wire transfer")).toBe("payments");
+  });
+
+  test("refunds move money; writing an order note does not", () => {
+    const shopify = (toolName: string, args: Record<string, unknown>) =>
+      safetyRequirement(
+        candidate({
+          toolRef: `composio-shopify/${toolName}`,
+          scope: "composio-shopify",
+          args,
+          target: {
+            serverId: "composio-shopify",
+            toolName,
+            url: "https://mcp.composio.dev/shopify",
+            effect: "write",
+          },
+        }),
+      )?.id;
+    // A refund moves money, whatever surrounds it in the action name.
+    expect(
+      shopify("SHOPIFY_CREATE_REFUND", {
+        id: 123,
+        refund_line_items: [{ line_item_id: 1 }],
+      }),
+    ).toBe("payments");
+    // Writing only a note on an order moves no money.
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", { id: 123, note: "gift wrap" }),
+    ).toBeUndefined();
+    // A field left empty is not an argument sent: the billing_address the Bot did not
+    // fill in must not hand the note off as money-moving (#890).
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", {
+        id: 123,
+        billing_address: null,
+        note: "gift wrap",
+      }),
+    ).toBeUndefined();
+    expect(
+      shopify("SHOPIFY_UPDATE_ORDER", {
+        id: 123,
+        billing_address: {},
+        note: "",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("a field nested past the depth cap still counts by its name", () => {
+    // Values deeper than the cap are not read, so a field there flattens to nothing whether or not
+    // it holds anything. Its name is all the rule gets to see of it, and an unread value is not an
+    // empty one: dropping the name too let a money field through just by nesting it deep enough.
+    const sent = (args: Record<string, unknown>) =>
+      safetyRequirement(
+        candidate({
+          toolRef: "composio-shopify/SHOPIFY_GRAPHQL_MUTATION",
+          scope: "composio-shopify",
+          args,
+          target: {
+            serverId: "composio-shopify",
+            toolName: "SHOPIFY_GRAPHQL_MUTATION",
+            url: "https://mcp.composio.dev/shopify",
+            effect: "write",
+          },
+        }),
+      )?.id;
+    const nested = (leaf: Record<string, unknown>) =>
+      sent({ a: { b: { c: { d: { e: { f: leaf } } } } } });
+    expect(nested({ payment_method: { card: "tok_123" } })).toBe("payments");
+    expect(nested({ billing: [{ line: 1 }] })).toBe("payments");
+    // A list read at the cap whose entries are past it is not empty either.
+    expect(
+      sent({ a: { b: { c: { d: { e: { refund_lines: [{ id: 1 }] } } } } } }),
+    ).toBe("payments");
+    // Past the cap as well, but genuinely empty: still nothing sent.
+    expect(nested({ billing_address: {}, refund: [] })).toBeUndefined();
   });
 });
 

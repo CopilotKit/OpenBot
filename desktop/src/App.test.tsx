@@ -1227,7 +1227,7 @@ function emptyConfiguration() {
   };
 }
 
-test("leftover database recovery requires confirmation and keeps setup ready to retry", async () => {
+test("leftover database is offered as a fresh start that carries on into Start", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   const reset = deferred<void>();
@@ -1237,6 +1237,7 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
       throw {
         said: "A previous OpenBot database remains without its encryption key.",
         database_reset: "fixture_postgres-data",
+        leftover_reset: ["fixture_postgres-data"],
       };
     if (command === "reset_leftover_database") return reset.promise;
     return previous(command, args);
@@ -1249,49 +1250,97 @@ test("leftover database recovery requires confirmation and keeps setup ready to 
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
   const resets = () =>
     invokeCalls.filter((call) => call.command === "reset_leftover_database");
-  await userEvent.click(
-    await view.findByRole("button", { name: "Reset leftover database" }),
-  );
+  const startFresh = await view.findByRole("button", { name: "Start fresh" });
+  // A choice, not a failure: nothing announces that Start did not finish.
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.getByText(/saved chats, Bots, and settings/)).toBeTruthy();
   expect(view.getByText(/permanently deletes/)).toBeTruthy();
+  expect(view.getByText(/with its original encryption key/)).toBeTruthy();
+  expect(view.getByText("fixture_postgres-data")).toBeTruthy();
   expect(resets()).toHaveLength(0);
-  await userEvent.click(view.getByRole("button", { name: "Keep saved data" }));
-  expect(resets()).toHaveLength(0);
-  expect(view.queryByRole("button", { name: "Delete saved data" })).toBeNull();
-  await userEvent.click(
-    view.getByRole("button", { name: "Reset leftover database" }),
-  );
-  await userEvent.click(
-    view.getByRole("button", { name: "Delete saved data" }),
-  );
+  await userEvent.click(startFresh);
   expect(resets()).toEqual([
     {
       command: "reset_leftover_database",
       args: {
         root: "/tmp/openbot-app-test",
-        volume: "fixture_postgres-data",
+        volumes: ["fixture_postgres-data"],
+        containers: [],
         confirmed: true,
       },
     },
   ]);
-  expect(
-    view.getByRole("button", { name: "Deleting saved data…" }),
-  ).toHaveProperty("disabled", true);
+  expect(view.getByRole("button", { name: "Starting fresh…" })).toHaveProperty(
+    "disabled",
+    true,
+  );
   expect(view.getByRole("button", { name: "Working…" })).toHaveProperty(
     "disabled",
     true,
   );
-  await act(async () => reset.resolve());
-  expect(
-    view.queryByRole("button", { name: "Reset leftover database" }),
-  ).toBeNull();
-  expect(view.queryByRole("alert")).toBeNull();
   expect(starts).toBe(1);
-  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await act(async () => reset.resolve());
   await view.findByRole("button", { name: "Ask" });
+  expect(starts).toBe(2);
   expect(installationCalls()).toHaveLength(1);
 });
 
-test("database recovery failure is shown without restarting services", async () => {
+test("starting fresh names every container and volume and removes only that list", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  const volumes = [
+    "openbot-profile-general-assistant",
+    "openbot-workspace-general-assistant",
+    "openbot_agent-profiles",
+  ];
+  const containers = [
+    "openbot-agent-computer-1",
+    "openbot-computer-general-assistant",
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "OpenBot found data from a previous installation.",
+        leftover_reset: volumes,
+        leftover_containers: containers,
+      };
+    if (command === "reset_leftover_database") return null;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://model.example/v1",
+    "synthetic-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const startFresh = await view.findByRole("button", { name: "Start fresh" });
+  expect(view.queryByText(/saved chats/)).toBeNull();
+  expect(view.queryByText(/encryption key/)).toBeNull();
+  expect(view.getByText(/browser sign-ins/)).toBeTruthy();
+  expect(
+    view.getByText(/Restore the previous installation’s folder/),
+  ).toBeTruthy();
+  for (const volume of volumes) expect(view.getByText(volume)).toBeTruthy();
+  expect(view.getByText(/stopped containers/)).toBeTruthy();
+  for (const container of containers)
+    expect(view.getByText(container)).toBeTruthy();
+  await userEvent.click(startFresh);
+  expect(
+    invokeCalls.filter((call) => call.command === "reset_leftover_database"),
+  ).toEqual([
+    {
+      command: "reset_leftover_database",
+      args: {
+        root: "/tmp/openbot-app-test",
+        volumes,
+        containers,
+        confirmed: true,
+      },
+    },
+  ]);
+});
+
+test("a fresh start that cannot delete the leftovers is shown without starting", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -1313,12 +1362,10 @@ test("database recovery failure is shown without restarting services", async () 
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
   await userEvent.click(
-    await view.findByRole("button", { name: "Reset leftover database" }),
-  );
-  await userEvent.click(
-    view.getByRole("button", { name: "Delete saved data" }),
+    await view.findByRole("button", { name: "Start fresh" }),
   );
   expect(await view.findByText(/database is still in use/)).toBeTruthy();
+  expect(view.getByRole("alert")).toBeTruthy();
   expect(
     invokeCalls.filter((call) => call.command === "start_stack"),
   ).toHaveLength(1);
@@ -1386,6 +1433,7 @@ function setupRootConfiguration(
       ];
     }
     if (command === "start_stack") return null;
+    if (command === "connect_intelligence_apps") return null;
     throw new Error(`unexpected command ${command}`);
   };
 }
@@ -1954,6 +2002,114 @@ async function enterProjectSelection() {
   return view;
 }
 
+async function signInWithProjects(root: string, handler: Invoke) {
+  setupRootConfiguration(root, async () => emptyConfiguration());
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "begin_intelligence_sign_in"
+      ? "https://copilotkit.test/sign-in"
+      : command === "finish_intelligence_sign_in"
+        ? [{ id: "project-1", name: "Project One" }]
+        : command === "intelligence_key_for"
+          ? "created-project-key"
+          : handler(command, args).catch((error) =>
+              error === UNHANDLED
+                ? previous(command, args)
+                : Promise.reject(error),
+            );
+  const view = await renderApp();
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await chooseOpenAi(view);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  return view;
+}
+
+const UNHANDLED = Symbol("unhandled");
+
+async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+}
+
+/*
+ * APPS CANNOT FAIL SIGN-IN. Connecting apps ran inside the CopilotKit sign-in, so until Ops could
+ * provision, every managed sign-in failed with an apps error. Now sign-in finishes, the projects
+ * are offered, Start is available, and Connect apps retries for the same folder.
+ */
+test("managed sign-in finishes when apps cannot connect, and Connect apps retries", async () => {
+  let connects = 0;
+  const view = await signInWithProjects("/tmp/apps-retry", async (command) => {
+    if (command !== "connect_intelligence_apps") throw UNHANDLED;
+    if (++connects === 1)
+      throw {
+        said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
+      };
+    return null;
+  });
+  await userEvent.click(
+    await view.findByRole("button", { name: "Project One" }),
+  );
+  expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+  expect(
+    await view.findByText(/OpenBot couldn't connect your apps/),
+  ).toBeTruthy();
+  expect(view.getByText("You can start OpenBot without them.")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  await userEvent.click(view.getByRole("button", { name: "Connect apps" }));
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Connect apps" })).toBeNull(),
+  );
+  expect(view.queryByText(/OpenBot couldn't connect your apps/)).toBeNull();
+  expect(
+    invokeCalls
+      .filter((call) => call.command === "connect_intelligence_apps")
+      .map((call) => call.args),
+  ).toEqual([{ root: "/tmp/apps-retry" }, { root: "/tmp/apps-retry" }]);
+  expect(invokeCalls).toContainEqual({
+    command: "intelligence_key_for",
+    args: { root: "/tmp/apps-retry", project: "project-1" },
+  });
+  expect(view.queryByLabelText(/Composio.*key/i)).toBeNull();
+});
+
+/*
+ * A SIGN-IN BELONGS TO ITS FOLDER. The project list outlived a change of folder, so picking a
+ * project after switching made a key for the new folder with the old folder's sign-in, and the
+ * new folder started without its apps.
+ */
+test("changing the folder after sign-in drops that sign-in's projects", async () => {
+  const view = await signInWithProjects("/tmp/folder-a", async () => {
+    throw UNHANDLED;
+  });
+  expect(await view.findByRole("button", { name: "Project One" })).toBeTruthy();
+  await userEvent.click(
+    view.getByRole("button", { name: "Change installation" }),
+  );
+  const rootField = view.getByLabelText("Where OpenBot lives");
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.clear(rootField);
+  await user.type(rootField, "/tmp/folder-b");
+  await act(async () => {
+    rootField.blur();
+  });
+  await completeInstallation(view);
+  await chooseOpenAi(view);
+  expect(view.queryByRole("button", { name: "Project One" })).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  ).toBeTruthy();
+  expect(
+    invokeCalls.some((call) => call.command === "intelligence_key_for"),
+  ).toBe(false);
+});
+
 test("creating a named project connects it only after the user submits", async () => {
   const view = await enterProjectSelection();
   const creation = deferred<{ id: string; name: string }>();
@@ -1974,7 +2130,7 @@ test("creating a named project connects it only after the user submits", async (
   await userEvent.click(create);
   expect(invokeCalls).toContainEqual({
     command: "create_intelligence_project",
-    args: { name: "OpenBot workspace" },
+    args: { root: "/tmp/create-project", name: "OpenBot workspace" },
   });
   expect(
     view.getByRole("button", { name: "Creating project…" }),
@@ -1989,7 +2145,7 @@ test("creating a named project connects it only after the user submits", async (
   expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
   expect(invokeCalls).toContainEqual({
     command: "intelligence_key_for",
-    args: { project: "new-project" },
+    args: { root: "/tmp/create-project", project: "new-project" },
   });
   expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
     "disabled",

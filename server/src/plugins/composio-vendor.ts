@@ -1,5 +1,6 @@
 import {
   BrokerAccountGoneError,
+  BrokerAccountHeldError,
   type BrokerApp,
   type BrokerConnection,
   BrokerRefusalError,
@@ -1689,10 +1690,21 @@ function vendorRefusal(
      * rule met one layer down — one person holds one account per app, because the call that runs an
      * action names the person and not the account. So it is a settled fact rather than a moment,
      * and "check the key and try again" is advice that cannot ever come true.
+     *
+     * RAISED AS ITS OWN CLASS, BECAUSE THE ACCOUNT IT REPORTS IS ONE THIS DEPLOYMENT MAY NOT KNOW
+     * ABOUT. The connect route refuses a second connection itself wherever it holds a row, so this
+     * only reaches it where the row is missing: a fresh or upgraded install, or two installs
+     * signing in as one person against one Composio key. See {@link BrokerAccountHeldError}: the
+     * route asks again and records the account rather than passing this sentence on.
+     *
+     * AND THE SENTENCE NO LONGER SENDS ANYBODY TO DISCONNECT IT. It used to name this deployment's
+     * Connected accounts page as the place to end the account, which is false exactly when this
+     * fires: with no row here, that page draws the app as not connected and offers no Disconnect.
      */
     case "ComposioMultipleConnectedAccountsError":
-      return refusal(
-        `Composio answered that this person already holds a connected account for ${app}, so ${outcome}. That is a settled state at Composio rather than a moment that passes — asking again meets the same answer — and what clears it is disconnecting the account they already hold, on this deployment's Connected accounts page, before another is attached.`,
+      return new BrokerAccountHeldError(
+        `Composio answered that this person already holds a connected account for ${app}, so ${outcome}. That is a settled state at Composio and not a moment that passes, so asking for another link meets the same answer. It is an account this person is already connected through, whether or not this deployment has recorded it yet.`,
+        { cause: error },
       );
 
     /*

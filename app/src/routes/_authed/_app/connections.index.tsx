@@ -14,7 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
   linkedNotice,
@@ -39,8 +39,12 @@ import {
 } from "@/lib/identity/queries";
 import { keyedLookup } from "@/lib/lookup";
 import {
+  brokeredAccountsListedOn,
+  serversListedFor,
+  sharedAccountsListedOn,
+} from "@/lib/plugins/listed";
+import {
   connectionsQueryOptions,
-  type PluginServer,
   personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
@@ -148,6 +152,10 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
     "That app's account changed while the authorization was open, so nothing was recorded. Access given to the old account was removed. Start again from the app's page.",
   ],
   [
+    "name-changed",
+    "That authorization was started before an update changed how OpenBot signs you in to the app, so nothing was recorded. Press Connect on the app's page to start again.",
+  ],
+  [
     "not-permitted",
     "You can't connect that app's account anymore, so nothing was recorded. Your access or the app's setup changed while the authorization was open. Ask an admin if you expected to finish it.",
   ],
@@ -187,60 +195,8 @@ const MARKS: ReadonlyMap<
  * nothing a plain object would have inherited, so a catalogue key called `toString` draws the
  * fallback mark rather than handing React `Object.prototype.toString` to render as a component.
  * The read goes through `keyedLookup` so the rule has one home rather than one comment per page;
- * see `app/src/lib/lookup.ts`. The `?? IconPlug` stays here, because what a missing key draws is
- * this page's decision. */
-const markFor = (key: string) => keyedLookup(MARKS, key) ?? IconPlug;
-
-/**
- * Whether a row came through a broker. A deployment only ever holds rows from one provider, so the
- * page needs to recognise "brokered", not to know which broker.
- */
-const isBrokered = (server: PluginServer): boolean =>
-  server.provenance === "composio" || server.provenance === "arcade";
-
-/**
- * The brokered apps this page lists, which is not every brokered row.
- *
- * Exported as a function rather than left inline in the render, for the reason `matchingApps` on the
- * Composio picker is: the rule is the thing worth pinning and pinning it needs no DOM, no router and
- * no query client. See its one clause below.
- */
-export function brokeredAccountsListedOn(
-  servers: PluginServer[],
-): PluginServer[] {
-  return servers.filter(
-    (server) =>
-      isBrokered(server) &&
-      server.authScheme !== "NO_AUTH" &&
-      server.accountMode !== "shared",
-  );
-}
-
-/**
- * The servers this page may list at all: none reached through Composio when the deployment has no
- * Composio key.
- *
- * An app an administrator enabled while a key was set keeps its row after the key is removed, and
- * listing it offered a person an account they cannot connect, under a sentence about an environment
- * variable only an administrator can set. Without the broker there is nothing for them to decide.
- */
-export function serversListedFor(page: {
-  servers: PluginServer[];
-  composioConfigured: boolean;
-}): PluginServer[] {
-  return page.composioConfigured
-    ? page.servers
-    : page.servers.filter((server) => server.provenance !== "composio");
-}
-
-/** Apps whose account is the organisation's, shown so a person knows a Bot does not act as them there. */
-export function sharedAccountsListedOn(
-  servers: PluginServer[],
-): PluginServer[] {
-  return servers.filter(
-    (server) => isBrokered(server) && server.accountMode === "shared",
-  );
-}
+ * see `app/src/lib/lookup.ts`. A missing key draws the app's initial, in `ConnectionMark`. */
+const markFor = (key: string) => keyedLookup(MARKS, key);
 
 function RouteComponent() {
   const { connected: outcome, authorized, linked } = Route.useSearch();
@@ -361,7 +317,11 @@ function RouteComponent() {
     providers.isPending;
 
   return (
-    <PageShell className="@container" title="Connections">
+    <PageShell
+      className="@container"
+      description="Connect your accounts so Bots can use apps on your behalf."
+      title="Connections"
+    >
       {/*
        * For `?connected=` only the failure is worth saying. A success needs no sentence: the row it
        * came back to now reads "Connected", which is the same news told by the thing it is news
@@ -393,10 +353,11 @@ function RouteComponent() {
           {arrival.authorizationNotice}
         </p>
       ) : null}
-      <PageSection
-        description="The apps and accounts your Bots use as you. Open one to connect it or change it."
-        title="Your connections"
-      >
+      {/*
+       * One section, so it carries no heading of its own: "Your connections" under "Connections"
+       * said the same thing twice, 48px apart, and the description now sits under the page title.
+       */}
+      <PageSection>
         {/*
          * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
          * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
@@ -409,32 +370,38 @@ function RouteComponent() {
             it keeps happening.
           </p>
         ) : rows.length === 0 ? (
-          <PageEmpty>
-            Nothing to connect yet. Apps show up here once an admin turns them
-            on.
+          <PageEmpty icon={IconPlug} title="No apps yet">
+            Apps show up here once an admin turns them on.
           </PageEmpty>
         ) : (
           <>
-            <p className="mt-4 text-xs text-muted-foreground">
-              {inUse} in use · {rows.length} in all
-            </p>
-            <InputGroup className="mt-3 h-9 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
-              <InputGroupAddon>
-                <IconSearch aria-hidden="true" className="size-4" />
-              </InputGroupAddon>
-              <InputGroupInput
-                aria-label="Search connections"
-                placeholder="Search connections"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </InputGroup>
+            <div className="flex items-center gap-3">
+              <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
+                <InputGroupAddon>
+                  <IconSearch aria-hidden="true" className="size-4" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  aria-label="Search connections"
+                  placeholder="Search connections"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </InputGroup>
+              <p className="shrink-0 text-xs text-muted-foreground">
+                {inUse} in use · {rows.length} in all
+              </p>
+            </div>
             {matching.length === 0 ? (
-              <p className="mt-8 text-sm text-muted-foreground" role="status">
+              <p className="mt-4 text-sm text-muted-foreground" role="status">
                 Nothing matches “{search.trim()}”.
               </p>
             ) : (
-              <div className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 @min-[36rem]:grid-cols-2">
+              /*
+               * A grid of separate cards, where every other list is one `PageRows` card of divided
+               * rows. The accepted exception: connections are apps you pick out by their mark, so
+               * they are laid out as tiles two across rather than read down as a list.
+               */
+              <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
                 {matching.map((row) => (
                   <ConnectionItem key={row.key} row={row} />
                 ))}
@@ -457,22 +424,25 @@ function RouteComponent() {
 function ConnectionItem({ row }: { row: ConnectionRow }) {
   return (
     <Item
-      className="min-w-0 flex-nowrap gap-3 px-2 py-3"
+      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
       data-testid={`account-${row.key}`}
       render={<Link params={{ key: row.key }} to="/connections/$key" />}
       size="sm"
+      variant="outline"
     >
       <RowMark className="size-9">
-        <ConnectionMark mark={row.mark} />
+        <ConnectionMark mark={row.mark} name={row.title} />
       </RowMark>
       <ItemContent className="min-w-0 gap-0.5">
         <ItemTitle className="block w-auto truncate">{row.title}</ItemTitle>
-        <ItemDescription
-          className="line-clamp-1 break-all text-xs"
-          title={row.summary}
-        >
-          {row.summary}
-        </ItemDescription>
+        {row.summary ? (
+          <ItemDescription
+            className="line-clamp-1 break-all text-xs"
+            title={row.summary}
+          >
+            {row.summary}
+          </ItemDescription>
+        ) : null}
       </ItemContent>
       <ItemActions className="shrink-0">
         <ConnectionStateLabel state={row.state} />
@@ -481,10 +451,17 @@ function ConnectionItem({ row }: { row: ConnectionRow }) {
   );
 }
 
-function ConnectionMark({ mark }: { mark: ConnectionRow["mark"] }) {
-  if (mark.kind === "logo") return <PluginLogo logo={mark.logo} />;
+function ConnectionMark({
+  mark,
+  name,
+}: {
+  mark: ConnectionRow["mark"];
+  name: string;
+}) {
+  if (mark.kind === "logo") return <PluginLogo logo={mark.logo} name={name} />;
   const Mark =
     mark.kind === "provider" ? providerIcon(mark.provider) : markFor(mark.key);
+  if (!Mark) return <AppInitial name={name} />;
   return <Mark className="size-4" />;
 }
 

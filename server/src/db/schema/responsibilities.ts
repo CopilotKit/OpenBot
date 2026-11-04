@@ -1,3 +1,4 @@
+import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import {
   boolean,
   index,
@@ -17,7 +18,6 @@ import type {
   ResponsibilitySource,
   ResponsibilitySubscription,
 } from "../../responsibilities/types";
-import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import { agents, credentials, users } from "./core";
 import { jsonb } from "./json";
 

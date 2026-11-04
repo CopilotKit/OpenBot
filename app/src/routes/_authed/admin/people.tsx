@@ -1,4 +1,10 @@
-import { IconLock, IconShieldCheck, IconUser } from "@tabler/icons-react";
+import {
+  IconLock,
+  IconSearch,
+  IconShieldCheck,
+  IconUser,
+  IconUsers,
+} from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -89,7 +95,7 @@ function PeoplePage() {
 
   return (
     <PageShell
-      description="Everybody who has signed in. Admins can open these screens. Everybody else talks to Bots."
+      description="Manage access for people who have signed in. Only admins can access the Admin pages."
       title="People"
     >
       <PageSection
@@ -128,10 +134,13 @@ function PeoplePage() {
             Couldn't load people. Reload the page.
           </p>
         ) : rows.length === 0 ? (
-          <PageEmpty>
+          <PageEmpty
+            icon={query ? IconSearch : IconUsers}
+            title={query ? "No matches" : "Nobody has signed in yet"}
+          >
             {query
               ? `Nobody matches "${query}".`
-              : "Nobody has signed in yet. People show here once they do."}
+              : "People show here once they do."}
           </PageEmpty>
         ) : (
           <PageRows>

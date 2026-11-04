@@ -20,6 +20,8 @@
  * `locked_until` — is exactly the duplicated firing mechanism #235 exists to prevent: two half-right
  * implementations of the same hard thing, one of which nobody tests.
  */
+
+import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import {
   and,
   asc,
@@ -42,7 +44,6 @@ import {
   routineSweeps,
   routines,
 } from "../db/schema";
-import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -150,6 +151,7 @@ export type RoutineInput = {
  * told whose they were would be a runner that could be told the wrong answer.
  */
 export type RoutineRunContext = {
+  source?: "schedule" | "run_now" | "trigger";
   routineId: string;
   ownerUserId: string;
   agentId: string;
@@ -361,12 +363,13 @@ export function createRoutineStore(database: Database): RoutineStore {
     ownerUserId: string,
     agentId: string,
     channelId?: string,
+    handle: Database | Transaction = database,
   ): Promise<string> {
     if (channelId !== undefined) {
       // One query for all four conditions: the channel exists, it is not deleted, the owner is a
       // member, and this agent is in it. Any miss is the same refusal, because telling them apart
       // would tell a caller which channel ids exist.
-      const rows = await database
+      const rows = await handle
         .select({ id: channels.id })
         .from(channels)
         .innerJoin(
@@ -392,7 +395,7 @@ export function createRoutineStore(database: Database): RoutineStore {
 
     // Six rows is enough to answer the question: one resolves, more than one refuses, and the
     // sentence names at most five before it says "and others".
-    const candidates = await database
+    const candidates = await handle
       .select({ id: channels.id, name: channels.name })
       .from(channels)
       .innerJoin(
@@ -471,8 +474,9 @@ export function createRoutineStore(database: Database): RoutineStore {
   async function loadOwned(
     ownerUserId: string,
     id: string,
+    handle: Database | Transaction = database,
   ): Promise<RoutineRow> {
-    const [row] = await database
+    const [row] = await handle
       .select()
       .from(routines)
       .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
@@ -487,44 +491,45 @@ export function createRoutineStore(database: Database): RoutineStore {
     id: string,
     patch: RoutinePatch,
   ): Promise<Routine> {
-    const existing = await loadOwned(ownerUserId, id);
-
-    const values: Partial<typeof routines.$inferInsert> = {
-      updatedAt: new Date(),
-    };
-    if (patch.instruction !== undefined) {
-      values.instruction = validInstruction(patch.instruction);
-    }
-    if (patch.channelId !== undefined) {
-      values.channelId = await resolveChannel(
-        ownerUserId,
-        existing.agentId,
-        patch.channelId,
-      );
-    }
-    if (patch.enabled !== undefined) values.enabled = patch.enabled;
-
-    const enabling = patch.enabled === true && !existing.enabled;
-
-    const cron = patch.cron ?? existing.cron;
-    const timezone = patch.timezone ?? existing.timezone;
-    if (patch.cron !== undefined) values.cron = patch.cron;
-    if (patch.timezone !== undefined) values.timezone = timezone;
-    /*
-     * Recomputed for a new cron, a new zone, and for switching back on. That last one is the subtle
-     * case: a routine switched off in June still holds June's `next_run_at`, and enabling it without
-     * recomputing hands the sweep a firing that was due months ago.
-     */
-    if (patch.cron !== undefined || patch.timezone !== undefined || enabling) {
-      values.nextRunAt = nextRunFor(cron, timezone, new Date());
-    }
-
-    /*
-     * The cap is re-counted inside the lock, in the same transaction as the write. Counting outside
-     * and writing inside would keep the very race the lock removes: two enables that both counted 19
-     * before either committed.
-     */
     const [row] = await withEnabledCapLock(ownerUserId, async (transaction) => {
+      // A waiting update must derive its transition and schedule from the row that now holds the lock.
+      const existing = await loadOwned(ownerUserId, id, transaction);
+
+      const values: Partial<typeof routines.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+      if (patch.instruction !== undefined) {
+        values.instruction = validInstruction(patch.instruction);
+      }
+      if (patch.channelId !== undefined) {
+        values.channelId = await resolveChannel(
+          ownerUserId,
+          existing.agentId,
+          patch.channelId,
+          transaction,
+        );
+      }
+      if (patch.enabled !== undefined) values.enabled = patch.enabled;
+
+      const enabling = patch.enabled === true && !existing.enabled;
+
+      const cron = patch.cron ?? existing.cron;
+      const timezone = patch.timezone ?? existing.timezone;
+      if (patch.cron !== undefined) values.cron = patch.cron;
+      if (patch.timezone !== undefined) values.timezone = timezone;
+      /*
+       * Recomputed for a new cron, a new zone, and for switching back on. That last one is the subtle
+       * case: a routine switched off in June still holds June's `next_run_at`, and enabling it without
+       * recomputing hands the sweep a firing that was due months ago.
+       */
+      if (
+        patch.cron !== undefined ||
+        patch.timezone !== undefined ||
+        enabling
+      ) {
+        values.nextRunAt = nextRunFor(cron, timezone, new Date());
+      }
+
       if (
         enabling &&
         (await countEnabled(transaction, ownerUserId)) >= MAX_ENABLED_ROUTINES
@@ -834,6 +839,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       const [row] = await database
         .select({
           routineId: routines.id,
+          source: routineRuns.source,
           ownerUserId: routines.ownerUserId,
           agentId: routines.agentId,
           channelId: routines.channelId,

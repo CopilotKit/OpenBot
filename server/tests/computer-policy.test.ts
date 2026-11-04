@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
-  policyInitiator,
   type PolicyContext,
+  policyInitiator,
 } from "../src/computer/policy";
 import { parseActionPolicy } from "../src/computer/policy-store";
 
@@ -199,6 +199,36 @@ describe("parseActionPolicy", () => {
       expect(result.policy.mode).toBe("dry-run");
       expect(result.policy.deny).toHaveLength(1);
     }
+  });
+
+  test("keeps a label for a rule in the policy and drops one for a rule it no longer has", () => {
+    const rule = 'contains(element.name, "pay")';
+    const result = parseActionPolicy({
+      mode: "enforce",
+      deny: [rule],
+      allow: ["true"],
+      labels: {
+        [rule]: { name: "  No payments ", description: "Stops paying." },
+        "a rule that was removed": { name: "Gone", description: "" },
+      },
+    });
+    expect(result.ok && result.policy.labels).toEqual({
+      [rule]: { name: "No payments", description: "Stops paying." },
+    });
+  });
+
+  test("refuses a label with no name, and labels that are not a map", () => {
+    const rule = "true";
+    expect(
+      parseActionPolicy({
+        mode: "enforce",
+        deny: [rule],
+        labels: { [rule]: { name: " ", description: "" } },
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseActionPolicy({ mode: "enforce", deny: [rule], labels: ["x"] }).ok,
+    ).toBe(false);
   });
 
   test("defaults the lists but never the mode", () => {

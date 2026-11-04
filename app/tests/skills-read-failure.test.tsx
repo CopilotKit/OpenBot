@@ -225,9 +225,7 @@ test("a deployment with genuinely no skills still says so on the admin page", as
   );
   await waitForFailedRead(client);
 
-  expect(
-    await view.findByText("No skills yet. Write one with Write a skill."),
-  ).toBeTruthy();
+  expect(await view.findByText("No skills yet")).toBeTruthy();
   expect(view.queryByText("Couldn't load skills. Reload the page.")).toBeNull();
 });
 

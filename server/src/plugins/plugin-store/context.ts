@@ -1,6 +1,12 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { recordAuditEvent } from "../../audit";
+import { createAuditStore, recordAuditEvent } from "../../audit";
+import { DEV_ACTOR } from "../../auth/dev-actor";
+import type { Database } from "../../db/client";
+import {
+  type EntraRefusal,
+  EntraTokenRefusedError,
+} from "../../auth/entra-refusal";
 import {
   type CredentialExecutor,
   CredentialUnusableError,
@@ -35,6 +41,7 @@ import {
   accountFor,
   personAccount,
 } from "../shared-accounts";
+import { filedUnder } from "../single-user-identity";
 import {
   type BrokeredDisconnectReason,
   CatalogueEntryUnknownError,
@@ -47,6 +54,7 @@ import {
   INVALID_GRANT,
   isUsableClient,
   type OAuthClient,
+  OAuthClientReadError,
   PluginInvariantError,
   type PluginKind,
   PluginRefusedError,
@@ -55,6 +63,26 @@ import {
   TokenRefusedError,
   type Transaction,
 } from "./model";
+
+/** What a person is told when Entra will not issue a token for them, in words they can act on. */
+function entraRefusal(reason: EntraRefusal, title: string): string {
+  switch (reason) {
+    case "not-admitted":
+      return `You no longer have access to OpenBot, so ${title} wasn't used.`;
+    case "no-sign-in":
+      return `${title} uses your Microsoft account, and OpenBot doesn't have your Microsoft sign-in. Sign in to OpenBot with Microsoft in the browser once, then ask again.`;
+    case "sign-in-expired":
+      return `Your Microsoft sign-in has expired, so ${title} wasn't used. Sign in with Microsoft again and ask again.`;
+    case "no-consent":
+      return `An admin hasn't given OpenBot access to ${title} in Microsoft Entra. Ask an admin to grant it.`;
+    case "no-api-consent":
+      return `OpenBot doesn't have consent for its own API in Microsoft Entra, so it can't reach ${title} as you. Ask an admin to grant it.`;
+    case "no-api":
+      return `OpenBot isn't set up in Microsoft Entra to reach ${title} as you. Ask an admin to expose OpenBot's API there.`;
+    case "refused":
+      return `Microsoft wouldn't let OpenBot reach ${title} as you. Try again, or ask an admin if it keeps happening.`;
+  }
+}
 
 /**
  * What every group of plugin store methods shares: the options it was made with, and the helpers
@@ -238,6 +266,26 @@ export function createStoreContext(options: PluginStoreOptions) {
   }
 
   /**
+   * A person's own account at this deployment's broker: filed under their own id, or under the name
+   * `brokered_identities` holds for them, which only a single-user deployment's one person has.
+   *
+   * ASKED OF THE TABLE ONLY FOR THAT PERSON. `ensureSingleUserIdentity` is the table's one writer
+   * and writes `dev-local-user` and nobody else, so for anyone signed in the read could only ever
+   * answer nothing, and it is not made: every brokered call, confirm and connect on a deployment
+   * that signs people in resolves with no query here. For the single-user person it is one
+   * primary-key read through {@link filedUnder}, the same read startup settled the name with, so
+   * the two cannot disagree about it, and every replica answers from the one row the database holds.
+   */
+  async function personAccountOf(userId: string): Promise<AccountRef> {
+    return personAccount(
+      userId,
+      userId === DEV_ACTOR.id
+        ? await filedUnder(database, brokerProvider, userId)
+        : null,
+    );
+  }
+
+  /**
    * The account a call, a connect or a check acts for, from the row and the person — never from a
    * request. A Shared app answers with the deployment's stored identity whoever asks.
    */
@@ -321,10 +369,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         };
       /*
        * The actor's id is both the local id and the vendor id, deliberately and for both
-       * providers. See {@link personAccount} for why, before changing it.
+       * providers, except for a single-user deployment's one person. See {@link personAccount}
+       * for why, before changing it.
        */
       return {
-        ref: personAccount(actorId),
+        ref: await personAccountOf(actorId),
         title: row.title,
         mode: "personal",
         appId,
@@ -352,7 +401,9 @@ export function createStoreContext(options: PluginStoreOptions) {
    * begun under Shared identity A, the app flipped Shared → Personal → Shared (minting B) and B
    * connected, and the admin's return then withdrew A at the vendor, correctly, and deleted B's row
    * here, so the app read as disconnected while B stood live at Arcade. A person's row needs no
-   * such clause: their vendor id is their user id ({@link personAccount}).
+   * such clause: they have one vendor id, their user id or the one name
+   * `brokered_identities` holds for them, and it never changes while they hold a row
+   * ({@link personAccountOf}).
    */
   const accountRow = (toolkit: string, account: AccountRef) =>
     account.holder === "person"
@@ -370,10 +421,11 @@ export function createStoreContext(options: PluginStoreOptions) {
         );
 
   /**
-   * The one statement behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
-   * `markAuthorizationWithdrawn`, so the three verdicts cannot drift into three row shapes.
-   * `completed_at` is truncated to milliseconds for the reason `claimAuthorizationAttempt`
-   * truncates `created_at`.
+   * The shared transition behind `failAuthorizationAttempt`, `markAuthorizationUnreconciled` and
+   * `markAuthorizationWithdrawn`, so the verdicts cannot drift into three row shapes.
+   * An unreconciled transition and its safe audit record commit together; a failed audit leaves
+   * the attempt unsettled. `completed_at` is truncated to milliseconds for the reason
+   * `claimAuthorizationAttempt` truncates `created_at`.
    *
    * CONDITIONAL ON `completed_at IS NULL`, EXACTLY AS THE COMPLETION ABOVE IS, BECAUSE A SETTLED
    * ATTEMPT IS A RECORD AND NOT A DRAFT. Without that condition this UPDATE matched on
@@ -404,21 +456,56 @@ export function createStoreContext(options: PluginStoreOptions) {
     input: { actorId: string; authId: string },
     outcome: "failed" | "unreconciled" | "withdrawn",
   ) => {
-    const written = await database
-      .update(pendingAuthorizations)
-      .set({
-        completedAt: sql`date_trunc('milliseconds', now())`,
-        outcome,
-      })
-      .where(
-        and(
-          eq(pendingAuthorizations.actorId, input.actorId),
-          eq(pendingAuthorizations.authId, input.authId),
-          isNull(pendingAuthorizations.completedAt),
-        ),
-      )
-      .returning({ actorId: pendingAuthorizations.actorId });
-    return written.length > 0;
+    return await database.transaction(async (transaction) => {
+      const [attempt] = await transaction
+        .update(pendingAuthorizations)
+        .set({
+          completedAt: sql`date_trunc('milliseconds', now())`,
+          outcome,
+        })
+        .where(
+          and(
+            eq(pendingAuthorizations.actorId, input.actorId),
+            eq(pendingAuthorizations.authId, input.authId),
+            isNull(pendingAuthorizations.completedAt),
+          ),
+        )
+        .returning({
+          serverId: pendingAuthorizations.serverId,
+          action: pendingAuthorizations.action,
+          holder: pendingAuthorizations.holder,
+          createdAt: pendingAuthorizations.createdAt,
+        });
+      if (!attempt) return false;
+      if (outcome === "unreconciled") {
+        const [server] = await transaction
+          .select({ url: mcpServers.url })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, attempt.serverId))
+          .limit(1);
+        const toolkit = server
+          ? toolkitOfFor(brokerProvider, server.url)
+          : null;
+        await recordAuditEvent(
+          createAuditStore(transaction as unknown as Database),
+          {
+            eventType: "mcp.authorization_unreconciled",
+            targetType: "mcp_server",
+            targetId: toolkit ?? attempt.serverId,
+            payload: {
+              actor: input.actorId,
+              server: toolkit,
+              serverId: attempt.serverId,
+              action: attempt.action,
+              holder: attempt.holder,
+              attemptStartedAt: attempt.createdAt.toISOString(),
+              outcome,
+            },
+          },
+        );
+      }
+      return true;
+    });
   };
 
   /**
@@ -451,12 +538,20 @@ export function createStoreContext(options: PluginStoreOptions) {
    * complete by construction rather than by cleanup. The other two paths have nothing to cache: a
    * `deployment-token` is decrypted out of the vault per call, and a `brokered` key is never held
    * here at all.
+   *
+   * A `person-entra` server is the exception, by design: the token Entra issues for a person is kept
+   * in memory until a few minutes before it expires (`auth/entra.ts`), because Entra's own guidance
+   * is to reuse a token for its lifetime. Removing the person here still stops it at once: every
+   * token is handed out only after the sign-in rules are asked again, and a refusal drops what is
+   * held for them.
    */
   async function connectionTokenFor(
     row: {
       id: string;
       title: string;
       credentialId: string | null;
+      /** The Entra scope a `person-entra` server is reached with; see `mcpServers.entraScope`. */
+      entraScope?: string | null;
       /*
        * NO `authScheme` HERE, DELIBERATELY. The scheme that decides whether a brokered call needs a
        * connection row is the APP'S, read through `brokeredAppScheme` below — and this row's own
@@ -631,6 +726,13 @@ export function createStoreContext(options: PluginStoreOptions) {
        * forces an arbitrary first consent before anybody knows which action they want. Here the
        * call proceeds and the vendor's own typed refusal is the authoritative answer.
        *
+       * NEITHER BROKER TAKES THIS WAIVER TODAY. Arcade declared `false` and took it until its grants
+       * were recorded here as Composio's are: with no row, this deployment could not say whose
+       * grants it had asked Arcade to use. It now declares `true`, a call needs its row as a
+       * Composio call does on every deployment, signed in or not, and Arcade still checks the
+       * action itself. The branch stays for a broker that declares otherwise, under the rules
+       * above.
+       *
        * ONLY A PRECONDITION IS REMOVED; THE IDENTITY IS UNCHANGED. The id returned is
        * `resolved.ref.vendorUserId` — the very value the branch below returns out of the row —
        * derived by {@link accountRefFor} from the session's actor and the app's own mode, Personal
@@ -692,6 +794,38 @@ export function createStoreContext(options: PluginStoreOptions) {
        * DEPLOYMENT_ID unable to move the account a call lands in.
        */
       return { vendorUserId: connected.vendorUserId };
+    }
+
+    /*
+     * A server reached as the signed-in person through Microsoft: a token Entra issues for the
+     * person asking, from their own Microsoft sign-in, for this server's scope. Never the
+     * deployment's credential, for the reason the `person-oauth` branch below gives, so every way it
+     * cannot be theirs is a refusal naming what they or an admin can do about it.
+     */
+    if (access.credential === "person-entra") {
+      if (!actorId) {
+        throw new PluginRefusedError(
+          `${row.title} answers as the person asking, and this run is not attributed to anybody.`,
+          null,
+        );
+      }
+      if (!options.entra || !row.entraScope) {
+        throw new PluginRefusedError(
+          `${row.title} needs Microsoft sign-in, and it isn't set up. Ask an admin to set it up.`,
+          null,
+        );
+      }
+      try {
+        return { token: await options.entra.tokenFor(actorId, row.entraScope) };
+      } catch (error) {
+        if (error instanceof EntraTokenRefusedError) {
+          throw new PluginRefusedError(
+            entraRefusal(error.reason, row.title),
+            null,
+          );
+        }
+        throw error;
+      }
     }
 
     if (access.credential !== "person-oauth") {
@@ -1260,6 +1394,40 @@ export function createStoreContext(options: PluginStoreOptions) {
   });
 
   /**
+   * Classify only client reads, never vendor registration or subsequent vault writes.
+   *
+   * The fault is logged by its name alone, because a vault or decryption message can quote the stored
+   * value. The error thrown in its place carries nothing of it, so this line is all an operator gets.
+   */
+  async function readClient(
+    serverId: string,
+    work: () => Promise<OAuthClient | null>,
+  ): Promise<OAuthClient | null> {
+    try {
+      return await work();
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "mcp-oauth-client-read-failed",
+          server: serverId,
+          error: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+      throw new OAuthClientReadError();
+    }
+  }
+
+  /** Parse errors can quote plaintext, so an invalid client is never rethrown with its secret. */
+  function clientFromStoredJson(plaintext: string): OAuthClient | null {
+    try {
+      const parsed: unknown = JSON.parse(plaintext);
+      return isUsableClient(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * One writer at a time for one server's OAuth client, across the whole deployment.
    *
    * Everything that stores a client reads "is there a live one" and then writes accordingly, and the
@@ -1304,35 +1472,29 @@ export function createStoreContext(options: PluginStoreOptions) {
     transaction: Transaction,
     serverId: string,
   ): Promise<OAuthClient | null> {
-    const [server] = await transaction
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
-    if (!server?.credentialId) return null;
+    return readClient(serverId, async () => {
+      const [server] = await transaction
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!server?.credentialId) return null;
 
-    const [held] = await transaction
-      .select({
-        encryptedValue: credentialRows.encryptedValue,
-        revokedAt: credentialRows.revokedAt,
-      })
-      .from(credentialRows)
-      .where(eq(credentialRows.id, server.credentialId))
-      .limit(1);
-    if (!held || held.revokedAt) return null;
+      const [held] = await transaction
+        .select({
+          encryptedValue: credentialRows.encryptedValue,
+          revokedAt: credentialRows.revokedAt,
+        })
+        .from(credentialRows)
+        .where(eq(credentialRows.id, server.credentialId))
+        .limit(1);
+      if (!held || held.revokedAt) return null;
 
-    try {
-      const parsed: unknown = JSON.parse(
-        await decryptSecret(encryptionKey, held.encryptedValue),
-      );
-      // A value that parsed and is not a client is unreadable in the same way and for the same
-      // caller — see {@link isUsableClient}. Null, because that is what this reader's caller acts
-      // on: it goes and registers one, which is the answer to holding none.
-      return isUsableClient(parsed) ? parsed : null;
-    } catch {
-      // Unreadable is the same as none: there is nothing to send anybody to consent with.
-      return null;
-    }
+      // A decryption fault does not mean the vendor forgot this client. Re-registering would replace
+      // the live client for every replica, including those that can still decrypt it.
+      const plaintext = await decryptSecret(encryptionKey, held.encryptedValue);
+      return clientFromStoredJson(plaintext);
+    });
   }
 
   /**
@@ -1453,29 +1615,29 @@ export function createStoreContext(options: PluginStoreOptions) {
   async function storedOAuthClient(
     serverId: string,
   ): Promise<OAuthClient | null> {
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
-    if (!row?.credentialId) return null;
+    return readClient(serverId, async () => {
+      const [row] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!row?.credentialId) return null;
 
-    try {
-      const parsed: unknown = JSON.parse(
-        await decryptCredentialForUse(
+      let plaintext: string;
+      try {
+        plaintext = await decryptCredentialForUse(
           encryptionKey,
           credentials,
           row.credentialId,
-        ),
-      );
-      // A client that parsed and is not one is as unusable as the revoked or missing row the catch
-      // below answers for, and is the same none to every caller — see {@link isUsableClient}.
-      return isUsableClient(parsed) ? parsed : null;
-    } catch {
-      // A revoked, missing or unreadable client is the same as none for every caller: there is
-      // nothing to send anybody to consent with, and the answer is to obtain one again.
-      return null;
-    }
+        );
+      } catch (error) {
+        // Only a confirmed missing or revoked credential permits obtaining a replacement. A failed
+        // read or decryption must not turn a working deployment-wide registration into a new client.
+        if (error instanceof CredentialUnusableError) return null;
+        throw error;
+      }
+      return clientFromStoredJson(plaintext);
+    });
   }
 
   /**
@@ -1891,8 +2053,7 @@ export function createStoreContext(options: PluginStoreOptions) {
    * and that order is kept rather than moved behind the revoke for the helper's convenience.
    *
    * Answers the payload fragment rather than the boolean so that no writer computes the field
-   * itself: a writer spreads this, and the guard in `sole-definition.test.ts` holds that to one
-   * home.
+   * itself: a writer spreads this to keep the claim's definition in one place.
    */
   async function vendorRevocationClaim(
     app: string,
@@ -2055,6 +2216,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     toolsDeclaredBy,
     knownToolRefs,
     secretFor,
+    personAccountOf,
     accountRefFor,
     accountRow,
     connectionTokenFor,

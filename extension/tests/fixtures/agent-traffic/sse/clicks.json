@@ -1,0 +1,640 @@
+{
+  "name": "clicks",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 56,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"019de807-9be7-4b41-8bc8-dcb36043f40e\",\"runId\":\"3c959610-7f32-4537-9058-71a110747ce2\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"0c9ea7bb-ec1c-4f06-a523-1eebfc10f773\",\"role\":\"user\",\"content\":\"What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 70,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"019de807-9be7-4b41-8bc8-dcb36043f40e\",\"runId\":\"3c959610-7f32-4537-9058-71a110747ce2\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"019de807-9be7-4b41-8bc8-dcb36043f40e\",\"runId\":\"3c959610-7f32-4537-9058-71a110747ce2\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"0c9ea7bb-ec1c-4f06-a523-1eebfc10f773\",\"role\":\"user\",\"content\":\"What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 1003,
+          "text": "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"toolCallName\":\"lookupWeather\",\"parentMessageId\":\"4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f\"}\n\n"
+        },
+        {
+          "at": 1007,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"delta\":\"{\\\"\"}\n\n"
+        },
+        {
+          "at": 1012,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"delta\":\"city\"}\n\n"
+        },
+        {
+          "at": 1015,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"delta\":\"\\\":\\\"\"}\n\n"
+        },
+        {
+          "at": 1029,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"delta\":\"Lis\"}\n\n"
+        },
+        {
+          "at": 1056,
+          "text": "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"delta\":\"bon\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"delta\":\"\\\"}\"}\n\n"
+        },
+        {
+          "at": 1116,
+          "text": "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\"}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"messageId\":\"5b6719b0-c349-4a34-a692-9427031aaca2\",\"toolCallId\":\"call_WmnBOx8Kcvm4z2nXja4ao2DS\",\"content\":\"{\\\"city\\\":\\\"Lisbon\\\",\\\"forecast\\\":\\\"sunny\\\",\\\"celsius\\\":21}\",\"role\":\"tool\"}\n\n"
+        },
+        {
+          "at": 1877,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\"The\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" weather\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" in\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" Lisbon\"}\n\n"
+        },
+        {
+          "at": 1884,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" is\"}\n\n"
+        },
+        {
+          "at": 1886,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" sunny\"}\n\n"
+        },
+        {
+          "at": 1969,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" with\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" a\"}\n\n"
+        },
+        {
+          "at": 1990,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" temperature\"}\n\n"
+        },
+        {
+          "at": 1995,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" of\"}\n\n"
+        },
+        {
+          "at": 1997,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\" \"}\n\n"
+        },
+        {
+          "at": 1999,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\"21\"}\n\n"
+        },
+        {
+          "at": 2003,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\"°C\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 2206,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"019de807-9be7-4b41-8bc8-dcb36043f40e\",\"runId\":\"3c959610-7f32-4537-9058-71a110747ce2\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":472,\"outputTokens\":32,\"totalTokens\":504,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 2207,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 2220,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"shopper\"},\"body\":{\"threadId\":\"1a20471b-d582-4433-b703-f05c3d0cb289\",\"runId\":\"9b53d353-a7c5-4d74-8bed-7293ed0b5980\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"07551a0e-2307-41d1-98bf-9cb959400eeb\",\"role\":\"user\",\"content\":\"Name one planet. One word only. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 2222,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"1a20471b-d582-4433-b703-f05c3d0cb289\",\"runId\":\"9b53d353-a7c5-4d74-8bed-7293ed0b5980\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"1a20471b-d582-4433-b703-f05c3d0cb289\",\"runId\":\"9b53d353-a7c5-4d74-8bed-7293ed0b5980\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"07551a0e-2307-41d1-98bf-9cb959400eeb\",\"role\":\"user\",\"content\":\"Name one planet. One word only. Call no tools.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 2757,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_085e9365cdf85e87006ad7fb113d9087d0b0ac299741ec49d5\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_085e9365cdf85e87006ad7fb113d9087d0b0ac299741ec49d5\",\"delta\":\"Mars\"}\n\n"
+        },
+        {
+          "at": 2898,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_085e9365cdf85e87006ad7fb113d9087d0b0ac299741ec49d5\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"1a20471b-d582-4433-b703-f05c3d0cb289\",\"runId\":\"9b53d353-a7c5-4d74-8bed-7293ed0b5980\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":226,\"outputTokens\":3,\"totalTokens\":229,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 2899,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "52b89f7b-c8b6-4d07-ab73-4c991057e2d2",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539406496
+        },
+        {
+          "type": "CUSTOM",
+          "name": "thread.linked",
+          "value": {
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "hasMessages": false,
+            "reason": "open",
+            "seq": 2
+          },
+          "timestamp": 1792539406548
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "0c9ea7bb-ec1c-4f06-a523-1eebfc10f773",
+            "runId": null,
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 84,
+            "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.",
+            "seq": 3
+          },
+          "timestamp": 1792539406549
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "seq": 4
+          },
+          "timestamp": 1792539406568
+        },
+        {
+          "type": "CUSTOM",
+          "name": "tool.call",
+          "value": {
+            "phase": "started",
+            "toolCallId": "call_WmnBOx8Kcvm4z2nXja4ao2DS",
+            "toolName": "lookupWeather",
+            "agentId": "default",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "messageId": "4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "seq": 5
+          },
+          "timestamp": 1792539407498
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "5b6719b0-c349-4a34-a692-9427031aaca2",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "role": "tool",
+            "textLength": 49,
+            "text": "{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}",
+            "seq": 6
+          },
+          "timestamp": 1792539407612
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "52b89f7b-c8b6-4d07-ab73-4c991057e2d2",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 58,
+            "text": "The weather in Lisbon is sunny with a temperature of 21°C.",
+            "seq": 7
+          },
+          "timestamp": 1792539408703
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "seq": 8
+          },
+          "timestamp": 1792539408703
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "p",
+              "role": null,
+              "action": null,
+              "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.",
+              "attributes": {},
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "messageId": "0c9ea7bb-ec1c-4f06-a523-1eebfc10f773",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "seq": 9
+          },
+          "timestamp": 1792539408711
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "button",
+              "role": null,
+              "action": null,
+              "text": "Details",
+              "attributes": {
+                "type": "button"
+              },
+              "label": "Details",
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "messageId": "4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "toolCallId": "call_WmnBOx8Kcvm4z2nXja4ao2DS",
+            "toolName": "lookupWeather",
+            "toolStatus": "complete",
+            "seq": 10
+          },
+          "timestamp": 1792539408712
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "span",
+              "role": null,
+              "action": null,
+              "text": "lookupWeather",
+              "attributes": {},
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "messageId": "4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "toolCallId": "call_WmnBOx8Kcvm4z2nXja4ao2DS",
+            "toolName": "lookupWeather",
+            "toolStatus": "complete",
+            "seq": 11
+          },
+          "timestamp": 1792539408713
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "div",
+              "role": "log",
+              "action": null,
+              "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.lookupWeatherDetails{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}The weather in Lisbon is sunny with a temperature of 21°C.",
+              "attributes": {
+                "role": "log"
+              },
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "seq": 12
+          },
+          "timestamp": 1792539408713
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "button",
+              "role": null,
+              "action": null,
+              "text": "Other",
+              "attributes": {
+                "type": "button"
+              },
+              "label": "Other",
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "seq": 13
+          },
+          "timestamp": 1792539408713
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "button",
+              "role": null,
+              "action": null,
+              "text": "Settings",
+              "attributes": {
+                "id": "elsewhere",
+                "type": "button"
+              },
+              "label": "Settings",
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "seq": 14
+          },
+          "timestamp": 1792539408714
+        },
+        {
+          "type": "CUSTOM",
+          "name": "thread.linked",
+          "value": {
+            "threadId": "1a20471b-d582-4433-b703-f05c3d0cb289",
+            "agentId": "shopper",
+            "hasMessages": false,
+            "reason": "open",
+            "seq": 15
+          },
+          "timestamp": 1792539408714
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "07551a0e-2307-41d1-98bf-9cb959400eeb",
+            "runId": null,
+            "threadId": "1a20471b-d582-4433-b703-f05c3d0cb289",
+            "agentId": "shopper",
+            "role": "user",
+            "textLength": 46,
+            "text": "Name one planet. One word only. Call no tools.",
+            "seq": 16
+          },
+          "timestamp": 1792539408714
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "9b53d353-a7c5-4d74-8bed-7293ed0b5980",
+            "threadId": "1a20471b-d582-4433-b703-f05c3d0cb289",
+            "agentId": "shopper",
+            "seq": 17
+          },
+          "timestamp": 1792539408717
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_085e9365cdf85e87006ad7fb113d9087d0b0ac299741ec49d5",
+            "runId": "9b53d353-a7c5-4d74-8bed-7293ed0b5980",
+            "threadId": "1a20471b-d582-4433-b703-f05c3d0cb289",
+            "agentId": "shopper",
+            "role": "assistant",
+            "textLength": 4,
+            "text": "Mars",
+            "seq": 18
+          },
+          "timestamp": 1792539409394
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "9b53d353-a7c5-4d74-8bed-7293ed0b5980",
+            "threadId": "1a20471b-d582-4433-b703-f05c3d0cb289",
+            "agentId": "shopper",
+            "seq": 19
+          },
+          "timestamp": 1792539409394
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "p",
+              "role": null,
+              "action": null,
+              "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.",
+              "attributes": {},
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "messageId": "0c9ea7bb-ec1c-4f06-a523-1eebfc10f773",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "seq": 20
+          },
+          "timestamp": 1792539409751
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "button",
+              "role": null,
+              "action": null,
+              "text": "Details",
+              "attributes": {
+                "type": "button"
+              },
+              "label": "Details",
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "messageId": "4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "toolCallId": "call_WmnBOx8Kcvm4z2nXja4ao2DS",
+            "toolName": "lookupWeather",
+            "toolStatus": "complete",
+            "seq": 21
+          },
+          "timestamp": 1792539409751
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "span",
+              "role": null,
+              "action": null,
+              "text": "lookupWeather",
+              "attributes": {},
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": "019de807-9be7-4b41-8bc8-dcb36043f40e",
+            "agentId": "default",
+            "messageId": "4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f",
+            "runId": "3c959610-7f32-4537-9058-71a110747ce2",
+            "toolCallId": "call_WmnBOx8Kcvm4z2nXja4ao2DS",
+            "toolName": "lookupWeather",
+            "toolStatus": "complete",
+            "seq": 22
+          },
+          "timestamp": 1792539409751
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "div",
+              "role": "log",
+              "action": null,
+              "text": "What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.lookupWeatherDetails{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}The weather in Lisbon is sunny with a temperature of 21°C.",
+              "attributes": {
+                "role": "log"
+              },
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": null,
+            "threadAmbiguity": {
+              "reason": "multiple-open",
+              "candidates": [
+                "019de807-9be7-4b41-8bc8-dcb36043f40e",
+                "1a20471b-d582-4433-b703-f05c3d0cb289"
+              ]
+            },
+            "seq": 23
+          },
+          "timestamp": 1792539409752
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "button",
+              "role": null,
+              "action": null,
+              "text": "Other",
+              "attributes": {
+                "type": "button"
+              },
+              "label": "Other",
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": null,
+            "threadAmbiguity": {
+              "reason": "multiple-open",
+              "candidates": [
+                "019de807-9be7-4b41-8bc8-dcb36043f40e",
+                "1a20471b-d582-4433-b703-f05c3d0cb289"
+              ]
+            },
+            "seq": 24
+          },
+          "timestamp": 1792539409752
+        },
+        {
+          "type": "CUSTOM",
+          "name": "click",
+          "value": {
+            "target": {
+              "tag": "button",
+              "role": null,
+              "action": null,
+              "text": "Settings",
+              "attributes": {
+                "id": "elsewhere",
+                "type": "button"
+              },
+              "label": "Settings",
+              "input": "pointer"
+            },
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "threadId": null,
+            "threadAmbiguity": {
+              "reason": "multiple-open",
+              "candidates": [
+                "019de807-9be7-4b41-8bc8-dcb36043f40e",
+                "1a20471b-d582-4433-b703-f05c3d0cb289"
+              ]
+            },
+            "seq": 25
+          },
+          "timestamp": 1792539409755
+        }
+      ],
+      "dropped": 0
+    }
+  ],
+  "clicks": [
+    {
+      "at": 2219,
+      "html": "<main><section><div data-message-id=\"0c9ea7bb-ec1c-4f06-a523-1eebfc10f773\"><p>What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.</p></div><div data-message-id=\"4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f\"><p></p><div data-tool-call-id=\"call_WmnBOx8Kcvm4z2nXja4ao2DS\"><span>lookupWeather</span><button type=\"button\">Details</button></div></div><div data-message-id=\"5b6719b0-c349-4a34-a692-9427031aaca2\"><p>{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}</p></div><div data-message-id=\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\"><p>The weather in Lisbon is sunny with a temperature of 21°C.</p></div></section><div role=\"log\"><div data-message-id=\"0c9ea7bb-ec1c-4f06-a523-1eebfc10f773\"><p>What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.</p></div><div data-message-id=\"4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f\"><p></p><div data-tool-call-id=\"call_WmnBOx8Kcvm4z2nXja4ao2DS\"><span>lookupWeather</span><button type=\"button\">Details</button></div></div><div data-message-id=\"5b6719b0-c349-4a34-a692-9427031aaca2\"><p>{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}</p></div><div data-message-id=\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\"><p>The weather in Lisbon is sunny with a temperature of 21°C.</p></div></div><div data-message-id=\"not-a-message\"><button type=\"button\">Other</button></div><button id=\"elsewhere\" type=\"button\">Settings</button></main>",
+      "selectors": [
+        "section [data-message-id] p",
+        "section [data-tool-call-id] button",
+        "section [data-tool-call-id] span",
+        "[role=\"log\"] [data-message-id] p",
+        "[data-message-id=\"not-a-message\"] button",
+        "#elsewhere"
+      ]
+    },
+    {
+      "at": 3260,
+      "html": "<main><section><div data-message-id=\"0c9ea7bb-ec1c-4f06-a523-1eebfc10f773\"><p>What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.</p></div><div data-message-id=\"4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f\"><p></p><div data-tool-call-id=\"call_WmnBOx8Kcvm4z2nXja4ao2DS\"><span>lookupWeather</span><button type=\"button\">Details</button></div></div><div data-message-id=\"5b6719b0-c349-4a34-a692-9427031aaca2\"><p>{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}</p></div><div data-message-id=\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\"><p>The weather in Lisbon is sunny with a temperature of 21°C.</p></div><div data-message-id=\"07551a0e-2307-41d1-98bf-9cb959400eeb\"><p>Name one planet. One word only. Call no tools.</p></div><div data-message-id=\"msg_085e9365cdf85e87006ad7fb113d9087d0b0ac299741ec49d5\"><p>Mars</p></div></section><div role=\"log\"><div data-message-id=\"0c9ea7bb-ec1c-4f06-a523-1eebfc10f773\"><p>What is the weather in Lisbon? Call lookupWeather once, then answer in one sentence.</p></div><div data-message-id=\"4e1b21a8-0a50-4ab9-b18a-da2ee8f5e78f\"><p></p><div data-tool-call-id=\"call_WmnBOx8Kcvm4z2nXja4ao2DS\"><span>lookupWeather</span><button type=\"button\">Details</button></div></div><div data-message-id=\"5b6719b0-c349-4a34-a692-9427031aaca2\"><p>{\"city\":\"Lisbon\",\"forecast\":\"sunny\",\"celsius\":21}</p></div><div data-message-id=\"msg_03ed833eef8821e8006ad7fb10621887d0af7fd9a36a999804\"><p>The weather in Lisbon is sunny with a temperature of 21°C.</p></div></div><div data-message-id=\"not-a-message\"><button type=\"button\">Other</button></div><button id=\"elsewhere\" type=\"button\">Settings</button></main>",
+      "selectors": [
+        "section [data-message-id] p",
+        "section [data-tool-call-id] button",
+        "section [data-tool-call-id] span",
+        "[role=\"log\"] [data-message-id] p",
+        "[data-message-id=\"not-a-message\"] button",
+        "#elsewhere"
+      ]
+    }
+  ]
+}

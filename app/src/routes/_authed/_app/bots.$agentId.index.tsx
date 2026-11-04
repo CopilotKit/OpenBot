@@ -18,7 +18,7 @@ function BotProfilePage() {
   return (
     <PageShell
       backButton={{ label: "Bots", linkProps: { to: "/bots" } }}
-      description="What this Bot is doing for you and how it's set up."
+      description="Review this Bot’s activity and settings."
       title={agent.data?.name ?? "Bot"}
     >
       {agent.isPending ? null : agent.error ? (

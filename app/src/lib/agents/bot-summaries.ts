@@ -63,15 +63,11 @@ export function reachSummary(transports: readonly string[]): string {
   return places.length ? places.join(", ") : "Only in OpenBot";
 }
 
-/** The apps feeding this Bot facts, and whether it researches in the background. */
+/** The apps feeding this Bot facts, and whether it checks in on them. */
 export function memorySummary(sources: number, research: boolean): string {
   const parts = [
     sources ? countLabel(sources, "source", "sources", "") : "",
-    research
-      ? sources
-        ? "background research on"
-        : "Background research on"
-      : "",
+    research ? (sources ? "check-ins on" : "Check-ins on") : "",
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : "Nothing connected";
 }

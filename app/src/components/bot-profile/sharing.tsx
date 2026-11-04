@@ -2,6 +2,7 @@ import {
   IconChevronRight,
   IconLink,
   IconPlus,
+  IconShare,
   IconUsers,
   IconUsersGroup,
 } from "@tabler/icons-react";
@@ -148,12 +149,19 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
             </Item>
           </PageRows>
         ) : (
-          <PageEmpty>
+          <PageEmpty
+            icon={IconShare}
+            title={
+              agent.visibility === "public"
+                ? "Not published to the team"
+                : "Not published"
+            }
+          >
             {agent.visibility === "public"
-              ? "Not published to the team. It's public, so everyone on OpenBot can already use it."
+              ? "It's public, so everyone on OpenBot can already use it."
               : agent.mine
-                ? "Not published. Only you can use it."
-                : "Not published."}
+                ? "Only you can use it."
+                : null}
           </PageEmpty>
         )}
       </PageSection>
@@ -365,7 +373,7 @@ function Assignments({ bot }: { bot: TeamBot }) {
         </p>
       ) : null}
       {assigned.length === 0 ? (
-        <PageEmpty>Not assigned to any group.</PageEmpty>
+        <PageEmpty icon={IconUsersGroup} title="Not assigned to any group" />
       ) : null}
       <PageRows>
         {assigned.map((name) => (

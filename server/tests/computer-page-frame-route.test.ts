@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PageFrameStore } from "../src/computer/page-frames";
 import type { PolicyStore } from "../src/computer/policy-store";
@@ -23,11 +24,14 @@ const actor: AuthenticatedActor = {
   role: "user",
 };
 
+/** Who is asking, which a test can change to be somebody else on the same Bot. */
+let asking: AuthenticatedActor = actor;
+
 const asActor: MiddlewareHandler<{ Variables: AppVariables }> = async (
   context,
   next,
 ) => {
-  context.set("actor", actor);
+  context.set("actor", asking);
   await next();
 };
 
@@ -35,7 +39,7 @@ function harness(options?: {
   screenshot?: () => Promise<{ base64: string; url?: string }>;
   navigate?: () => Promise<{ url: string; title: string }>;
   status?: (botId: string) => Promise<{ botId: string; state: string }>;
-  isolation?: "per-bot" | "shared";
+  isolation?: "per-person" | "shared";
 }) {
   const saved: Array<{
     computerId: string;
@@ -44,7 +48,9 @@ function harness(options?: {
     frame: string;
   }> = [];
   const gateway = {
-    provider: { isolation: options?.isolation ?? "per-bot" },
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
+    provider: { isolation: options?.isolation ?? "per-person" },
     navigate:
       options?.navigate ??
       (async () => ({
@@ -116,9 +122,10 @@ describe("the frame a page was opened on", () => {
       200,
     );
 
+    // Filed under the person's seat on the Bot, not the Bot alone.
     expect(saved).toEqual([
       {
-        computerId: "bot-9",
+        computerId: "person:user-1/bot-9",
         toolCallId: "call-1",
         url: "https://example.com/story",
         frame: "PNGBYTES",
@@ -162,6 +169,42 @@ describe("the frame a page was opened on", () => {
         title: null,
         frame: "PNGBYTES",
       },
+    });
+  });
+
+  /*
+   * Two people on one public Bot. Filed under the Bot alone, anybody who could use it could read
+   * another person's signed-in page by naming their turn.
+   */
+  test("another person on the same Bot cannot read the frame by naming the turn", async () => {
+    const { routes } = harness();
+    await navigate(routes, "https://example.com/story");
+
+    asking = { id: "user-2", email: "other@openbot.test", role: "user" };
+    try {
+      const response = await routes.request(
+        "http://openbot.test/bot-9/page-frame/call-1",
+      );
+      expect(await response.json()).toEqual({ frame: null });
+    } finally {
+      asking = actor;
+    }
+  });
+
+  test("a frame kept before computers were per person still reads back", async () => {
+    const { routes, saved } = harness();
+    saved.push({
+      computerId: "bot-9",
+      toolCallId: "call-old",
+      url: "https://example.com/old",
+      frame: "OLDPNG",
+    });
+
+    const response = await routes.request(
+      "http://openbot.test/bot-9/page-frame/call-old",
+    );
+    expect(await response.json()).toEqual({
+      frame: { url: "https://example.com/old", title: null, frame: "OLDPNG" },
     });
   });
 
@@ -246,7 +289,7 @@ describe("the frame a page was opened on", () => {
    */
   test("an old computer's unlabelled frame is kept when the Bot has its own", async () => {
     const { routes, saved } = harness({
-      isolation: "per-bot",
+      isolation: "per-person",
       screenshot: async () => ({ base64: "PNGBYTES" }),
     });
 
@@ -283,6 +326,8 @@ describe("the frame a page was opened on", () => {
    */
   test("a deployment keeping no frames still navigates", async () => {
     const gateway = {
+      seatFor: async (botId: string, personId: string) =>
+        personSeat(personId, botId),
       navigate: async () => ({ url: "https://example.com/story", title: "T" }),
       status: async (botId: string) => ({ botId, state: "ready" as const }),
       screenshot: async () => {

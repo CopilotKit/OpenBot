@@ -17,6 +17,8 @@ export function ToolLine({
   running,
   refused,
   failed,
+  notYet,
+  byYou,
   children,
 }: {
   /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
@@ -30,6 +32,17 @@ export function ToolLine({
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /**
+   * Nothing was done yet, for an ordinary reason: a computer still starting turned the call away
+   * before it reached anything. Muted like a success, because nothing went wrong, and labelled so it
+   * does not read as one.
+   */
+  notYet?: boolean;
+  /**
+   * The step was handed to the person and they did it themselves. Muted like a success, because it
+   * was done, and labelled so it does not read as the Bot having done it.
+   */
+  byYou?: boolean;
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
 }) {
@@ -46,14 +59,27 @@ export function ToolLine({
       }`}
     >
       {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
-      <span className="shrink-0">
+      {/*
+       * Free to shrink, so a long label (a folded run's "Read 1 file, searched for 2 patterns and
+       * listed 1 directory") wraps in a phone-width column instead of running past it. The detail
+       * shrinks a hundred times faster, so it is truncated away before the label wraps.
+       */}
+      <span className="min-w-0">
         {refused
           ? `Blocked: ${label}`
           : failed
             ? `${label}, didn't work`
-            : label}
+            : notYet
+              ? `${label}, not done yet`
+              : byYou
+                ? `${label}, done by you`
+                : label}
       </span>
-      {detail ? <span className="truncate opacity-70">{detail}</span> : null}
+      {detail ? (
+        <span className="min-w-0 shrink-[100] truncate opacity-70">
+          {detail}
+        </span>
+      ) : null}
     </span>
   );
 

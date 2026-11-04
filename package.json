@@ -9,7 +9,8 @@
     "server",
     "worker",
     "shared",
-    "toolkit"
+    "toolkit",
+    "extension"
   ],
   "scripts": {
     "build": "bun run generate:app-config && bun run --filter '*' build",
@@ -30,6 +31,7 @@
     "test:live-composio": "bun -e \"if (!process.env.COMPOSIO_API_KEY?.trim()) { console.error('COMPOSIO_API_KEY is empty or unset, so every case in this suite would skip and this command would still exit 0. Run it as COMPOSIO_API_KEY=... bun run test:live-composio.'); process.exit(1) }\" && OPENBOT_LIVE_COMPOSIO=1 bun test server/tests/composio-live.test.ts",
     "test:live-arcade": "bun -e \"if (!process.env.ARCADE_API_KEY?.trim()) { console.error('ARCADE_API_KEY is empty or unset, so every case in this suite would skip and this command would still exit 0. Run it as ARCADE_API_KEY=... bun run test:live-arcade.'); process.exit(1) }\" && OPENBOT_LIVE_ARCADE=1 bun test server/tests/arcade-live.test.ts",
     "diagram": "bun scripts/architecture-diagram.ts",
+    "setup:composio": "bun scripts/setup-composio.ts",
     "composio:smoke": "bun scripts/composio-smoke.ts",
     "mock:knowledge": "bun scripts/mock-knowledge-mcp.ts"
   },
@@ -46,5 +48,8 @@
   },
   "overrides": {
     "lodash-es": "4.18.0"
+  },
+  "patchedDependencies": {
+    "@copilotkit/learning@0.0.1": "patches/@copilotkit%2Flearning@0.0.1.patch"
   }
 }

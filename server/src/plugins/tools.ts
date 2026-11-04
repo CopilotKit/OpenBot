@@ -1,18 +1,19 @@
-import { ApprovalRefusedError } from "../approvals/types";
-import type { AuditInitiator } from "../audit";
+import {
+  addressedTo,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
+import { RESEARCH_TOOLS, type ResearchRole } from "@openbot/shared/research";
 import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { SEARCH_TOOLS, systemOf } from "../agents/tool-search";
+import { ApprovalRefusedError } from "../approvals/types";
+import type { AuditInitiator } from "../audit";
 import { markUntrusted } from "../untrusted-content";
 import {
   type CatalogueEntry,
   catalogueEntry,
   researchRoleFor,
 } from "./catalogue";
-import {
-  addressedTo,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
-import { type ResearchRole, RESEARCH_TOOLS } from "@openbot/shared/research";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -80,7 +81,7 @@ export function vendorAnswer(result: { text: string; isError: boolean }) {
  * A tool array tells a model a tool exists. It does not tell it that the tool is the right way to
  * reach that system, and it competes with a page of prose about the browser that every Bot is given
  * whether or not it has any connectors at all. The browser prose wins: it is emphatic, it is about
- * capability, and it says "never claim you cannot browse".
+ * capability, and it used to say "never claim you cannot browse".
  *
  * So a Bot holding four Google Drive tools browsed to drive.google.com, met a sign-in page its
  * container could never satisfy, and asked its person to sign in to a vendor that person had already
@@ -103,6 +104,15 @@ export function grantedToolGuidance(
    * connector existed, the Bot simply was not on it, and nothing said so.
    */
   connectedButNotHeld: readonly string[] = [],
+  /**
+   * Tools this run holds and is not shown until a search finds them. See `agents/tool-search.ts`.
+   *
+   * Counted per system rather than named, which is the point of holding them back: naming 239 Shopify
+   * tools here would put back in the prompt what search took out of the tool list. Their system is
+   * still listed as one this Bot reaches, so it is never told it holds nothing for an app it holds
+   * hundreds of tools for.
+   */
+  waiting: ReadonlySet<string> = new Set(),
 ): string {
   /*
    * THE CARD TOOL IS NOT A SYSTEM. It is offered to every Bot so a missing app can be put in front of
@@ -116,12 +126,16 @@ export function grantedToolGuidance(
     return "";
 
   const bySystem = new Map<string, string[]>();
+  const waitingBySystem = new Map<string, number>();
   for (const tool of reaching) {
     // `mcp__server__tool`, which is the shape the model is offered.
+    const system = systemOf(tool.name);
     const parts = tool.name.replace(/^mcp__/, "").split("__");
-    const system = parts.length > 1 ? (parts[0] as string) : "this deployment";
     const rest = parts.length > 1 ? parts.slice(1).join("__") : tool.name;
-    bySystem.set(system, [...(bySystem.get(system) ?? []), rest]);
+    if (!bySystem.has(system)) bySystem.set(system, []);
+    if (waiting.has(tool.name))
+      waitingBySystem.set(system, (waitingBySystem.get(system) ?? 0) + 1);
+    else bySystem.get(system)?.push(rest);
   }
 
   const held = [...bySystem.keys()];
@@ -137,9 +151,20 @@ export function grantedToolGuidance(
           "You can reach these systems directly, as the person asking, with their own access:",
         ]
       : []),
-    ...[...bySystem.entries()].map(
-      ([system, names]) => `- ${system}: ${names.join(", ")}`,
-    ),
+    ...[...bySystem.entries()].map(([system, names]) => {
+      const more = waitingBySystem.get(system) ?? 0;
+      if (more === 0) return `- ${system}: ${names.join(", ")}`;
+      const found = `${more} ${names.length > 0 ? "more " : ""}tools you find with ${SEARCH_TOOLS}`;
+      return `- ${system}: ${[...names, found].join(", ")}`;
+    }),
+    ...(waiting.size > 0
+      ? [
+          `Some of these systems have more tools than fit in front of you at once. Find them with ${SEARCH_TOOLS}:`,
+          "describe what you need in a few words, and the tools it returns can be called from your next step.",
+          `Search before deciding a system cannot do something. Only when ${SEARCH_TOOLS} finds nothing that fits is a`,
+          "tool missing.",
+        ]
+      : []),
     ...(reaching.length > 0
       ? [
           "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
@@ -203,6 +228,17 @@ type ResearchProvider = {
   search: GrantedTool;
   fetch: GrantedTool;
 };
+
+/**
+ * Whether these tools include one that finds sources, from any research provider.
+ *
+ * The search role alone, not the full pair `researchProviders` wants: a Bot holding a search tool and
+ * no reader can still search, and telling it to drive its browser to a search engine instead would
+ * be the very routing mistake this decides against. See `computerGuidance`.
+ */
+export function holdsWebSearch(tools: readonly GrantedTool[]): boolean {
+  return tools.some((tool) => researchRoleFor(tool.ref) === "search");
+}
 
 /**
  * The research providers this Bot can actually use: a search tool and a fetch tool from one server.
@@ -290,6 +326,7 @@ export async function grantedTools(options: {
   return granted.tools.map((tool) => ({
     name: tool.toolName,
     ref: tool.ref,
+    searchable: true as const,
     initiator,
     description: tool.description,
     parameters: parametersFor(tool.inputSchema),

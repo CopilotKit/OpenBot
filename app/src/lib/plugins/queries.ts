@@ -97,6 +97,12 @@ export type PluginServer = {
    * Null is not an older brokered row. It is a row that is not brokered at all.
    */
   authScheme: string | null;
+  /**
+   * The Microsoft Entra scope a server added by URL is reached with as the person asking, or null
+   * for one reached on the deployment's own token. Optional because a server replica older than
+   * this field does not send it, mid-rollout.
+   */
+  entraScope?: string | null;
   tools: PluginTool[];
   /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
   withdrawn: WithdrawnGrant[];
@@ -118,6 +124,14 @@ export type PluginServer = {
    * {@link accountMode} is not `"shared"`.
    */
   sharedVendorConnected: boolean;
+  /**
+   * Who may give this app to a Bot: any Bot's owner, for their own Bot (`any`), or only an admin
+   * (`admin`), with the default for its account filled in. Every person's own account defaults to
+   * `any`, as do the built-in Routines; everything else to `admin`.
+   */
+  ownerGrants: "any" | "admin";
+  /** What an admin chose, or null where the default is in force. */
+  ownerGrantsChosen: "any" | "admin" | null;
 };
 
 export type PluginSkill = {

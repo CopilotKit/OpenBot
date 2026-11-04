@@ -10,7 +10,8 @@
  * membership-scoped, so the owner cannot read it and it cannot read theirs. Nothing here changes that.
  *
  * WHOSE ACCOUNTS. A Team Bot reaches a connected app as its OWNER when the owner has connected it,
- * the same for everyone. A teammate's OWN account on a server the owner has not connected is used
+ * the same for everyone — for an app an ADMINISTRATOR gave it. An app the owner gave it themselves
+ * (`plugin_grants.granted_as = owner`) always runs on the asking teammate's own account. A teammate's OWN account on a server the owner has not connected is used
  * only with their consent: Allow once, Always allow for this Bot, or Skip. Everything else about the
  * call (grant, policy, approvals, audit) is still decided as the teammate who is asking.
  */
@@ -21,6 +22,7 @@ import type { AgentActor } from "../agents/profile-types";
 import type { Database } from "../db/client";
 import { agents, users } from "../db/schema/core";
 import { agentProfiles } from "../db/schema/coworker";
+import { pluginGrants } from "../db/schema/plugins";
 import {
   teamBotAssignments,
   teamBotAudience,
@@ -153,6 +155,13 @@ export function createTeamBots(options: {
      * personal account on (a shared credential reaches the same place whoever asks). The owner, where
      * the owner connected it. The asker's own account only with a standing or one-time consent;
      * without one the call is refused with the card's marker, and nothing is sent.
+     *
+     * NEVER THE OWNER'S FOR A GRANT THE OWNER MADE. Where the owner gave the Bot this action of one of
+     * their own apps (`granted_as = owner`), the owner's connection is not asked about: the call goes
+     * on as though the owner had none, which is the asker's own account — with their consent, or
+     * refused to connect. An owner giving their Bot their Gmail decided about their own mailbox for
+     * their own use; publishing the Bot afterwards must not turn that into every teammate's access to
+     * it. Only an administrator's grant can put a Team Bot on its owner's account.
      */
     credentialActorFor(actorId: string, botId: string) {
       return async (ref: string): Promise<string> => {
@@ -160,7 +169,22 @@ export function createTeamBots(options: {
         const owner = published?.ownerUserId;
         if (!owner || owner === actorId) return actorId;
         const serverId = ref.split("/")[0] ?? "";
-        if ((await connectedServers(owner)).has(serverId)) return owner;
+        const [grant] = await database
+          .select({ grantedAs: pluginGrants.grantedAs })
+          .from(pluginGrants)
+          .where(
+            and(
+              eq(pluginGrants.kind, "mcp"),
+              eq(pluginGrants.ref, ref),
+              eq(pluginGrants.agentId, botId),
+            ),
+          )
+          .limit(1);
+        if (
+          grant?.grantedAs !== "owner" &&
+          (await connectedServers(owner)).has(serverId)
+        )
+          return owner;
         if (!(await connectedServers(actorId)).has(serverId)) return actorId;
         const [consent] = await database
           .select({ decision: teamBotConsents.decision })
@@ -208,6 +232,66 @@ export function createTeamBots(options: {
           `${TEAM_BOT_CONSENT_MARKER}${JSON.stringify({ botId, serverId })} ${message}`,
           null,
         );
+      };
+    },
+
+    /**
+     * For a check-in, which nobody is watching: which of this Bot's tools go out on the asker's OWN
+     * account without asking them anything. Null when the Bot is theirs or nobody's Team Bot, where
+     * every call already does.
+     *
+     * {@link credentialActorFor}'s answer, read without acting on it. That one spends a one-time
+     * consent and raises a card, and both need a person present. So here the owner's account is no
+     * (it is not what the asker connected), a one-time consent is no (it was for one call they made),
+     * no consent is no, and a standing consent, for this Bot or every Bot, is yes.
+     */
+    async unaskedOwnAccount(
+      actorId: string,
+      botId: string,
+    ): Promise<((ref: string) => Promise<boolean>) | null> {
+      const owner = (await publication(botId))?.ownerUserId;
+      if (!owner || owner === actorId) return null;
+      return async (ref) => {
+        const serverId = ref.split("/")[0] ?? "";
+        const [grant] = await database
+          .select({ grantedAs: pluginGrants.grantedAs })
+          .from(pluginGrants)
+          .where(
+            and(
+              eq(pluginGrants.kind, "mcp"),
+              eq(pluginGrants.ref, ref),
+              eq(pluginGrants.agentId, botId),
+            ),
+          )
+          .limit(1);
+        if (
+          grant?.grantedAs !== "owner" &&
+          (await connectedServers(owner)).has(serverId)
+        )
+          return false;
+        const [consent] = await database
+          .select({ decision: teamBotConsents.decision })
+          .from(teamBotConsents)
+          .where(
+            and(
+              eq(teamBotConsents.userId, actorId),
+              eq(teamBotConsents.agentId, botId),
+              eq(teamBotConsents.serverId, serverId),
+            ),
+          )
+          .limit(1);
+        if (consent?.decision === "always") return true;
+        const [everyBot] = await database
+          .select({ serverId: teamBotConsentDefaults.serverId })
+          .from(teamBotConsentDefaults)
+          .where(
+            and(
+              eq(teamBotConsentDefaults.userId, actorId),
+              eq(teamBotConsentDefaults.serverId, serverId),
+            ),
+          )
+          .limit(1);
+        return everyBot !== undefined;
       };
     },
 

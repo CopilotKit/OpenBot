@@ -6,6 +6,7 @@ import type {
 import { createActionBarrier } from "./action-barrier";
 import {
   type ControlStore,
+  MAX_HELD_BY,
   MAX_REQUEST_URL,
   type StoredControl,
 } from "./control-store";
@@ -38,10 +39,20 @@ export const HUMAN_HAS_CONTROL =
   "A person has control or has been asked to take control. Wait for them to hand it back before acting.";
 export const TAKE_CONTROL_FIRST =
   "Take control before driving the computer yourself.";
+export const RECORDING_ENDING =
+  "A person's recording in this browser is still ending. Wait a moment before acting.";
 type Options = {
   store?: ControlStore;
   invalidateSnapshot?: () => void;
   drainTimeoutMs?: number;
+  /**
+   * Told whenever the wheel leaves the person who held it: they hand it back, the request they took is cancelled, or
+   * the computer interrupts it (a stop, a reset, the browser or the process starting again). A recording in a Bot's
+   * browser is that person's alone and ends here (`shared/bot-browser.ts`). Called after the change is saved, and
+   * never awaited: the state machine does not wait on a browser. What it returns settles once that recording has
+   * ended, and until then no Bot action is admitted, so the Bot never acts into a recording that is still stopping.
+   */
+  onWheelLeft?: () => Promise<unknown> | undefined;
 };
 
 /**
@@ -165,10 +176,36 @@ export function createControl(
     }
     return changed;
   }
+  /** Endings `onWheelLeft` started that have not settled: the Bot is not admitted while there are any. */
+  let ending = 0;
   function syncAdmission() {
-    if (active(current()) || data.holder === "human" || data.recoveryRequired)
+    if (
+      active(current()) ||
+      data.holder === "human" ||
+      data.recoveryRequired ||
+      ending > 0
+    )
       barrier.close();
     else barrier.open();
+  }
+  /**
+   * The wheel left the person: what ends with it is told, and the Bot stays out until it has ended. Counted before the
+   * admission is synced, so a release never opens it for even one action while a recording is still stopping (behind a
+   * Record that was still starting, as it may be).
+   */
+  function wheelLeft() {
+    const settled = options.onWheelLeft?.();
+    if (!settled) return;
+    ending += 1;
+    void settled
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => {
+        ending -= 1;
+        syncAdmission();
+      });
   }
   function expire() {
     if (storageError) throw storageError;
@@ -208,6 +245,9 @@ export function createControl(
         barrier.pending() > 0,
       resumeSnapshotRequired: data.resumeSnapshotRequired,
       recoveryRequired: data.recoveryRequired,
+      ...(data.holder === "human" && data.heldBy
+        ? { heldBy: data.heldBy }
+        : {}),
       ...(secret
         ? {
             secretWanted: secret.label,
@@ -256,11 +296,13 @@ export function createControl(
     }
     if (personHadIt) data.recoveryRequired = true;
     data.holder = "bot";
+    delete data.heldBy;
     data.since = now();
     data.resumeSnapshotRequired = true;
     secret = undefined;
     options.invalidateSnapshot?.();
     persist();
+    if (personHadIt) wheelLeft();
     syncAdmission();
     return get();
   }
@@ -368,7 +410,19 @@ export function createControl(
       persist();
       return get();
     },
-    async take(requestId: string): Promise<ControlState> {
+    /**
+     * A person takes the wheel for the request that is waiting. `by` is their user id, which the server always sends,
+     * kept as `heldBy` until the wheel goes back; a take without one leaves nobody named, and nobody may then record
+     * in the Bot's browser or use its bar. Taking a request already taken changes nothing, whoever asks.
+     */
+    async take(requestId: string, by?: string): Promise<ControlState> {
+      if (
+        by !== undefined &&
+        (typeof by !== "string" || !by.trim() || by.length > MAX_HELD_BY)
+      )
+        throw new ControlRequestError(
+          `by must be a nonempty string of at most ${MAX_HELD_BY} characters.`,
+        );
       const request = intended(requestId);
       if (request.status === "taken" && data.holder === "human") return get();
       if (request.status !== "waiting")
@@ -390,6 +444,8 @@ export function createControl(
       after.updatedAt = now();
       delete after.expiresAt;
       data.holder = "human";
+      if (by !== undefined) data.heldBy = by;
+      else delete data.heldBy;
       data.since = now();
       secret = undefined;
       persist();
@@ -408,12 +464,14 @@ export function createControl(
         );
       if (request.status === "taken") finish(request, "completed");
       data.holder = "bot";
+      delete data.heldBy;
       data.since = now();
       data.resumeSnapshotRequired = true;
       data.recoveryRequired = false;
       secret = undefined;
       options.invalidateSnapshot?.();
       persist();
+      wheelLeft();
       syncAdmission();
       return get();
     },
@@ -422,8 +480,11 @@ export function createControl(
       if (request.status === "cancelled") return get();
       if (!active(request))
         throw new ControlRequestError("That request is no longer active.", 409);
+      const wasTaken = request.status === "taken";
       finish(request, "cancelled");
       persist();
+      // The person keeps the page until they hand it back, but what they took it for is over.
+      if (wasTaken) wheelLeft();
       syncAdmission();
       return get();
     },
@@ -453,6 +514,7 @@ export function createControl(
       expire();
       if (data.holder === "human" || active(current()) || data.recoveryRequired)
         throw new ControlError(HUMAN_HAS_CONTROL);
+      if (ending > 0) throw new ControlError(RECORDING_ENDING);
       if (browserMutation && data.resumeSnapshotRequired)
         throw new SnapshotRequiredError();
     },
@@ -462,6 +524,24 @@ export function createControl(
     },
     humanMayDrive(): boolean {
       return data.holder === "human" && barrier.pending() === 0;
+    },
+    /**
+     * Whether `by` may record in the Bot's browser now: they hold the wheel, for a request that is still theirs (not
+     * cancelled), and nothing the Bot was doing is still draining. Only the person is ever recorded, never the Bot,
+     * because the Bot cannot act while this is true.
+     */
+    personMayRecord(by: string): boolean {
+      return this.personHolds(by) && current()?.status === "taken";
+    },
+    /**
+     * Whether `by` holds the wheel now, with nothing the Bot was doing still draining: the bar's own rule
+     * (`humanMayDrive`), for the person it names. What clearing the Bot's browser asks, so it is never wiped under the
+     * Bot, nor by anyone but the person working it.
+     */
+    personHolds(by: string): boolean {
+      return (
+        this.humanMayDrive() && data.heldBy !== undefined && data.heldBy === by
+      );
     },
     requestSecret(input: {
       label?: unknown;

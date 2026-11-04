@@ -26,3 +26,12 @@ test("a server added by URL still falls back to the shared-token shape", () => {
     "deployment-bearer",
   );
 });
+
+test("a server added by URL and marked with an Entra scope is reached as the person asking, with no token to paste", () => {
+  expect(
+    connectionKindFor(
+      { provenance: "custom", entraScope: "api://hr-api/.default" } as never,
+      undefined,
+    ),
+  ).toBe("person-entra");
+});

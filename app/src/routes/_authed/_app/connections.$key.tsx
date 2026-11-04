@@ -1,4 +1,10 @@
-import { IconArrowUpRight, IconChevronDown } from "@tabler/icons-react";
+import {
+  IconAppsOff,
+  IconArrowUpRight,
+  IconChevronDown,
+  IconPlugOff,
+  IconUsers,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -182,14 +188,21 @@ function AppConnectionPage() {
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be shown
      * to you in your own browser; there is deliberately nothing here that could complete it for you.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       /*
        * A 200 with no url on it is not a url to follow. Every press that reaches here is on a
        * `user-oauth` catalogue entry, whose half of that route always mints one or refuses — so
        * this is the server having answered something this page does not understand, and saying so
        * is the only honest thing left. Assigning it navigated to a page called `undefined` on this
        * deployment's own origin. See `connectAccountMutationOptions`.
+       *
+       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * not-understood answer here.
        */
+      const authorizationUrl =
+        start !== null && "authorizationUrl" in start
+          ? start.authorizationUrl
+          : null;
       if (authorizationUrl === null) {
         setNotice(
           "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
@@ -259,9 +272,9 @@ function AppConnectionPage() {
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
-    /* The same capability the grant list below is drawn on, read once above and passed to both, so
-       the row's offer and the list's presence cannot come from different facts. */
-    authorizesPerAction: perActionGrants,
+    /* The same capability the grant list below is drawn on: a broker that approves per action takes
+       a consent over the connection that stands. */
+    reconnectsInPlace: perActionGrants,
     brokered,
     configured: plugins.data?.composioConfigured ?? false,
     recorded: connection !== undefined,
@@ -363,9 +376,8 @@ function AppConnectionPage() {
   if (server?.provenance === "composio" && !plugins.data.composioConfigured) {
     return (
       <PageShell backButton={back} title={server.title}>
-        <PageEmpty>
-          {server.title} isn't set up yet. An admin has to turn it on before
-          anyone can connect it.
+        <PageEmpty icon={IconPlugOff} title="Not set up yet">
+          An admin has to turn on {server.title} before anyone can connect it.
         </PageEmpty>
       </PageShell>
     );
@@ -440,10 +452,11 @@ function AppConnectionPage() {
     /* Bound once because the row below is told it twice — once inside the whole disconnected
        sentence and once on its own — and two copies of it would drift. */
     const reassurance = "No Bot can use this as you.";
-    /* Where the next step is. A broker that approves one action at a time has no whole-app Connect,
-       so the sentence points at the action list underneath instead of a button that is not there. */
+    /* Where the next step is. Connect asks for the whole app on every broker. Where the broker also
+       approves one action at a time, the action list underneath is the other way in, and the
+       sentence names both. */
     const trip = perActionGrants
-      ? "Authorize the actions you want below."
+      ? `Connecting takes you to ${server.title} to approve access. You can also authorize only the actions you want below.`
       : `Connecting takes you to ${server.title} to approve access.`;
 
     return (
@@ -514,7 +527,10 @@ function AppConnectionPage() {
         description="You don't connect this app yourself."
         title={entry?.title ?? key}
       >
-        <PageEmpty>
+        <PageEmpty
+          icon={entry ? IconUsers : IconAppsOff}
+          title={entry ? "Shared account" : "App not found"}
+        >
           {entry
             ? "Bots use one shared account for this app, the same for everybody."
             : "OpenBot has no app by that name."}
@@ -626,7 +642,7 @@ function AppConnectionPage() {
 
       {connection ? (
         <PageSection
-          description={`What you allowed, as ${entry.vendor} recorded it. This can be less than OpenBot asked for.`}
+          description={`Review the permissions recorded by ${entry.vendor}. They may include fewer permissions than OpenBot requested.`}
           title="Access"
         >
           <PageRows>

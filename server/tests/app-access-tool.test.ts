@@ -32,7 +32,13 @@ function access(state: AppAccessState): AppAccess {
     unavailable: state === "disabled" ? "absent" : null,
     accountHolder: "you",
     asksFirst: false,
-    granted: state !== "not_granted" && state !== "disabled",
+    granted:
+      state !== "not_granted" &&
+      state !== "disabled" &&
+      state !== "owner_grantable",
+    ownerGrants: "any",
+    givenByOwner: false,
+    needsConnect: false,
     connectedAt: null,
     requestKind: null,
     request: null,
@@ -72,6 +78,7 @@ describe("show_app_access", () => {
         agentId: "expenses",
         userId: "usr_7",
         composioConfigured: true,
+        ownerGrantsAllowed: true,
       },
     ]);
   });
@@ -83,6 +90,7 @@ describe("show_app_access", () => {
     ["shared_not_connected", /ask an administrator for it/],
     ["disabled", /switched off on this deployment/],
     ["not_granted", /you have not been granted it/],
+    ["owner_grantable", /can give it to you themselves/],
   ] as const)(
     "answers %s with the card marker and the state in words",
     async (state, said) => {
@@ -96,6 +104,7 @@ describe("show_app_access", () => {
         title: "Gmail",
         agentId: "expenses",
         reason: "access",
+        blocked: state !== "ready",
       });
       expect(prompt?.message).toMatch(said);
       expect(prompt?.message).toContain("Do not browse to its website");

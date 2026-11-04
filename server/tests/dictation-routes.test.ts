@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import type { MiddlewareHandler } from "hono";
 import { MAX_DICTATION_BYTES } from "@openbot/shared/dictation";
+import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { createDictationRoutes } from "../src/dictation/routes";
 

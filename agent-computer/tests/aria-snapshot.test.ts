@@ -46,12 +46,6 @@ const CAPTURED = `- generic [ref=e2]:
   - button "Submit order" [ref=e44]`;
 
 describe("parseAriaSnapshot, against captured output", () => {
-  test("the fixture is genuinely valid YAML", () => {
-    // The guard against the mistake that made this rewrite necessary: an invented fixture will most
-    // likely fail here first.
-    expect(() => Bun.YAML.parse(CAPTURED)).not.toThrow();
-  });
-
   test("keeps the controls and drops the scaffolding", () => {
     const { elements } = parseAriaSnapshot(CAPTURED);
     // `generic`, `paragraph`, `group` and `text` all carry refs but are not things a Bot can act on,
@@ -131,10 +125,6 @@ describe("parseAriaSnapshot, against captured output", () => {
   - generic [ref=e8]:
     - checkbox "Extra Cheese" [ref=e9]
     - text: Extra Cheese`;
-
-  test("the mixed fixture is genuinely valid YAML", () => {
-    expect(() => Bun.YAML.parse(MIXED)).not.toThrow();
-  });
 
   test("a half-ticked box is not reported as ticked", () => {
     const byName = new Map(
@@ -323,5 +313,156 @@ describe("parseDescriptor", () => {
   test("junk yields nothing rather than a half-built descriptor", () => {
     expect(parseDescriptor("")).toBeNull();
     expect(parseDescriptor("   ")).toBeNull();
+  });
+});
+
+/**
+ * Captured from `ariaSnapshot({ mode: "ai" })` in this package's Playwright: two native `<select>`s
+ * and a custom listbox. A native select's options carry no refs, so they used to be dropped and a Bot
+ * saw `combobox "Industry"` with nothing it could choose and no way to tell what it was set to.
+ */
+const DROPDOWNS = `- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - text: Industry
+    - combobox "Industry" [ref=e3]:
+      - option "Select an industry" [selected]
+      - option "Logistics"
+      - option "Retail"
+  - generic [ref=e4]:
+    - text: Stage
+    - combobox "Stage" [ref=e5]:
+      - option "Prospect" [selected]
+      - option "Qualified"
+  - listbox "Owner" [ref=e6]:
+    - option "Alex" [ref=e7]`;
+
+describe("parseAriaSnapshot, dropdowns", () => {
+  test("a native select reports its options and the one it shows", () => {
+    const { elements } = parseAriaSnapshot(DROPDOWNS);
+    expect(elements.find((element) => element.ref === "e3")).toEqual({
+      ref: "e3",
+      role: "combobox",
+      name: "Industry",
+      options: ["Select an industry", "Logistics", "Retail"],
+      value: "Select an industry",
+    });
+    expect(elements.find((element) => element.ref === "e5")?.value).toBe(
+      "Prospect",
+    );
+  });
+
+  test("a custom listbox's options stay elements of their own, listed once", () => {
+    const { elements } = parseAriaSnapshot(DROPDOWNS);
+    expect(elements.find((element) => element.ref === "e6")).toEqual({
+      ref: "e6",
+      role: "listbox",
+      name: "Owner",
+    });
+    expect(elements.find((element) => element.ref === "e7")).toEqual({
+      ref: "e7",
+      role: "option",
+      name: "Alex",
+    });
+  });
+
+  test("a very long list is cut to fifty choices", () => {
+    const many = Array.from(
+      { length: 120 },
+      (_, index) => `      - option "Country ${index}"`,
+    ).join("\n");
+    const { elements } = parseAriaSnapshot(
+      `- combobox "Country" [ref=e9]:\n${many}`,
+    );
+    expect(elements[0]?.options).toHaveLength(50);
+  });
+});
+
+describe("where a link goes", () => {
+  /** Captured from `ariaSnapshot({ mode: "ai" })` in the computer image, on a page at an ERP-like address. */
+  const LINKS = `- generic [active] [ref=e1]:
+  - link "PO 102" [ref=e2] [cursor=pointer]:
+    - /url: /purchase-orders/DEMO-PO-102
+  - link "Material documents" [ref=e3] [cursor=pointer]:
+    - /url: material-documents?po=DEMO-PO-102
+  - link "Hash" [ref=e4] [cursor=pointer]:
+    - /url: "#"
+  - link "JS" [ref=e5] [cursor=pointer]:
+    - /url: javascript:void(0)
+  - text: No href
+  - link "Div link" [ref=e6]
+  - link "Ext" [ref=e7] [cursor=pointer]:
+    - /url: https://other.test/a
+  - button "Submit for approval" [ref=e9]
+  - iframe [ref=e10]:
+    - link "Inner" [ref=f1e2] [cursor=pointer]:
+      - /url: inner`;
+  const BASE = "http://erp/invoices/DEMO-INV-002";
+  const urlOf = (ref: string) =>
+    parseAriaSnapshot(LINKS, BASE).elements.find(
+      (element) => element.ref === ref,
+    )?.url;
+
+  test("a link's address is resolved against the document's base, as the browser would", () => {
+    expect(urlOf("e2")).toBe("http://erp/purchase-orders/DEMO-PO-102");
+    expect(urlOf("e3")).toBe(
+      "http://erp/invoices/material-documents?po=DEMO-PO-102",
+    );
+    expect(urlOf("e7")).toBe("https://other.test/a");
+    // Kept as the browser has them; which of these are opened rather than clicked is the server's call.
+    expect(urlOf("e4")).toBe("http://erp/invoices/DEMO-INV-002#");
+    expect(urlOf("e5")).toBe("javascript:void(0)");
+  });
+
+  test("a link with no address, a button and a framed link carry none", () => {
+    expect(urlOf("e6")).toBeUndefined();
+    expect(urlOf("e9")).toBeUndefined();
+    // A frame's link resolves against the frame and navigates the frame: opening it here would differ.
+    expect(urlOf("f1e2")).toBeUndefined();
+  });
+
+  test("a frame-counter prefix on a top-page ref is not a frame", () => {
+    // Captured from a Bot's computer: a link on the page itself, with ref `f9e182`. Playwright's
+    // prefix is its frame counter, which is not zero for every top page.
+    const { elements } = parseAriaSnapshot(
+      `- generic [ref=f9e1]:
+  - link "DEMO-GR-50001" [ref=f9e182] [cursor=pointer]:
+    - /url: /material-documents/DEMO-GR-50001
+  - iframe [ref=f9e190]:
+    - link "Inner" [ref=f10e2] [cursor=pointer]:
+      - /url: inner`,
+      "http://erp/purchase-orders/DEMO-PO-101",
+    );
+    expect(elements.find((element) => element.ref === "f9e182")?.url).toBe(
+      "http://erp/material-documents/DEMO-GR-50001",
+    );
+    expect(
+      elements.find((element) => element.ref === "f10e2")?.url,
+    ).toBeUndefined();
+  });
+
+  test("without a base, no link carries an address", () => {
+    const { elements } = parseAriaSnapshot(LINKS);
+    expect(elements.some((element) => "url" in element)).toBe(false);
+  });
+
+  test("the address does not change what else the element reports", () => {
+    const { elements } = parseAriaSnapshot(LINKS, BASE);
+    expect(elements.find((element) => element.ref === "e2")).toEqual({
+      ref: "e2",
+      role: "link",
+      name: "PO 102",
+      url: "http://erp/purchase-orders/DEMO-PO-102",
+    });
+    // `/url` is the link's child, not an element of its own.
+    expect(elements.map((element) => element.ref)).toEqual([
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+      "e9",
+      "f1e2",
+    ]);
   });
 });

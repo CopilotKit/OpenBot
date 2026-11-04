@@ -9,6 +9,7 @@ import {
   type Tool,
   type ToolCall,
 } from "@ag-ui/client";
+import { OPENBOT_WAITING_METADATA } from "@openbot/shared/waiting";
 import { Observable, type Subscription } from "rxjs";
 import { withApprovalContext } from "./continuation";
 import type { AuditInitiator } from "./initiator";
@@ -21,14 +22,19 @@ export type HeadlessTool = {
    * call it makes anyway gets a governed refusal rather than going unanswered.
    */
   hidden?: boolean;
+  /**
+   * Started with the other calls of its step rather than after them. Calls are otherwise run one at
+   * a time, in order, because a browser's clicks and typing depend on the page the last one left.
+   */
+  concurrent?: boolean;
   execute(
     args: unknown,
     context: { toolCallId: string; signal: AbortSignal },
   ): Promise<unknown>;
 };
 
-/** Where a suspended run's waiting details ride on its AG-UI interrupt. */
-export const OPENBOT_WAITING_METADATA = "openbotWaiting";
+/** Where a suspended run's waiting details ride on its AG-UI interrupt. Shared with the browser. */
+export { OPENBOT_WAITING_METADATA };
 
 export type HeadlessWaiting = {
   kind: string;
@@ -179,36 +185,52 @@ export class HeadlessToolsMiddleware extends Middleware {
               "The headless tool continuation limit was reached.",
             );
           const results = new Map<string, string>();
+          const run = async (call: ToolCall, seen: Message[]) => {
+            const tool = tools.get(call.function.name);
+            if (!tool)
+              throw new Error(
+                `The tool ${call.function.name} is unavailable for this headless turn.`,
+              );
+            const args: unknown = JSON.parse(call.function.arguments || "{}");
+            const continuation = {
+              runId: request.runId,
+              threadId: request.threadId,
+              toolCallId: call.id,
+              toolName: call.function.name,
+              args,
+              messages: seen,
+              state,
+              context: request.context,
+              forwardedProps: request.forwardedProps,
+              initiator: this.initiator,
+            };
+            return withApprovalContext(continuation, () =>
+              tool.execute(args, {
+                toolCallId: call.id,
+                signal: controller.signal,
+              }),
+            );
+          };
+          /*
+           * A tool that may run beside the others is started now, with them all, and its result is
+           * taken in order below like any other. One that is never reached, because an earlier call
+           * stopped the run, is stopped with it by the abort on teardown; its rejection is observed
+           * here so it is not reported as unhandled.
+           */
+          const early = new Map<string, Promise<unknown>>();
+          for (const call of owned) {
+            if (!tools.get(call.function.name)?.concurrent) continue;
+            const started = run(call, messages);
+            started.catch(() => undefined);
+            early.set(call.id, started);
+          }
           for (const call of owned) {
             if (subscriber.closed) return;
             executed.add(call.id);
             let content: string;
             let error: string | undefined;
             try {
-              const tool = tools.get(call.function.name);
-              if (!tool)
-                throw new Error(
-                  `The tool ${call.function.name} is unavailable for this headless turn.`,
-                );
-              const args: unknown = JSON.parse(call.function.arguments || "{}");
-              const continuation = {
-                runId: request.runId,
-                threadId: request.threadId,
-                toolCallId: call.id,
-                toolName: call.function.name,
-                args,
-                messages,
-                state,
-                context: request.context,
-                forwardedProps: request.forwardedProps,
-                initiator: this.initiator,
-              };
-              const result = await withApprovalContext(continuation, () =>
-                tool.execute(args, {
-                  toolCallId: call.id,
-                  signal: controller.signal,
-                }),
-              );
+              const result = await (early.get(call.id) ?? run(call, messages));
               content =
                 typeof result === "string" ? result : JSON.stringify(result);
               if (content === undefined)

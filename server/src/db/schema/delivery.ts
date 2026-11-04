@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type {
   BindingTransport,
+  DeliveryKind,
   DeliveryScope,
   DeliveryState,
 } from "../../delivery/types";
@@ -111,7 +112,7 @@ export const deliveryOutbox = pgTable(
     deviceId: text("device_id"),
     transport: text("transport").$type<BindingTransport | "push">().notNull(),
     text: text("text").notNull(),
-    kind: text("kind").$type<"reply" | "question" | "approval">().notNull(),
+    kind: text("kind").$type<DeliveryKind>().notNull(),
     requestId: text("request_id"),
     state: text("state").$type<DeliveryState>().notNull().default("queued"),
     providerId: text("provider_id"),

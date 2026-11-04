@@ -2,6 +2,8 @@ import {
   IconArrowUpRight,
   IconChevronRight,
   IconExternalLink,
+  IconPuzzle,
+  IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
@@ -53,7 +55,14 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setOwnerGrantsMutationOptions,
 } from "@/lib/plugins/mutations";
+import {
+  brokeredConnectionDescription,
+  brokeredDisconnectNote,
+  brokeredProvenance,
+  brokeredReach,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   type CatalogueItem,
   connectionsQueryOptions,
@@ -62,13 +71,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  brokeredConnectionDescription,
-  brokeredDisconnectNote,
-  brokeredPerActionTrip,
-  brokeredProvenance,
-  brokeredReach,
-} from "@/lib/plugins/provider-vocabulary";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
@@ -164,14 +166,17 @@ function BotApprovalText({
  * "one credential, used for everybody" to the connector whose whole point is that each person
  * connects their own account, and would have stored a token nothing ever reads.
  *
- * A server an administrator added by URL is still the fallback's case, and still correct there:
- * nothing about it is reached as a person, so it gets the shared-token shape.
+ * A server an administrator added by URL is still the fallback's case, and still correct there,
+ * unless it was marked with an Entra scope. Then each call carries a token Microsoft Entra issues
+ * for the person asking, so it is reached as that person and has no token to paste: the shared-token
+ * shape would say the opposite of what it does.
  */
 export function connectionKindFor(
   server: PluginServer | undefined,
   auth: CatalogueItem["auth"] | undefined,
-): CatalogueItem["auth"] | "brokered" {
+): CatalogueItem["auth"] | "brokered" | "person-entra" {
   if (server && brokeredProvenance(server.provenance)) return "brokered";
+  if (server?.entraScope) return "person-entra";
   return auth ?? "deployment-bearer";
 }
 
@@ -299,6 +304,10 @@ function RouteComponent() {
     ...refreshPluginServerMutationOptions(queryClient),
     ...report,
   });
+  const ownerGrants = useMutation({
+    ...setOwnerGrantsMutationOptions(queryClient),
+    ...report,
+  });
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
     ...report,
@@ -312,13 +321,20 @@ function RouteComponent() {
      * shown to this person in their own browser; there is deliberately nothing here that could
      * complete it for them, and nothing about being an administrator changes that.
      */
-    onSuccess: (authorizationUrl) => {
+    onSuccess: (start) => {
       /*
        * A 200 with no url on it is not a url to follow. This press is on a `user-oauth` catalogue
        * entry, whose half of that route always mints one or refuses, so this is the server having
        * answered something this page does not understand. Assigning it navigated to a page called
        * `undefined` on this deployment's own origin. See `connectAccountMutationOptions`.
+       *
+       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * not-understood answer here.
        */
+      const authorizationUrl =
+        start !== null && "authorizationUrl" in start
+          ? start.authorizationUrl
+          : null;
       if (authorizationUrl === null) {
         setError(
           "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
@@ -388,16 +404,10 @@ function RouteComponent() {
    * `connectSelf` above stays: it is the `user-oauth` row's Connect, which is a different row with
    * no Disconnect beside it and nothing brokered to confirm.
    */
-  /*
-   * THE SAME CAPABILITY THE SETTINGS SCREEN READS, and read here for the same reason: this page
-   * draws the brokered row too, so under a per-action broker it offered the one Connect that can
-   * never succeed. Off the declared capability and never off `provider === "arcade"` — see
-   * {@link BrokeredAccount.authorizesPerAction}.
-   */
-  const perActionGrants = plugins.data?.authorizesPerAction ?? false;
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
-    authorizesPerAction: perActionGrants,
+    // Off the declared capability, never off the vendor's name. See the row's own field.
+    reconnectsInPlace: plugins.data?.authorizesPerAction ?? false,
     brokered: auth === "brokered",
     configured: plugins.data?.composioConfigured ?? false,
     recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
@@ -524,7 +534,9 @@ function RouteComponent() {
         description="There is no plugin with that name, here or in the catalogue."
         title="Not a plugin"
       >
-        <PageEmpty>Nothing to configure.</PageEmpty>
+        <PageEmpty icon={IconPuzzle} title="Plugin not found">
+          Nothing to configure.
+        </PageEmpty>
       </PageShell>
     );
   }
@@ -627,6 +639,45 @@ function RouteComponent() {
               </Item>
             </>
           ) : null}
+
+          {/*
+           * Who may give the app to a Bot. Binary and immediate, so a Switch. Every person's own
+           * account and the built-in Routines start on; a deployment token, a shared account and an
+           * app with no account start off, because a Bot given one of those reaches an account that
+           * is not the asker's. An owner's grant runs on the asker's own account, except on a shared
+           * account, where the grant lets the people who can use the Bot use the team account.
+           */}
+          {server ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Bot owners can give it to their Bots</ItemTitle>
+                  <ItemDescription>
+                    {server.ownerGrants !== "any"
+                      ? "Only an admin can give it to a Bot."
+                      : shared
+                        ? "Bot owners who give it to their Bots let those Bots use the team account."
+                        : "People can let Bots they own use it, on the account of whoever is asking."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    aria-label={`Let Bot owners give ${title} to their Bots`}
+                    checked={server.ownerGrants === "any"}
+                    disabled={ownerGrants.isPending}
+                    onCheckedChange={(next) => {
+                      setError(null);
+                      ownerGrants.mutate({
+                        serverId: key,
+                        ownerGrants: next ? "any" : "admin",
+                      });
+                    }}
+                  />
+                </ItemActions>
+              </Item>
+            </>
+          ) : null}
         </PageRows>
       </PageSection>
 
@@ -656,7 +707,9 @@ function RouteComponent() {
                 : auth === "brokered"
                   ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
                     brokeredConnectionDescription(provider)
-                  : "What this deployment sends to the vendor. One credential for everybody."
+                  : auth === "person-entra"
+                    ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
+                    : "What this deployment sends to the vendor. One credential for everybody."
           }
           title="Connection"
         >
@@ -721,6 +774,32 @@ function RouteComponent() {
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
                     {brokeredReach(provider).badge}
+                  </span>
+                </ItemActions>
+              </Item>
+            ) : null}
+
+            {auth === "person-entra" ? (
+              /*
+               * Nothing to click. The scope is set when the server is added by URL, and each call
+               * exchanges the asking person's own Microsoft sign-in for a token to it. Shown so an
+               * admin can see the mark at all: without this row the page drew the shared-token
+               * shape over a server that never sends one.
+               */
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>How this is reached</ItemTitle>
+                  <ItemDescription>
+                    As the person asking, through their Microsoft sign-in. There
+                    is no token to paste.
+                  </ItemDescription>
+                  <code className="mt-1 block break-all font-mono text-muted-foreground text-xs">
+                    {server?.entraScope}
+                  </code>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    Microsoft Entra
                   </span>
                 </ItemActions>
               </Item>
@@ -830,7 +909,7 @@ function RouteComponent() {
                   <BrokeredAccountRow
                     account={brokeredAccount}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
-                    disconnectedDescription={`No team account is connected. Bots with these tools are refused.${perActionGrants ? ` ${brokeredPerActionTrip(provider, "settings")}` : ""}`}
+                    disconnectedDescription="No team account is connected. Bots with these tools are refused."
                     heading="Team account"
                     notice="Sign in as the team account, not your own."
                     provider={provider}
@@ -843,11 +922,7 @@ function RouteComponent() {
                        at Composio, so what it undoes is not the row here but the grant on this
                        person's mailbox, and connecting again is a fresh consent. */
                     connectedDescription={`Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
-                    disconnectedDescription={
-                      perActionGrants
-                        ? `${brokeredPerActionTrip(provider, "settings")} ${reassurance}`
-                        : `Connect your own account to try this connector. ${reassurance}`
-                    }
+                    disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
                     /* The half of the line above that is true whichever way this app connects.
                        An app whose key somebody types gets a different first sentence from the
                        row — pressing Connect opens a form rather than leaving for a consent
@@ -1043,9 +1118,8 @@ function RouteComponent() {
         >
           <SkippedToolsNotice names={server.skippedTools ?? []} />
           {server.tools.length === 0 ? (
-            <PageEmpty>
-              {server.lastError ??
-                "No tools listed. Refresh tools to check again."}
+            <PageEmpty icon={IconTool} title="No tools listed">
+              {server.lastError ?? "Refresh tools to check again."}
             </PageEmpty>
           ) : (
             <PageRows>

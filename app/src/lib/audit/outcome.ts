@@ -45,6 +45,10 @@ export const REFUSED_EVENT_TYPES = [
   "credential.rotation_refused",
   /** A revoked person still holding a bookmark, or an address outside the deployment. */
   "session.refused",
+  /** A Bot asked for a computer of its own by somebody without "Isolated Bots", or that has no owner. */
+  "bot.isolation_refused",
+  /** A run that would have sent more tools than its model accepts, never sent to it. */
+  "agent.tool_limit_refused",
 ] as const;
 
 /**

@@ -7,8 +7,9 @@
  * Offer then claim, like `work/culler.ts`. The offer is derived from the table rather than from an
  * event, so a missed sweep costs two seconds where a missed event would cost the name entirely.
  */
-import { and, asc, eq, isNull, notExists, sql } from "drizzle-orm";
+
 import { readFiring } from "@openbot/shared/routine-firing";
+import { and, asc, eq, isNull, notExists, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
   channelMemberships,
@@ -253,11 +254,24 @@ async function summariseOne(
       const applied = await transaction
         .update(channels)
         .set({ summary: title, summaryAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(channels.id, channelId), isNull(channels.summary)))
+        .where(
+          and(
+            eq(channels.id, channelId),
+            isNull(channels.summary),
+            isNull(channels.deletedAt),
+          ),
+        )
         .returning({ id: channels.id });
-      // Somebody else named it between the claim and this write. Their title stands, and this work
-      // is done rather than still owed.
-      if (applied.length === 0) return "written";
+      if (applied.length === 0) {
+        // Another writer's title stands, but a conversation deleted while the model worked is gone.
+        // Both settle the queue item; only a surviving conversation counts as named.
+        const [remaining] = await transaction
+          .select({ id: channels.id })
+          .from(channels)
+          .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
+          .limit(1);
+        return remaining ? "written" : "nothing to name it with";
+      }
 
       const members = await transaction
         .select({ userId: channelMemberships.userId })

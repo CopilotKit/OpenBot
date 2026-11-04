@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { listenPort } from "@openbot/shared/listen-port";
+import { appListenHosts, isLoopbackHost } from "@openbot/shared/this-machine";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
-import { listenPort } from "@openbot/shared/listen-port";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 /*
  * Announce the server's port to the two runtimes that serve the app through Vite, and to no other.
@@ -73,6 +75,45 @@ if (!appPort.ok) {
 const apiPort = listenPort(process.env.SERVER_PORT, 3001);
 if (!apiPort.ok) {
   throw new Error(apiPort.reason.replace(/^PORT /, "SERVER_PORT "));
+}
+
+/**
+ * Only this machine, unless the deployment names an address beyond it (`appListenHosts`).
+ *
+ * The dev server passes `/api` to the server from this machine, and a single-user server admits a
+ * caller from this machine as its administrator, so a dev server anybody on the network could open
+ * handed them that. Refused here rather than by listening on one loopback, because Vite takes one
+ * address and both loopbacks have to answer (see `serving`). Read from the root `.env` as well as the
+ * environment, as the server reads it.
+ */
+export function thisMachineOnly(
+  environment: Record<string, string | undefined>,
+): Plugin {
+  const beyond = appListenHosts(environment)[0] === "::";
+  const refuseOthers = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    next: () => void,
+  ) => {
+    if (beyond || isLoopbackHost(request.socket.remoteAddress ?? "")) {
+      next();
+      return;
+    }
+    response.statusCode = 403;
+    response.setHeader("content-type", "text/plain; charset=utf-8");
+    response.end(
+      "This OpenBot only answers on the computer it runs on. Open it there.",
+    );
+  };
+  return {
+    name: "openbot-this-machine-only",
+    configureServer(server) {
+      server.middlewares.use(refuseOthers);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(refuseOthers);
+    },
+  };
 }
 
 const serving = {
@@ -170,6 +211,7 @@ export const routeBuildRollupOutputOptions = {
 
 export default defineConfig({
   plugins: [
+    thisMachineOnly(loadEnv("", path.resolve(__dirname, ".."), "")),
     announceServerPort(apiPort.port),
     tanstackRouter({
       autoCodeSplitting: true,

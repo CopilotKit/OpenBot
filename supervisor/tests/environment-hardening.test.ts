@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { environmentFor } from "../src/environment";
 
+const BOT = { kind: "bot", id: "bot-1" } as const;
+
 /**
  * Whitespace-only `COMPUTER_TOKEN` used to be forwarded verbatim while the child trims and then
  * exits, a boot crash loop from a value the supervisor accepted. Invalid `COMPUTER_BROWSER_MODE`
@@ -9,22 +11,28 @@ import { environmentFor } from "../src/environment";
 describe("supervisor environment hardening", () => {
   test("omits a whitespace-only computer token", () => {
     expect(
-      environmentFor("bot-1", {
+      environmentFor(BOT, {
         COMPUTER_TOKEN: "   ",
         COMPUTER_BROWSER_MODE: "headless",
       }),
-    ).toEqual(["COMPUTER_BOT_ID=bot-1", "COMPUTER_BROWSER_MODE=headless"]);
+    ).toEqual([
+      "COMPUTER_BOT_ID=bot-1",
+      "COMPUTER_SEPARATE_WORKSPACES=on",
+      "COMPUTER_BROWSER_MODE=headless",
+    ]);
   });
 
   test("trims a padded token", () => {
-    expect(environmentFor("bot-1", { COMPUTER_TOKEN: "  secret  " })).toContain(
-      "COMPUTER_TOKEN=secret",
+    // The computer's own token, derived from the trimmed one: `HMAC-SHA256("secret",
+    // "openbot computer token v1\nbot:bot-1")`, worked out with openssl rather than the code.
+    expect(environmentFor(BOT, { COMPUTER_TOKEN: "  secret  " })).toContain(
+      "COMPUTER_TOKEN=e6cd32e1c8314337711d1a37faeedaea7410a0cd4c13ce7712af71c1d182d113",
     );
   });
 
   test("refuses an invalid browser mode instead of forwarding it", () => {
     expect(() =>
-      environmentFor("bot-1", {
+      environmentFor(BOT, {
         COMPUTER_TOKEN: "s",
         COMPUTER_BROWSER_MODE: "fullscreen",
       }),
@@ -34,7 +42,7 @@ describe("supervisor environment hardening", () => {
   test("accepts both valid modes", () => {
     for (const mode of ["headless", "headed"]) {
       expect(
-        environmentFor("bot-1", {
+        environmentFor(BOT, {
           COMPUTER_TOKEN: "s",
           COMPUTER_BROWSER_MODE: mode,
         }),

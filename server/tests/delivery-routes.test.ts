@@ -36,6 +36,8 @@ function fixture(
     challengeError?: Error;
     /** The transport the Reachability code was issued for. */
     challengeTransport?: "slack" | "teams";
+    /** Why the gate asked, as the stored request carries it; "task" for a check-in task's. */
+    policySource?: string;
   } = {},
 ) {
   const calls: unknown[] = [];
@@ -134,6 +136,16 @@ function fixture(
               effect: "write",
               threadId: "canonical",
               args: { url: "https://example.com" },
+              ...(options.policySource
+                ? {
+                    policy: {
+                      behaviour: "ask" as const,
+                      source: options.policySource as "task",
+                      reason:
+                        "Tasks started from a check-in ask before every change.",
+                    },
+                  }
+                : {}),
             },
           };
         },
@@ -574,6 +586,44 @@ test("bound sender runs the canonical turn and an approval becomes an OpenTag ca
   });
   expect(result.events.at(-1)).toMatchObject({ type: "RUN_FINISHED" });
 });
+test("a check-in task's approval becomes a card without Always allow, and an older card's Always is once", async () => {
+  const f = fixture({
+    policySource: "task",
+    converse: {
+      kind: "waiting",
+      binding: bound,
+      inboxId: "in1",
+      replyText: "",
+      extras: { approvals: [APPROVAL], questions: [] },
+    },
+  });
+  const result = await run(f, {
+    context: [sender()],
+    messages: [{ id: "m9", role: "user", content: "<@UBOT> open example.com" }],
+  });
+  const card = result.events.find(
+    (e) => e.type === "CUSTOM" && e.name === "on_interrupt",
+  );
+  expect(card.value.__copilotkit_interrupt_value__.args).toMatchObject({
+    action: "Research Bot: browser/navigate",
+    allow_always: false,
+  });
+  const resumed = await run(f, {
+    forwardedProps: {
+      command: {
+        resume: {
+          "0f8fad5bd9cb469fa16570867728950e": {
+            confirmed: true,
+            always: true,
+            by: "slack:T1:U1",
+          },
+        },
+      },
+    },
+  });
+  expect(said(resumed.events)).toContain("Allowed once");
+  expect(f.decisions).toEqual([["owner", APPROVAL, "allow_once"]]);
+});
 test("in a conversation others may read, the answer goes to the owner privately", async () => {
   const f = fixture({
     converse: {
@@ -878,6 +928,71 @@ test("a chart the Bot drew is drawn natively by the Channel, and its follow-up r
   expect(
     f.calls.filter((c) => (c as { converse?: unknown }).converse),
   ).toHaveLength(turns);
+});
+test("a chart drawn natively in Slack or Teams says where its figures came from", async () => {
+  const points = [{ label: "France", value: 3.1 }];
+  const f = fixture({
+    converse: {
+      kind: "replied",
+      binding: bound,
+      inboxId: "in1",
+      replyText: "Here is GDP.",
+      components: [
+        {
+          name: "showBarChart",
+          args: {
+            title: "GDP",
+            points,
+            basis: "read",
+            sources: [
+              { title: "World Bank", url: "https://data.worldbank.org" },
+              { title: "World Bank", url: "https://data.worldbank.org" },
+              { title: "Notes", url: "javascript:alert(1)" },
+              null,
+            ],
+            asOf: "2025",
+          },
+        },
+        {
+          name: "showPieChart",
+          args: { title: "Unchecked", points, basis: "own-knowledge" },
+        },
+        { name: "showBarChart", args: { title: "Old", points } },
+      ],
+      extras: { approvals: [], questions: [] },
+    },
+  });
+  const result = await run(f, {
+    tools: [{ name: "render_chart", description: "", parameters: {} }],
+    context: [sender()],
+    messages: [{ id: "m1", role: "user", content: "chart GDP" }],
+  });
+  expect(
+    result.events.filter((e) => e.type === "TOOL_CALL_START"),
+  ).toHaveLength(3);
+  expect(
+    result.events
+      .filter((e) => e.type === "TEXT_MESSAGE_CONTENT")
+      .map((e) => e.delta),
+  ).toEqual([
+    "Here is GDP.",
+    "Sources: [World Bank](https://data.worldbank.org), Notes · As of 2025",
+    "From the Bot's own knowledge. Not checked against a source.",
+  ]);
+  // Each line follows its own chart.
+  const kinds = result.events
+    .filter(
+      (e) => e.type === "TOOL_CALL_START" || e.type === "TEXT_MESSAGE_CONTENT",
+    )
+    .map((e) => e.type);
+  expect(kinds).toEqual([
+    "TEXT_MESSAGE_CONTENT",
+    "TOOL_CALL_START",
+    "TEXT_MESSAGE_CONTENT",
+    "TOOL_CALL_START",
+    "TEXT_MESSAGE_CONTENT",
+    "TOOL_CALL_START",
+  ]);
 });
 test("a channel message from a colleague who never linked still reaches the owners' Slack triggers", async () => {
   // Whose triggers fire is decided by each owner's channel membership in the ingest, never by the

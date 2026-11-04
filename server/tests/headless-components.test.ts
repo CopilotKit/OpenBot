@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { z } from "zod";
 import { GALLERY as ACTIVITY } from "../../app/src/components/gallery/activity";
 import { GALLERY as CARDS } from "../../app/src/components/gallery/cards";
@@ -9,7 +10,6 @@ import { GALLERY as DECISIONS } from "../../app/src/components/gallery/decisions
 import { GALLERY as FORM } from "../../app/src/components/gallery/form";
 import { GALLERY as QUOTE } from "../../app/src/components/gallery/quote";
 import { GALLERY as TABLE } from "../../app/src/components/gallery/table";
-import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { type AuditEventInput, type AuditStore, auditSink } from "../src/audit";
 import {
   createHeadlessComponentTools,
@@ -149,6 +149,7 @@ describe("headless components mirror the compiled gallery", () => {
     ) as typeof import("../../app/node_modules/@types/react-dom/server");
     const args = {
       title: "Open issues by team",
+      basis: "given",
       points: [
         { label: "Platform", value: 12 },
         { label: "Apps", value: 5 },
@@ -184,7 +185,11 @@ function fakeStore(decision: ComponentDecision): ComponentStore {
 
 describe("headless component tools", () => {
   const initiator = { kind: "routine" as const, id: "routine-1" };
-  const valid = { title: "Revenue", points: [{ label: "Q1", value: 3 }] };
+  const valid = {
+    title: "Revenue",
+    basis: "given",
+    points: [{ label: "Q1", value: 3 }],
+  };
 
   test("a held chart is offered with its published description and records a confirmation", async () => {
     const tools = await createHeadlessComponentTools({

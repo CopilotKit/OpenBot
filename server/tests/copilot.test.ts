@@ -5,9 +5,15 @@ import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import {
+  COMPONENT_GUIDANCE,
+  computerGuidance,
+  ORCHESTRATION_GUIDANCE,
+  PROVENANCE_GUIDANCE,
+} from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
-import { EMPTY, lastValueFrom } from "rxjs";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
+import { EMPTY, lastValueFrom, Observable } from "rxjs";
 import { z } from "zod";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
@@ -17,7 +23,9 @@ import {
   buildAgents,
   builtInAgentConfiguration,
   createRequestAgents,
+  generativeUiMiddlewares,
   type LoadInstructions,
+  onOpenBotRunner,
   registeredAgentFromRow,
   resolveRuntimeAgents,
   runtimeModelForEnvironment,
@@ -240,7 +248,7 @@ describe("deployment model selection", () => {
     );
     expect(model.provider).toBe("anthropic");
     expect(model.defaultModel).toBe(defaultModelFor("anthropic"));
-    expect(model.defaultModel).toBe("claude-sonnet-4-5");
+    expect(model.defaultModel).toBe("claude-sonnet-5-5");
   });
 });
 
@@ -318,7 +326,7 @@ describe("registered Copilot agents", () => {
       model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere.
-      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       apiKey: "openai-secret",
     });
   });
@@ -644,6 +652,8 @@ describe("standing agent roles", () => {
         // travel in it or the Bot never hears it. Referenced rather than restated, so the assertion
         // stays exact without pinning the wording twice.
         PROVENANCE_GUIDANCE,
+        COMPONENT_GUIDANCE,
+        ORCHESTRATION_GUIDANCE,
         UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
     });
@@ -852,6 +862,8 @@ describe("standing agent roles", () => {
         "Reconcile corporate card statements.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
         PROVENANCE_GUIDANCE,
+        COMPONENT_GUIDANCE,
+        ORCHESTRATION_GUIDANCE,
         UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
     );
@@ -987,7 +999,7 @@ function fakeAgUiEndpoint() {
  * A Bot is told what it holds, not only handed it.
  *
  * A tool array tells a model a tool exists. It does not say the tool is the right way to reach that
- * system, and it competes with `COMPUTER_GUIDANCE`: a page of emphatic prose about the browser that
+ * system, and it competes with `computerGuidance`: a page of emphatic prose about the browser that
  * every Bot gets whether or not it has a single connector, and that mentions connectors nowhere.
  *
  * The browser prose won. A Bot holding four Google Drive tools browsed to drive.google.com, met a
@@ -1133,7 +1145,7 @@ describe("what a Bot is told it holds", () => {
       { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
       drive,
-      "BROWSER GUIDANCE HERE",
+      () => "BROWSER GUIDANCE HERE",
     ).prompt as string;
 
     // Order is the fix, not merely presence: the grants have to land before the browser prose.
@@ -1141,6 +1153,88 @@ describe("what a Bot is told it holds", () => {
     expect(prompt.indexOf("google-drive")).toBeLessThan(
       prompt.indexOf("BROWSER GUIDANCE HERE"),
     );
+  });
+});
+
+/**
+ * Whether the browser leaves searching to a search tool, decided by what this run holds.
+ *
+ * "search for X" in a demo made a Bot drive its browser to a search engine. The guidance has two
+ * wordings, and which one a built-in Bot gets has to follow the tools it is built with, including a
+ * narrowed run that was not offered the search tool it was granted.
+ */
+describe("what a built-in Bot is told about searching", () => {
+  const promptHolding = (
+    tools: { name: string; ref: string }[],
+    guidance: typeof computerGuidance | null = computerGuidance,
+  ) => {
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
+      "openai-secret",
+      tools as never[],
+      guidance ?? undefined,
+    );
+    return String((configuration as { prompt?: unknown }).prompt);
+  };
+  const card = { name: "show_app_access", ref: "app-access/show_app_access" };
+  const exaSearch = {
+    name: "mcp__exa__web_search_exa",
+    ref: "exa/web_search_exa",
+  };
+  const exaFetch = {
+    name: "mcp__exa__web_fetch_exa",
+    ref: "exa/web_fetch_exa",
+  };
+
+  test.each([
+    ["a provider's pair", [card, exaSearch, exaFetch]],
+    ["a search tool alone", [card, exaSearch]],
+    [
+      "another provider",
+      [
+        card,
+        {
+          name: "mcp__firecrawl__firecrawl_search",
+          ref: "firecrawl/firecrawl_search",
+        },
+      ],
+    ],
+  ])("holding %s, it is told to search with it", (_, tools) => {
+    const prompt = promptHolding(tools);
+    expect(prompt).toContain(computerGuidance({ search: true }));
+    expect(prompt).not.toContain(computerGuidance({ search: false }));
+  });
+
+  test.each([
+    ["nothing", []],
+    ["only the card", [card]],
+    ["a reader with no search", [card, exaFetch]],
+    [
+      "a tool called search that finds no sources",
+      [
+        card,
+        {
+          name: "mcp__google-drive__search_files",
+          ref: "google-drive/search_files",
+        },
+      ],
+    ],
+  ])("holding %s, it is told never to search in the browser", (_, tools) => {
+    const prompt = promptHolding(tools);
+    expect(prompt).toContain(computerGuidance({ search: false }));
+    expect(prompt).not.toContain(computerGuidance({ search: true }));
+  });
+
+  test("a deployment with no computer is told about neither", () => {
+    const prompt = promptHolding([card, exaSearch], null);
+    expect(prompt).toContain("Be helpful.");
+    expect(prompt).not.toContain("computer_navigate");
   });
 });
 
@@ -1225,6 +1319,190 @@ describe("where a Bot says its answer came from", () => {
 });
 
 /**
+ * A Bot is told to answer with a component when the answer has structure.
+ *
+ * Every Bot was offered the gallery and none was told when to use it, so structured answers came back
+ * as prose. The rule travels the same three ways the provenance rule does, and each is asserted,
+ * because they are built by different code: the built-in prompt, the standing role that is a remote
+ * Bot's only instruction, and a background turn, which builds its Bot through the resolver rather
+ * than the request path.
+ */
+describe("when a Bot answers with a component", () => {
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  test("a built-in Bot carries it straight after the provenance rule it defers to", () => {
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      model,
+      "openai-secret",
+    );
+    const prompt = "prompt" in configuration ? configuration.prompt : undefined;
+
+    // Its last line points at "the rules above", so the order is part of the rule.
+    expect(prompt).toContain(`${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}`);
+  });
+
+  test("a remote Bot carries it in its standing role", () => {
+    expect(standingRoleMessage(riskRow).content).toContain(COMPONENT_GUIDANCE);
+  });
+
+  test("names kinds of answer, never a tool a turn might not hold", () => {
+    const guidance = COMPONENT_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
+    for (const kind of ["a chart", "a checklist", "a record card", "choose"])
+      expect(guidance).toContain(kind);
+    expect(guidance).toContain("plain text only for a short conversational");
+    // Tool names are camelCase or snake_case; the tools on a turn vary per Bot and grant.
+    expect(COMPONENT_GUIDANCE).not.toMatch(/\b[a-z]+[A-Z]\w*\b|\b\w+_\w+\b/);
+  });
+
+  test("reaches both kinds of Bot on a background turn", async () => {
+    const recorder = new LLMock();
+    await using endpoint = fakeAgUiEndpoint();
+    const originalBase = process.env.OPENAI_BASE_URL;
+    try {
+      process.env.OPENAI_BASE_URL = await recorder.start();
+      recorder.onMessage(/.*/, { content: "Routine done." });
+      // Built from rows the way the server's own loader builds them.
+      const registered = [
+        {
+          ...assistantRow,
+          configuration: { systemPrompt: "Be helpful." },
+        },
+        { ...riskRow, configuration: { endpoint: endpoint.url } },
+      ].map((row) => {
+        const agent = registeredAgentFromRow(row);
+        if (!agent) throw new Error(`Expected ${row.id} to register.`);
+        return agent;
+      });
+      const resolver = createActorAgentResolver({
+        loadAgents: async () => registered,
+        model,
+        resolveModelApiKey: async () => "openai-secret",
+      });
+      const runTurn = createTurnRunner({
+        admission: async () => new AbortController().signal,
+        intelligence: {
+          getOrCreateThread: async () => undefined,
+          getThreadMessages: async () => ({ messages: [] }),
+          ɵacquireThreadLock: async () => undefined,
+          ɵrenewThreadLock: async () => undefined,
+          ɵcleanupThreadLock: async () => undefined,
+        },
+        runner: {
+          run: ({ agent, input }) =>
+            new Observable((subscriber) => {
+              agent
+                .runAgent(input, {
+                  onEvent: ({ event }) => subscriber.next(event),
+                })
+                .then(
+                  () => subscriber.complete(),
+                  (error) => subscriber.error(error),
+                );
+            }),
+          stop: async () => true,
+        },
+        // What the server's `buildAgentFor` calls for a routine, a handoff or a check-in.
+        buildAgentFor: ({ ownerUserId, agentId, initiator }) =>
+          resolver.resolveAgentForActor(
+            { id: ownerUserId, role: "user" },
+            agentId,
+            { initiator },
+          ),
+      });
+
+      for (const agentId of [assistantRow.id, riskRow.id])
+        await runTurn({
+          ownerUserId: "owner",
+          routineId: "routine-weekly",
+          agentId,
+          threadId: `thread-${agentId}`,
+          instruction: "Summarise this week's spend by team.",
+        });
+
+      expect(recorder.getRequests()).toHaveLength(1);
+      expect(endpoint.requests).toHaveLength(1);
+      // Both standing rules a background turn has to carry: when to draw, and when to share out.
+      for (const guidance of [COMPONENT_GUIDANCE, ORCHESTRATION_GUIDANCE]) {
+        const quoted = JSON.stringify(guidance).slice(1, -1);
+        expect(JSON.stringify(recorder.getRequests()[0]?.body)).toContain(
+          quoted,
+        );
+        expect(JSON.stringify(endpoint.requests[0])).toContain(quoted);
+      }
+    } finally {
+      if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBase;
+      await recorder.stop();
+    }
+  });
+});
+
+/**
+ * Every Bot is an orchestrator by default: it gives work that needs many tool calls or a lot of
+ * reading to subagents, and keeps the decisions and the answer. The rule travels the ways the
+ * component rule does (a background turn is asserted with it above), and a check-in, which runs a
+ * remote Bot on OpenBot's own runner, carries it once rather than twice.
+ */
+describe("when a Bot gives work to subagents", () => {
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  test("a built-in Bot carries it after the component rule", () => {
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      model,
+      "openai-secret",
+    );
+    const prompt = "prompt" in configuration ? configuration.prompt : undefined;
+    expect(prompt).toContain(
+      `${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}`,
+    );
+  });
+
+  test("a remote Bot carries it in its standing role", () => {
+    expect(standingRoleMessage(riskRow).content).toContain(
+      ORCHESTRATION_GUIDANCE,
+    );
+  });
+
+  test("it says what to give away and what to keep", () => {
+    const guidance = ORCHESTRATION_GUIDANCE.replace(/\s+/g, " ");
+    expect(guidance).toContain("When you hold run_subagent");
+    expect(guidance).toContain("self-contained task");
+    expect(guidance).toContain("several times in one step");
+    expect(guidance).toContain(
+      "Keep the planning, the decisions, anything that needs the person's approval, and the final answer yourself.",
+    );
+  });
+
+  test("a check-in runs a remote Bot with the standing rules said once, not twice", () => {
+    const remote = registeredAgentFromRow({
+      ...riskRow,
+      configuration: { endpoint: "https://risk.internal/ag-ui" },
+    });
+    if (!remote) throw new Error("Expected the remote Bot to register.");
+    const onOurs = onOpenBotRunner(remote);
+    if (onOurs.type !== "built_in") throw new Error("Expected a built-in run.");
+    const configuration = builtInAgentConfiguration(onOurs, model, "key");
+    const prompt =
+      "prompt" in configuration ? (configuration.prompt ?? "") : "";
+    expect(prompt.split(ORCHESTRATION_GUIDANCE)).toHaveLength(2);
+    expect(prompt.split(COMPONENT_GUIDANCE)).toHaveLength(2);
+    expect(prompt).toStartWith("You are Risk, Risk & Compliance.");
+  });
+});
+
+/**
  * The person's own standing instructions, and where they land in a prompt.
  *
  * The third instruction carrier. A role is the coworker's and reads the same to everybody; a skill
@@ -1277,7 +1555,7 @@ describe("a person's standing instructions", () => {
       model,
       "openai-secret",
       [{ name: "mcp__google-drive__search_files" }] as never[],
-      "Computer guidance.",
+      () => "Computer guidance.",
       [],
       "Write in British English.",
     ).prompt as string;
@@ -1304,7 +1582,7 @@ describe("a person's standing instructions", () => {
       // Byte for byte what a deployment had before any of this existed, which is what most people
       // on most days get.
       expect(prompt).toBe(
-        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       );
     },
   );
@@ -2583,5 +2861,21 @@ describe("where an attachment reaches the model, and where it deliberately does 
       (messages[4] as { content?: { source?: unknown }[] }).content?.[0]
         ?.source,
     ).toMatchObject({ type: "data" });
+  });
+});
+
+describe("generativeUiMiddlewares", () => {
+  test("a deployment that opted out refuses render_ui whatever the browser sends", () => {
+    // Omitted, the runtime would apply it to any run that carries a catalog.
+    expect(generativeUiMiddlewares(false).generativeUI).toBe(false);
+  });
+
+  test("a deployment that opted in applies render_ui to every run", () => {
+    expect(generativeUiMiddlewares(true).generativeUI).toBe(true);
+  });
+
+  test("the A2UI 0.9 middleware is off either way", () => {
+    expect(generativeUiMiddlewares(true).a2ui).toEqual({ enabled: false });
+    expect(generativeUiMiddlewares(false).a2ui).toEqual({ enabled: false });
   });
 });

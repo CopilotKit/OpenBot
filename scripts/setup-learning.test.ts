@@ -132,7 +132,8 @@ test("fresh managed setup creates and verifies the selected project's container 
   const content = await readFile(f.envPath, "utf8");
   expect(content).toContain("# Keep my other configuration");
   expect(parseEnv(content)).toMatchObject({
-    INTELLIGENCE_API_KEY: key,
+    CPK_INTELLIGENCE_API_KEY: key,
+    INTELLIGENCE_API_KEY: "",
     CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "openbot",
     OPENAI_API_KEY: "synthetic-model",
   });
@@ -143,6 +144,21 @@ test("fresh managed setup creates and verifies the selected project's container 
   expect(await readFile(f.envPath, "utf8")).toBe(saved);
   expect(f.calls).toHaveLength(3);
 });
+
+test.if(process.platform === "win32")(
+  "a project id the Windows shell would run is named, and the CLI is not called",
+  async () => {
+    const f = await fixture();
+    await writeFile(
+      join(f.directory, ".copilotkit/project.json"),
+      JSON.stringify({ projectId: "12&calc", projectSlug: "chosen" }),
+    );
+    await expect(
+      setupLearning({ ...f.options, runCli: f.runCli }),
+    ).rejects.toThrow("cannot be passed safely");
+    expect(f.calls).toEqual([]);
+  },
+);
 
 test("reuses an existing verified container without creating or editing it", async () => {
   const f = await fixture();
@@ -601,8 +617,27 @@ test("self-hosted setup failure or concurrent env edits do not save credentials"
   );
 });
 
-test("a partial key provision cannot reuse a stale CLI key or create a container", async () => {
-  const f = await fixture("CPK_INTELLIGENCE_API_KEY=cpk-old-project-key\n");
+test.each(["", "INTELLIGENCE_API_KEY=cpk-old-project-key\n"])(
+  "a CLI key is used without reprovisioning or rewriting configuration: %s",
+  async (legacy) => {
+    const f = await fixture(`${legacy}CPK_INTELLIGENCE_API_KEY=cpk-cli-key\n`);
+    const before = await readFile(f.envPath, "utf8");
+    const view = keyView(["present"]);
+    expect(
+      await setupLearning({
+        ...f.options,
+        runCli: f.runCli,
+        keyIntelligence: view.keyIntelligence,
+      }),
+    ).toBe("present");
+    expect(view.keys).toEqual(["cpk-cli-key"]);
+    expect(f.calls).toHaveLength(0);
+    expect(await readFile(f.envPath, "utf8")).toBe(before);
+  },
+);
+
+test("a partial key provision does not create a container", async () => {
+  const f = await fixture();
   const before = await readFile(f.envPath, "utf8");
   await expect(
     setupLearning({

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import Arcade, { APIError } from "@arcadeai/arcadejs";
 import { useArcadeClient } from "../src/plugins/arcade";
-import { BrokerRefusalError } from "../src/plugins/broker";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
+import { BrokerRefusalError } from "../src/plugins/broker";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 
 /** Prototype stubs BEFORE construction; `new Arcade({ apiKey })` opens no socket. */

@@ -327,10 +327,16 @@ config:
 # How a Bot gets a computer.
 #
 #   shared    One browser for every Bot, run by this chart. Needs nothing installed in the cluster,
-#             and is what a first install should use.
-#   sandbox   A computer each, as a `Sandbox` from kubernetes-sigs/agent-sandbox, suspended when
-#             idle and resumed with its logins intact. Needs that controller in the cluster.
-#   external  Neither. `url` points at a computer somebody else runs.
+#             and is what a first install should use. Each person's Bots keep their own logins
+#             and files, but a command one Bot runs can read another's files. For that reason a
+#             person's own OpenBot browser does not run here, and nobody records in a Bot's browser:
+#             the Browser page and the Bot's screen say so.
+#   sandbox   A computer for each person, and for each Isolated Bot, as a `Sandbox` from
+#             kubernetes-sigs/agent-sandbox, suspended when idle and resumed with its logins
+#             intact. Needs that controller in the cluster. Each person's own OpenBot browser gets a
+#             computer of its own the same way.
+#   external  Neither. `url` points at a computer somebody else runs, which is shared like the
+#             first, so it runs no person's browser and records in no Bot's browser either.
 computers:
   mode: shared
   # Only for `mode: external`. The other modes derive the address from what they created.
@@ -346,15 +352,16 @@ computers:
   # Who the browser and the Bot's shell run as.
   #
   # KUBERNETES ONLY, and that is the scope rather than the whole of #261. The chart runs the
-  # all-in-one image, whose `Dockerfile` creates `pwuser`, chowns `/workspace`, `/profiles` and
-  # `/app` to it, and drops to it through s6. A computer pod overrides the command to run the
-  # browser process alone, so it never reaches s6 and ran as uid 0. The Compose and supervisor
-  # paths run `agent-computer/Dockerfile`, which builds no such user and is still uid 0; that is
-  # the rest of #261's residual and is not this.
+  # all-in-one image, whose `Dockerfile` creates `pwuser`, chowns `/workspace` and `/profiles` to
+  # it, leaves `/app` root's, and drops to it through s6. A computer pod overrides the command to
+  # run the browser process alone, so it never reaches s6 and ran as uid 0. The Compose and
+  # supervisor paths run `agent-computer/Dockerfile`, which builds no such user and is still uid 0;
+  # that is the rest of #261's residual and is not this.
   #
   # WHAT IT BUYS, honestly. It is not a containment boundary against a Bot's own shell: the image
-  # grants `pwuser` passwordless sudo for apt-get/apt/dpkg, and those escalate to root by design
-  # (`-o APT::Update::Pre-Invoke=`). gVisor and a computer per Bot remain the actual boundary. What
+  # grants `pwuser` passwordless sudo for `openbot-apt`, which installs packages by name and refuses
+  # the arguments that make apt-get run a command as root, but a package's own scripts still run as
+  # root and root is one CVE away. gVisor and a computer per Bot remain the actual boundary. What
   # this does buy is real and separate: the org policies and admission rules that reject uid 0
   # outright, root-owned data stops accumulating in the volumes, and any bug yielding a constrained
   # primitive lands as 1001 rather than as root.
@@ -385,7 +392,7 @@ computers:
   # NOTHING ELSE IS SET HERE ON PURPOSE. A capability drop was proposed in #262 and declined,
   # because gVisor is the sandbox boundary this ships and `apt-get` in a Bot's shell needs CHOWN,
   # DAC_OVERRIDE, FOWNER, SETUID and SETGID. `allowPrivilegeEscalation: false` is the same question
-  # wearing a different hat: it is `no_new_privs`, which turns off the setuid bit `sudo apt-get`
+  # wearing a different hat: it is `no_new_privs`, which turns off the setuid bit `sudo openbot-apt`
   # depends on. The supervisor path already makes that trade (`docker.ts` sets
   # `no-new-privileges:true`), and can, because the image it runs installs no sudo at all. Add
   # either here if your deployment wants it and your Bots never install packages.
@@ -400,6 +407,16 @@ computers:
   # the process default, which is a handful and thirty minutes.
   maxBrowsers: ""
   browserIdleMs: ""
+  # At what share of the pod's memory limit the computer starts closing browsers nobody is using,
+  # least recently used first, down to ten points under it. Measured as the kubelet measures it (the
+  # working set), before each launch and once a minute: it stops idle browsers filling the pod one
+  # launch at a time, and a page that grows between two checks can still run the pod out of memory.
+  # Empty means 85; 0 switches it off.
+  memoryHighPercent: ""
+  # How long a Bot's background tab (one it left behind, such as the page a sign-in popup opened from)
+  # is kept untouched before it is closed. The page the Bot is on is never closed. Empty means ten
+  # minutes; 0 keeps them.
+  tabIdleMs: ""
 
   # Which Chromium a Bot's computer runs. `headed` is full Chromium drawing to the pod's own X server
   # (Xvfb, started by the computer), behind the same streamed screen: it is what sites see from a
@@ -434,14 +451,19 @@ computers:
     # safe default; `Delete` is for a trial you want to leave no trace of.
     whenDeleted: Retain
 
+  # SIZED FOR A PERSON, NOT A BOT. A computer is one person's and runs a browser for each of their
+  # Bots in use at once, up to `maxBrowsers` (8 when empty), closing each after `browserIdleMs`
+  # untouched (30 minutes when empty). Chromium is roughly 200-500MB per browser (a little more
+  # headed, plus a few MB for Xvfb) and up to 2GB with real pages open. Running out of memory takes
+  # down every one of that person's browsers at once, so size the limit to `maxBrowsers` times what
+  # one browser takes on your Bots' sites, plus headroom; on a small node, lower `maxBrowsers` (the
+  # least recently used browser closes first) rather than the limit.
   resources:
     requests:
       cpu: 500m
-      # Chromium is roughly 200-500MB per browser (a little more headed, plus a few MB for Xvfb) and
-      # up to 2GB with real pages open.
-      memory: 1Gi
+      memory: 2Gi
     limits:
-      memory: 4Gi
+      memory: 8Gi
 
   nodeSelector: {}
   tolerations: []
@@ -484,6 +506,9 @@ routines:
   # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
   # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
   enabled: false
+  # Pause new scheduled runs during an operator-controlled maintenance window. Existing Jobs
+  # retain their lease/timeout behavior; suspension does not cancel work already in flight.
+  suspend: false
   # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
   schedule: "*/5 * * * *"
 

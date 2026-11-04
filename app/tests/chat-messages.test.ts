@@ -1,5 +1,5 @@
-import type { Message, ToolCall } from "@ag-ui/core";
 import { describe, expect, test } from "bun:test";
+import type { Message, ToolCall } from "@ag-ui/core";
 import { toVisibleChatItems } from "../src/components/channels/chat-messages";
 
 /**

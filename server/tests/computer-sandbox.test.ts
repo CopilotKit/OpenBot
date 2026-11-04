@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
+import { ComputerStillStartingError } from "../src/computer/client";
+import { botSeat, personSeat } from "../src/computer/computer-key";
 import {
   createSandboxComputerProvider,
   sandboxNameFor,
@@ -51,10 +54,10 @@ describe("telling one run of a Bot's computer from the next", () => {
   test("changes across a resume even when the node and address do not", async () => {
     const before = await providerWith(
       running("2026-08-24T23:14:04Z", "node-a", "192.168.49.27"),
-    ).sessionOf?.("knowledge");
+    ).sessionOf?.(botSeat("knowledge"));
     const after = await providerWith(
       running("2026-08-25T00:40:04Z", "node-a", "192.168.49.27"),
-    ).sessionOf?.("knowledge");
+    ).sessionOf?.(botSeat("knowledge"));
 
     expect(before).toBeDefined();
     expect(after).toBeDefined();
@@ -63,8 +66,8 @@ describe("telling one run of a Bot's computer from the next", () => {
 
   test("is the same while one run keeps serving", async () => {
     const sandbox = running("2026-08-25T00:40:04Z", "node-a", "192.168.49.27");
-    expect(await providerWith(sandbox).sessionOf?.("knowledge")).toBe(
-      await providerWith(sandbox).sessionOf?.("knowledge"),
+    expect(await providerWith(sandbox).sessionOf?.(botSeat("knowledge"))).toBe(
+      await providerWith(sandbox).sessionOf?.(botSeat("knowledge")),
     );
   });
 
@@ -76,7 +79,7 @@ describe("telling one run of a Bot's computer from the next", () => {
       status: { conditions: [{ type: "Suspended", status: "True" }] },
     };
     expect(
-      await providerWith(suspended).sessionOf?.("knowledge"),
+      await providerWith(suspended).sessionOf?.(botSeat("knowledge")),
     ).toBeUndefined();
   });
 
@@ -89,7 +92,7 @@ describe("telling one run of a Bot's computer from the next", () => {
     await providerWith(
       running("2026-08-25T00:40:04Z", "n", "1.2.3.4"),
       seen,
-    ).sessionOf?.("knowledge");
+    ).sessionOf?.(botSeat("knowledge"));
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
   });
 
@@ -100,9 +103,87 @@ describe("telling one run of a Bot's computer from the next", () => {
       spec: { operatingMode: "Suspended" },
       status: { conditions: [{ type: "Suspended", status: "True" }] },
     };
-    const status = await providerWith(suspended, seen).status("knowledge");
+    const status = await providerWith(suspended, seen).status(
+      botSeat("knowledge"),
+    );
 
     expect(status.state).toBe("absent");
+    expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
+  });
+});
+
+/**
+ * A cold start that runs past the wait is a wait, not a fault.
+ *
+ * It used to throw a `SandboxError` whose message explained the pod schedule to whoever was
+ * watching, and the route answered 500. Now it is the typed "still starting" every surface knows to
+ * render gently, and the call it interrupted is said to have done nothing.
+ */
+describe("a computer that takes longer than the wait to start", () => {
+  const booting = {
+    metadata: { name: "bot-general-abc" },
+    spec: { operatingMode: "Running" },
+    status: {
+      conditions: [
+        { type: "Suspended", status: "False" },
+        { type: "Ready", status: "False" },
+      ],
+    },
+  };
+
+  test("locate gives up with the still-starting error, not a sandbox failure", async () => {
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider
+        .locate(botSeat("general"))
+        .catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+      expect(failure.message).toContain("not performed");
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("locate answers within its own wait, well before a resume's budget runs out", async () => {
+    // Held under a load balancer's idle timeout, so the person's request is answered, not cut.
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 600_000,
+      locateWaitMs: 0,
+      fetchImpl: (async () =>
+        Response.json(booting)) as unknown as typeof fetch,
+    });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const failure = await provider
+        .locate(botSeat("general"))
+        .catch((error) => error);
+      expect(failure).toBeInstanceOf(ComputerStillStartingError);
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("status calls one on its way up starting, without touching it", async () => {
+    const seen: string[] = [];
+    const status = await providerWith(booting, seen).status(botSeat("general"));
+    expect(status.state).toBe("starting");
     expect(seen.every((call) => call.startsWith("GET "))).toBe(true);
   });
 });
@@ -150,9 +231,9 @@ describe("the credential a sandbox call carries", () => {
       }) as unknown as typeof fetch,
     });
 
-    await provider.status("bot-1");
+    await provider.status(botSeat("bot-1"));
     current = "rotated";
-    await provider.status("bot-1");
+    await provider.status(botSeat("bot-1"));
 
     expect(sent).toEqual(["Bearer first", "Bearer rotated"]);
   });
@@ -175,16 +256,22 @@ function fakeCluster(initial: {
   mode: "Running" | "Suspended";
   image: string;
   volumes?: unknown;
+  /** The Sandbox's pod template, in place of one that names only the image. */
+  podTemplate?: unknown;
 }) {
   const state = {
     generation: 1,
     mode: initial.mode,
-    podTemplate: IMAGE(initial.image) as unknown,
+    podTemplate: (initial.podTemplate ?? IMAGE(initial.image)) as unknown,
     volumeClaimTemplates: initial.volumes ?? [
       { metadata: { name: "profile" } },
     ],
     /** The image the pod is running, or undefined when there is no pod. */
     pod: initial.mode === "Running" ? initial.image : undefined,
+    /** The template the running pod was cut from, which a running pod keeps whatever the Sandbox says now. */
+    podFrom: (initial.mode === "Running"
+      ? (initial.podTemplate ?? IMAGE(initial.image))
+      : undefined) as unknown,
     readyAt: "2026-09-29T00:00:00Z",
   };
   const patches: { contentType: string; body: unknown }[] = [];
@@ -195,14 +282,22 @@ function fakeCluster(initial: {
     );
   // What the controller would do on its next reconcile.
   const reconcile = () => {
-    if (state.mode === "Suspended") state.pod = undefined;
-    else if (!state.pod) {
+    if (state.mode === "Suspended") {
+      state.pod = undefined;
+      state.podFrom = undefined;
+    } else if (!state.pod) {
       state.pod = imageOf(state.podTemplate);
+      state.podFrom = state.podTemplate;
       state.readyAt = new Date().toISOString();
     }
   };
   const body = () => ({
-    metadata: { name: "bot-general-abc", generation: state.generation },
+    metadata: {
+      name: "bot-general-abc",
+      generation: state.generation,
+      // Whose computer, as `desired` writes it on every Sandbox the server creates.
+      annotations: { "openbot.dev/bot-id": "general" },
+    },
     spec: {
       operatingMode: state.mode,
       podTemplate: state.podTemplate,
@@ -279,7 +374,7 @@ describe("a computer on an older image", () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "old" });
     const volumes = cluster.state.volumeClaimTemplates;
 
-    await providerOn(cluster, "new").locate("general");
+    await providerOn(cluster, "new").locate(botSeat("general"));
 
     expect(cluster.state.pod).toBe("new");
     expect(cluster.state.mode).toBe("Running");
@@ -296,7 +391,7 @@ describe("a computer on an older image", () => {
 
   test("waking one that is already current changes only its mode", async () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "same" });
-    await providerOn(cluster, "same").locate("general");
+    await providerOn(cluster, "same").locate(botSeat("general"));
     expect(cluster.patches).toEqual([
       {
         contentType: "application/merge-patch+json",
@@ -307,7 +402,7 @@ describe("a computer on an older image", () => {
 
   test("one that is running mid-task is never restarted by being used", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "old" });
-    await providerOn(cluster, "new").locate("general");
+    await providerOn(cluster, "new").locate(botSeat("general"));
     expect(cluster.patches).toHaveLength(0);
     expect(cluster.state.pod).toBe("old");
   });
@@ -321,15 +416,157 @@ describe("a computer on an older image", () => {
   });
 });
 
+describe("which id a computer is for", () => {
+  /*
+   * A computer of one id (a person's own browser, an isolated Bot) has to know it: it runs a person's browser only on a
+   * computer of its own (agent-computer's person-access.ts), and without `COMPUTER_BOT_ID` it reads as a computer Bots
+   * share and refuses. A person's computer carries several Bots and names none. Told on creation and on every new
+   * template, as the supervisor tells each container.
+   */
+  const PERSON = "person-0123456789abcdef0123456789abcdef";
+  const envOf = (template: unknown) =>
+    (
+      template as {
+        spec: { containers: { env?: { name: string; value?: string }[] }[] };
+      }
+    ).spec.containers[0]?.env;
+
+  test("a new computer's pod says the id it was made for", async () => {
+    const created: unknown[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)));
+        return Response.json({});
+      }
+      if (created.length === 0) return new Response("", { status: 404 });
+      return Response.json(running("2026-10-27T00:00:00Z", "n", "1.2.3.4"));
+    }) as unknown as typeof fetch;
+    const template = {
+      spec: {
+        containers: [
+          {
+            name: "computer",
+            image: "openbot:new",
+            env: [
+              { name: "PORT", value: "4100" },
+              // One the template carried is replaced, never doubled.
+              { name: "COMPUTER_BOT_ID", value: "shared" },
+            ],
+          },
+        ],
+      },
+    };
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: template },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl,
+    }).locate(botSeat(PERSON));
+    const body = created[0] as { spec: { podTemplate: unknown } };
+    expect(envOf(body.spec.podTemplate)).toEqual([
+      { name: "PORT", value: "4100" },
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+    ]);
+    // The template every computer is cut from is left as it was.
+    expect(template.spec.containers[0]?.env).toHaveLength(2);
+    expect(template.spec.containers[0]?.env[1]?.value).toBe("shared");
+  });
+
+  test("a computer brought onto a new image keeps being told", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await providerOn(cluster, "new").locate(botSeat(PERSON));
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_BOT_ID", value: PERSON },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+    ]);
+    // An id is no reason to call a computer out of date: only its image is.
+    const [current] = await providerOn(cluster, "new").list();
+    expect(current?.updateAvailable).toBe(false);
+  });
+});
+
+describe("where a computer keeps its files", () => {
+  const envOf = (template: unknown) =>
+    (
+      template as {
+        spec: { containers: { env?: { name: string; value?: string }[] }[] };
+      }
+    ).spec.containers[0]?.env;
+  /** The chart's template, which gives every Bot a folder of its own. */
+  const separated = (tag: string) => ({
+    spec: {
+      containers: [
+        {
+          name: "computer",
+          image: `openbot:${tag}`,
+          env: [{ name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" }],
+        },
+      ],
+    },
+  });
+
+  test("an isolated Bot brought onto a new image keeps its files at the root of the volume it had", async () => {
+    // The Sandbox its Bot had before computers were per person, named for the Bot, with its files at the root.
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: {
+        podTemplate: separated("new"),
+        volumeClaimTemplates: [{ metadata: { name: "profile" } }],
+      },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl: cluster.fetchImpl,
+    }).locate(botSeat("general"));
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_BOT_ID", value: "general" },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "off" },
+    ]);
+  });
+
+  test("a person's computer gives each Bot a folder, names no Bot, and is told whose it is", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "old" });
+    await createSandboxComputerProvider({
+      namespace: "openbot",
+      template: {
+        podTemplate: {
+          spec: {
+            containers: [
+              {
+                name: "computer",
+                image: "openbot:new",
+                env: [{ name: "COMPUTER_BOT_ID", value: "stray" }],
+              },
+            ],
+          },
+        },
+        volumeClaimTemplates: [{ metadata: { name: "profile" } }],
+      },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      fetchImpl: cluster.fetchImpl,
+    }).locate(personSeat("user-1", "general"));
+    expect(envOf(cluster.state.podTemplate)).toEqual([
+      { name: "COMPUTER_PERSON_ID", value: "user-1" },
+      { name: "COMPUTER_SEPARATE_WORKSPACES", value: "on" },
+    ]);
+  });
+});
+
 describe("updating a computer on request", () => {
   test("a running one restarts on the new image and keeps its volumes", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "old" });
     const volumes = cluster.state.volumeClaimTemplates;
     const provider = providerOn(cluster, "new");
 
-    const result = await provider.update("general");
+    const result = await provider.update(botSeat("general").key);
     expect(result).toMatchObject({ updated: true, wasRunning: true });
-    await provider.restarting("general");
+    await provider.restarting(botSeat("general").key);
 
     expect(cluster.state.pod).toBe("new");
     expect(cluster.state.mode).toBe("Running");
@@ -350,22 +587,24 @@ describe("updating a computer on request", () => {
     const cluster = fakeCluster({ mode: "Suspended", image: "old" });
     const provider = providerOn(cluster, "new");
 
-    expect(await provider.update("general")).toMatchObject({
+    expect(await provider.update(botSeat("general").key)).toMatchObject({
       updated: true,
       wasRunning: false,
     });
-    expect(provider.restarting("general")).toBeUndefined();
+    expect(provider.restarting(botSeat("general").key)).toBeUndefined();
     expect(cluster.state.mode).toBe("Suspended");
     expect(cluster.state.pod).toBeUndefined();
 
     // And the next use wakes it on the new image without a second template write.
-    await provider.locate("general");
+    await provider.locate(botSeat("general"));
     expect(cluster.state.pod).toBe("new");
   });
 
   test("one already on the current image is left alone", async () => {
     const cluster = fakeCluster({ mode: "Running", image: "same" });
-    expect(await providerOn(cluster, "same").update("general")).toMatchObject({
+    expect(
+      await providerOn(cluster, "same").update(botSeat("general").key),
+    ).toMatchObject({
       updated: false,
     });
     expect(cluster.patches).toHaveLength(0);
@@ -381,9 +620,252 @@ describe("updating a computer on request", () => {
       fetchImpl: (async () =>
         new Response("null", { status: 404 })) as unknown as typeof fetch,
     });
-    expect(await provider.update("general")).toEqual({
+    expect(await provider.update(botSeat("general").key)).toEqual({
       updated: false,
       wasRunning: false,
     });
+  });
+});
+
+/**
+ * One Sandbox per person, and per isolated Bot.
+ *
+ * The regression: a Sandbox was named for the Bot alone, so a public Bot's one Sandbox, and the
+ * logins in its volume, were everybody's.
+ */
+describe("whose computer a Sandbox is", () => {
+  test("two people on one public Bot get two Sandboxes", () => {
+    const ada = sandboxNameFor(personSeat("ada", "pub-bot").key);
+    const bo = sandboxNameFor(personSeat("bo", "pub-bot").key);
+    expect(ada).not.toBe(bo);
+    expect(ada.startsWith("person-")).toBe(true);
+  });
+
+  test("one person's two Bots share that person's Sandbox", () => {
+    expect(sandboxNameFor(personSeat("ada", "sales").key)).toBe(
+      sandboxNameFor(personSeat("ada", "notes").key),
+    );
+  });
+
+  test("an isolated Bot keeps the Sandbox every Bot's computer had before", () => {
+    // Same name as before computers were per person, so its existing volume and logins carry on.
+    expect(sandboxNameFor(botSeat("knowledge").key)).toBe(
+      sandboxNameFor("knowledge"),
+    );
+    expect(sandboxNameFor({ kind: "person", personId: "knowledge" })).not.toBe(
+      sandboxNameFor("knowledge"),
+    );
+  });
+
+  test("a person's Sandbox is created for them, and listed as theirs", async () => {
+    const created: unknown[] = [];
+    let exists = false;
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: { spec: { containers: [] } } },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      locateWaitMs: 50,
+      resumeTimeoutMs: 50,
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST") {
+          created.push(JSON.parse(String(init?.body)));
+          exists = true;
+          return Response.json({});
+        }
+        if (new URL(String(url)).pathname.endsWith("/sandboxes")) {
+          return Response.json({ items: created });
+        }
+        if (!exists) return new Response("", { status: 404 });
+        return Response.json({
+          ...(created[0] as object),
+          status: {
+            serviceFQDN: "person-ada.openbot.svc.cluster.local",
+            conditions: [{ type: "Ready", status: "True" }],
+          },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(await provider.locate(personSeat("ada", "sales"))).toBe(
+      "http://person-ada.openbot.svc.cluster.local:4100",
+    );
+    expect(created).toHaveLength(1);
+    expect(
+      (created[0] as { metadata: { annotations: Record<string, string> } })
+        .metadata.annotations,
+    ).toEqual({
+      "openbot.dev/person-id": "ada",
+      "openbot.dev/computer": "person:ada",
+    });
+    // A second Bot of Ada's reaches the same Sandbox and creates nothing.
+    await provider.locate(personSeat("ada", "notes"));
+    expect(created).toHaveLength(1);
+    expect((await provider.list()).map((computer) => computer.key)).toEqual([
+      { kind: "person", personId: "ada" },
+    ]);
+  });
+});
+
+/**
+ * A computer's own token, never the deployment's.
+ *
+ * A Sandbox was cut from a template that handed every computer the deployment's `COMPUTER_TOKEN` from the chart's
+ * Secret, and a Bot can read what its computer's process was started with: one Bot's shell held the key to every
+ * person's computer in the cluster. Each Sandbox is now written a token of its own, derived from the deployment's and
+ * whose computer it is, which is what the server sends it.
+ */
+describe("the token a computer is given", () => {
+  const DEPLOYMENT = "deployment-computer-token";
+  /** `HMAC-SHA256(COMPUTER_TOKEN, "openbot computer token v1\n<kind>:<id>")`, from the documented scheme. */
+  const own = (computer: string) =>
+    createHmac("sha256", DEPLOYMENT)
+      .update(`openbot computer token v1\n${computer}`)
+      .digest("hex");
+  /** The chart's template before this change: the deployment's token, from its Secret. */
+  const fromSecret = (tag: string) => ({
+    spec: {
+      containers: [
+        {
+          name: "computer",
+          image: `openbot:${tag}`,
+          env: [
+            { name: "PORT", value: "4100" },
+            {
+              name: "COMPUTER_TOKEN",
+              valueFrom: {
+                secretKeyRef: {
+                  name: "openbot-secrets",
+                  key: "computer-token",
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const tokenIn = (template: unknown) =>
+    (
+      template as {
+        spec: {
+          containers: {
+            env?: { name: string; value?: string; valueFrom?: unknown }[];
+          }[];
+        };
+      }
+    ).spec.containers[0]?.env?.filter(
+      (entry) => entry.name === "COMPUTER_TOKEN",
+    );
+  const providerFor = (
+    cluster: ReturnType<typeof fakeCluster>,
+    template: unknown,
+  ) =>
+    createSandboxComputerProvider({
+      namespace: "openbot",
+      template: {
+        podTemplate: template,
+        volumeClaimTemplates: [{ metadata: { name: "profile" } }],
+      },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 5_000,
+      computerToken: DEPLOYMENT,
+      fetchImpl: cluster.fetchImpl,
+    });
+
+  test("a new computer's Sandbox holds its own token, and nothing of the deployment's", async () => {
+    const created: unknown[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)));
+        return Response.json({});
+      }
+      if (created.length === 0) return new Response("", { status: 404 });
+      return Response.json(running("2026-11-03T00:00:00Z", "n", "1.2.3.4"));
+    }) as unknown as typeof fetch;
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: fromSecret("new") },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      computerToken: DEPLOYMENT,
+      fetchImpl,
+    });
+    await provider.locate(personSeat("ada", "notes"));
+    const body = created[0] as { spec: { podTemplate: unknown } };
+    expect(tokenIn(body.spec.podTemplate)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("person:ada") },
+    ]);
+    expect(JSON.stringify(created)).not.toContain(DEPLOYMENT);
+    expect(JSON.stringify(created)).not.toContain("computer-token");
+    // The token the server sends that computer is the one it was given.
+    expect(
+      provider.tokenFor?.(personSeat("ada", "notes").key, DEPLOYMENT),
+    ).toBe(own("person:ada"));
+  });
+
+  test("a running computer from before, holding the deployment's token, restarts onto its own and keeps its volumes", async () => {
+    // Every call the server makes to it is refused, so it is not a working computer to be left alone mid-task.
+    const cluster = fakeCluster({
+      mode: "Running",
+      image: "same",
+      podTemplate: fromSecret("same"),
+    });
+    const volumes = cluster.state.volumeClaimTemplates;
+    const provider = providerFor(cluster, fromSecret("same"));
+    expect((await provider.list())[0]?.updateAvailable).toBe(true);
+
+    await provider.locate(botSeat("general"));
+
+    expect(cluster.state.mode).toBe("Running");
+    expect(tokenIn(cluster.state.podFrom)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("bot:general") },
+    ]);
+    expect(cluster.state.volumeClaimTemplates).toBe(volumes);
+    // Suspended with the new template, then resumed: the only way the controller replaces a pod.
+    const modes = cluster.patches.map((patch) =>
+      patch.contentType === "application/json-patch+json"
+        ? (patch.body as { path: string; value: unknown }[]).find(
+            (op) => op.path === "/spec/operatingMode",
+          )?.value
+        : (patch.body as { spec: { operatingMode: string } }).spec
+            .operatingMode,
+    );
+    expect(modes).toEqual(["Suspended", "Running"]);
+    expect((await provider.list())[0]?.updateAvailable).toBe(false);
+  });
+
+  test("a suspended computer from before wakes on its own token", async () => {
+    const cluster = fakeCluster({
+      mode: "Suspended",
+      image: "same",
+      podTemplate: fromSecret("same"),
+    });
+    await providerFor(cluster, fromSecret("same")).locate(
+      personSeat("ada", "notes"),
+    );
+    expect(cluster.state.mode).toBe("Running");
+    expect(tokenIn(cluster.state.podFrom)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("person:ada") },
+    ]);
+    // One write, with the template and the mode together, so the pod is never cut from the old one.
+    expect(cluster.patches).toHaveLength(1);
+  });
+
+  test("one already holding its own token is left alone", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "same" });
+    const provider = providerFor(cluster, fromSecret("same"));
+    await provider.locate(botSeat("general"));
+    const patches = cluster.patches.length;
+    await provider.locate(botSeat("general"));
+    expect(cluster.patches).toHaveLength(patches);
+    expect(tokenIn(cluster.state.podFrom)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("bot:general") },
+    ]);
   });
 });

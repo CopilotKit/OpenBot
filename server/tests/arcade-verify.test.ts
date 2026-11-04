@@ -40,8 +40,8 @@ import { AUTHORIZATION_REFUSALS } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
 import { testDatabaseUrl } from "./support/database";
-import { removePeople, seedPeople } from "./support/people";
 import { testEnvironment } from "./support/environment";
+import { removePeople, seedPeople } from "./support/people";
 
 /*
  * SIX CONNECTIONS RATHER THAN THE SHARED `TEST_POOL` OF TWO, because the race below drives two
@@ -505,6 +505,7 @@ test("the reasons the verifier can refuse with are a closed set", () => {
     "not-finished",
     "authorization-failed",
     "context-changed",
+    "name-changed",
     "not-permitted",
     "cancelled",
     "cancelled-left-live",

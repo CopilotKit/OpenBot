@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { startRetentionSweeps } from "../src/audit-retention";
 import {
@@ -119,4 +119,8 @@ describe("page frame retention", () => {
 
     expect(await kept()).toHaveLength(0);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

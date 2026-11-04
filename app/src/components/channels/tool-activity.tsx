@@ -1,6 +1,12 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
 import {
+  readConnectPrompt,
+  SHOW_APP_ACCESS_TOOL,
+} from "@openbot/shared/connect-prompt";
+import { researchRoleOfTool } from "@openbot/shared/research";
+import {
   IconFileText,
+  IconFolder,
   IconPlug,
   IconSearch,
   IconTool,
@@ -9,13 +15,14 @@ import {
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
-import { markdownComponents } from "@/lib/markdown";
+import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
   connectorName,
   humanise,
   ownToolLabel,
   readToolName,
-} from "@/lib/plugins/tool-name";
+} from "@openbot/shared/tool-name";
 import {
   asText,
   forDisplay,
@@ -23,12 +30,8 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import {
-  readConnectPrompt,
-  SHOW_APP_ACCESS_TOOL,
-} from "@openbot/shared/connect-prompt";
-import { researchRoleOfTool } from "@openbot/shared/research";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
+import { codingOutcome, lookStep } from "./coding-tool-cards";
 import type { VisibleChatItem } from "./chat-messages";
 import { ToolLine } from "./tool-line";
 
@@ -50,24 +53,34 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  * tool the app has no component for, such as an external agent's `run_command`. A tool the app draws
  * itself, a chart or a request for help, stays where it is, and so does a refusal that asks the
  * person to connect their own account, because a question for the person must never sit behind a
- * disclosure. A single call on its own keeps its own line; one browser step is still a group, as it
+ * disclosure.
+ *
+ * A coding harness's reads and searches fold too, though the app draws them, because Claude Code
+ * folds them: a run of Read, Grep, Glob and plain `ls`, `cat` or `grep` commands is one line saying
+ * "Read 3 files and searched for 2 patterns" (its changelog, 2.1.0 to 2.1.89). Its edits, writes,
+ * other commands and plan keep their own rows, as they do there. A single call on its own keeps its own line; one browser step is still a group, as it
  * always was, so the row does not change shape when the second step arrives.
  *
  * `isDrawn` says which tools the app draws itself; the transcript reads it from `useDrawnTool`.
  *
- * The group takes its first step's id, so the row keeps its identity while later steps stream in.
+ * EVERY RUN IS A GROUP, A RUN OF ONE INCLUDED, AND KEEPS ITS ROW ID FOR ITS WHOLE LIFE. A lone call
+ * used to be its own `tool` row and became a `tools` row when a second call arrived, under the same
+ * key but a different tree, so React tore the row down and rebuilt it and its entrance replayed. A
+ * group took its first step's id, so when that step turned out to ask the person something and left,
+ * the group's id changed and it was rebuilt again. Now the transcript draws a group of one as the
+ * line it always was, inside the one row type, and `rowIds` remembers which row each step was drawn
+ * in: a run reuses the row of the first of its steps no earlier run in this pass has claimed. Group
+ * ids carry a `group:` prefix, so they can never collide with a single row's id.
  */
 export function groupToolSteps(
   items: readonly VisibleChatItem[],
   isDrawn: (name: string) => boolean,
+  rowIds: Map<string, string> = new Map(),
 ): TranscriptItem[] {
-  const grouped: TranscriptItem[] = [];
+  const segments: (VisibleChatItem | ToolItem[])[] = [];
   let run: ToolItem[] = [];
   const close = () => {
-    const [first] = run;
-    if (!first) return;
-    if (run.length === 1 && !isBrowserStep(first)) grouped.push(first);
-    else grouped.push({ kind: "tools", id: first.id, steps: run });
+    if (run.length > 0) segments.push(run);
     run = [];
   };
   for (const item of items) {
@@ -76,16 +89,55 @@ export function groupToolSteps(
       continue;
     }
     close();
-    grouped.push(item);
+    segments.push(item);
   }
   close();
-  return grouped;
+
+  // Runs claim their rows first, so a group keeps its row when its first step leaves it...
+  const claimed = new Set<string>();
+  const runIds = new Map<ToolItem[], string>();
+  for (const segment of segments) {
+    if (!Array.isArray(segment)) continue;
+    const [first] = segment;
+    if (!first) continue;
+    const kept = segment
+      .map((step) => rowIds.get(step.id))
+      .find((id) => id !== undefined && !claimed.has(id));
+    const id = kept ?? `group:${first.id}`;
+    claimed.add(id);
+    runIds.set(segment, id);
+    for (const step of segment) rowIds.set(step.id, id);
+  }
+
+  // ...and a lone call that stops folding (its answer asks the person) keeps the row it had.
+  return segments.map((segment): TranscriptItem => {
+    if (Array.isArray(segment)) {
+      return {
+        kind: "tools",
+        id: runIds.get(segment) ?? "",
+        steps: segment,
+      };
+    }
+    if (segment.kind !== "tool") return segment;
+    const previous = rowIds.get(segment.id);
+    if (previous === undefined || claimed.has(previous)) return segment;
+    claimed.add(previous);
+    return { ...segment, id: previous };
+  });
 }
 
 function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
   if (isBrowserStep(item)) return true;
   const name = item.toolCall.function.name;
-  if (!name.startsWith("mcp__") && isDrawn(name)) return false;
+  const args = item.toolCall.function.arguments;
+  if (codingLook(name, args) !== null) return true;
+  // Another harness's tool under one of Claude Code's names is not drawn as Claude Code's.
+  if (
+    !name.startsWith("mcp__") &&
+    isDrawn(name) &&
+    !foreignCodingCall(name, args)
+  )
+    return false;
   /*
    * The app-access card is drawn from a server tool's answer, so no renderer registers it and the
    * registry cannot say so. Never folded — not even while its answer is still on the way, or the
@@ -141,7 +193,52 @@ function asksThePerson(result: string | undefined): boolean {
   return readTeamBotConsent(body) !== null || readConnectPrompt(body) !== null;
 }
 
-type StepKind = "search" | "fetch" | "browser" | "connector" | "tool";
+/** The app a tool item draws a card for, or null when it draws none. */
+function cardApp(item: ToolItem): string | null {
+  if (item.result === undefined) return null;
+  const answer = asText(item.result);
+  const prompt = answer.startsWith(REFUSAL_MARKER)
+    ? readConnectPrompt(answer.slice(REFUSAL_MARKER.length).trim())
+    : item.toolCall.function.name === SHOW_APP_ACCESS_TOOL
+      ? readConnectPrompt(answer)
+      : null;
+  return prompt?.serverId ?? null;
+}
+
+/**
+ * One card per app per turn.
+ *
+ * A refused call already draws the app's card, and a Bot told to show the card for an app it cannot
+ * use often calls `show_app_access` for the same app straight after, which drew the same card again.
+ * The refused call is kept, because it is what the Bot did; a later `show_app_access` for an app
+ * whose card that turn already drew is dropped. A person's next message starts a new turn.
+ */
+export function dropRepeatedAppCards(
+  items: readonly VisibleChatItem[],
+): VisibleChatItem[] {
+  const drawn = new Set<string>();
+  return items.filter((item) => {
+    if (item.kind === "text" && item.role === "user") drawn.clear();
+    if (item.kind !== "tool") return true;
+    const app = cardApp(item);
+    if (app === null) return true;
+    const repeat =
+      drawn.has(app) && item.toolCall.function.name === SHOW_APP_ACCESS_TOOL;
+    drawn.add(app);
+    return !repeat;
+  });
+}
+
+type StepKind =
+  | "search"
+  | "fetch"
+  | "browser"
+  | "connector"
+  | "tool"
+  // A coding harness's reads and searches, counted as Claude Code counts them.
+  | "file"
+  | "pattern"
+  | "directory";
 
 export type StepDetails = {
   id: string;
@@ -160,6 +257,8 @@ export type StepDetails = {
   connector?: string;
   inputs: [string, string][];
   output?: string;
+  /** The output is a file, a command's output or a search's matches: drawn as it came, not as markdown. */
+  verbatim?: boolean;
 };
 
 function objectOf(value: string | undefined): Record<string, unknown> {
@@ -230,6 +329,25 @@ export function stepDetails(step: ToolItem): StepDetails {
   }
 
   const name = step.toolCall.function.name;
+  const look = codingLook(name, step.toolCall.function.arguments);
+  if (look !== null) {
+    // Running whenever it has no result: whether the turn still is, the step's status says.
+    const outcome = codingOutcome(step.result, true);
+    const { label, detail } = lookStep(name, args, look, outcome);
+    const output = outcome.text.replace(/\s+$/, "");
+    return {
+      id: step.id,
+      kind: look,
+      label,
+      ...(detail ? { detail } : {}),
+      pending: step.result === undefined,
+      failed: outcome.state === "failed",
+      refused: false,
+      pages: 0,
+      inputs: [],
+      ...(output ? { output, verbatim: true } : {}),
+    };
+  }
   const answer = step.result === undefined ? undefined : asText(step.result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
@@ -317,6 +435,15 @@ function plural(count: number, one: string, many: string): string {
 export function summarise(steps: readonly StepDetails[]): string {
   const of = (kind: StepKind) => steps.filter((step) => step.kind === kind);
   const phrases: string[] = [];
+  // Claude Code's own words for a run of reads and searches.
+  const files = of("file").length;
+  if (files) phrases.push(`read ${plural(files, "file", "files")}`);
+  const patterns = of("pattern").length;
+  if (patterns)
+    phrases.push(`searched for ${plural(patterns, "pattern", "patterns")}`);
+  const directories = of("directory").length;
+  if (directories)
+    phrases.push(`listed ${plural(directories, "directory", "directories")}`);
   if (of("search").length) phrases.push("searched the web");
   const read = of("fetch").reduce((sum, step) => sum + step.pages, 0);
   if (read) phrases.push(`read ${plural(read, "page", "pages")}`);
@@ -344,6 +471,9 @@ const KIND_ICONS = {
   browser: IconWorld,
   connector: IconPlug,
   tool: IconTool,
+  file: IconFileText,
+  pattern: IconSearch,
+  directory: IconFolder,
 } as const;
 
 function StepIcon({
@@ -399,7 +529,14 @@ function StepStatus({ step, active }: { step: StepDetails; active: boolean }) {
   return null;
 }
 
-function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
+/** One step, as a folded line opens to it. Also how a subtask's card lists the steps it took. */
+export function StepRow({
+  step,
+  active,
+}: {
+  step: StepDetails;
+  active: boolean;
+}) {
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
@@ -457,9 +594,16 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
               ))}
             </dl>
           ) : null}
-          {step.output ? (
+          {step.output && step.verbatim ? (
+            <pre className="max-h-60 overflow-auto border-l pl-3 font-mono whitespace-pre-wrap break-words">
+              {step.output}
+            </pre>
+          ) : step.output ? (
             <div className="max-h-60 overflow-auto border-l pl-3 [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
-              <Streamdown components={markdownComponents}>
+              <Streamdown
+                components={markdownComponents}
+                plugins={markdownPlugins}
+              >
                 {forDisplay(step.output)}
               </Streamdown>
             </div>

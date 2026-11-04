@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
 import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import {
   agents,
@@ -13,7 +14,6 @@ import {
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
-import type { ActionPolicy } from "../src/computer/policy";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -203,4 +203,8 @@ describe("the tools a Bot is handed on the server", () => {
       policy = { mode: "enforce", deny: [], allow: ["true"] };
     }
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

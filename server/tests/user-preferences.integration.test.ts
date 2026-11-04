@@ -29,18 +29,30 @@ test("database defaults and writes survive a new store and remain scoped to the 
   expect(await store.read(alice)).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
+    proactive: "on",
   });
   expect(await store.patch(alice, { messageListEmphasis: "agent" })).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
+    proactive: "on",
   });
   expect(await createUserPreferencesStore(database).read(alice)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
+    proactive: "on",
   });
   expect(await store.read(bob)).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openbot",
+    proactive: "on",
   });
 });
 
@@ -67,4 +79,64 @@ test("missing users do not appear successfully saved", async () => {
   await expect(
     store.patch(id, { messageListEmphasis: "agent" }),
   ).rejects.toThrow("could not be saved");
+});
+
+test("the narration choice is kept in the database beside the others", async () => {
+  const id = await person();
+  expect((await store.read(id)).narration).toBe(null);
+  await store.patch(id, { narration: "on" });
+  expect(await createUserPreferencesStore(database).read(id)).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: "on",
+    skin: "openbot",
+    proactive: "on",
+  });
+});
+
+test("the skin is saved on the account and survives a new store", async () => {
+  const id = await person();
+  expect(await store.patch(id, { skin: "openmuse" })).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openmuse",
+    proactive: "on",
+  });
+  expect((await createUserPreferencesStore(database).read(id)).skin).toBe(
+    "openmuse",
+  );
+});
+
+test("a stored skin this build does not ship reads as the default", async () => {
+  const id = await person();
+  await database
+    .update(users)
+    .set({ preferences: sql`'{"skin":"retired-skin"}'::jsonb` })
+    .where(eq(users.id, id));
+  expect((await store.read(id)).skin).toBe("openbot");
+});
+
+test("check-ins are on for a person who never chose, and their off is kept in the database", async () => {
+  // Stored preferences written before the switch existed have no key for it, and read as on.
+  const id = await person();
+  await database
+    .update(users)
+    .set({ preferences: sql`'{"skin":"openduet"}'::jsonb` })
+    .where(eq(users.id, id));
+  expect((await store.read(id)).proactive).toBe("on");
+  await store.patch(id, { proactive: "off" });
+  expect(await createUserPreferencesStore(database).read(id)).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    narration: null,
+    skin: "openduet",
+    proactive: "off",
+  });
+  // The jsonb key the check-in claim filters on, as Postgres holds it.
+  const [row] = await database
+    .select({ proactive: sql<string>`${users.preferences}->>'proactive'` })
+    .from(users)
+    .where(eq(users.id, id));
+  expect(row?.proactive).toBe("off");
 });

@@ -1,7 +1,9 @@
 import {
+  IconApps,
   IconBrandGoogleDrive,
   IconBrandNotion,
   IconChevronRight,
+  IconCircleCheck,
   IconPlug,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -18,6 +20,7 @@ import {
   AccessRequestsSection,
   usePendingRequestCounts,
 } from "@/components/plugins/access-requests";
+import { PluginLogo } from "@/components/plugins/plugin-logo";
 import {
   Item,
   ItemActions,
@@ -27,6 +30,11 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
+  moreAppsRow,
+  moreAppsSectionDescription,
+  providerVocabulary,
+} from "@/lib/plugins/provider-vocabulary";
+import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
@@ -34,11 +42,6 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import {
-  moreAppsRow,
-  moreAppsSectionDescription,
-  providerVocabulary,
-} from "@/lib/plugins/provider-vocabulary";
 
 /**
  * What this deployment can reach, as one list per state.
@@ -58,18 +61,28 @@ export const Route = createFileRoute("/_authed/admin/plugins/")({
 });
 
 /**
- * A vendor's own mark where there is one, and a plug where there is not.
- *
- * The fallback covers a server an administrator added by URL, which has no catalogue entry and so no
- * mark of its own — and it would cover a catalogue vendor Tabler ships no brand for. Only Drive is in
- * the catalogue today, and Tabler has it.
+ * A vendor's own mark where Tabler ships one. Everything else draws the server's logo, or its
+ * initial: a server an administrator added by URL has no catalogue entry and so no mark of its own,
+ * and a column of identical plugs would tell one vendor from another no better than no icon at all.
  */
 const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
   "google-drive": IconBrandGoogleDrive,
   notion: IconBrandNotion,
 };
 
-const markFor = (key: string) => MARKS[key] ?? IconPlug;
+function VendorMark({
+  id,
+  logo,
+  name,
+}: {
+  id: string;
+  logo?: string | null;
+  name: string;
+}) {
+  const Brand = MARKS[id];
+  if (Brand) return <Brand className="size-4" />;
+  return <PluginLogo logo={logo} name={name} />;
+}
 
 /**
  * What a connected row says on the right.
@@ -139,7 +152,7 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="What this deployment can reach, and which Bots can use it. A plugin you add is for everybody. Choose which Bots get its tools on its page."
+      description="Connect services for your company, then choose which Bots can use each service’s tools."
       title="Plugins"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
@@ -160,13 +173,12 @@ function RouteComponent() {
             title="Connected"
           >
             {plugins.data?.servers.length === 0 ? (
-              <PageEmpty>
-                Nothing connected yet. Pick one from the list below.
+              <PageEmpty icon={IconPlug} title="Nothing connected yet">
+                Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
                 {plugins.data?.servers.map((server, index) => {
-                  const Mark = markFor(server.id);
                   return (
                     <React.Fragment key={server.id}>
                       {/*
@@ -185,7 +197,11 @@ function RouteComponent() {
                         size="sm"
                       >
                         <RowMark>
-                          <Mark className="size-4" />
+                          <VendorMark
+                            id={server.id}
+                            logo={server.logo}
+                            name={server.title}
+                          />
                         </RowMark>
                         <ItemContent>
                           <ItemTitle>{server.title}</ItemTitle>
@@ -231,11 +247,12 @@ function RouteComponent() {
             title="Explore plugins"
           >
             {explore.length === 0 ? (
-              <PageEmpty>Every plugin in the catalogue is connected.</PageEmpty>
+              <PageEmpty icon={IconCircleCheck} title="All connected">
+                Every plugin in the catalogue is connected.
+              </PageEmpty>
             ) : (
               <PageRows>
                 {explore.map((entry: CatalogueItem, index) => {
-                  const Mark = markFor(entry.key);
                   return (
                     <React.Fragment key={entry.key}>
                       <Item
@@ -249,7 +266,7 @@ function RouteComponent() {
                         size="sm"
                       >
                         <RowMark>
-                          <Mark className="size-4" />
+                          <VendorMark id={entry.key} name={entry.title} />
                         </RowMark>
                         <ItemContent>
                           <ItemTitle>{entry.title}</ItemTitle>
@@ -299,7 +316,7 @@ function RouteComponent() {
                   size="sm"
                 >
                   <RowMark>
-                    <IconPlug className="size-4" />
+                    <IconApps className="size-4" />
                   </RowMark>
                   <ItemContent>
                     <ItemTitle>{moreApps.title}</ItemTitle>
@@ -314,7 +331,7 @@ function RouteComponent() {
                    until the key is set. */
                 <Item data-testid="plugin-directory" size="sm">
                   <RowMark>
-                    <IconPlug className="size-4" />
+                    <IconApps className="size-4" />
                   </RowMark>
                   <ItemContent>
                     <ItemTitle>{moreApps.title}</ItemTitle>

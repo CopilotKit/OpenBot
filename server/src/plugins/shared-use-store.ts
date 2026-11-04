@@ -32,6 +32,8 @@ import {
   steeringOf,
 } from "./shared-use";
 
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 export class SharedUseRequestDecidedError extends Error {
   constructor() {
     super("That request has already been decided.");
@@ -141,8 +143,9 @@ export function createSharedUseStore(
    */
   async function rowsOfApp(
     serverId: string,
+    executor: Database | Transaction = database,
   ): Promise<{ appId: string; url: string | null; ids: string[] }> {
-    const [row] = await database
+    const [row] = await executor
       .select({ url: mcpServers.url })
       .from(mcpServers)
       .where(eq(mcpServers.id, serverId))
@@ -151,7 +154,7 @@ export function createSharedUseStore(
     const toolkit = url ? appOfUrl(url) : null;
     if (!toolkit) return { appId: serverId, url, ids: [serverId] };
     const canonical = canonicalUrlOf(toolkit);
-    const siblings = await database
+    const siblings = await executor
       .select({ id: mcpServers.id })
       .from(mcpServers)
       .where(eq(mcpServers.url, canonical))
@@ -170,18 +173,24 @@ export function createSharedUseStore(
    * read and write of an approval or a request goes through this first, and callers may hand in
    * either id and land on the same key.
    */
-  async function appIdOf(serverId: string): Promise<string> {
-    return (await rowsOfApp(serverId)).appId;
+  async function appIdOf(
+    serverId: string,
+    executor: Database | Transaction = database,
+  ): Promise<string> {
+    return (await rowsOfApp(serverId, executor)).appId;
   }
 
-  async function approvalFor(
-    botId: string,
-    anyServerId: string,
-  ): Promise<SharedUseApproval | null> {
-    const serverId = await appIdOf(anyServerId);
+  /** The approval row for this Bot at the app, whoever set it, and whether it may be read now. */
+  async function storedApproval(botId: string, serverId: string) {
     const [row] = await database
-      .select()
+      .select({
+        audience: sharedUseApprovals.audience,
+        outsideInput: sharedUseApprovals.outsideInput,
+        approvedAs: sharedUseApprovals.approvedAs,
+        ownersDecide: sql<boolean>`coalesce(${mcpServers.ownerGrants} = 'any' and ${mcpServers.accountMode} = 'shared', false)`,
+      })
       .from(sharedUseApprovals)
+      .leftJoin(mcpServers, eq(mcpServers.id, sharedUseApprovals.serverId))
       .where(
         and(
           eq(sharedUseApprovals.agentId, botId),
@@ -189,7 +198,36 @@ export function createSharedUseStore(
         ),
       )
       .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Who set the audience this Bot holds at the app — `admin` (a null from an older replica is
+   * one), `owner`, or null where there is none.
+   */
+  async function approvalSource(
+    botId: string,
+    anyServerId: string,
+  ): Promise<"admin" | "owner" | null> {
+    const row = await storedApproval(botId, await appIdOf(anyServerId));
     if (!row) return null;
+    return row.approvedAs === "owner" ? "owner" : "admin";
+  }
+
+  /*
+   * AN OWNER'S AUDIENCE COUNTS ONLY WHILE OWNERS DECIDE. One set by an owner's grant is withdrawn
+   * when an administrator stops letting owners give the app, but a row that outlived that — a
+   * replica that switched the rule without withdrawing, a delete that failed — must not keep the
+   * team account open. So it is read as no approval unless the app's rule is `any` now.
+   */
+  async function approvalFor(
+    botId: string,
+    anyServerId: string,
+  ): Promise<SharedUseApproval | null> {
+    const serverId = await appIdOf(anyServerId);
+    const row = await storedApproval(botId, serverId);
+    if (!row) return null;
+    if (row.approvedAs === "owner" && !row.ownersDecide) return null;
     const members = await database
       .select({
         kind: sharedUseApprovalMembers.kind,
@@ -209,81 +247,128 @@ export function createSharedUseStore(
     };
   }
 
-  async function setApproval(input: {
+  type ApprovalInput = {
     botId: string;
     serverId: string;
     approval: SharedUseApproval;
     by: string;
-  }) {
-    const serverId = await appIdOf(input.serverId);
+    /** Who is setting it. Only {@link approveOwnerGrant} says `owner`. */
+    as?: "admin" | "owner";
+  };
+
+  async function setApproval(input: ApprovalInput) {
     await database.transaction(async (tx) => {
+      const serverId = await lockApproval(tx, input.botId, input.serverId);
+      await writeApproval(tx, { ...input, serverId });
+    });
+  }
+
+  /** Lock the canonical Bot/app before either a request or its approval row is written. */
+  async function lockApproval(
+    tx: Transaction,
+    botId: string,
+    serverId: string,
+  ) {
+    const appId = await appIdOf(serverId, tx);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${JSON.stringify(["shared-use-approval", botId, appId])}))`,
+    );
+    return appId;
+  }
+
+  /** Share the decision transaction; callers already hold the canonical Bot/app lock. */
+  async function writeApproval(tx: Transaction, input: ApprovalInput) {
+    const serverId = input.serverId;
+    const approvedAs = input.as ?? "admin";
+    const insertion = tx.insert(sharedUseApprovals).values({
+      agentId: input.botId,
+      serverId,
+      audience: input.approval.audience,
+      outsideInput: input.approval.outsideInput,
+      approvedBy: input.by,
+      approvedAs,
+    });
+    const target = [sharedUseApprovals.agentId, sharedUseApprovals.serverId];
+    // An owner may fill an absence, never replace an approval another transaction just committed.
+    const written =
+      approvedAs === "owner"
+        ? await insertion
+            .onConflictDoNothing({ target })
+            .returning({ botId: sharedUseApprovals.agentId })
+        : await insertion
+            .onConflictDoUpdate({
+              target,
+              set: {
+                audience: input.approval.audience,
+                outsideInput: input.approval.outsideInput,
+                approvedBy: input.by,
+                approvedAs,
+                approvedAt: new Date(),
+              },
+            })
+            .returning({ botId: sharedUseApprovals.agentId });
+    if (written.length === 0) return false;
+    await tx
+      .delete(sharedUseApprovalMembers)
+      .where(
+        and(
+          eq(sharedUseApprovalMembers.agentId, input.botId),
+          eq(sharedUseApprovalMembers.serverId, serverId),
+        ),
+      );
+    if (
+      input.approval.audience === "people" &&
+      input.approval.members.length > 0
+    ) {
+      // Publication and assignment can name the same group. Membership is a set of exact
+      // (kind, value) pairs; a user and a group with the same value are still distinct.
       await tx
-        .insert(sharedUseApprovals)
-        .values({
-          agentId: input.botId,
-          serverId,
-          audience: input.approval.audience,
-          outsideInput: input.approval.outsideInput,
-          approvedBy: input.by,
-        })
-        .onConflictDoUpdate({
-          target: [sharedUseApprovals.agentId, sharedUseApprovals.serverId],
-          set: {
-            audience: input.approval.audience,
-            outsideInput: input.approval.outsideInput,
-            approvedBy: input.by,
-            approvedAt: new Date(),
-          },
-        });
-      await tx
-        .delete(sharedUseApprovalMembers)
-        .where(
-          and(
-            eq(sharedUseApprovalMembers.agentId, input.botId),
-            eq(sharedUseApprovalMembers.serverId, serverId),
-          ),
-        );
-      if (
-        input.approval.audience === "people" &&
-        input.approval.members.length > 0
-      ) {
-        await tx.insert(sharedUseApprovalMembers).values(
+        .insert(sharedUseApprovalMembers)
+        .values(
           input.approval.members.map((member) => ({
             agentId: input.botId,
             serverId,
             ...member,
           })),
-        );
+        )
+        .onConflictDoNothing({
+          target: [
+            sharedUseApprovalMembers.agentId,
+            sharedUseApprovalMembers.serverId,
+            sharedUseApprovalMembers.kind,
+            sharedUseApprovalMembers.value,
+          ],
+        });
+    }
+    /* A pending request this approval now answers is closed as approved, so the inbox never asks twice. */
+    const pending = await tx
+      .select()
+      .from(sharedUseRequests)
+      .where(
+        and(
+          eq(sharedUseRequests.agentId, input.botId),
+          eq(sharedUseRequests.serverId, serverId),
+          eq(sharedUseRequests.status, "pending"),
+        ),
+      );
+    for (const request of pending) {
+      const proposed = {
+        audience: request.proposedAudience,
+        outsideInput: request.proposedOutsideInput,
+        members: request.proposedMembers,
+      };
+      if (covers(input.approval, proposed)) {
+        await tx
+          .update(sharedUseRequests)
+          .set({
+            status: "approved",
+            decidedBy: input.by,
+            decidedAt: new Date(),
+          })
+          .where(eq(sharedUseRequests.id, request.id));
       }
-      /* A pending request this approval now answers is closed as approved, so the inbox never asks twice. */
-      const pending = await tx
-        .select()
-        .from(sharedUseRequests)
-        .where(
-          and(
-            eq(sharedUseRequests.agentId, input.botId),
-            eq(sharedUseRequests.serverId, serverId),
-            eq(sharedUseRequests.status, "pending"),
-          ),
-        );
-      for (const request of pending) {
-        const proposed = {
-          audience: request.proposedAudience,
-          outsideInput: request.proposedOutsideInput,
-          members: request.proposedMembers,
-        };
-        if (covers(input.approval, proposed)) {
-          await tx
-            .update(sharedUseRequests)
-            .set({
-              status: "approved",
-              decidedBy: input.by,
-              decidedAt: new Date(),
-            })
-            .where(eq(sharedUseRequests.id, request.id));
-        }
-      }
-    });
+    }
+    return true;
   }
 
   /*
@@ -298,6 +383,76 @@ export function createSharedUseStore(
     await database
       .delete(sharedUseApprovals)
       .where(inArray(sharedUseApprovals.serverId, ids));
+  }
+
+  /**
+   * A Bot's owner gave it a Shared app whose rule lets owners decide: the audience that grant sets,
+   * written and answered, or null where it sets none.
+   *
+   * WHO, EXACTLY THE PEOPLE WHO CAN USE THE BOT NOW. The Bot's exposure as it stands — its owner
+   * for a private Bot, its published audience for a Team Bot — and never outside input: an email
+   * or a webhook steering the team account is not somebody who can use the Bot, and stays an
+   * administrator's to approve. It is a snapshot, as an administrator's approval is: publishing the
+   * Bot further later is caught by the gate and asked of an administrator, the way every widening is.
+   *
+   * NEVER OVER AN APPROVAL ALREADY THERE. An administrator's stands for a reason the owner did not
+   * give, narrower or wider, and the owner's own from before is already this. Nothing is written
+   * unless the app's answering row is Shared and its rule is `any` now, read here rather than
+   * trusted from the caller.
+   */
+  async function approveOwnerGrant(input: {
+    botId: string;
+    serverId: string;
+    by: string;
+  }): Promise<SharedUseApproval | null> {
+    const serverId = await appIdOf(input.serverId);
+    const [app] = await database
+      .select({
+        accountMode: mcpServers.accountMode,
+        ownerGrants: mcpServers.ownerGrants,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (app?.accountMode !== "shared" || app.ownerGrants !== "any") return null;
+    if (await storedApproval(input.botId, serverId)) return null;
+    const approval: SharedUseApproval = {
+      ...exposureOf(await botFacts(input.botId)),
+      outsideInput: false,
+    };
+    const written = await database.transaction(async (tx) => {
+      const appId = await lockApproval(tx, input.botId, serverId);
+      return writeApproval(tx, {
+        botId: input.botId,
+        serverId: appId,
+        approval,
+        by: input.by,
+        as: "owner",
+      });
+    });
+    return written ? approval : null;
+  }
+
+  /**
+   * Withdraw the audiences owners' grants set at an app — for one Bot, or every Bot — and none an
+   * administrator set. Answers the Bots withdrawn from, so each can be written to the trail.
+   */
+  async function withdrawOwnerApprovals(input: {
+    serverId: string;
+    botId?: string;
+  }): Promise<string[]> {
+    const { ids } = await rowsOfApp(input.serverId);
+    const withdrawn = await database
+      .delete(sharedUseApprovals)
+      .where(
+        and(
+          inArray(sharedUseApprovals.serverId, ids),
+          eq(sharedUseApprovals.approvedAs, "owner"),
+          ...(input.botId ? [eq(sharedUseApprovals.agentId, input.botId)] : []),
+        ),
+      )
+      .returning({ botId: sharedUseApprovals.agentId });
+    return [...new Set(withdrawn.map((row) => row.botId))];
   }
 
   async function sourcesOf(responsibilityId: string): Promise<string[]> {
@@ -634,33 +789,50 @@ export function createSharedUseStore(
     by: string;
     decision: "approve" | "decline";
   }) {
-    const [claimed] = await database
-      .update(sharedUseRequests)
-      .set({
-        status: input.decision === "approve" ? "approved" : "declined",
-        decidedBy: input.by,
-        decidedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(sharedUseRequests.id, input.id),
-          eq(sharedUseRequests.status, "pending"),
-        ),
-      )
-      .returning();
-    if (!claimed) throw new SharedUseRequestDecidedError();
-    if (input.decision === "approve") {
-      await setApproval({
-        botId: claimed.agentId,
-        serverId: claimed.serverId,
-        by: input.by,
-        approval: {
-          audience: claimed.proposedAudience,
-          outsideInput: claimed.proposedOutsideInput,
-          members: claimed.proposedMembers,
-        },
-      });
-    }
+    await database.transaction(async (tx) => {
+      const [request] = await tx
+        .select({
+          botId: sharedUseRequests.agentId,
+          serverId: sharedUseRequests.serverId,
+        })
+        .from(sharedUseRequests)
+        .where(
+          and(
+            eq(sharedUseRequests.id, input.id),
+            eq(sharedUseRequests.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (!request) throw new SharedUseRequestDecidedError();
+      const serverId = await lockApproval(tx, request.botId, request.serverId);
+      const [claimed] = await tx
+        .update(sharedUseRequests)
+        .set({
+          status: input.decision === "approve" ? "approved" : "declined",
+          decidedBy: input.by,
+          decidedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(sharedUseRequests.id, input.id),
+            eq(sharedUseRequests.status, "pending"),
+          ),
+        )
+        .returning();
+      if (!claimed) throw new SharedUseRequestDecidedError();
+      if (input.decision === "approve") {
+        await writeApproval(tx, {
+          botId: claimed.agentId,
+          serverId,
+          by: input.by,
+          approval: {
+            audience: claimed.proposedAudience,
+            outsideInput: claimed.proposedOutsideInput,
+            members: claimed.proposedMembers,
+          },
+        });
+      }
+    });
     const [row] = await rows(eq(sharedUseRequests.id, input.id));
     /*
      * THE CLAIM ABOVE PROVES THE REQUEST ROW IS THERE, and this read still has to be checked: `rows`
@@ -703,8 +875,11 @@ export function createSharedUseStore(
   return {
     appIdOf,
     approvalFor,
+    approvalSource,
     admitsPerson,
     setApproval,
+    approveOwnerGrant,
+    withdrawOwnerApprovals,
     deleteApprovalsFor,
     botFacts,
     actorFacts,

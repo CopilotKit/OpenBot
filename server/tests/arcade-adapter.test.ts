@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import Arcade, { APIError } from "@arcadeai/arcadejs";
 import { callTool, useArcadeClient } from "../src/plugins/arcade";
-import { BrokerRefusalError } from "../src/plugins/broker";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
+import { BrokerRefusalError } from "../src/plugins/broker";
 
 /**
  * Same pattern as `composio-adapter.test.ts` ("the key becoming a vendor"): `new Arcade({ apiKey })`
@@ -39,8 +39,10 @@ const toolOf = (toolkit: string, i: number) => ({
 });
 
 describe("createArcadeClient", () => {
-  test("declares its grant is held by the vendor", () => {
-    expect(createArcadeClient("never-dialled").broker.grantIsLocal).toBe(false);
+  test("declares its grants are recorded here, as Composio's are", () => {
+    // A Bot's call needs the row a consent writes, and a single-user deployment's own name at
+    // Arcade is decided from those rows. See `ensureSingleUserIdentity`.
+    expect(createArcadeClient("never-dialled").broker.grantIsLocal).toBe(true);
   });
 
   test("constructing it opens no socket and sends no request", () => {
@@ -121,8 +123,11 @@ describe("createArcadeClient", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.text).toBe(
-      "Gmail.SendEmail has not been authorized on this account yet. Authorize it in Connections and ask again.",
+      "Arcade does not allow Gmail.SendEmail on this account.",
     );
+    // Handed to the store, which shows the Reconnect card and asks whether the account is gone.
+    expect(result.actionNotAllowed).toBe(true);
+    expect(result.accountGone).toBeUndefined();
   });
 
   test("a non-SDK error is rethrown as itself, not as a synthetic failure", async () => {

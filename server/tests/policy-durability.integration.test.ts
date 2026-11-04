@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import {
   createPolicyStore,
@@ -41,6 +41,24 @@ describe("a boundary set while running", () => {
     const after = createPolicyStore(configured, database);
     expect(await after.load()).toBe("the database");
     expect(after.get().deny).toEqual([rule]);
+  });
+
+  test("keeps each rule's name and description across a restart", async () => {
+    const before = createPolicyStore(configured, database);
+    await before.load();
+    const labels = {
+      [rule]: { name: "Never submit a form", description: "Stops submits." },
+    };
+    await before.set({
+      mode: "enforce",
+      deny: [rule],
+      allow: ["true"],
+      labels,
+    });
+
+    const after = createPolicyStore(configured, database);
+    await after.load();
+    expect(after.get().labels).toEqual(labels);
   });
 
   test("a deployment that never set one gets its configured default", async () => {
@@ -94,4 +112,8 @@ describe("a boundary set while running", () => {
     await store.reset();
     expect(store.get()).toEqual(configured);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

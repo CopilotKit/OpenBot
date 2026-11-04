@@ -18,9 +18,9 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
+import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { Route as AdminToolRoute } from "@/routes/_authed/admin/plugins/$key_.tools.$tool";
-import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 
 /**
  * A connector's own pages, when `GET /api/plugins` fails.
@@ -269,7 +269,7 @@ test("a list that genuinely lacks the connector still says it is not enabled, on
   );
   await waitForFailedRead(client);
 
-  expect(await view.findByText("This connector isn't turned on.")).toBeTruthy();
+  expect(await view.findByText("This connector is off")).toBeTruthy();
   expect(
     view.queryByText("Couldn't load plugins. Reload the page."),
   ).toBeNull();

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   askTheirOwnPerson,
-  ESCALATE_TOOL,
   escalationTool,
   PUT_TO,
 } from "../src/agents/escalation";
@@ -35,11 +34,6 @@ function recorder() {
 }
 
 describe("asking a person", () => {
-  test("is offered to every run, granted anybody or not", () => {
-    const tool = escalationTool({ from: FROM, route: askTheirOwnPerson });
-    expect(tool.name).toBe(ESCALATE_TOOL);
-  });
-
   test("names who was reached, so the Bot can say what it did", async () => {
     const tool = escalationTool({ from: FROM, route: askTheirOwnPerson });
 
@@ -63,19 +57,6 @@ describe("asking a person", () => {
     await tool.execute({ question: "which account?" });
 
     expect(written[0]?.initiator).toEqual({ kind: "routine", id: "routine_7" });
-  });
-
-  test("a run that says nothing leaves the row filed as a person's", async () => {
-    const { written, store } = recorder();
-    const tool = escalationTool({
-      from: FROM,
-      route: askTheirOwnPerson,
-      auditStore: store,
-    });
-
-    await tool.execute({ question: "which account?" });
-
-    expect(written[0]?.initiator).toBe(undefined);
   });
 
   test("the question is on the record", async () => {

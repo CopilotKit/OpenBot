@@ -1,4 +1,4 @@
-import { IconDeviceMobile, IconSend } from "@tabler/icons-react";
+import { IconDeviceMobile, IconDevices, IconSend } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import {
@@ -18,6 +18,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   deliveryQueryOptions,
+  type Reachability,
   removePushDeviceMutationOptions,
 } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
@@ -25,6 +26,43 @@ import { queryClient } from "@/query-client";
 const PLATFORM: Record<"ios" | "android", string> = {
   ios: "iOS",
   android: "Android",
+};
+
+type Delivery = Reachability["deliveries"][number];
+
+/** Each channel as the switches under "Where updates go" name it. */
+const CHANNEL: Record<Delivery["transport"], string> = {
+  push: "Push",
+  slack: "Slack",
+  teams: "Microsoft Teams",
+  sms: "SMS",
+};
+
+/**
+ * What a delivery was about, as the kind of update it was routed under in "Where updates go", so a
+ * row can be matched to the switch that let it through: a Bot's reply goes out as Progress, an
+ * approval as a Decision, and a check-in ping as Something needs you.
+ */
+const KIND: Record<Delivery["kind"], string> = {
+  reply: "Progress",
+  approval: "Decision",
+  question: "Question",
+  attention: "Something needs you",
+};
+
+/**
+ * Where a delivery got to. `accepted` is the provider taking it without saying yet that it arrived,
+ * and `unknown` is a send that may or may not have gone; the error under the row says which.
+ */
+const STATE: Record<Delivery["state"], string> = {
+  queued: "Waiting to send",
+  running: "Sending",
+  accepted: "Sending",
+  sent: "Sent",
+  delivered: "Delivered",
+  failed: "Failed",
+  unknown: "Not confirmed",
+  opted_out: "Not sent",
 };
 
 /** The phones that receive push notifications for every one of the person's Bots. */
@@ -44,7 +82,9 @@ export function NativeDevices() {
       ) : null}
       {reach.isPending || !reach.data ? null : reach.data.devices.length ===
         0 ? (
-        <PageEmpty>No devices yet.</PageEmpty>
+        <PageEmpty icon={IconDevices} title="No devices yet">
+          Phones and computers you sign in on show up here.
+        </PageEmpty>
       ) : (
         <PageRows>
           {reach.data.devices.map((device, index) => (
@@ -88,7 +128,9 @@ export function RecentDeliveries() {
       ) : null}
       {reach.isPending || !reach.data ? null : reach.data.deliveries.length ===
         0 ? (
-        <PageEmpty>No deliveries yet.</PageEmpty>
+        <PageEmpty icon={IconSend} title="No deliveries yet">
+          Notifications sent to your devices show up here.
+        </PageEmpty>
       ) : (
         <PageRows>
           {reach.data.deliveries.map((delivery, index) => (
@@ -99,11 +141,9 @@ export function RecentDeliveries() {
                   <IconSend />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>
-                    {delivery.transport} · {delivery.kind}
-                  </ItemTitle>
+                  <ItemTitle>{KIND[delivery.kind]}</ItemTitle>
                   <ItemDescription>
-                    {delivery.state} ·{" "}
+                    {CHANNEL[delivery.transport]} · {STATE[delivery.state]} ·{" "}
                     {new Date(delivery.createdAt).toLocaleString()}
                   </ItemDescription>
                   {delivery.error ? (

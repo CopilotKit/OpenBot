@@ -1,4 +1,5 @@
 import { checkNavigationTarget } from "../computer/target";
+import { isManagedEndpoint } from "./managed-endpoint";
 
 /**
  * Where an external agent lives, and whether we are willing to talk to it.
@@ -71,6 +72,18 @@ export function checkAgentEndpoint(
   options: {
     allowPrivateHosts?: boolean;
     allowedHosts?: ReadonlySet<string>;
+    /**
+     * The agent addresses this deployment runs itself: the managed Bot, and the harness picked
+     * during setup.
+     *
+     * These are the deployment's own settings, not addresses a person typed into a form, so the
+     * private-network refusal that guards registrations must not refuse them — a local deployment
+     * keeps its managed Bot on loopback, and a Bot created in the app is bound to exactly that
+     * address. The match is EXACT, on the same identity the run path uses to decide whether the
+     * deployment token is attached (`isManagedEndpoint`): another path on the same host and port
+     * is not the deployment's agent, and stays refused.
+     */
+    managedEndpoints?: readonly (string | URL)[];
   } = {},
 ): EndpointVerdict {
   if (typeof raw !== "string" || !raw.trim()) {
@@ -78,6 +91,20 @@ export function checkAgentEndpoint(
   }
 
   const verdict = checkNavigationTarget(raw.trim(), options);
+  if (
+    !verdict.allowed &&
+    options.managedEndpoints !== undefined &&
+    isManagedEndpoint(raw.trim(), options.managedEndpoints) &&
+    /*
+     * The same floor `namedAsAllowed` keeps: being the deployment's own address only ever
+     * overrules a refusal for being private. The metadata address and anything that is not a web
+     * address are refused before this, whatever the configuration says — a managed endpoint that
+     * IS one of those is a broken deployment, not a reason to dial it.
+     */
+    checkNavigationTarget(raw.trim(), { allowPrivateHosts: true }).allowed
+  ) {
+    return { allowed: true, url: new URL(raw.trim()).toString() };
+  }
   if (!verdict.allowed && namedAsAllowed(raw.trim(), options.allowedHosts)) {
     /*
      * Named, one host at a time, by whoever runs this deployment.
@@ -127,6 +154,24 @@ export class EndpointNotAllowedError extends Error {
     super(message);
     this.name = "EndpointNotAllowedError";
   }
+}
+
+/** How a refusal of the stored address begins, whoever ends up holding its message. */
+const NOT_DIALLED = "This deployment will not dial ";
+
+/**
+ * Whether a run failed because its stored address is one this deployment will not dial.
+ *
+ * By message as well as by type, because the AG-UI client turns a fetch that throws into a RUN_ERROR
+ * event carrying only the message, so the error a caller finally holds is a plain `Error`. Only the
+ * stored address counts: a redirect can stop redirecting, and that address cannot change on its own.
+ */
+export function isEndpointRefusal(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "EndpointNotAllowedError" ||
+      error.message.startsWith(NOT_DIALLED))
+  );
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -240,6 +285,14 @@ export function createAgentFetch(
      * not be a way to arrive somewhere registration would have declined.
      */
     allowedHosts?: ReadonlySet<string>;
+    /**
+     * The stored address only, never a redirect hop. A run bound to the deployment's own agent
+     * dials it directly; nothing reaches it by being redirected there. An outside agent answering
+     * with a `Location` on the deployment's agent would otherwise steer a run into a service this
+     * deployment runs on a private address, so a hop onto it is refused like any other private
+     * address the deployment did not name.
+     */
+    managedEndpoints?: readonly (string | URL)[];
     fetchImpl?: typeof fetch;
     /**
      * Told about every address this refused to dial, and why.
@@ -269,20 +322,23 @@ export function createAgentFetch(
     }
     return new EndpointNotAllowedError(reason);
   };
-  const check = (address: string) =>
+  const check = (address: string, managed: "stored" | "hop") =>
     checkAgentEndpoint(address, {
       ...(options.allowPrivateHosts !== undefined
         ? { allowPrivateHosts: options.allowPrivateHosts }
         : {}),
       ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
+      ...(managed === "stored" && options.managedEndpoints
+        ? { managedEndpoints: options.managedEndpoints }
+        : {}),
     });
 
   return async function guardedFetch(url: string, init?: RequestInit) {
-    const stored = check(url);
+    const stored = check(url, "stored");
     if (!stored.allowed) {
       throw refuse(
         url,
-        `This deployment will not dial ${url}: ${stored.reason.charAt(0).toLowerCase()}${stored.reason.slice(1)}`,
+        `${NOT_DIALLED}${url}: ${stored.reason.charAt(0).toLowerCase()}${stored.reason.slice(1)}`,
       );
     }
 
@@ -305,7 +361,7 @@ export function createAgentFetch(
       if (!location) return response;
 
       const next = new URL(location, target).toString();
-      const verdict = check(next);
+      const verdict = check(next, "hop");
       if (!verdict.allowed) {
         throw refuse(
           next,

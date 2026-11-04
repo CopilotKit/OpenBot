@@ -133,6 +133,28 @@ export const mcpServers = pgTable(
      * any connection row exists, so this is where `authorize` and `confirm` both read it from.
      */
     sharedVendorUserId: text("shared_vendor_user_id"),
+    /**
+     * Who may give this app to a Bot: any Bot's owner, for their own Bot (`any`), or only an
+     * administrator (`admin`).
+     *
+     * NULL MEANS THE DEFAULT FOR WHOSE ACCOUNT THE APP RUNS ON, and that is a statement rather than
+     * a gap. `ownerGrantsOf` in `plugins/app-access.ts` reads it: an app every person connects for
+     * themselves, and the built-in Routines, default to `any`; an app on the deployment's token, a
+     * Shared team account or no account at all defaults to `admin`. Stored only once an
+     * administrator chooses, so an app switched from Personal to Shared falls back to `admin` by
+     * itself instead of keeping a default somebody chose for the other mode.
+     *
+     * Nullable for the reason `docs/development.md` gives under Migrations: a replica from before
+     * this column writes rows without it.
+     */
+    ownerGrants: text("owner_grants").$type<"any" | "admin">(),
+    /**
+     * The Microsoft Entra scope a server added by URL is reached with as the signed-in person, for
+     * example `api://hr-api/.default`. Set, each call goes out with a token Entra issues for that
+     * person through the on-behalf-of exchange (`auth/entra.ts`); null, the server is reached on the
+     * one credential the deployment holds for it, as every server added by URL always was.
+     */
+    entraScope: text("entra_scope"),
     /** What the deployment last heard back from it. `null` until the first successful listing. */
     toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
     /** The last failure, kept so the Plugins page can say why a server has no tools. */
@@ -153,6 +175,10 @@ export const mcpServers = pgTable(
     check(
       "mcp_servers_account_mode_check",
       sql`${table.accountMode} IS NULL OR ${table.accountMode} IN ('personal', 'shared')`,
+    ),
+    check(
+      "mcp_servers_owner_grants_check",
+      sql`${table.ownerGrants} IS NULL OR ${table.ownerGrants} IN ('any', 'admin')`,
     ),
   ],
 );
@@ -245,6 +271,19 @@ export const mcpTools = pgTable(
      * an approver to click through the colour.
      */
     destructive: boolean("destructive").notNull().default(false),
+    /**
+     * Whether the server marked this action read-only (MCP `readOnlyHint`), as it said it.
+     *
+     * Its own fact, and NOT an input to {@link mcpTools.effect}: chat goes on deciding whether to ask
+     * first exactly as it did, because a hint from a server nobody reviewed is not believed there.
+     * A check-in reads it, and only for an app the person connected with their own account, where
+     * the tool's own read-only label is what decides whether a background run may call it. See
+     * `labelledRead` in `plugins/catalogue.ts`.
+     *
+     * `false` for an action nothing said about, and for rows listed before this column existed: an
+     * app is re-read on its next refresh.
+     */
+    declaredRead: boolean("declared_read").notNull().default(false),
     /**
      * The vendor's version for this action, as the listing gave it — `20260903_00` and the like.
      *
@@ -494,6 +533,45 @@ export const brokeredConnections = pgTable(
 );
 
 /**
+ * The name a person's accounts are filed under at a broker, where it is not their own id.
+ *
+ * A person is filed under their own `users.id` everywhere else (see `personAccount`), and that is
+ * only safe because the id is theirs alone. The single-user actor's is not: every single-user
+ * deployment signs its one person in as `dev-local-user`, so every one of them sharing a Composio
+ * or Arcade key was one user there. One deployment's Gmail was listed and used by another, a
+ * disconnect in one ended the account for both, and a call naming no account ran in whichever of
+ * them connected last. So a single-user deployment's own name is minted once per broker,
+ * `dev-local-user:<random>`, and kept here, where every replica and every restart reads the same
+ * one. The local id is unchanged, so threads, memory and everything else stay attached to
+ * `dev-local-user`.
+ *
+ * NO ROW MEANS THE PERSON'S OWN ID, which is every signed-in person. Every single-user deployment
+ * with a broker has one, written at its first start with that broker and never replaced; the
+ * connections it had recorded under `dev-local-user` are retired then, here and not at the broker,
+ * and connected again under the new name. See `ensureSingleUserIdentity` in
+ * `plugins/single-user-identity.ts`, the only writer.
+ *
+ * NO KEY TO `users`, for the reason `brokered_connections.user_id` has none: the name has to
+ * outlive the person for as long as accounts filed under it might need ending.
+ */
+export const brokeredIdentities = pgTable(
+  "brokered_identities",
+  {
+    provider: text("provider").$type<"composio" | "arcade">().notNull(),
+    userId: text("user_id").notNull(),
+    vendorUserId: text("vendor_user_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.userId] }),
+    check(
+      "brokered_identities_provider_check",
+      sql`${table.provider} IN ('composio', 'arcade')`,
+    ),
+  ],
+);
+
+/**
  * One in-flight Arcade authorization: what the returning browser is verified against.
  *
  * `actor_id` IS THE SIGNED-IN PERSON'S `users.id` — the session subject — AND NEVER
@@ -550,7 +628,13 @@ export const pendingAuthorizations = pgTable(
     serverId: text("server_id")
       .notNull()
       .references(() => mcpServers.id, { onDelete: "cascade" }),
-    action: text("action").notNull(),
+    /**
+     * The one action Authorize was pressed for, or `null` for Connect, which asks the broker for
+     * everything the app's actions need. Null rather than the app's own name, because the verifier
+     * lands the person on `?action=` and the trail files it as `action`, and an app's name there
+     * read as an action that was just authorized.
+     */
+    action: text("action"),
     /**
      * Whose account this attempt is for, with the same meaning and the same two values as
      * {@link brokeredConnections.holder} — and held by the same CHECK, because `$type<>` is erased
@@ -802,12 +886,30 @@ export const pluginGrants = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     grantedBy: text("granted_by"),
+    /**
+     * Whether an administrator made this grant (`admin`, or null on every row from before this
+     * column) or the Bot's owner gave one of their own apps to their own Bot (`owner`).
+     *
+     * NOT BOOKKEEPING: IT DECIDES WHOSE ACCOUNT A CALL USES. On a published Team Bot, an
+     * administrator's grant of a personal app goes out on the owner's account wherever the owner
+     * connected it — `credentialActorFor` in `team-bots/team-bots.ts`. An owner's grant never does:
+     * it always uses the asking person's own account. Otherwise publishing a Bot would hand every
+     * teammate the owner's mailbox, which nobody decided except by giving the Bot their own Gmail.
+     *
+     * Nullable, null read as `admin`, for the rolling deploy `docs/development.md` describes: a
+     * replica from before this column only ever wrote an administrator's grant.
+     */
+    grantedAs: text("granted_as").$type<"admin" | "owner">(),
     grantedAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     primaryKey({ columns: [table.kind, table.ref, table.agentId] }),
     index("plugin_grants_agent_idx").on(table.agentId),
+    check(
+      "plugin_grants_granted_as_check",
+      sql`${table.grantedAs} IS NULL OR ${table.grantedAs} IN ('admin', 'owner')`,
+    ),
   ],
 );
 

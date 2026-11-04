@@ -26,6 +26,12 @@ concurrency:
   group: desktop-windows-signing-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
+# Match the source publisher's exact repository/distribution identity in official and fork builds.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_RELEASE_REPOSITORY: ${{ github.repository }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
+
 jobs:
   checks:
     name: Signing regressions (no Azure access)
@@ -93,7 +99,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: desktop/src-tauri
           key: windows-signing

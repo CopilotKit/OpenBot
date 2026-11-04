@@ -2,7 +2,15 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
+import { fitPayload } from "./triggers";
 import type { ResponsibilityEvent, ResponsibilityEventResult } from "./types";
+
+/**
+ * GitHub sends whole objects: a `pull_request` delivery repeats the repository under `head` and
+ * `base`, and for OpenBot's own pull requests measured 26–57 KB. Matches the trigger ingress, which
+ * takes the same provider payloads; the ledger's own 32 KiB cap is met by `fitPayload` below.
+ */
+export const GITHUB_BODY_LIMIT = 256 * 1024;
 
 export type GithubResponsibilityBinding = {
   ownerUserId: string;
@@ -24,7 +32,14 @@ export function createGithubResponsibilityRoutes(options: {
   ingest: (event: ResponsibilityEvent) => Promise<ResponsibilityEventResult>;
 }) {
   const routes = new Hono();
-  routes.use("*", bodyLimit({ maxSize: 32 * 1024 }));
+  routes.use(
+    "*",
+    bodyLimit({
+      maxSize: GITHUB_BODY_LIMIT,
+      onError: (context) =>
+        context.json({ error: "GitHub event is too large." }, 413),
+    }),
+  );
   routes.onError((error, context) => {
     console.error(
       JSON.stringify({
@@ -91,7 +106,8 @@ export function createGithubResponsibilityRoutes(options: {
       type: payload.data.action
         ? `${eventType}.${payload.data.action}`
         : eventType,
-      payload: payload.data,
+      // Fitted last: anything that reads the payload's fields, as a trigger filter does, reads them above.
+      payload: fitPayload(payload.data),
     });
     return context.json(result, 202);
   });

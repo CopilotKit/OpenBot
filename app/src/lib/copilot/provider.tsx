@@ -2,18 +2,20 @@ import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { a2uiProviderOptions } from "./a2ui";
-import { SignInTool } from "./sign-in-tool";
-import "./a2ui.css";
+import { generativeUiProviderOptions } from "./a2ui";
 import { ActiveBotProvider } from "./active-bot";
+import { BotOffers } from "./bot-offer";
 import { BotTools } from "./bot-tools";
+import { CodingTools } from "./coding-tools";
 import { ComputerTools } from "./computer-tools";
 import { EscalationTool } from "./escalation-tool";
 import { GalleryTools } from "./gallery-tools";
 import { GENERATIVE_UI_DESIGN_SKILL } from "./generative-ui";
 import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
+import { SignInTool } from "./sign-in-tool";
 import { SkillTools } from "./skill-tools";
+import { SubagentTool } from "./subagent-tool";
 
 /**
  * The CopilotKit client, wrapped once for the whole authenticated app.
@@ -34,9 +36,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   return (
     <CopilotKitProvider
+      enableInspector={false}
       runtimeUrl="/api/copilotkit"
       credentials="include"
-      {...a2uiProviderOptions(capabilities?.generativeUi)}
+      {...generativeUiProviderOptions(capabilities?.generativeUi)}
       /*
        * Passed only when this deployment actually has the capability, and this is the load-bearing
        * part rather than a tidiness. The SDK reads generative UI as on when EITHER the runtime says
@@ -55,8 +58,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         ? { openGenerativeUI: { designSkill: GENERATIVE_UI_DESIGN_SKILL } }
         : {})}
     >
-      {/* Computer tools target the Bot declared by the mounted surface. */}
+      {/* Computer tools act on the Bot that made the call, which is usually the one on screen. */}
       <ActiveBotProvider>
+        {/* Each run is offered its own Bot's tools, never the screen's; see bot-offer.ts. */}
+        <BotOffers />
         <ComputerTools />
         {/* The private sign-in request: a card whose form posts to the server, never to the Bot. */}
         <SignInTool />
@@ -65,8 +70,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           where the grant and the caps are. A hop that happens off-screen is the thing to avoid.
         */}
         <HandoffTool />
+        {/* A Bot's own subtasks: their steps as they happen, then their answers. Runs on the server. */}
+        <SubagentTool />
         <EscalationTool />
-        {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
+        {/* A coding harness Bot's own tools, which it runs itself: commands, diffs and its plan. */}
+        <CodingTools />
+        {/* Gallery tools are registered once; their handlers ask about the Bot that made the call (see botOfCall). */}
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}
         <SandboxedTools />

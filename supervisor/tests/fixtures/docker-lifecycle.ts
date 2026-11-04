@@ -7,7 +7,8 @@ import {
   test,
 } from "bun:test";
 import type Docker from "dockerode";
-import { namesFor, NAMESPACE } from "../../src/names";
+import { environmentFor } from "../../src/environment";
+import { legacyNamesFor, NAMESPACE, namesFor } from "../../src/names";
 
 // Launched by docker.integration.test.ts in a fresh process: names.ts reads its namespace once.
 const namespace = NAMESPACE;
@@ -39,9 +40,28 @@ const OTHER = `openbot-supervisor-fixture:${namespace}-two`;
 const fixtureImages: string[] = [];
 
 const BOT = "supervisortestbot";
-const result = namesFor(BOT);
+const result = namesFor("bot", BOT);
 if (!result.ok) throw new Error(result.reason);
 const names = result.names;
+
+/** People and a Bot from before one computer per person, for the cases that need them. */
+function named(kind: "person" | "bot", id: string) {
+  const found = namesFor(kind, id);
+  if (!found.ok) throw new Error(found.reason);
+  return found.names;
+}
+const ADA = named("person", "ada");
+const BO = named("person", "bo");
+const LEGACY_BOT = "notesbot";
+const legacyFound = legacyNamesFor(LEGACY_BOT);
+if (!legacyFound.ok) throw new Error(legacyFound.reason);
+const LEGACY = legacyFound.names;
+/** What every computer of this supervisor's carried before kinds existed. */
+const LEGACY_LABELS = {
+  "openbot.supervisor": "true",
+  "openbot.namespace": namespace,
+  "openbot.bot-id": LEGACY_BOT,
+};
 
 function isMissing(error: unknown): boolean {
   return (
@@ -137,6 +157,7 @@ let completedCases = 0;
 afterAll(async () => {
   await remove(names.container);
   await removeVolumes();
+  await removeNamespace();
   for (const image of fixtureImages) {
     const info = await withDocker().docker.getImage(image).inspect();
     if (info.Config.Labels?.["openbot.test-fixture"] !== namespace)
@@ -178,14 +199,98 @@ async function plant(labels: Record<string, string>, health?: boolean) {
 const OURS = {
   "openbot.supervisor": "true",
   "openbot.namespace": namespace,
+  "openbot.computer-kind": "bot",
   "openbot.bot-id": BOT,
 };
+
+/**
+ * Everything this run made in its own namespace, which is unique to it: people's computers, a Bot's
+ * old computer and volume, and any copy helper left behind.
+ */
+async function removeNamespace() {
+  const docker = withDocker().docker;
+  const containers = await docker.listContainers({
+    all: true,
+    filters: { label: [`openbot.namespace=${namespace}`] },
+  });
+  for (const container of containers) {
+    await docker
+      .getContainer(container.Id)
+      .remove({ force: true })
+      .catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+  }
+  const { Volumes } = await docker.listVolumes({
+    filters: { label: [`openbot.namespace=${namespace}`] },
+  });
+  for (const volume of Volumes ?? []) {
+    await docker
+      .getVolume(volume.Name)
+      .remove()
+      .catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+  }
+}
 
 afterEach(async () => {
   await remove(names.container);
   await removeVolumes();
+  await removeNamespace();
+  supervisor.forgetCarryOvers();
   completedCases += 1;
 });
+
+/** Run a shell line in the fixture image with these volumes mounted, and return what it printed. */
+async function inVolumes(binds: string[], script: string): Promise<string> {
+  const docker = withDocker().docker;
+  const container = await docker.createContainer({
+    Image: IMAGE,
+    Labels: {
+      "openbot.test-fixture": namespace,
+      "openbot.namespace": namespace,
+    },
+    Entrypoint: ["sh", "-c"],
+    Cmd: [script],
+    Tty: true,
+    HostConfig: { Binds: binds },
+  });
+  try {
+    await container.start();
+    await container.wait();
+    return (await container.logs({ stdout: true, stderr: true }))
+      .toString()
+      .trim();
+  } finally {
+    await container.remove({ force: true });
+  }
+}
+
+/** Run inside the actual supervisor-created computer, keeping both output and its exit status. */
+async function inComputer(script: string): Promise<string> {
+  const execution = await withDocker()
+    .docker.getContainer(names.container)
+    .exec({
+      Cmd: ["sh", "-c", script],
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+    });
+  const stream = await execution.start({ Detach: false, Tty: true });
+  let output = "";
+  await new Promise<void>((resolve, reject) => {
+    stream.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    stream.on("end", resolve);
+    stream.on("error", reject);
+  });
+  const result = await execution.inspect();
+  if (result.ExitCode !== 0)
+    throw new Error(`Computer command exited ${result.ExitCode}: ${output}`);
+  return output.trim();
+}
 
 describe("a name held by somebody else", () => {
   test("is refused rather than adopted, and never started", async () => {
@@ -332,6 +437,65 @@ describe("a computer built from an older image", () => {
     expect(after.State.Health?.Status).toBe("healthy");
   }, 180_000);
 
+  /*
+   * The upgrade that takes the deployment's token off every computer.
+   *
+   * Every computer used to be handed the deployment's `COMPUTER_TOKEN` itself, which a Bot could read off its own
+   * computer's process and use on every other computer it could reach. Now each is given its own (environment.ts), so a
+   * computer from before holds a token this supervisor no longer hands out. It is replaced the next time it is asked
+   * for, with the volumes holding the person's sign-ins and files kept, as any other upgrade replaces one.
+   */
+  test("made before computers had their own token is replaced onto its own, keeping its files and sign-ins", async () => {
+    const deployment = `deployment-${crypto.randomUUID()}`;
+    // As the supervisor before this made it: the deployment's token, unchanged.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [`COMPUTER_TOKEN=${deployment}`],
+    });
+    const before = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(before.Config.Env).toContain(`COMPUTER_TOKEN=${deployment}`);
+    await inComputer(
+      "echo saved-login > /profiles/keep; echo saved-work > /workspace/keep",
+    );
+
+    // Asked for again by today's supervisor, whose environment for it is `environmentFor`'s.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: environmentFor(names, { COMPUTER_TOKEN: deployment }),
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    expect(after.Id).not.toBe(before.Id);
+    expect(after.State.Health?.Status).toBe("healthy");
+    const tokens = (after.Config.Env ?? []).filter((line) =>
+      line.startsWith("COMPUTER_TOKEN="),
+    );
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).not.toContain(deployment);
+    expect(tokens).toEqual(
+      environmentFor(names, { COMPUTER_TOKEN: deployment }).filter((line) =>
+        line.startsWith("COMPUTER_TOKEN="),
+      ),
+    );
+    expect(await inComputer("cat /profiles/keep /workspace/keep")).toBe(
+      "saved-login\r\nsaved-work",
+    );
+
+    // And once it holds its own, it is kept.
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: environmentFor(names, { COMPUTER_TOKEN: deployment }),
+    });
+    const kept = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(kept.Id).toBe(after.Id);
+  }, 180_000);
+
   test("is left alone when it holds the token asked for", async () => {
     /*
      * The half that keeps this from replacing a working browser on every request, which is the same
@@ -386,4 +550,280 @@ describe("a computer built from an older image", () => {
     expect(second).not.toBeNull();
     expect(after.Id).toBe(before.Id);
   }, 180_000);
+});
+
+describe("package installation on a computer", () => {
+  test("updates APT and installs a package without privileged container mode", async () => {
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    // A local repository exercises APT's _apt user and dpkg's ownership changes without relying
+    // on an external package mirror. The executable really comes from an installed .deb.
+    const output = await inComputer(String.raw`
+set -eu
+repo=/tmp/openbot-packages
+mkdir -p "$repo/build/DEBIAN" "$repo/build/usr/local/bin"
+cat > "$repo/build/DEBIAN/control" <<'CONTROL'
+Package: openbot-test-tool
+Version: 1.0
+Architecture: all
+Maintainer: OpenBot Tests <test@example.invalid>
+Description: Local package installation regression fixture
+CONTROL
+cat > "$repo/build/usr/local/bin/openbot-test-tool" <<'TOOL'
+#!/bin/sh
+echo installed-by-apt
+TOOL
+chmod 755 "$repo/build/usr/local/bin/openbot-test-tool"
+chown 65534:65534 "$repo/build/usr/local/bin/openbot-test-tool"
+dpkg-deb --build "$repo/build" "$repo/tool.deb" >/dev/null
+cp "$repo/build/DEBIAN/control" "$repo/Packages"
+printf 'Filename: ./tool.deb\nSize: %s\nSHA256: %s\n' "$(stat -c %s "$repo/tool.deb")" "$(sha256sum "$repo/tool.deb" | cut -d ' ' -f 1)" >> "$repo/Packages"
+printf 'deb [trusted=yes] file:%s ./\n' "$repo" > "$repo/sources.list"
+apt-get -o Dir::Etc::sourcelist="$repo/sources.list" -o Dir::Etc::sourceparts=- update
+DEBIAN_FRONTEND=noninteractive apt-get -o Dir::Etc::sourcelist="$repo/sources.list" -o Dir::Etc::sourceparts=- install -y openbot-test-tool
+[ "$(stat -c %u:%g /usr/local/bin/openbot-test-tool)" = 65534:65534 ]
+# Root must still be able to work with files a package installed for another user.
+chmod 700 /usr/local/bin/openbot-test-tool
+/usr/local/bin/openbot-test-tool
+`);
+    expect(output).toContain("installed-by-apt");
+    const info = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(info.HostConfig.SecurityOpt).toContain("no-new-privileges:true");
+    expect(info.HostConfig.CapDrop).toEqual(["ALL"]);
+    expect(
+      info.HostConfig.CapAdd?.map((capability) =>
+        capability.replace(/^CAP_/, ""),
+      ).toSorted(),
+    ).toEqual(["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]);
+    expect(info.HostConfig.Privileged).toBe(false);
+  }, 90_000);
+
+  test("replaces a same-image computer missing package permissions and keeps its files", async () => {
+    for (const volume of [names.profileVolume, names.workspaceVolume]) {
+      await withDocker().docker.createVolume({ Name: volume, Labels: OURS });
+    }
+    await inVolumes(
+      [
+        `${names.profileVolume}:/profiles`,
+        `${names.workspaceVolume}:/workspace`,
+      ],
+      "echo saved-login > /profiles/keep; echo saved-work > /workspace/keep",
+    );
+    const before = await withDocker().docker.createContainer({
+      name: names.container,
+      Image: IMAGE,
+      Labels: OURS,
+      HostConfig: {
+        Binds: [
+          `${names.profileVolume}:/profiles`,
+          `${names.workspaceVolume}:/workspace`,
+        ],
+        SecurityOpt: ["no-new-privileges:true"],
+        CapDrop: ["ALL"],
+      },
+    });
+    await before.start();
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(after.Id).not.toBe(before.id);
+    expect(await inComputer("cat /profiles/keep /workspace/keep")).toBe(
+      "saved-login\r\nsaved-work",
+    );
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    const reused = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+    expect(reused.Id).toBe(after.Id);
+  }, 90_000);
+});
+
+describe("one computer per person", () => {
+  test("a person's computer is named and labelled for that person", async () => {
+    const state = await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+    expect(state).toMatchObject({ kind: "person", id: "ada" });
+    const info = await withDocker()
+      .docker.getContainer(ADA.container)
+      .inspect();
+    expect(info.Config.Labels).toMatchObject({
+      "openbot.computer-kind": "person",
+      "openbot.person-id": "ada",
+    });
+    const listed = await withDocker().supervisor.listOwned();
+    expect(listed).toContainEqual(
+      expect.objectContaining({
+        kind: "person",
+        id: "ada",
+        container: ADA.container,
+      }),
+    );
+  }, 90_000);
+
+  test("an old computer under a name today's scheme also derives is refused, not adopted", async () => {
+    /*
+     * The old computer of a Bot called `bot-supervisortestbot` was named exactly what an isolated Bot
+     * called `supervisortestbot` is named now. Ours by owner and namespace, but not this computer:
+     * adopting it would hand one Bot another's logins.
+     */
+    await plant(
+      { ...OURS, "openbot.computer-kind": "", "openbot.bot-id": `bot-${BOT}` },
+      true,
+    );
+    await expect(
+      withDocker().supervisor.ensure(names, { image: IMAGE, environment: [] }),
+    ).rejects.toBeInstanceOf(withDocker().supervisor.NameHeldError);
+  }, 90_000);
+});
+
+describe("a private Bot's login, carried over to its owner", () => {
+  async function oldProfile(contents: string) {
+    await withDocker()
+      .docker.createVolume({
+        Name: LEGACY.profileVolume,
+        Labels: LEGACY_LABELS,
+      })
+      .catch(() => undefined);
+    await inVolumes(
+      [`${LEGACY.profileVolume}:/v`],
+      `mkdir -p /v/Default && printf %s '${contents}' > /v/Default/Cookies`,
+    );
+  }
+  const cookiesIn = (person: typeof ADA) =>
+    inVolumes(
+      [`${person.profileVolume}:/p`],
+      `cat /p/${LEGACY_BOT}/Default/Cookies 2>/dev/null || echo none`,
+    );
+
+  test("is copied into the owner's computer under that Bot, once, and the old volume kept", async () => {
+    await oldProfile("ada-login");
+    await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+
+    expect(
+      await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+        image: IMAGE,
+      }),
+    ).toBe("copied");
+    expect(await cookiesIn(ADA)).toBe("ada-login");
+
+    // Run again from a fresh process's memory, after the old profile changed: the marker in the
+    // owner's volume says it was done, so nothing is copied over what the owner has now.
+    withDocker().supervisor.forgetCarryOvers();
+    await oldProfile("stale");
+    expect(
+      await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+        image: IMAGE,
+      }),
+    ).toBe("done");
+    expect(await cookiesIn(ADA)).toBe("ada-login");
+
+    // The old volume is left exactly where it was.
+    const kept = await withDocker()
+      .docker.getVolume(LEGACY.profileVolume)
+      .inspect();
+    expect(kept.Name).toBe(LEGACY.profileVolume);
+  }, 180_000);
+
+  test("brings the Bot's old files into its folder on the owner's computer, once", async () => {
+    await oldProfile("ada-login");
+    await withDocker()
+      .docker.createVolume({
+        Name: LEGACY.workspaceVolume,
+        Labels: LEGACY_LABELS,
+      })
+      .catch(() => undefined);
+    await inVolumes(
+      [`${LEGACY.workspaceVolume}:/v`],
+      "mkdir -p /v/reports && printf %s 'march totals' > /v/reports/march.txt",
+    );
+    withDocker().supervisor.forgetCarryOvers();
+    await withDocker().supervisor.ensure(ADA, {
+      image: IMAGE,
+      environment: [],
+    });
+    await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+      image: IMAGE,
+    });
+    // Where the Bot's shell and file tools start on its person's computer (agent-computer's workspaces.ts).
+    const filesIn = () =>
+      inVolumes(
+        [`${ADA.workspaceVolume}:/w`],
+        `cat /w/computers/${LEGACY_BOT}/reports/march.txt 2>/dev/null || echo none`,
+      );
+    expect(await filesIn()).toBe("march totals");
+
+    // Once: a later change to the old volume is not copied over what the Bot has now.
+    withDocker().supervisor.forgetCarryOvers();
+    await inVolumes(
+      [`${LEGACY.workspaceVolume}:/v`],
+      "printf %s stale > /v/reports/march.txt",
+    );
+    await withDocker().supervisor.carryOverProfile(ADA, LEGACY_BOT, {
+      image: IMAGE,
+    });
+    expect(await filesIn()).toBe("march totals");
+    expect(
+      (await withDocker().docker.getVolume(LEGACY.workspaceVolume).inspect())
+        .Name,
+    ).toBe(LEGACY.workspaceVolume);
+  }, 180_000);
+
+  test("never overwrites a profile the owner's computer already has for that Bot", async () => {
+    await oldProfile("old-login");
+    await withDocker().supervisor.ensure(BO, { image: IMAGE, environment: [] });
+    await inVolumes(
+      [`${BO.profileVolume}:/p`],
+      `mkdir -p /p/${LEGACY_BOT}/Default && printf %s newer > /p/${LEGACY_BOT}/Default/Cookies`,
+    );
+
+    expect(
+      await withDocker().supervisor.carryOverProfile(BO, LEGACY_BOT, {
+        image: IMAGE,
+      }),
+    ).toBe("kept");
+    expect(await cookiesIn(BO)).toBe("newer");
+  }, 180_000);
+
+  test("the old computer is stopped when the supervisor starts, and its volume kept", async () => {
+    await oldProfile("x");
+    await withDocker().docker.createContainer({
+      name: LEGACY.container,
+      Image: IMAGE,
+      Labels: { ...LEGACY_LABELS, "openbot.test-fixture": namespace },
+      HostConfig: { Binds: [`${LEGACY.profileVolume}:/profiles`] },
+    });
+    await withDocker().docker.getContainer(LEGACY.container).start();
+
+    const stopped = await withDocker().supervisor.retireLegacyComputers();
+    expect(stopped).toContain(LEGACY.container);
+    const info = await withDocker()
+      .docker.getContainer(LEGACY.container)
+      .inspect();
+    expect(info.State.Running).toBe(false);
+    // Not listed as one of today's computers either.
+    const listed = await withDocker().supervisor.listOwned();
+    expect(listed.map((computer) => computer.container)).not.toContain(
+      LEGACY.container,
+    );
+    expect(
+      (await withDocker().docker.getVolume(LEGACY.profileVolume).inspect())
+        .Name,
+    ).toBe(LEGACY.profileVolume);
+  }, 120_000);
 });

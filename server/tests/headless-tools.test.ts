@@ -6,14 +6,18 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
-import { Observable } from "rxjs";
-import { parseApprovalContinuation } from "../src/approvals/types";
-import type { AuditEventInput } from "../src/audit";
-import { createComputerGateway } from "../src/computer/gateway";
-import * as headless from "../src/computer/headless-tools";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
+import { Observable } from "rxjs";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
+import { parseApprovalContinuation } from "../src/approvals/types";
+import type { AuditEventInput } from "../src/audit";
+import { botSeat } from "../src/computer/computer-key";
+import {
+  ComputerStillStartingError,
+  createComputerGateway,
+} from "../src/computer/gateway";
+import * as headless from "../src/computer/headless-tools";
 
 const definition = {
   name: "computer_snapshot",
@@ -283,9 +287,9 @@ function computerHarness(deny: string[] = []) {
   const gateway = createComputerGateway({
     provider: {
       name: "test",
-      isolation: "per-bot",
+      isolation: "per-person",
       locate: async () => "http://computer:4100",
-      status: async (botId) => ({ botId, state: "ready" }),
+      status: async (seat) => ({ botId: seat.botId, state: "ready" }),
       list: async () => [],
       stop: async () => ({ wasRunning: true }),
       reset: async () => ({ cleared: true }),
@@ -374,7 +378,7 @@ test("scheduled computer actions carry the owner and routine into both policy an
     initiator: { kind: "routine" as const, id: "routine" },
   };
   await expect(
-    gateway.runCommand("bot", actor, { command: "pwd" }),
+    gateway.runCommand(botSeat("bot"), actor, { command: "pwd" }),
   ).rejects.toThrow();
   expect(received.some((call) => call.path === "/exec")).toBe(false);
   expect(audit).toContainEqual(
@@ -386,12 +390,81 @@ test("scheduled computer actions carry the owner and routine into both policy an
   );
 });
 
+/**
+ * A cold start that outlasts the wait reaches the model as an answer it can act on.
+ *
+ * Thrown, it was one more error string; the model apologised and gave up on a computer that was
+ * seconds from ready. And a click used to wait for the start twice, once to learn the run and again
+ * to send, so it is also pinned that the wait happens once.
+ */
+test("a computer still starting answers 'not performed, try again' rather than throwing, after one wait", async () => {
+  let locates = 0;
+  const audit: AuditEventInput[] = [];
+  const gateway = createComputerGateway({
+    provider: {
+      name: "test",
+      isolation: "per-person",
+      locate: async () => {
+        locates++;
+        throw new ComputerStillStartingError();
+      },
+      status: async (seat) => ({ botId: seat.botId, state: "starting" }),
+      list: async () => [],
+      stop: async () => ({ wasRunning: false }),
+      reset: async () => ({ cleared: false }),
+    },
+    auditStore: {
+      insert: async (event) => {
+        audit.push(event);
+      },
+    },
+    policy: () => ({ mode: "enforce", allow: ["true"], deny: [] }),
+    fetchImpl: (async () => {
+      throw new Error("nothing should reach the computer");
+    }) as unknown as typeof fetch,
+  });
+  const tools = headless.createHeadlessComputerTools({
+    gateway,
+    seat: botSeat("bot"),
+    actor: { id: "owner", userId: "owner" },
+  });
+  const invoke = (name: string, args: unknown) => {
+    const tool = tools.find((candidate) => candidate.definition.name === name);
+    if (!tool) throw new Error(`Missing ${name}`);
+    return tool.execute(args, {
+      toolCallId: name,
+      signal: new AbortController().signal,
+    });
+  };
+
+  const navigated = await invoke("computer_navigate", {
+    url: "https://example.com",
+  });
+  expect(navigated).toMatchObject({
+    ok: false,
+    starting: true,
+    notPerformed: true,
+  });
+  expect(String((navigated as { reason?: string }).reason)).toContain(
+    "not performed",
+  );
+
+  locates = 0;
+  const clicked = await invoke("computer_click", { ref: "e1", snapshotId: 7 });
+  expect(clicked).toMatchObject({ ok: false, starting: true });
+  expect(locates).toBe(1);
+  // Still on the trail: allowed, then the failure that says it did not happen.
+  expect(audit.map((event) => event.eventType)).toContain(
+    "computer.action_failed",
+  );
+});
+
 test("the headless computer adapter executes shipped browser, command, and file tools through the gateway", async () => {
   expect(typeof headless.createHeadlessComputerTools).toBe("function");
   const { gateway, received, audit } = computerHarness();
   const tools = headless.createHeadlessComputerTools({
     gateway,
-    botId: "bot",
+    seat: botSeat("bot"),
     actor: {
       id: "owner",
       userId: "owner",
@@ -467,7 +540,7 @@ test("an unattended remote computer run snapshots, clicks, runs commands and sav
   const { run, persisted } = turnHarness(remote.agent, async () =>
     headless.createHeadlessComputerTools({
       gateway,
-      botId: "bot",
+      seat: botSeat("bot"),
       actor: {
         id: "owner",
         userId: "owner",
@@ -623,7 +696,7 @@ test("human help creates a durable suspension, persists the waiting event, and r
   const { run, persisted, lockCalls } = turnHarness(remote.agent, async () =>
     headless.createHeadlessComputerTools({
       gateway,
-      botId: "bot",
+      seat: botSeat("bot"),
       actor: {
         id: "owner",
         userId: "owner",

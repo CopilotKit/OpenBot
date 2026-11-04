@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
+import { personSeat } from "../src/computer/computer-key";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
 
 function appWith(calls: { timeoutMs?: number }[]) {
   const gateway = {
+    seatFor: async (botId: string, personId: string) =>
+      personSeat(personId, botId),
     runCommand: async (
       _botId: string,
       _actor: unknown,

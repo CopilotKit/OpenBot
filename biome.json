@@ -77,6 +77,37 @@
       }
     },
     {
+      "includes": ["extension/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../../server/**",
+                      "../../../server/**",
+                      "../../../../server/**",
+                      "drizzle-orm",
+                      "drizzle-orm/**",
+                      "hono",
+                      "hono/**",
+                      "@/routes/**",
+                      "@/lib/client",
+                      "@/query-client"
+                    ],
+                    "message": "The extension runs in the browser. It talks to OpenBot over HTTP only, and takes only OpenBot's UI primitives and layout parts from the app."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["toolkit/src/copilotkit/**"],
       "linter": {
         "rules": {
@@ -113,6 +144,26 @@
             "useSemanticElements": "off",
             "noLabelWithoutControl": "off",
             "useKeyWithClickEvents": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["mobile/src/check-ins.tsx", "mobile/app/needs-you.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "react-native": {
+                    "importNames": ["Button"],
+                    "message": "Needs you draws its choices as the app's link-coloured text (CardAction in mobile/src/check-ins.tsx). A system Button is a filled, upper-cased bar on Android and the web and looks like no other screen."
+                  }
+                }
+              }
+            }
           }
         }
       }

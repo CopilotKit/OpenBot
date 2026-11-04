@@ -1,0 +1,1 @@
+ALTER TABLE "agent_profiles" ADD COLUMN "isolated" boolean DEFAULT false NOT NULL;

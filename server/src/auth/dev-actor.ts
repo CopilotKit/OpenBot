@@ -1,5 +1,7 @@
 import type { MiddlewareHandler } from "hono";
+import type { SingleUserAccess } from "../config";
 import type { Database } from "../db/client";
+import { callerOf, singleUserRefusal } from "../request-trust";
 import { users } from "../db/schema";
 import type { AppVariables, AuthenticatedActor } from "./guards";
 
@@ -48,7 +50,6 @@ export async function initializeDevActorUser(
       target: users.id,
       set: {
         email: DEV_ACTOR.email,
-        name,
         updatedAt: new Date(),
       },
     });
@@ -84,11 +85,25 @@ export function singleUserEnabled(
   );
 }
 
-/** A guard that admits everybody as {@link DEV_ACTOR}. Only ever mounted when singleUserEnabled(). */
-export function createDevRequireUser(): MiddlewareHandler<{
+/**
+ * A guard that admits as {@link DEV_ACTOR} every request this machine's own person could have made: from
+ * this machine where the server runs on it, addressed to one of its own names (`singleUserRefusal`).
+ * Only ever mounted when singleUserEnabled().
+ *
+ * `access` is the deployment's (`config.singleUserAccess`). Absent, the strictest: this machine only.
+ */
+export function createDevRequireUser(
+  access?: SingleUserAccess,
+): MiddlewareHandler<{
   Variables: AppVariables;
 }> {
   return async (context, next) => {
+    const refused = singleUserRefusal(
+      context.req.raw,
+      callerOf(context),
+      access,
+    );
+    if (refused) return context.json({ error: refused }, 403);
     context.set("actor", DEV_ACTOR);
     await next();
   };

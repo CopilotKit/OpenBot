@@ -13,12 +13,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { setUpdateRoutingMutationOptions } from "@/lib/bot-lifecycle/mutations";
-import { deliveryQueryOptions } from "@/lib/delivery";
 import {
   type UpdateKind,
   type UpdateTransport,
   updateRoutingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import { deliveryQueryOptions } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
 
 const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
@@ -33,6 +33,11 @@ const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
   question: {
     title: "Questions",
     description: "Things a Bot asked you and is waiting on.",
+  },
+  attention: {
+    title: "Something needs you",
+    description:
+      "What your Bots' check-ins found, at most once an hour, every Bot in one message.",
   },
 };
 
@@ -62,7 +67,7 @@ export function UpdateRoutingSection() {
     reach.data ? reach.data.available[transport] : true;
   return (
     <PageSection
-      description="Where each kind of update goes when you're away. OpenBot on the web always shows everything."
+      description="Choose where to receive each type of update when you’re away. All updates remain available in the web app."
       title="Where updates go"
     >
       {routing.isPending || reach.isPending ? null : routing.error ? (

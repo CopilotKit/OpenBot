@@ -76,26 +76,72 @@ export async function callComputer(
      */
     if (response.status === 403 && run !== null)
       withdrawComputerActivity(botId, run);
-    return {
-      ok: false,
-      reason: (body?.error as string) ?? "That did not work.",
-      // Preserve refusal/stale-ref/control distinctions for the model's next step.
-      ...(response.status === 403
-        ? { refused: true, rule: body?.rule ?? null }
-        : {}),
-      ...(response.status === 409
-        ? body?.humanHasControl === true
-          ? {
-              humanHasControl: true,
-              requestId: body?.requestId,
-              handoff: body?.handoff,
-            }
-          : body?.snapshotRequired === true
-            ? { staleRefs: true, snapshotRequired: true }
-            : { staleRefs: true }
-        : {}),
-    };
+    return failedComputerCall(response.status, body);
   }
 
   return { ok: true, ...(body ?? {}) };
+}
+
+/**
+ * What a Bot is told when a computer call came back refused or failed.
+ *
+ * A result, never a thrown error. The SDK starts no follow-up run after a frontend tool throws, so a
+ * throw ends the Bot's turn on the spot with nothing said; a result reaches the model, which can take
+ * a fresh snapshot, pick another field, or tell the person what stopped it. Shared with the approval
+ * gate's wrapper, which reaches the same computer by another route and must answer the same way.
+ */
+export function failedComputerCall(
+  status: number,
+  body: Record<string, unknown> | null,
+): ToolOutcome {
+  /*
+   * A cold start that outlasted the server's wait. Said as what it is: the computer is starting, this
+   * call did nothing, and asking again shortly is the right next step. Kept apart from the failures
+   * below so the line in the transcript reads as a wait, and so the model is not handed something
+   * that looks like a broken computer and gives up on one seconds from ready.
+   */
+  if (body?.starting === true) {
+    return {
+      ok: false,
+      starting: true,
+      notPerformed: true,
+      reason:
+        typeof body.error === "string"
+          ? body.error
+          : "The computer is still starting. This call was not performed. Try it again in a moment.",
+    };
+  }
+  /*
+   * A rule wants to ask about this call, and it went straight to the computer without its
+   * conversation. Nothing was done. `useFrontendTool` in approval-tools sends it again through the
+   * approval route, so this result only reaches the Bot from a surface with no conversation at all.
+   */
+  if (body?.needsConversation === true) {
+    return {
+      ok: false,
+      needsConversation: true,
+      notPerformed: true,
+      reason:
+        typeof body.error === "string"
+          ? body.error
+          : "This action needs your approval in a chat with this Bot.",
+    };
+  }
+  return {
+    ok: false,
+    reason: typeof body?.error === "string" ? body.error : "That did not work.",
+    // Preserve refusal/stale-ref/control distinctions for the model's next step.
+    ...(status === 403 ? { refused: true, rule: body?.rule ?? null } : {}),
+    ...(status === 409
+      ? body?.humanHasControl === true
+        ? {
+            humanHasControl: true,
+            requestId: body?.requestId,
+            handoff: body?.handoff,
+          }
+        : body?.snapshotRequired === true
+          ? { staleRefs: true, snapshotRequired: true }
+          : { staleRefs: true }
+      : {}),
+  };
 }

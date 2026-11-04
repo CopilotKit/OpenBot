@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame } from "./frame";
+import { byPosition } from "./positions";
 
 /**
  * Human-in-the-loop gallery components. `respond` resolves the suspended Bot run, and completed
@@ -36,6 +37,12 @@ export const ApprovalCardProps = z.object({
     .describe(
       "The facts they need in order to decide, e.g. amount, vendor, date",
     ),
+  command: z
+    .string()
+    .optional()
+    .describe(
+      "When you are asking before running a command on your computer: that command, exactly as you will run it. It is shown on the card, and listed with their answer in your computer's Activity.",
+    ),
   approveLabel: z.string().optional().describe("Defaults to Approve"),
   rejectLabel: z.string().optional().describe("Defaults to Decline"),
 });
@@ -64,6 +71,11 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
 
   const decided =
     status === "complete" ? readDecision(props.result) : undefined;
+  const command = args.command?.trim() || undefined;
+  // The command once: a Bot that also lists it among the facts would show it twice.
+  const details = (args.details ?? []).filter(
+    (detail) => !command || detail.value?.trim() !== command,
+  );
 
   return (
     <GalleryFrame
@@ -80,10 +92,18 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
     >
       <p className="text-sm">{args.summary}</p>
 
-      {args.details?.length ? (
+      {command || details.length ? (
         <dl className="mt-3 grid grid-cols-[minmax(0,9rem)_1fr] gap-x-4 gap-y-1.5 text-sm">
-          {args.details.map((detail) => (
-            <div className="contents" key={detail.label}>
+          {command ? (
+            <div className="contents">
+              <dt className="truncate text-muted-foreground">Command</dt>
+              <dd className="min-w-0">
+                <code className="break-all font-mono text-xs">{command}</code>
+              </dd>
+            </div>
+          ) : null}
+          {byPosition(details).map(({ item: detail, key }) => (
+            <div className="contents" key={key}>
               <dt className="truncate text-muted-foreground">{detail.label}</dt>
               <dd className="min-w-0 break-words">{detail.value}</dd>
             </div>
@@ -241,8 +261,8 @@ function readChoice(result: string | undefined): string | undefined {
 }
 
 /**
- * `kind: "decision"` is what makes these suspend the run: they are registered with
- * `useHumanInTheLoop` rather than as ordinary tools, and the person's answer IS the tool result, so
+ * `kind: "decision"` is what makes these suspend the run: they are registered as human-in-the-loop
+ * tools (`useDecisionTool`) rather than as ordinary ones, and the person's answer IS the tool result, so
  * there is no confirmation line to give the model.
  */
 export const GALLERY: GalleryComponent[] = [

@@ -496,8 +496,11 @@ export type ConnectedAppBroker = {
    * provider would mean finding every such comparison by hand. A property on the seam makes the
    * answer one value per broker and makes a new broker declare it or fail to type-check.
    *
-   * TRUE for Composio, whose connection rows and grants live in this deployment's own tables. That
-   * is the behaviour it always had, made explicit here rather than changed.
+   * TRUE for both brokers. Composio's connection rows have always lived in this deployment's own
+   * tables. Arcade's did too, once a consent came back through the verifier, but its broker used to
+   * declare `false` and its calls went out with no row behind them; it now records and requires the
+   * row exactly as Composio does, so Bot calls, pages and offboarding all read one kind of record. A broker that declared `false` would still be gated as the comment at
+   * `connectionTokenFor` sets out.
    */
   grantIsLocal: boolean;
   /**
@@ -657,8 +660,7 @@ export type ConnectedAppBroker = {
    * IT PAIRS WITH {@link ConnectedAppBroker.authorizations}: a broker declaring `null` there
    * answers `null` here, and a broker declaring a flow answers a non-null id on every successful
    * mint. A broker that grew a flow and forgot the id would leave D24 with no source while every
-   * type still checked, so `broker-authorization-pairing.test.ts` asserts the pair over every
-   * broker literal in the tree.
+   * type still checked. A broker's authorization tests must verify this pairing.
    */
   authorize(request: {
     account: AccountRef;
@@ -694,6 +696,10 @@ export type ConnectedAppBroker = {
      * OPTIONAL, AND IGNORABLE. An adapter whose vendor grants per app, as Composio does, has no use
      * for it and drops it without throwing: handing an action to a broker that cannot use it is
      * not an error, and a caller need not know which kind of broker it holds to call this.
+     *
+     * ABSENT, IT IS A CONSENT FOR THE WHOLE APP, which is what Connect asks for on every broker. A
+     * vendor that grants per action, as Arcade does, then asks for everything the app's actions
+     * need in one consent; see `authorize` in `./arcade-adapter`.
      *
      * `returnUrl` ABOVE STAYS REQUIRED ON THE SEAM EVEN SO. An adapter whose vendor answers with
      * its own return leg may ignore it, but the seam does not relax for that: the next adapter
@@ -927,6 +933,28 @@ export class BrokerAccountGoneError extends BrokerRefusalError {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "BrokerAccountGoneError";
+  }
+}
+
+/**
+ * An account the vendor ALREADY HOLDS for this person and this app, met while beginning another.
+ *
+ * {@link BrokerAccountGoneError} TURNED AROUND, AND ITS OWN CLASS FOR THE SAME REASON. That one is
+ * a row this deployment still has over an account the vendor no longer holds; this one is an
+ * account the vendor holds under a row this deployment does not have. A fresh install, an upgrade
+ * that lost the table, or a second install signing in as the same person against the same vendor
+ * key all arrive here, and the person sees an app drawn as not connected that the vendor refuses to
+ * connect a second time. Telling it apart by type is what lets the connect route ask the vendor
+ * once more and RECORD the account it already holds, which is the confirm route's own act, instead
+ * of handing the person a refusal that names a Disconnect button their page does not show.
+ *
+ * A {@link BrokerRefusalError} because it keeps that class's promise about the message, so a
+ * reader that never learned this class still passes on a sentence this deployment wrote.
+ */
+export class BrokerAccountHeldError extends BrokerRefusalError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BrokerAccountHeldError";
   }
 }
 

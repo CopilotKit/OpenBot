@@ -73,7 +73,26 @@ export type SnapshotElement = {
   value?: string;
   disabled?: boolean;
   checked?: boolean;
+  /**
+   * A native dropdown's choices, by what each says. Its options carry no refs, so without this a Bot
+   * saw `combobox "Industry"` and nothing it could choose; it chooses by sending one of these as text.
+   */
+  options?: string[];
+  /**
+   * Where a link goes, as an absolute address: its `href` resolved against the document's base, which
+   * is what the browser itself would open. Only for a link on the top page that has one.
+   *
+   * The server opens this rather than clicking, so following a link is the same action as typing its
+   * address, and is judged as one: a read, not a change. See `followableLink` in the server.
+   */
+  url?: string;
 };
+
+/** The longest link address reported. Past this it is left off, and the link is clicked as before. */
+const URL_LIMIT = 2048;
+
+/** The most choices one dropdown reports, so a list of every country cannot crowd out the form. */
+const OPTION_LIMIT = 50;
 
 /** The descriptor half of an entry: everything before the colon. */
 type Descriptor = {
@@ -174,10 +193,40 @@ export function cutAtCodeUnits(text: string, limit: number): string {
   return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;
 }
 
+/**
+ * A link's address, resolved the way the browser resolves it, or undefined.
+ *
+ * Playwright writes a link's `href` as a `/url:` child, exactly as the page has it, so a relative one
+ * needs the document's base (`document.baseURI`, which honours `<base href>`) to say where it goes.
+ *
+ * The caller passes no base for a link inside an iframe: it resolves against that frame's base, not
+ * this one, and clicking it navigates the frame, not the page, so opening its address instead would
+ * be a different action. Framed links keep no address and are clicked.
+ */
+function linkUrlOf(
+  value: unknown,
+  baseUrl: string | undefined,
+): string | undefined {
+  if (!baseUrl || !Array.isArray(value)) return undefined;
+  for (const child of value) {
+    if (!child || typeof child !== "object" || Array.isArray(child)) continue;
+    const raw = (child as Record<string, unknown>)["/url"];
+    if (typeof raw !== "string") continue;
+    try {
+      const resolved = new URL(raw.trim(), baseUrl).href;
+      return resolved.length <= URL_LIMIT ? resolved : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 /** Build an element from a descriptor and whatever YAML gave as its value, or null if not actionable. */
 function toElement(
   descriptor: Descriptor,
   value: unknown,
+  baseUrl?: string,
 ): SnapshotElement | null {
   if (!INTERACTIVE_ROLES.has(descriptor.role)) return null;
 
@@ -199,6 +248,22 @@ function toElement(
 
   if (descriptor.flags.has("disabled")) element.disabled = true;
 
+  if (descriptor.role === "link") {
+    const url = linkUrlOf(value, baseUrl);
+    if (url) element.url = url;
+  }
+
+  // A native `<select>`: its value in the YAML is the list of its options, not text. The option marked
+  // `[selected]` is what the field shows, which is the value a person reads off it.
+  if (descriptor.role === "combobox" || descriptor.role === "listbox") {
+    const list = optionsOf(value);
+    if (list) {
+      element.options = list.options;
+      if (list.selected !== undefined && element.value === undefined)
+        element.value = list.selected;
+    }
+  }
+
   // Playwright emits `[checked]` only when something is checked, so absence is ambiguous on its own: a
   // Bot cannot tell an unticked box from a control that does not tick. Reported as false for the roles
   // that can be checked, and left off entirely for the ones that cannot.
@@ -218,8 +283,44 @@ function toElement(
   return element;
 }
 
-/** Turn an aria snapshot into the flat element list the tool contract publishes. */
-export function parseAriaSnapshot(yaml: string): {
+/**
+ * The options listed under a dropdown, and which one is selected.
+ *
+ * Only options with no ref of their own: one with a ref is a custom listbox's option, already an
+ * element the Bot clicks, and listing it twice would offer two ways to do one thing.
+ */
+function optionsOf(
+  value: unknown,
+): { options: string[]; selected?: string } | null {
+  if (!Array.isArray(value)) return null;
+  const options: string[] = [];
+  let selected: string | undefined;
+  for (const child of value) {
+    const key =
+      typeof child === "string"
+        ? child
+        : child && typeof child === "object"
+          ? Object.keys(child)[0]
+          : undefined;
+    const descriptor = key ? parseDescriptor(key) : null;
+    if (descriptor?.role !== "option" || descriptor.flags.has("ref")) continue;
+    const name = cutAtCodeUnits(descriptor.name, 200);
+    if (descriptor.flags.has("selected") && selected === undefined)
+      selected = name;
+    if (options.length < OPTION_LIMIT) options.push(name);
+  }
+  return options.length ? { options, selected } : null;
+}
+
+/**
+ * Turn an aria snapshot into the flat element list the tool contract publishes.
+ *
+ * `baseUrl` is the document's base, for resolving where links go. Without it links carry no address.
+ */
+export function parseAriaSnapshot(
+  yaml: string,
+  baseUrl?: string,
+): {
   elements: SnapshotElement[];
   truncated: boolean;
 } {
@@ -243,19 +344,27 @@ export function parseAriaSnapshot(yaml: string): {
     return { elements: [], truncated: false };
   }
 
-  /** Depth first: the tree nests by containment, and a flat list is what a Bot acts on. */
-  const walk = (node: unknown): void => {
+  /**
+   * Depth first: the tree nests by containment, and a flat list is what a Bot acts on.
+   *
+   * `base` is what links here resolve against: the page's, until the walk enters an `iframe` entry,
+   * and none below one. Told by the tree, not by the ref: Playwright prefixes refs with a frame
+   * counter (`f9e182`) that is not zero for every top page, so a prefix does not mean a frame.
+   */
+  const walk = (node: unknown, base: string | undefined): void => {
     if (truncated) return;
 
     if (Array.isArray(node)) {
-      for (const child of node) walk(child);
+      for (const child of node) walk(child, base);
       return;
     }
 
     if (typeof node === "string") {
       // An entry with no value: `- button "Submit order" [ref=e44]`.
       const descriptor = parseDescriptor(node);
-      const element = descriptor ? toElement(descriptor, undefined) : null;
+      const element = descriptor
+        ? toElement(descriptor, undefined, base)
+        : null;
       if (element) push(element);
       return;
     }
@@ -263,15 +372,16 @@ export function parseAriaSnapshot(yaml: string): {
     if (node && typeof node === "object") {
       for (const [key, value] of Object.entries(node)) {
         const descriptor = parseDescriptor(key);
-        const element = descriptor ? toElement(descriptor, value) : null;
+        const element = descriptor ? toElement(descriptor, value, base) : null;
         if (element) push(element);
         // Descend regardless of whether this entry was actionable: a `group "Pizza Size"` is not, and
         // its radios are.
-        if (value && typeof value === "object") walk(value);
+        if (value && typeof value === "object")
+          walk(value, descriptor?.role === "iframe" ? undefined : base);
       }
     }
   };
 
-  walk(tree);
+  walk(tree, baseUrl);
   return { elements, truncated };
 }

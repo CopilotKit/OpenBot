@@ -10,6 +10,8 @@
  * reported and left for the next sweep, because a computer still running costs money rather than
  * losing anything, and a failing CronJob that pages somebody at 3am should mean something worse.
  */
+
+import { workOwner } from "@openbot/shared/work-owner";
 import { createComputerProvider } from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -19,7 +21,6 @@ import {
   suspendClaimedComputers,
 } from "../src/work/culler";
 import { createWorkQueue } from "../src/work/queue";
-import { workOwner } from "@openbot/shared/work-owner";
 
 const config = loadConfig(process.env);
 if (!config.computer) {

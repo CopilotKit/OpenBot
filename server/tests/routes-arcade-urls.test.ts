@@ -21,8 +21,8 @@
 import { describe, expect, test } from "bun:test";
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
-import type { AccountModeSwitch } from "../src/plugins/account-mode";
 import type { BrokerProvider } from "../src/plugins/access";
+import type { AccountModeSwitch } from "../src/plugins/account-mode";
 import type { BrokerApp, ComposioBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";

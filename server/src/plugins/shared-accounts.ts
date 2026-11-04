@@ -22,12 +22,13 @@ export type AccountRef =
   | { holder: "deployment"; vendorUserId: string };
 
 /**
- * A PERSON'S ACCOUNT, AND WHY ITS TWO IDS ARE ONE VALUE.
+ * A PERSON'S ACCOUNT, AND WHY ITS TWO IDS ARE ALMOST ALWAYS ONE VALUE.
  *
  * `userId` and `vendorUserId` are different CONCEPTS — who the account belongs to here, and the
  * name the vendor files it under — and they are kept as two fields because the deployment holder
  * proves they can differ: its vendor id is minted by {@link mintDeploymentVendorUserId} and has no
- * local user at all. FOR A PERSON THEY ARE THE SAME VALUE ON PURPOSE, for both providers:
+ * local user at all. FOR A PERSON THEY ARE THE SAME VALUE ON PURPOSE, for both providers, unless
+ * `filedUnder` names another:
  *
  * - Neither vendor issues a user handle. Composio's `user_id` and Arcade's `user_id` are both a
  *   string the CALLER chooses and the vendor files connections under, so "the vendor's id for this
@@ -46,9 +47,18 @@ export type AccountRef =
  * sends `vendorUserId`, and code that crosses them is only right by coincidence. This is the one
  * place a person's ref is minted from a local id; a ref read back from a stored row goes through
  * {@link asAccountRef} and carries the row's own `vendor_user_id`.
+ *
+ * `filedUnder` IS THE ONE EXCEPTION, AND IT IS READ, NEVER DERIVED. A single-user deployment's one
+ * person is `dev-local-user` on every such deployment, so their own id is not theirs alone, and the
+ * name their accounts are filed under is the one `brokered_identities` holds for them (see
+ * `ensureSingleUserIdentity`). `null` means no row, and then the collapse above holds. Required
+ * rather than defaulted, so a caller cannot mint a person's ref without having asked.
  */
-export function personAccount(userId: string): AccountRef {
-  return { holder: "person", userId, vendorUserId: userId };
+export function personAccount(
+  userId: string,
+  filedUnder: string | null,
+): AccountRef {
+  return { holder: "person", userId, vendorUserId: filedUnder ?? userId };
 }
 
 export function asAccountMode(value: unknown): AccountMode | null {

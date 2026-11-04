@@ -17,6 +17,7 @@ import {
   parseApprovalContinuation,
 } from "../src/approvals/types";
 import type { AppVariables } from "../src/auth/guards";
+import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
@@ -44,9 +45,9 @@ const clicks: unknown[] = [];
 const gateway = createComputerGateway({
   provider: {
     name: "test",
-    isolation: "per-bot",
+    isolation: "per-person",
     locate: async () => "http://computer:4100",
-    status: async (id) => ({ botId: id, state: "ready" }),
+    status: async (seat) => ({ botId: seat.botId, state: "ready" }),
     list: async () => [],
     stop: async () => ({ wasRunning: true }),
     reset: async () => ({ cleared: true }),
@@ -69,7 +70,7 @@ const gateway = createComputerGateway({
 const run = (snapshot: ApprovalContinuation, actorId: string, bot = botId) => {
   const tool = createHeadlessComputerTools({
     gateway,
-    botId: bot,
+    seat: botSeat(bot),
     actor: { id: actorId, userId: actorId, initiator: { kind: "person" } },
   }).find((candidate) => candidate.definition.name === snapshot.toolName);
   if (!tool) throw new Error("no tool");

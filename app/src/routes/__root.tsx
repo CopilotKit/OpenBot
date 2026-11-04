@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { RouterContext } from "../router-context";
 import "@fontsource-variable/inter/wght.css";
@@ -123,6 +124,7 @@ function RootComponent() {
       <ThemeProvider>
         <TooltipProvider>
           <Outlet />
+          <Toaster />
         </TooltipProvider>
       </ThemeProvider>
     </div>

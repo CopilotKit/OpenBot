@@ -211,6 +211,39 @@ describe("the computer boundary overlay", () => {
     ).toBe("network:organization");
   });
 
+  test("a navigation to an allowed host on a non-default port is checked by host and port", () => {
+    // `page.host` is `URL.host`, which carries a non-default port. The allowlist is matched on the
+    // host alone, with the port checked against the rule's ports.
+    const current = snapshot({
+      network: [
+        {
+          scopeKind: "organization",
+          scopeId: "",
+          mode: "allowlist_only",
+          rules: [
+            { type: "domain", value: "erp.internal", ports: "8080" },
+            { type: "domain", value: "example.com" },
+          ],
+          locked: false,
+          updatedBy: null,
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const at = (url: string) =>
+      decideFromSnapshot(
+        current,
+        context({ page: { url, host: new URL(url).host } }),
+      );
+    expect(at("http://erp.internal:8080/invoices")).toBeNull();
+    expect(at("https://example.com:8443/")).toBeNull();
+    // The rule's ports still bind.
+    expect(at("http://erp.internal:9090/")?.matched).toBe(
+      "network:organization",
+    );
+    expect(at("http://evil.test:8080/")?.matched).toBe("network:organization");
+  });
+
   test("installed, it is final even over a permissive dry-run boundary", () => {
     const current = snapshot({
       rows: [row("organization", "", "cloudBrowser", false)],
@@ -359,6 +392,11 @@ describe("scrubbing commands", () => {
       "psql postgres://app:[REDACTED]@db:5432/app",
     ],
     ["mysql -uroot -phunter2 app", "mysql -uroot -p[REDACTED] app"],
+    // `-P` is mysql's port, not its password: the attached port must survive and the real
+    // password later in the same command must still be redacted (gh-815).
+    ["mysql -h db -P3306 -phunter2 app", "mysql -h db -P3306 -p[REDACTED] app"],
+    ["mysql -uroot -p3306 app", "mysql -uroot -p[REDACTED] app"],
+    ["mysqldump -phunter2 db", "mysqldump -p[REDACTED] db"],
     [
       "tool --password hunter2 --verbose",
       "tool --password [REDACTED] --verbose",

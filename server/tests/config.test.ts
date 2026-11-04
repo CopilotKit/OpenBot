@@ -51,6 +51,25 @@ const {
 } = baseEnvironment;
 
 describe("deployment configuration", () => {
+  test.each([undefined, "", "stale-legacy-key"])(
+    "uses the CLI runtime key with legacy value %s",
+    (legacy) => {
+      const config = loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_API_KEY: legacy,
+        CPK_INTELLIGENCE_API_KEY: "  cpk-current-project  ",
+      });
+      expect(config.runtime.intelligence.apiKey).toBe("cpk-current-project");
+    },
+  );
+
+  test("an empty CLI key preserves legacy-only deployments", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, CPK_INTELLIGENCE_API_KEY: "  " }).runtime
+        .intelligence.apiKey,
+    ).toBe("tenant-api-key");
+  });
+
   test("organization authority disables the standalone actor without requiring local provider secrets", () => {
     const config = loadConfig({
       ...withoutSignIn,
@@ -113,7 +132,7 @@ describe("deployment configuration", () => {
     delete environment[name];
 
     expect(() => loadConfig(environment)).toThrow(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+      `CopilotKit Intelligence is required and is not configured. Missing: ${name === "INTELLIGENCE_API_KEY" ? "CPK_INTELLIGENCE_API_KEY (or INTELLIGENCE_API_KEY)" : name}`,
     );
   });
 
@@ -132,6 +151,38 @@ describe("deployment configuration", () => {
     expect(config.runtime.intelligence.apiKey).toBe(
       baseEnvironment.INTELLIGENCE_API_KEY,
     );
+  });
+
+  // The browser opens the gateway itself, at the address `/info` gives it. A server in a container
+  // reaches local Intelligence somewhere the browser on the host cannot, so it may name both.
+  test("keeps the browser's gateway address apart from the server's, when one is given", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+    });
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.gatewayWsUrl).toBe(
+      "ws://host.docker.internal:14401",
+    );
+    expect(config.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "ws://localhost:14401",
+    );
+
+    const without = loadConfig(baseEnvironment);
+    if (without.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(without.runtime.intelligence.browserGatewayWsUrl).toBeUndefined();
+
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "not a url",
+      }),
+    ).toThrow("INTELLIGENCE_BROWSER_GATEWAY_WS_URL must be a valid URL");
   });
 
   test("still forwards a licence token when a deployment sets one", () => {
@@ -414,8 +465,39 @@ describe("deployment configuration", () => {
       clientId: "entra-client-id",
       clientSecret: "entra-client-secret",
       tenantId: "common",
+      apiScope: "api://entra-client-id/.default",
+      // No app may call OpenBot with a person's token until one is named.
+      allowedClients: [],
     });
     expect(configuredAuthProviders(config.auth)).toEqual(["microsoft"]);
+  });
+
+  test("takes the apps that may call with a person's Entra token by client id, and refuses anything else", () => {
+    const entra = {
+      ...withoutSignIn,
+      ...SESSION,
+      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
+      MICROSOFT_OAUTH_TENANT_ID: "8f2c1e40-0000-0000-0000-000000000000",
+    };
+    // Compared as Entra writes `azp`, lower case, whatever case the portal was copied in.
+    expect(
+      loadConfig({
+        ...entra,
+        MICROSOFT_OAUTH_ALLOWED_CLIENTS:
+          "6E74172B-BE56-4843-9FF4-E66A39BB12E3, 1b4f7c2d-0000-4000-8000-000000000001",
+      }).auth?.microsoft?.allowedClients,
+    ).toEqual([
+      "6e74172b-be56-4843-9ff4-e66a39bb12e3",
+      "1b4f7c2d-0000-4000-8000-000000000001",
+    ]);
+    // The app's API URI is the likely paste, and no token's `azp` is ever one.
+    expect(() =>
+      loadConfig({
+        ...entra,
+        MICROSOFT_OAUTH_ALLOWED_CLIENTS: "api://hr-portal",
+      }),
+    ).toThrow("MICROSOFT_OAUTH_ALLOWED_CLIENTS names `api://hr-portal`");
   });
 
   test("narrows Microsoft to one directory when given a tenant", () => {

@@ -12,7 +12,7 @@ Setting it up takes three hands, and none of them can do another's:
 
 | Who              | Does                                                                       | Where                                                             |
 | ---------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Whoever deploys  | Sets `COMPOSIO_API_KEY`                                                    | The deployment's environment, or `secrets.composioApiKey` in the Helm chart. There is no screen for it |
+| Whoever deploys  | Runs automatic setup or supplies `COMPOSIO_API_KEY`                         | The deployment's environment, or `secrets.composioApiKey` in the Helm chart. There is no screen for it |
 | An administrator | Enables an app                                                             | `/admin/plugins/composio`                                         |
 | An administrator | Grants its actions to a Bot                                                | `/admin/plugins/composio-<slug>`, then that page's per-Bot screen |
 | Each person      | Connects their own account to that app                                     | `/connections`                                    |
@@ -35,12 +35,67 @@ setting there is — nothing per app, nothing per person. One key does not mean 
 Composio keeps people apart by a user id sent with every call, so one person's connections are never
 reachable from another's.
 
+### Automatic project setup
+
+In OpenBot Desktop, once you sign in to CopilotKit, OpenBot connects this installation's apps.
+The native app uses the same sign-in session to create or reuse its isolated Composio project,
+saves the project key in protected local storage, and supplies it to the server when you start or
+restart OpenBot. No terminal, CLI installation, or key copying is needed. Sign-in and Start never
+wait on this step. If it fails, OpenBot starts with apps unavailable, and the sign-in screen offers
+Connect apps to try again. A `COMPOSIO_API_KEY` you put in `.env` or the environment always wins
+over a provisioned key, and OpenBot never moves or removes it. Individual apps still require their
+own account consent after an administrator enables them.
+
+Desktop requires the deployed Ops provisioning backend and an updated desktop release. The
+source-checkout flow below additionally requires a compatible published CopilotKit CLI.
+
+After `npx --yes copilotkit@latest login`, `bash scripts/start.sh` provisions Composio before
+starting services. This step is best-effort, like Learning setup. If it cannot complete,
+`start.sh` prints the helper's reason and starts OpenBot with apps unavailable. To prepare only
+this connection, or to retry, run:
+
+```sh
+bun run setup:composio
+```
+
+The helper persists a fresh `OPENBOT_INSTALLATION_ID` UUID in private, ignored
+`.env.openbot-installation-id` before invoking the CLI. The CLI uses your existing sign-in to
+create or reuse one isolated Composio project for that installation and writes its project key to
+`.env` as `COMPOSIO_API_KEY`. It prints only completion metadata; OpenBot reloads the saved key.
+Retries reuse the same UUID and project, including when a request finished remotely but the local
+process was interrupted. Concurrent setup attempts share one identity; the CLI serializes its
+environment write and an overlapping attempt may ask you to retry. If an interrupted CLI leaves
+`.env.composio.lock`, remove it only after confirming no provision command is running, then retry.
+
+Keep the identity file when restarting or moving the same installation. A new installation must
+generate its own identity file rather than copy an existing one. You may supply a UUID through
+`OPENBOT_INSTALLATION_ID` before first setup; a later value must match the saved one. Setup never
+uses `DEPLOYMENT_ID`, whose packaged default can be shared by multiple clones.
+
+A supplied `COMPOSIO_API_KEY` is left intact. `OPENBOT_BROKER_PROVIDER=arcade`, or an Arcade key
+without an explicit Composio selection, also skips provisioning. Learning setup and container
+creation are independent. No parent Composio organization credential is stored in OpenBot; its
+runtime receives only the provisioned project's key. That key is still deployment-wide: this does
+not create a separate Composio project for each OpenBot organization or person. Enabling an app
+continues to create or reuse that project's app authorization config.
+
+**Source-checkout launch dependency:** publish a CopilotKit CLI supporting `integrations composio
+provision` and deploy its authenticated Ops provisioning backend before releasing this startup flow.
+Missing `npx`, an older CLI, expired sign-in, unavailable provisioning, or network errors stop local
+startup with a sanitized action to take. Sign in again and rerun `bun run setup:composio`; the saved
+identity is retained. Preparing `.env` with your own project key remains supported.
+
+Direct server, container, and Helm launches do not run the laptop helper. Prepare the project key
+on an operator machine first and transfer `COMPOSIO_API_KEY` using your normal secret management
+(`secrets.composioApiKey` for Helm). The identity file belongs with that deployment's operator
+state. With no key, those launches retain the existing disabled Composio state described below.
+
 Nothing validates the key at startup. There is no shape to check it against and no call worth making
 at boot to find out, so the first real request is what says whether it works. `composio:smoke` below
 is how an operator asks that question deliberately rather than by watching somebody else fail.
 
-Unset is a supported, fully described state rather than a degraded one: it is what every deployment
-is today. What is on screen with no key is exactly one row, on `/admin/plugins` under the **More
+Unset is a supported state for launches without setup. What is on screen with no key is exactly
+one row, on `/admin/plugins` under the **More
 apps** heading, titled *Composio* and reading *Add your Composio key to enable a catalogue of tools.
 Set COMPOSIO_API_KEY on this deployment.* It has no chevron and it is not a link, because there is
 nowhere to go until the key is set. It names the setting rather than hiding the feature, so an
@@ -428,6 +483,15 @@ published to (as they are listed at that moment; groups by name, so the director
 them), or everyone — and separately, whether outside input (email, Slack, webhooks, any trigger other
 than a schedule or Run now) may. Every call is checked against that, including runs handed on from
 another Bot, which are judged by what started the first run.
+
+**Owners can decide, if an administrator lets them.** By default only an administrator gives a
+Shared app to a Bot. If the app's page says Bot owners can give it to their Bots, an owner who gives
+it to a Bot they own also sets who may use the account through that Bot: the people who can use the
+Bot when they give it (only the owner for a private Bot, its published audience for a Team Bot),
+and never outside input. No separate approval is needed. The trail records it as
+`shared_use.owner_approved`, naming the owner, the Bot and the app. Taking the app back, or the
+administrator switching the app back to admins only, withdraws that audience
+(`shared_use.owner_withdrawn`); an audience an administrator approved stays.
 
 **Widening a Bot later** — publishing it further, assigning it to a group, making it public, adding a
 trigger — goes through. If an administrator made the change, it is approved in the same step. If the

@@ -1,9 +1,9 @@
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { PERSON_INITIATOR } from "../audit";
 import type {
   Responsibility,
   ResponsibilityStore,
 } from "../responsibilities/types";
-import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import {
   type PersonQuestion,
   questionConversationBot,

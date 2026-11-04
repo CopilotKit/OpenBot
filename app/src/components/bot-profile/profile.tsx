@@ -11,8 +11,8 @@ import { useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { BotNeedsYou } from "@/components/approvals/waiting";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
+import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
-import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -41,7 +41,7 @@ import {
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { queryClient } from "@/query-client";
-import { BotActivitySections } from "./activity";
+import { BotActivityGlance, BotActivityRow } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -50,7 +50,10 @@ const NOTIFY_LABEL: Record<BotNotify, string> = {
   none: "Nothing (badges only)",
 };
 
-/** A Bot's own page: its state for you, what it is doing, its settings, and what can be done to it. */
+/**
+ * A Bot's own page: what it needs from you, its state for you, what it is doing, the tasks you marked
+ * done this week, its settings, and what can be done to it.
+ */
 export function BotProfile({
   agent,
   settings,
@@ -63,6 +66,7 @@ export function BotProfile({
   manage?: React.ReactNode;
 }) {
   const lifecycle = useQuery(botLifecycleQueryOptions(agent.id));
+  const { done } = useNeedsYou(agent.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
   const [permission, setPermission] = useState<string>(() => {
@@ -80,7 +84,7 @@ export function BotProfile({
       <div className="mt-6 flex items-center gap-3">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
         <div className="min-w-0">
-          <p className="truncate font-medium">{agent.title}</p>
+          {agent.title && <p className="truncate font-medium">{agent.title}</p>}
           <p className="line-clamp-2 text-muted-foreground text-sm">
             {agent.roleDescription}
           </p>
@@ -90,8 +94,8 @@ export function BotProfile({
         <BotPausedBanner agentId={agent.id} />
       </div>
 
+      {/* Its questions and approvals, its tasks, and what its check-ins found, in one card. */}
       <BotNeedsYou agentId={agent.id} />
-      <SuggestionsInbox agentId={agent.id} />
 
       <PageSection title="For you">
         {/* Whether this Bot's Shared-app calls are being refused right now, with the button that
@@ -218,11 +222,13 @@ export function BotProfile({
                 <IconChevronRight className="size-4 text-muted-foreground" />
               </ItemActions>
             </Item>
+            <BotActivityRow agentId={agent.id} />
           </PageRows>
         )}
       </PageSection>
 
-      <BotActivitySections agentId={agent.id} />
+      <BotActivityGlance agentId={agent.id} />
+      <DoneTasks done={done} />
       {settings}
       {manage}
     </>
