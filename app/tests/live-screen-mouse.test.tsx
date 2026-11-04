@@ -124,6 +124,7 @@ test("an ordinary click is still one click", async () => {
       x: 40,
       y: 30,
       button: "left",
+      buttons: 0,
       clickCount: 1,
       modifiers: 0,
     },
@@ -133,6 +134,7 @@ test("an ordinary click is still one click", async () => {
       x: 40,
       y: 30,
       button: "left",
+      buttons: 0,
       clickCount: 1,
       modifiers: 0,
     },
@@ -175,11 +177,48 @@ test("moving the mouse is not a click", async () => {
       event: "moved",
       x: 40,
       y: 30,
-      button: "left",
+      // Nothing held: a hover, not a drag.
+      button: "none",
+      buttons: 0,
       clickCount: 0,
       modifiers: 0,
     },
   ]);
+});
+
+test("a move with the left button held is a drag", async () => {
+  const { canvas, socket } = await liveCanvas();
+  fireEvent.mouseMove(canvas, { clientX: 40, clientY: 30, buttons: 1 });
+  await nextFrame();
+  expect(socket.sent).toMatchObject([
+    { event: "moved", button: "left", buttons: 1 },
+  ]);
+});
+
+test("a button let go off the screen is let go on the Bot's page too, at the edge", async () => {
+  // The release used to go nowhere, so the Bot's browser went on believing the button was held.
+  const { canvas, socket } = await liveCanvas();
+  fireEvent.mouseDown(canvas, {
+    clientX: 40,
+    clientY: 30,
+    button: 0,
+    buttons: 1,
+    detail: 1,
+  });
+  fireEvent.mouseUp(document.body, {
+    clientX: 2000,
+    clientY: 30,
+    button: 0,
+    buttons: 0,
+    detail: 1,
+  });
+  expect(socket.sent).toMatchObject([
+    { event: "pressed", x: 40, y: 30 },
+    { event: "released", x: FRAME.width - 1, y: 30, button: "left" },
+  ]);
+  // Over once it is let go: a later release elsewhere on the page is that page's.
+  fireEvent.mouseUp(document.body, { clientX: 2000, clientY: 30 });
+  expect(socket.sent).toHaveLength(2);
 });
 
 test("a turn of the wheel is stopped here as well as sent there", async () => {
@@ -260,4 +299,22 @@ test("turns of the wheel within one frame add up to one", async () => {
   expect(socket.sent).toEqual([
     { type: "wheel", x: 40, y: 30, deltaX: 0, deltaY: 60, modifiers: 0 },
   ]);
+});
+
+test("a wheel that counts in lines, as Firefox's does, scrolls by pixels", async () => {
+  const { canvas, socket } = await liveCanvas();
+  const wheel = new MouseEvent("wheel", {
+    clientX: 40,
+    clientY: 30,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperties(wheel, {
+    deltaX: { value: 0 },
+    deltaY: { value: 3 },
+    deltaMode: { value: 1 },
+  });
+  canvas.dispatchEvent(wheel);
+  await nextFrame();
+  expect(socket.sent).toMatchObject([{ type: "wheel", deltaY: 120 }]);
 });

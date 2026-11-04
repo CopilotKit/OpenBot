@@ -2,9 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BotBrowserState } from "../../shared/bot-browser";
-import type { ComputerControlState } from "../../shared/computer-control";
-import type { LauncherConnection } from "../../shared/openbot-browser";
 import type { MiddlewareHandler } from "hono";
 import type { AuditEventInput, AuditStore } from "../../server/src/audit";
 import type {
@@ -15,6 +12,9 @@ import { createComputerGateway } from "../../server/src/computer/gateway";
 import type { PolicyStore } from "../../server/src/computer/policy-store";
 import type { ComputerProvider } from "../../server/src/computer/provider";
 import { createComputerRoutes } from "../../server/src/computer/routes";
+import type { BotBrowserState } from "../../shared/bot-browser";
+import type { ComputerControlState } from "../../shared/computer-control";
+import type { LauncherConnection } from "../../shared/openbot-browser";
 import {
   NOT_ITS_OWN_COMPUTER,
   NOT_ITS_OWN_COMPUTER_RECORD,
@@ -770,7 +770,8 @@ describe.skipIf(!asked)("a person's keys on a Bot's live screen", () => {
           error?: string;
         };
         if (message.type === "frame") resolve();
-        if (message.type === "error") errors.push(message.error ?? "");
+        if (message.type === "error" || message.type === "input-error")
+          errors.push(message.error ?? "");
       });
     });
     try {
@@ -858,7 +859,8 @@ describe.skipIf(!asked)("what a person types while they hold the wheel", () => {
           error?: string;
         };
         if (message.type === "frame") resolve();
-        if (message.type === "error") errors.push(message.error ?? "");
+        if (message.type === "error" || message.type === "input-error")
+          errors.push(message.error ?? "");
       });
     });
     const key = (key: string, code: string, windowsVirtualKeyCode: number) => {

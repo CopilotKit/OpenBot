@@ -9,6 +9,7 @@ import {
 import { readControl } from "@/lib/computers/control";
 import {
   connectScreen,
+  FRAME_PREFIX,
   type ScreenSocket,
 } from "@/lib/computers/screen-connection";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
@@ -70,6 +71,40 @@ function remoteKey(event: KeyboardEvent) {
  */
 function isPasteShortcut(event: KeyboardEvent): boolean {
   return (event.ctrlKey || event.metaKey) && keyOf(event) === "v";
+}
+
+/**
+ * A frame's JPEG bytes from its base64.
+ *
+ * The browser's own decoder where it has one. Otherwise a plain loop: `Uint8Array.from(string, fn)`
+ * called a function for every byte, a hundred thousand calls a frame on the thread handling the
+ * person's clicks.
+ */
+function jpegBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const native = (
+    Uint8Array as unknown as {
+      fromBase64?: (data: string) => Uint8Array<ArrayBuffer>;
+    }
+  ).fromBase64;
+  if (native) return native(base64);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** How long a refused input is said on the screen. */
+const INPUT_PROBLEM_MS = 4_000;
+
+/** How far one line of a wheel reported in lines scrolls. */
+const LINE_PIXELS = 40;
+
+/** Keys that change other keys rather than typing. */
+const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift", "AltGraph"]);
+
+/** Whether a key's name is the one character it types: "a", "é", "😀"; not "Enter" or "ArrowLeft". */
+function isCharacter(key: string): boolean {
+  return [...key].length === 1;
 }
 
 /** What a page can ask of its live screen: to take the keyboard, as a click on the screen does. */
@@ -140,6 +175,18 @@ export function LiveScreen({
   /** Monotonic guard so a slow older decode cannot replace a newer frame. */
   const latestFrameId = useRef(0);
   const [connected, setConnected] = useState(false);
+  /**
+   * The last input that was refused or did not land, said for a few seconds in a corner of the screen.
+   *
+   * It used to come back as the same error that ends the stream, so one key typed a moment before the
+   * wheel was handed over put the Retry panel over the whole screen and reconnected it.
+   */
+  const [inputProblem, setInputProblem] = useState<string | null>(null);
+  useEffect(() => {
+    if (!inputProblem) return;
+    const timer = setTimeout(() => setInputProblem(null), INPUT_PROBLEM_MS);
+    return () => clearTimeout(timer);
+  }, [inputProblem]);
   const inputReady = useRef(false);
   const previouslyDriving = useRef(driving);
 
@@ -161,11 +208,8 @@ export function LiveScreen({
        * between a smooth page and one that stutters while you are trying to click something on it.
        */
       try {
-        const binary = Uint8Array.from(atob(frame.data), (c) =>
-          c.charCodeAt(0),
-        );
         const bitmap = await createImageBitmap(
-          new Blob([binary], { type: "image/jpeg" }),
+          new Blob([jpegBytes(frame.data)], { type: "image/jpeg" }),
         );
         if (
           closed ||
@@ -180,8 +224,9 @@ export function LiveScreen({
           bitmap.close();
           return;
         }
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
+        // Assigning a size reallocates the canvas and clears it, even the same size, so only on a change.
+        if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+        if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
         canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
         bitmap.close();
       } catch {
@@ -189,14 +234,56 @@ export function LiveScreen({
       }
     };
 
+    /*
+     * One frame decoding at a time, and only the newest waiting behind it.
+     *
+     * Every frame used to start its own decode the moment it arrived, and a decode that finished after
+     * a newer one was thrown away, so while the page moved the browser decoded frames nobody would see.
+     */
+    let decoding = false;
+    let waiting: { frame: FrameMessage; frameId: number } | null = null;
+    const show = async (frame: FrameMessage, frameId: number) => {
+      waiting = { frame, frameId };
+      if (decoding) return;
+      decoding = true;
+      try {
+        while (waiting && !closed) {
+          const next: { frame: FrameMessage; frameId: number } = waiting;
+          waiting = null;
+          await drawFrame(next.frame, next.frameId);
+        }
+      } finally {
+        decoding = false;
+      }
+    };
+
+    /** The newest frame that arrived while the tab was hidden, not even parsed. See `onMessage`. */
+    let hiddenFrame: string | null = null;
+
     const drawLatestFrame = () => {
       if (!currentPageVisible()) return;
+      if (hiddenFrame !== null) {
+        const raw = hiddenFrame;
+        hiddenFrame = null;
+        onMessage({ data: raw });
+        return;
+      }
       const frame = latestFrame.current;
       if (!frame) return;
-      void drawFrame(frame, latestFrameId.current);
+      void show(frame, latestFrameId.current);
     };
 
     const onMessage = (event: { data: unknown }) => {
+      // A hidden tab keeps only the newest frame, as it arrived. Parsing every frame nobody can see
+      // was the main cost of a live screen in a background tab.
+      if (
+        !currentPageVisible() &&
+        typeof event.data === "string" &&
+        event.data.startsWith(FRAME_PREFIX)
+      ) {
+        hiddenFrame = event.data;
+        return;
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(String(event.data));
@@ -223,6 +310,11 @@ export function LiveScreen({
       if (typeof message.type !== "string") return;
       if (message.type === "error") {
         onProblem?.(message.error ?? "Couldn't show the screen.");
+        return;
+      }
+      // One input that did not land. The screen is still live, so it is said, not put over the screen.
+      if (message.type === "input-error") {
+        setInputProblem(message.error ?? "That input didn't reach the page.");
         return;
       }
       if (message.type !== "frame" || !message.data) return;
@@ -262,7 +354,7 @@ export function LiveScreen({
       const frameId = ++latestFrameId.current;
 
       if (!currentPageVisible()) return;
-      void drawFrame(frame, frameId);
+      void show(frame, frameId);
     };
 
     const connection = connectScreen({
@@ -305,6 +397,7 @@ export function LiveScreen({
       onDisconnect: () => {
         frameSize.current = null;
         latestFrame.current = null;
+        hiddenFrame = null;
         latestFrameId.current++;
         const canvas = canvasRef.current;
         if (canvas)
@@ -445,6 +538,60 @@ export function LiveScreen({
     );
   }, []);
 
+  /** Whether a button went down on the screen and has not come up yet, wherever the pointer is now. */
+  const pressedOnScreen = useRef(false);
+
+  /**
+   * One mouse event as the computer takes it.
+   *
+   * `button` is the one this event is about, and `buttons` every one held, as the page reads them in
+   * `MouseEvent.button` and `MouseEvent.buttons`. A move with nothing held is `none`: it used to say
+   * "left", so to the page every hover was a drag with the left button down.
+   */
+  const mouseMessage = useCallback(
+    (
+      kind: "pressed" | "released" | "moved",
+      event: MouseEvent | React.MouseEvent,
+      point: { x: number; y: number },
+    ) => ({
+      type: "mouse",
+      event: kind,
+      ...point,
+      button:
+        kind === "moved"
+          ? event.buttons & 1
+            ? "left"
+            : event.buttons & 2
+              ? "right"
+              : event.buttons & 4
+                ? "middle"
+                : "none"
+          : event.button === 2
+            ? "right"
+            : event.button === 1
+              ? "middle"
+              : "left",
+      buttons: event.buttons,
+      /*
+       * The browser's own count, not a fixed one.
+       *
+       * `MouseEvent.detail` is how many times in a row this button has been pressed in the same
+       * place, worked out by the browser to its own timing and distance rules. Chrome fires
+       * `dblclick` on the far page only when the second press says it is the second, so sending 1
+       * every time meant a double click arrived as two separate clicks: no `dblclick` ever
+       * reached the page, `event.detail` was always 1, and opening a row, expanding a node and
+       * selecting a word were all things a person holding the wheel could not do.
+       *
+       * At least one on a press, because the computer refuses a press of zero for the reason its
+       * own comment gives -- Chrome would see a move that happens to have a button set, and no
+       * click at all. `detail` is zero on an event a script dispatched rather than a person.
+       */
+      clickCount: kind === "moved" ? 0 : Math.max(1, event.detail),
+      modifiers: modifierBits(event),
+    }),
+    [],
+  );
+
   const onMouse = useCallback(
     (kind: "pressed" | "released" | "moved") =>
       (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -454,36 +601,57 @@ export function LiveScreen({
           event.currentTarget.focus({ preventScroll: true });
         const point = at(event);
         if (!point) return;
-        (kind === "moved" ? sendSoon : send)({
-          type: "mouse",
-          event: kind,
-          ...point,
-          button:
-            event.button === 2
-              ? "right"
-              : event.button === 1
-                ? "middle"
-                : "left",
-          /*
-           * The browser's own count, not a fixed one.
-           *
-           * `MouseEvent.detail` is how many times in a row this button has been pressed in the same
-           * place, worked out by the browser to its own timing and distance rules. Chrome fires
-           * `dblclick` on the far page only when the second press says it is the second, so sending 1
-           * every time meant a double click arrived as two separate clicks: no `dblclick` ever
-           * reached the page, `event.detail` was always 1, and opening a row, expanding a node and
-           * selecting a word were all things a person holding the wheel could not do.
-           *
-           * At least one on a press, because the computer refuses a press of zero for the reason its
-           * own comment gives -- Chrome would see a move that happens to have a button set, and no
-           * click at all. `detail` is zero on an event a script dispatched rather than a person.
-           */
-          clickCount: kind === "moved" ? 0 : Math.max(1, event.detail),
-          modifiers: modifierBits(event),
-        });
+        if (kind === "pressed") pressedOnScreen.current = true;
+        if (kind === "released" && event.buttons === 0)
+          pressedOnScreen.current = false;
+        (kind === "moved" ? sendSoon : send)(mouseMessage(kind, event, point));
       },
-    [at, send, sendSoon],
+    [at, send, sendSoon, mouseMessage],
   );
+
+  /*
+   * A drag that leaves the screen is still a drag.
+   *
+   * A button pressed on the screen and let go outside it never sent its release, so the Bot's browser
+   * went on believing it was held: the next move there dragged a selection or a slider nobody was
+   * holding. While a button is down, moves and the release are followed on the whole window, at the
+   * nearest point on the edge of the screen, the way a browser follows a drag past its own window.
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!driving || !connected || !canvas) return;
+    const edge = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return at({
+        clientX: Math.min(
+          Math.max(event.clientX, rect.left),
+          rect.left + rect.width - 1,
+        ),
+        clientY: Math.min(
+          Math.max(event.clientY, rect.top),
+          rect.top + rect.height - 1,
+        ),
+      });
+    };
+    const onMove = (event: MouseEvent) => {
+      if (!pressedOnScreen.current || event.target === canvas) return;
+      const point = edge(event);
+      if (point) sendSoon(mouseMessage("moved", event, point));
+    };
+    const onUp = (event: MouseEvent) => {
+      if (!pressedOnScreen.current || event.target === canvas) return;
+      if (event.buttons === 0) pressedOnScreen.current = false;
+      const point = edge(event);
+      if (point) send(mouseMessage("released", event, point));
+    };
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
+    return () => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+      pressedOnScreen.current = false;
+    };
+  }, [driving, connected, at, send, sendSoon, mouseMessage]);
 
   useImperativeHandle(
     ref,
@@ -530,14 +698,18 @@ export function LiveScreen({
       if (isPasteShortcut(event)) return;
       event.preventDefault();
       event.stopPropagation();
+      // The first half of an accent typed in two keys. The browser reports the accented character on
+      // the second key, which is the one that goes; this one has nothing to send.
+      if (event.key === "Dead") return;
       held.set(event.code, remoteKey(event));
       send({
         type: "key",
         event: "down",
         ...remoteKey(event),
         // Only a printable character carries text. Sending text for Backspace makes Chrome insert a
-        // character instead of deleting one.
-        ...(event.key.length === 1 ? { text: event.key } : {}),
+        // character instead of deleting one. Counted in characters, not UTF-16 units, so an emoji is
+        // text too.
+        ...(isCharacter(event.key) ? { text: event.key } : {}),
         modifiers: modifierBits(event),
       });
     };
@@ -555,6 +727,17 @@ export function LiveScreen({
         ...remoteKey(event),
         modifiers: modifierBits(event),
       });
+      /*
+       * On a Mac a key let go while Command is down never reports its release: Command+A sends A down
+       * and no A up. Sent as Control+A, the A stayed held in the Bot's browser and every key after it
+       * repeated or combined with it. Command coming up lets go of whatever it was held with.
+       */
+      if (event.key === "Meta")
+        for (const [code, key] of held)
+          if (!MODIFIER_KEYS.has(key.key)) {
+            held.delete(code);
+            send({ type: "key", event: "up", ...key, modifiers: 0 });
+          }
     };
     /** Paste arrives as one block; CDP inserts it as text rather than key events. */
     const onPaste = (event: ClipboardEvent) => {
@@ -591,11 +774,22 @@ export function LiveScreen({
       const point = at(event);
       if (!point) return;
       event.preventDefault();
+      /*
+       * In pixels, which is what the computer scrolls by. Firefox reports a mouse wheel in lines, three
+       * a notch, so it scrolled the Bot's page three pixels at a time. A line is taken as 40 pixels, as
+       * Chrome scrolls one, and a page as the height of the screen.
+       */
+      const unit =
+        event.deltaMode === 1
+          ? LINE_PIXELS
+          : event.deltaMode === 2
+            ? (frameSize.current?.height ?? 800)
+            : 1;
       sendSoon({
         type: "wheel",
         ...point,
-        deltaX: event.deltaX,
-        deltaY: event.deltaY,
+        deltaX: event.deltaX * unit,
+        deltaY: event.deltaY * unit,
         modifiers: modifierBits(event),
       });
     };
@@ -604,23 +798,34 @@ export function LiveScreen({
   }, [driving, connected, at, sendSoon]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`block h-auto w-full ${driving ? "cursor-crosshair focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
-      // Only forward input during takeover. Then the screen is a stop in the Tab order and takes every key while it has
-      // the focus, which is what a screen reader is told by `application`.
-      {...(driving
-        ? {
-            onMouseDown: onMouse("pressed"),
-            onMouseUp: onMouse("released"),
-            onMouseMove: onMouse("moved"),
-            onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
-            role: "application",
-            tabIndex: 0,
-          }
-        : {})}
-      aria-label={driving ? label : "The Bot's screen, live"}
-      data-connected={connected}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className={`block h-auto w-full ${driving ? "cursor-default focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
+        // Only forward input during takeover. Then the screen is a stop in the Tab order and takes every key while it has
+        // the focus, which is what a screen reader is told by `application`.
+        {...(driving
+          ? {
+              onMouseDown: onMouse("pressed"),
+              onMouseUp: onMouse("released"),
+              onMouseMove: onMouse("moved"),
+              onContextMenu: (event: React.MouseEvent) =>
+                event.preventDefault(),
+              role: "application",
+              tabIndex: 0,
+            }
+          : {})}
+        aria-label={driving ? label : "The Bot's screen, live"}
+        data-connected={connected}
+      />
+      {inputProblem ? (
+        <span
+          role="status"
+          className="absolute bottom-2 left-2 max-w-[80%] rounded-full bg-black/70 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
+        >
+          {inputProblem}
+        </span>
+      ) : null}
+    </>
   );
 }

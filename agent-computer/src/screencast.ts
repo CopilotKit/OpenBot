@@ -21,7 +21,10 @@ export type InputMessage =
       event: "pressed" | "released" | "moved";
       x: number;
       y: number;
-      button?: "left" | "right" | "middle";
+      /** The button this event is about. `none` for a move with nothing held. */
+      button?: "none" | "left" | "right" | "middle";
+      /** Every button held during the event, as `MouseEvent.buttons` counts them: left 1, right 2, middle 4. */
+      buttons?: number;
       clickCount?: number;
       modifiers?: number;
     }
@@ -228,6 +231,11 @@ export async function startScreencast(
           x: message.x,
           y: message.y,
           button: message.button ?? "left",
+          // Without it a page reads `MouseEvent.buttons` from `button`, so a hover sent as "left" was
+          // a drag with the left button held. Sent only when the surface said, as older ones do not.
+          ...(message.buttons !== undefined
+            ? { buttons: message.buttons }
+            : {}),
           // Chrome needs a non-zero clickCount on press/release or the page sees a move that happens
           // to have a button set, and no click ever fires.
           clickCount: message.event === "moved" ? 0 : (message.clickCount ?? 1),

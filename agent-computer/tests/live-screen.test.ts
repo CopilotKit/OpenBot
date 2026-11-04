@@ -145,7 +145,8 @@ function watch(botId: string): Frames {
       error?: string;
     };
     if (message.type === "frame") sawFrame();
-    if (message.type === "error") errors.push(message.error ?? "");
+    if (message.type === "error" || message.type === "input-error")
+      errors.push(message.error ?? "");
   });
   const close = () => {
     try {

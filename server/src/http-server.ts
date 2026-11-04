@@ -30,6 +30,8 @@ import {
 type StreamData = {
   upstream: string;
   inward?: WebSocket;
+  /** Input that arrived before the socket to the computer had opened, sent once it does. */
+  early?: string[];
 };
 
 /**
@@ -43,6 +45,9 @@ type SocketData = StreamData | ChannelSocket["data"];
 
 /** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
 const FRAME_PREFIX = '{"type":"frame"';
+
+/** How many inputs are held while the socket to the computer opens. A person, not a script, fills it. */
+const EARLY_INPUT_LIMIT = 256;
 
 /** How much may sit unsent to a person's browser before a new frame is dropped: about one frame. */
 const STREAM_BUFFER_LIMIT = 128 * 1024;
@@ -243,6 +248,10 @@ export function startHttpServer(deps: {
             inward.close();
           }
         };
+        inward.onopen = () => {
+          for (const message of stream.early ?? []) inward.send(message);
+          stream.early = undefined;
+        };
         inward.onclose = () => ws.close();
         inward.onerror = () => ws.close();
       },
@@ -251,7 +260,15 @@ export function startHttpServer(deps: {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
         }
-        if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+        const inward = ws.data.inward;
+        // A click made the moment the screen appeared used to be lost here, before the socket to the
+        // computer had finished opening. Held until it has, in order, and only that long.
+        if (inward?.readyState === WebSocket.CONNECTING) {
+          if ((ws.data.early?.length ?? 0) < EARLY_INPUT_LIMIT)
+            ws.data.early = [...(ws.data.early ?? []), String(raw)];
+          return;
+        }
+        if (inward?.readyState === WebSocket.OPEN) inward.send(String(raw));
       },
       close(ws, code, reason) {
         if (!isProxiedStream(ws.data)) {

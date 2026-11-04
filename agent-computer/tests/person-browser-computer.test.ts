@@ -251,7 +251,8 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
           error?: string;
         };
         if (message.type === "frame") resolve();
-        if (message.type === "error") errors.push(message.error ?? "");
+        if (message.type === "error" || message.type === "input-error")
+          errors.push(message.error ?? "");
       });
       socket.addEventListener("error", () =>
         reject(new Error("The live screen failed.")),
@@ -295,7 +296,8 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
           type: string;
           error?: string;
         };
-        if (message.type === "error") resolve(message.error ?? "");
+        if (message.type === "error" || message.type === "input-error")
+          resolve(message.error ?? "");
       });
     });
     socket.close();

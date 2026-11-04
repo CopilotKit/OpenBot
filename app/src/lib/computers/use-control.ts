@@ -24,6 +24,8 @@ type ControlStore = {
   subscribe: (listener: () => void) => () => void;
 };
 const stores = new Map<string, ControlStore>();
+/** How many reads in a row may fail before input is paused: two, about two seconds. */
+const MISSED_READS_BEFORE_PAUSE = 2;
 
 /** One authoritative poll and mutation gate per visible Bot, shared by chat, sidebar and modal. */
 function createControlStore(computerId: string): ControlStore {
@@ -31,6 +33,8 @@ function createControlStore(computerId: string): ControlStore {
   let version = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   let reading: AbortController | undefined;
+  /** Reads in a row that could not reach the computer. See `refresh`. */
+  let failures = 0;
   const listeners = new Set<() => void>();
   const publish = (next: Snapshot) => {
     snapshot = next;
@@ -48,15 +52,28 @@ function createControlStore(computerId: string): ControlStore {
     ).catch(() => null);
     if (reading === abort) reading = undefined;
     if (abort.signal.aborted || mine !== version || snapshot.busy) return;
-    publish({
-      ...snapshot,
-      control,
-      problem: control
-        ? snapshot.problem?.startsWith("Reconnecting:")
-          ? null
-          : snapshot.problem
-        : "Reconnecting: browser ownership could not be checked. Input is paused.",
-    });
+    /*
+     * One read that did not come back is not news. It used to blank the control state at once, which
+     * took the wheel off a person mid-sentence: their keyboard stopped being forwarded and every key
+     * they held was let go over there, for a hiccup the next read a second later recovered from. The
+     * computer still refuses input from anybody not holding the wheel, whatever this shows.
+     */
+    failures = control ? 0 : failures + 1;
+    if (!control && failures < MISSED_READS_BEFORE_PAUSE && snapshot.control)
+      return;
+    const problem = control
+      ? snapshot.problem?.startsWith("Reconnecting:")
+        ? null
+        : snapshot.problem
+      : "Reconnecting: browser ownership could not be checked. Input is paused.";
+    // The same answer as last time changes nothing on screen, so nothing is told. Every view of the
+    // computer re-rendered once a second for a state that had not moved.
+    if (
+      problem === snapshot.problem &&
+      JSON.stringify(control) === JSON.stringify(snapshot.control)
+    )
+      return;
+    publish({ ...snapshot, control, problem });
   };
   // Keep the same store through Strict Mode resubscriptions and pending mutations.
   const disposeWhenUnused = () =>
@@ -110,6 +127,9 @@ function createControlStore(computerId: string): ControlStore {
       disposeWhenUnused();
     }
   };
+  const refreshWhenShown = () => {
+    if (!document.hidden && !snapshot.busy && !reading) void refresh();
+  };
   const store: ControlStore = {
     getSnapshot: () => snapshot,
     refresh,
@@ -118,15 +138,19 @@ function createControlStore(computerId: string): ControlStore {
       listeners.add(listener);
       if (timer === undefined) {
         if (!snapshot.busy) void refresh();
+        // Not while the tab is hidden: nobody is looking, and it is read again the moment they are.
         timer = setInterval(() => {
+          if (document.hidden) return;
           if (!snapshot.busy && !reading) void refresh();
         }, 1000);
+        document.addEventListener("visibilitychange", refreshWhenShown);
       }
       return () => {
         listeners.delete(listener);
         if (listeners.size) return;
         clearInterval(timer);
         timer = undefined;
+        document.removeEventListener("visibilitychange", refreshWhenShown);
         reading?.abort();
         version++;
         disposeWhenUnused();

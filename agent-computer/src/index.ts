@@ -738,6 +738,13 @@ async function notePersonFilled(
   }
 }
 
+/*
+ * A refusal or a failure of one input is sent as `input-error`, not `error`: the screen is still live,
+ * and the person only needs to hear that this one did not land. An `error` ends the stream on the
+ * surface (it puts up the Retry panel and reconnects), which one dispatch that failed, or a key typed a
+ * moment before the wheel was theirs, has no reason to do.
+ */
+
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = {
   botId: string;
@@ -784,7 +791,7 @@ async function applyInput(
   if (standing.state !== "casting") {
     ws.send(
       JSON.stringify({
-        type: "error",
+        type: standing.state === "starting" ? "input-error" : "error",
         error:
           standing.state === "starting"
             ? SCREEN_STILL_STARTING
@@ -798,14 +805,16 @@ async function applyInput(
     const parsed: unknown = JSON.parse(String(raw));
     const validated = parseInputMessage(parsed);
     if (!validated.ok) {
-      ws.send(JSON.stringify({ type: "error", error: validated.error }));
+      ws.send(JSON.stringify({ type: "input-error", error: validated.error }));
       return;
     }
     message = validated.message;
   } catch {
     // The validated-but-wrong branch above sends an error frame; unparseable input used to
     // be dropped silently, so a buggy surface saw input "ignored" with no diagnostic.
-    ws.send(JSON.stringify({ type: "error", error: "Input is not JSON." }));
+    ws.send(
+      JSON.stringify({ type: "input-error", error: "Input is not JSON." }),
+    );
     return;
   }
   // A person's input is accepted only while they hold the wheel. The socket being open is not permission:
@@ -821,7 +830,7 @@ async function applyInput(
   // A person's own browser needs no handover: nobody else works in it, so it starts, and stays,
   // with the person holding the wheel.
   if (!isPersonBrowserId(ws.data.botId) && !session.control.humanMayDrive()) {
-    ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
+    ws.send(JSON.stringify({ type: "input-error", error: TAKE_CONTROL_FIRST }));
     return;
   }
   session.humanInputs += 1;
@@ -840,7 +849,7 @@ async function applyInput(
     );
     ws.send(
       JSON.stringify({
-        type: "error",
+        type: "input-error",
         error: describe(error, "That input could not be applied."),
       }),
     );
