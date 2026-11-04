@@ -1,8 +1,9 @@
 //! What the Status window says about what OpenBot is running, and how much memory it takes.
 //!
 //! Containers are told apart by the names their owners give them: Compose names OpenBot's
-//! `openbot-<service>-<n>` (its project is `openbot`), and k3d names an Intelligence stack's
-//! `k3d-<stack id>-<role>`. Memory is Docker's own figure for each container, OpenBot's own server
+//! `<project>-<service>-<n>` and the supervisor its Bots' computers `<namespace>-computer-…` (see
+//! `stack::container_prefixes`), and k3d names an Intelligence stack's `k3d-<stack id>-<role>`.
+//! Not every `openbot-` container: a source checkout called `openbot` names its own that way. Memory is Docker's own figure for each container, OpenBot's own server
 //! and worker among them, so the total is what the machine is actually spending.
 
 use serde::Serialize;
@@ -35,9 +36,10 @@ pub fn memory_in_use(column: &str) -> Option<u64> {
     (number.is_finite() && number >= 0.0).then(|| (number * scale).round() as u64)
 }
 
-/// `docker stats --no-stream --format '{{.Name}}\t{{.MemUsage}}'`, split into OpenBot's containers
-/// and those of the Intelligence stack `stack`. Anybody else's containers are left out.
-pub fn containers(stats: &str, stack: Option<&str>) -> (Vec<Part>, Vec<Part>) {
+/// `docker stats --no-stream --format '{{.Name}}\t{{.MemUsage}}'`, split into OpenBot's containers,
+/// those named with one of `owned` prefixes, and those of the Intelligence stack `stack`. Anybody
+/// else's containers are left out.
+pub fn containers(stats: &str, owned: &[String], stack: Option<&str>) -> (Vec<Part>, Vec<Part>) {
     let mut openbot = Vec::new();
     let mut intelligence = Vec::new();
     let intelligence_prefix = stack.map(|stack| format!("k3d-{stack}-"));
@@ -50,7 +52,7 @@ pub fn containers(stats: &str, stack: Option<&str>) -> (Vec<Part>, Vec<Part>) {
             name: name.to_owned(),
             memory_bytes: memory_in_use(usage),
         };
-        if name.starts_with("openbot-") {
+        if owned.iter().any(|prefix| name.starts_with(prefix.as_str())) {
             openbot.push(part);
         } else if intelligence_prefix
             .as_deref()
@@ -84,7 +86,8 @@ mod tests {
                      k3d-local-other-server-0\t2GiB / 8GiB\n\
                      buildx_buildkit_x\t50MiB / 8GiB\n\
                      /openbot-supervisor-1\t--\n";
-        let (openbot, intelligence) = containers(stats, Some("local-abc"));
+        let legacy = crate::stack::container_prefixes("openbot");
+        let (openbot, intelligence) = containers(stats, &legacy, Some("local-abc"));
         assert_eq!(
             openbot,
             vec![
@@ -105,13 +108,40 @@ mod tests {
                 memory_bytes: Some(1_073_741_824)
             }]
         );
-        assert!(containers(stats, None).1.is_empty());
+        assert!(containers(stats, &legacy, None).1.is_empty());
+    }
+
+    /// A source checkout called `openbot` names its containers `openbot-…` and its Bots' computers
+    /// `openbot-computer-…`; an installation running as `openbot-desktop` lists none of them.
+    #[test]
+    fn a_source_checkouts_openbot_containers_are_not_the_installations() {
+        let stats = "openbot-postgres-1\t1GiB / 8GiB\n\
+                     openbot-computer-person-dev-local-user\t1GiB / 8GiB\n\
+                     openbot-desktop-postgres-1\t100MiB / 8GiB\n\
+                     openbot-desktop-computer-person-someone\t200MiB / 8GiB\n";
+        let owned = crate::stack::container_prefixes(crate::stack::DESKTOP_PROJECT);
+        let names: Vec<String> = containers(stats, &owned, None)
+            .0
+            .into_iter()
+            .map(|part| part.name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "openbot-desktop-postgres-1",
+                "openbot-desktop-computer-person-someone"
+            ]
+        );
     }
 
     #[test]
     fn the_quick_listing_names_containers_without_measuring_them() {
         let listing = "openbot-postgres-1\t\nk3d-local-abc-server-0\t\n";
-        let (openbot, intelligence) = containers(listing, Some("local-abc"));
+        let (openbot, intelligence) = containers(
+            listing,
+            &crate::stack::container_prefixes("openbot"),
+            Some("local-abc"),
+        );
         assert_eq!(
             openbot,
             vec![Part {
