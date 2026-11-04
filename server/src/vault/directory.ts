@@ -177,7 +177,14 @@ export function createConnectionsDirectory(options: {
   let resyncing: Promise<void> | undefined;
   let resyncAgain = false;
 
+  /**
+   * How many times each secret's values were dropped. A reveal keeps what it was answered only when
+   * nothing dropped the secret while the request was out: an announcement that arrived during it may
+   * describe a change the answer predates.
+   */
+  const drops = new Map<string, number>();
   const dropValues = (secretId: string) => {
+    drops.set(secretId, (drops.get(secretId) ?? 0) + 1);
     for (const reader of readersOf.get(secretId) ?? []) values.delete(reader);
     readersOf.delete(secretId);
   };
@@ -411,9 +418,11 @@ export function createConnectionsDirectory(options: {
       if (held && held.expiresAt > Date.now())
         return { id, version: held.version, value: held.value };
       values.delete(reader);
+      const dropsBefore = drops.get(id) ?? 0;
       const revealed = await client.secrets.reveal(id, accessor);
-      // A value revealed while a change was in flight is still the vault's answer; an announcement
-      // that lands after this drops it.
+      // Spent, but not kept, when an announcement about this secret landed while the vault was
+      // answering: the next use asks again rather than holding a value the change may have retired.
+      if ((drops.get(id) ?? 0) !== dropsBefore) return revealed;
       values.set(reader, {
         value: revealed.value,
         version: revealed.version,
