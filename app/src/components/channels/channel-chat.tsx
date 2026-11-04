@@ -14,7 +14,6 @@ import {
   QuestionNotice,
   shownAnswer,
   useConversationQuestion,
-  useQuestionSteps,
 } from "@/components/approvals/question-notice";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
@@ -1035,8 +1034,6 @@ export function ChannelChat({
    */
   const question = useConversationQuestion(channel.id, channel.threadId);
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
-  // A question of several decisions takes them one at a time; the last sends them all.
-  const steps = useQuestionSteps(question);
   const [answeredId, setAnsweredId] = useState<string | null>(null);
   const answerTo = async (text: string) => {
     if (!question) return;
@@ -1179,11 +1176,8 @@ export function ChannelChat({
                 <QuestionNotice
                   avatarSeed={botSeed}
                   botName={botName}
-                  onAnswered={(whole) => {
-                    void answerTo(whole).catch(() => steps.back());
-                  }}
+                  onAnswered={answerTo}
                   question={question}
-                  steps={steps}
                 />
               ) : undefined
             }
@@ -1269,19 +1263,7 @@ export function ChannelChat({
                 draft.attachments.length === 0 &&
                 skillInstructions.length === 0
               ) {
-                if (!steps.current) {
-                  await answerTo(draft.text);
-                  return;
-                }
-                const whole = steps.answer(draft.text);
-                if (whole === null) return;
-                try {
-                  await answerTo(whole);
-                } catch (error) {
-                  // Not sent: back on the last decision, with the draft given back to the composer.
-                  steps.back();
-                  throw error;
-                }
+                await answerTo(draft.text);
                 return;
               }
               await say(draft.text, skillInstructions, draft.attachments);
