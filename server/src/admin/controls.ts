@@ -102,6 +102,15 @@ export type EnterpriseDeps = {
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
   builtInModel?: string;
+  /**
+   * The model a person picked for the conversation behind a thread, when there is one they may use
+   * (`channels/model-choice.ts`). A built-in run in that thread answers on it, so it is the model
+   * the allowlist judges and the usage row names.
+   */
+  pickedModel?: (
+    actorId: string,
+    threadId: string,
+  ) => Promise<string | undefined>;
   /** Offboarding: ends sessions and deny-lists, and retires what a person granted. */
   people?: {
     revoke: (userId: string, by: string) => Promise<void>;
@@ -975,6 +984,21 @@ export function auditRoutineStore<T extends RoutineLike>(
  * a turn the allowlist refused keeps the one refused row `headlessTurnRefusal` wrote for it. A failed
  * write is logged and never fails the turn, as the gate's is.
  */
+/**
+ * `provider/model` a built-in run in this thread answers on: the person's pick for the
+ * conversation, or the deployment's own. Same spelling as `builtInModel`.
+ */
+export async function builtInModelFor(
+  deps: Pick<EnterpriseDeps, "builtInModel" | "pickedModel">,
+  actorId: string,
+  threadId: string | null,
+): Promise<string | undefined> {
+  const deployment = deps.builtInModel;
+  if (!deployment || !threadId) return deployment;
+  const picked = await deps.pickedModel?.(actorId, threadId);
+  return picked ? `${deployment.split("/")[0]}/${picked}` : deployment;
+}
+
 export async function recordHeadlessUsage(input: {
   ownerUserId: string;
   agentId: string;
@@ -990,7 +1014,13 @@ export async function recordHeadlessUsage(input: {
       .where(eq(agents.id, input.agentId))
       .limit(1);
     const model =
-      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+      row?.type === "built_in"
+        ? await builtInModelFor(
+            controls.deps,
+            input.ownerUserId,
+            input.threadId,
+          )
+        : undefined;
     // A model nobody named is allowed only while there is no list, as the gate records it.
     const listed = controls.snapshot()?.settings.modelAllowlist?.enabled;
     await controls.store.recordModelUsage({

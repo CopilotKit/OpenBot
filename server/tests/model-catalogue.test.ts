@@ -367,6 +367,21 @@ describe("the catalogue a deployment offers", () => {
     ]);
   });
 
+  test("while the admin has picking off there is nothing to choose", async () => {
+    const { fetcher } = provider(openAIListing(["gpt-4o", "gpt-5.5"]));
+    let on = false;
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+      enabled: () => on,
+    });
+    expect((await catalogue.read()).choosable).toBe(false);
+    on = true;
+    expect((await catalogue.read()).choosable).toBe(true);
+  });
+
   test("allows only what it offers", async () => {
     const { fetcher } = provider(openAIListing(["gpt-4o", "gpt-5.5"]));
     const catalogue = createModelCatalogue({

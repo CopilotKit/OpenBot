@@ -88,7 +88,6 @@ import {
   type LoadPersonalMemory,
   PersonalMemoryMiddleware,
 } from "./memory/tools";
-import { requestedModel } from "./model-catalogue";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -705,10 +704,10 @@ export async function buildAgents(
   /** How a run refused for holding too many tools is put on record. Absent writes no row. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
   /**
-   * Whether a run may use the model it asks for (`forwardedProps.openbotModel`). Appended last for the
+   * The model the person picked for the conversation a run answers in. Appended last for the
    * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
    */
-  allowsModel?: AllowsModel,
+  pickedModel?: PickedModel,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -766,7 +765,7 @@ export async function buildAgents(
           markAttachmentsSent,
           acquireLearnedSkills,
           recordToolLimitRefusal,
-          allowsModel,
+          pickedModel,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1031,8 +1030,8 @@ async function buildAgent(
   acquireLearnedSkills?: AcquireLearnedSkills,
   /** How a run refused by `admitTools` below is put on record. See {@link buildAgents}. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
-  /** Whether a run may use the model it asks for. See {@link buildAgents}. */
-  allowsModel?: AllowsModel,
+  /** The model the person picked for this conversation. See {@link buildAgents}. */
+  pickedModel?: PickedModel,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1280,7 +1279,7 @@ async function buildAgent(
   const whole = withTools(granted);
   // Even a small app grant may need search once the client's tools arrive with the run.
   if (
-    !allowsModel &&
+    !pickedModel &&
     !narrowing &&
     !handoff &&
     !model.plan &&
@@ -1293,7 +1292,7 @@ async function buildAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input, signal) => {
-      const runModel = await modelForRun(model, input, allowsModel);
+      const runModel = await modelForRun(model, input, pickedModel);
       signal.throwIfAborted();
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
@@ -1891,10 +1890,10 @@ export async function resolveRuntimeAgents(
   /** Appended after `loadPersonalMemory`, for the positional reason `loadInstructions` gives. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
   /**
-   * Whether a run may use the model it asks for (`forwardedProps.openbotModel`). Appended last for the
+   * The model the person picked for the conversation a run answers in. Appended last for the
    * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
    */
-  allowsModel?: AllowsModel,
+  pickedModel?: PickedModel,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1932,43 +1931,37 @@ export async function resolveRuntimeAgents(
     acquireLearnedSkills,
     loadPersonalMemory,
     recordToolLimitRefusal,
-    allowsModel,
+    pickedModel,
   );
 }
 
-/** Whether a run may use this model id, as the provider or gateway in front names it. */
-export type AllowsModel = (id: string) => Promise<boolean>;
-
-/** A person asked for a model this deployment does not offer them. Said to them as it is. */
-export class ModelNotOfferedError extends Error {
-  constructor(id: string) {
-    super(`${id} isn't available here. Pick another model and send again.`);
-    this.name = "ModelNotOfferedError";
-  }
-}
+/**
+ * The model the person picked for the conversation this run answers in, already checked against
+ * what the deployment offers, or undefined for the configured one. Read by the server from its own
+ * record of the pick (`channels/model-choice.ts`), never from anything the request carries.
+ */
+export type PickedModel = (input: RunAgentInput) => Promise<string | undefined>;
 
 /**
- * The model one run of a built-in Bot uses: the one it asked for, when this deployment offers it,
- * and otherwise the deployment's own.
+ * The model one run of a built-in Bot uses: the person's pick for this conversation, or the
+ * deployment's own.
  *
  * Decided here, on the server, and never by the runtime's own `forwardedProps.model` override. That
  * one takes any `provider/model` string from the browser and sends it with this deployment's key,
- * past the allowlist and past the tool-search wrapper this file puts around the model. Here the id
- * must be one the catalogue offers, and it is sent through the same configuration as the default.
+ * past the allowlist and past the tool-search wrapper this file puts around the model. Here the pick
+ * comes from the server's own record and goes through the same configuration as the default.
  *
- * A plan's harness picks its own model and is sent none, so a plan ignores the request. Asking for
- * the deployment's own model is the same as asking for nothing.
+ * A plan's harness picks its own model and is sent none, so a plan ignores the pick.
  */
 export async function modelForRun(
   model: RuntimeModel,
   input: RunAgentInput,
-  allowsModel: AllowsModel | undefined,
+  pickedModel: PickedModel | undefined,
 ): Promise<RuntimeModel> {
-  const asked = requestedModel(input.forwardedProps);
-  if (!asked || !allowsModel || model.plan || asked === model.defaultModel)
-    return model;
-  if (!(await allowsModel(asked))) throw new ModelNotOfferedError(asked);
-  return { ...model, defaultModel: asked };
+  if (!pickedModel || model.plan) return model;
+  const picked = await pickedModel(input);
+  if (!picked || picked === model.defaultModel) return model;
+  return { ...model, defaultModel: picked };
 }
 
 /** What one Bot may call, for the person whose request this is. */

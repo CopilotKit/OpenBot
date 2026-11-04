@@ -14,9 +14,8 @@ import type { Context, MiddlewareHandler } from "hono";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { agents } from "../db/schema";
-import { requestedModel } from "../model-catalogue";
 import { type Capability, capabilityRefusal } from "./capabilities";
-import { enterpriseControls } from "./controls";
+import { builtInModelFor, enterpriseControls } from "./controls";
 
 type Ctx = Context<{ Variables: AppVariables }>;
 
@@ -85,6 +84,12 @@ export const GATED_ROUTES: Rule[] = [
   {
     method: "POST",
     path: /^\/api\/agents\/[^/]+\/duplicate$/,
+    needs: async () => ["useBots"],
+  },
+  // Picking the model a Bot answers on is part of using Bots.
+  {
+    method: "PUT",
+    path: /^\/api\/channels\/[^/]+\/model$/,
     needs: async () => ["useBots"],
   },
   {
@@ -239,19 +244,10 @@ async function governRun(
   const allowlist = controls.snapshot()?.settings.modelAllowlist;
   const isAllowed = (model: string) =>
     !allowlist?.enabled || allowlist.models.includes(model);
-  /*
-   * A built-in Bot runs on the model the person picked when they picked one (see `modelForRun`), so
-   * that is what the allowlist judges and what the usage row names. Same `provider/model` spelling
-   * as the deployment's own: the provider is the deployment's, the model is the picked one.
-   */
-  const picked = requestedModel(request.forwardedProps);
-  const deploymentModel = controls.deps.builtInModel;
-  const configured =
-    builtIn && deploymentModel
-      ? picked
-        ? `${deploymentModel.split("/")[0]}/${picked}`
-        : deploymentModel
-      : undefined;
+  // A built-in Bot answers on the person's pick for this conversation, when there is one.
+  const configured = builtIn
+    ? await builtInModelFor(controls.deps, actor.id, threadId)
+    : undefined;
 
   const record = (
     model: string,

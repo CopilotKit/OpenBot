@@ -3,7 +3,6 @@ import type { ComputerGuidance } from "@openbot/shared/bot-prompt";
 import type { AuditInitiator } from "../audit";
 import type { AgentFetch, StallGuard } from "../channels/stall-guard";
 import {
-  type AllowsModel,
   type HandoffForRun,
   type LoadAgentsForActor,
   type LoadAttachment,
@@ -11,6 +10,7 @@ import {
   type LoadToolsForBot,
   type MarkAttachmentsSent,
   onOpenBotRunner,
+  type PickedModel,
   type RecordToolLimitRefusal,
   type RuntimeModel,
   resolveRuntimeAgents,
@@ -83,8 +83,8 @@ export type ActorAgentResolverDependencies = {
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
   acquireLearnedSkills?: AcquireLearnedSkills;
   loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory;
-  /** Whether a run may use the model a person picked. Absent, every run uses the deployment's. */
-  allowsModel?: AllowsModel;
+  /** The model a person picked for the conversation a run answers in. Absent, the deployment's. */
+  pickedModelForActor?: (actorId: string) => PickedModel;
   /** Writes the row for a run refused for sending more tools than its model accepts. */
   recordToolLimitRefusalForActor?: (
     actorId: string,
@@ -156,7 +156,7 @@ export function createActorAgentResolver(
       acquireForActor,
       deps.loadPersonalMemoryForActor?.(actor.id),
       deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
-      deps.allowsModel,
+      deps.pickedModelForActor?.(actor.id),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {

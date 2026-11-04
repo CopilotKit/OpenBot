@@ -106,6 +106,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
+import { createModelChoices, modelSelectionOn } from "./channels/model-choice";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -1418,6 +1419,14 @@ const modelCatalogue = createModelCatalogue({
   model: runtimeModel,
   apiKey: resolveRuntimeModelApiKey,
   allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
+  enabled: modelSelectionOn,
+});
+
+/** Each person's pick per conversation, saved through `/api/channels/:id/model` and read per run. */
+const modelChoices = createModelChoices({
+  database,
+  model: runtimeModel,
+  catalogue: modelCatalogue,
 });
 
 const hostAccessBroker = createHostAccessBroker(Date.now, {
@@ -1975,7 +1984,8 @@ const actorAgentResolver = createActorAgentResolver({
   loadAgents: loadAgentsForActor,
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
-  allowsModel: (id) => modelCatalogue.allows(id),
+  pickedModelForActor: (actorId) => (input) =>
+    modelChoices.forRun(actorId, input.threadId),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>
     restrictToolsForRun(
@@ -2677,6 +2687,8 @@ await installEnterpriseControls({
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
+  // The run gate records and judges the model a built-in run will use: the person's pick, if any.
+  pickedModel: (actorId, threadId) => modelChoices.forRun(actorId, threadId),
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
   recorders: {
@@ -2974,6 +2986,7 @@ const app = createApp(
       auditStore: bootAuditStore,
     },
     models: modelCatalogue,
+    modelChoices,
     // The checklist onboarding ends on. Facts and verdicts about this configuration, never values.
     setup: createSetupSources({
       productName: tenantPackage.productName,

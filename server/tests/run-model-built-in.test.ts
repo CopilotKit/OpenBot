@@ -6,7 +6,8 @@ import { buildAgents, type RuntimeModel } from "../src/copilot";
 
 /*
  * A built-in Bot's run, end to end against a fake provider: the model the provider is asked for is
- * the one the person picked, when OpenBot offers it, and the deployment's otherwise.
+ * the person's saved pick for the conversation, and the deployment's otherwise. Never one the
+ * request itself names.
  */
 
 const model: RuntimeModel = { provider: "openai", defaultModel: "gpt-5.5" };
@@ -27,7 +28,7 @@ afterAll(async () => {
 
 beforeEach(() => llm.clearRequests());
 
-async function bot(offered: readonly string[]) {
+async function bot(picked: string | undefined) {
   const agents = await buildAgents(
     [
       {
@@ -54,7 +55,7 @@ async function bot(offered: readonly string[]) {
     undefined,
     undefined,
     undefined,
-    async (id) => offered.includes(id),
+    async () => picked,
   );
   if (!agents.assistant) throw new Error("Bot missing");
   return agents.assistant.clone();
@@ -74,13 +75,13 @@ function input(forwardedProps: Record<string, unknown>): RunAgentInput {
 
 async function run(
   forwardedProps: Record<string, unknown>,
-  offered: readonly string[],
+  picked: string | undefined,
 ) {
-  const agent = await bot(offered);
+  const agent = await bot(picked);
   const events: BaseEvent[] = [];
   await new Promise<void>((resolve, reject) => {
     agent.run(input(forwardedProps)).subscribe({
-      next: (event) => events.push(event),
+      next: (event: BaseEvent) => events.push(event),
       error: reject,
       complete: resolve,
     });
@@ -96,22 +97,19 @@ function modelsAsked(): string[] {
 }
 
 test("a run with no pick asks the provider for the deployment's model", async () => {
-  await run({}, ["gpt-4o"]);
+  await run({}, undefined);
   expect(modelsAsked()).toEqual(["gpt-5.5"]);
 });
 
 test("a run asks the provider for the model the person picked", async () => {
-  const events = await run({ openbotModel: "gpt-4o" }, ["gpt-4o"]);
+  const events = await run({}, "gpt-4o");
   expect(modelsAsked()).toEqual(["gpt-4o"]);
   expect(events.some((event) => event.type === EventType.RUN_FINISHED)).toBe(
     true,
   );
 });
 
-test("a pick OpenBot does not offer is refused, and the provider is never asked", async () => {
-  const events = await run({ openbotModel: "gpt-image-2" }, ["gpt-4o"]);
-  expect(modelsAsked()).toEqual([]);
-  expect(events.some((event) => event.type === EventType.RUN_FINISHED)).toBe(
-    false,
-  );
+test("a model the request names is not the one asked for", async () => {
+  await run({ openbotModel: "gpt-4o", model: "openai/gpt-4o" }, undefined);
+  expect(modelsAsked()).toEqual(["gpt-5.5"]);
 });

@@ -29,23 +29,16 @@ export type ModelOption = {
   vendor?: string;
 };
 
-/** The forwarded property a run names its model in. Set by the composer's model picker. */
-export const RUN_MODEL_PROPERTY = "openbotModel";
-
-/** The model a run asked for, when it asked for one at all. */
-export function requestedModel(forwardedProps: unknown): string | undefined {
-  if (!forwardedProps || typeof forwardedProps !== "object") return undefined;
-  const value = (forwardedProps as Record<string, unknown>)[RUN_MODEL_PROPERTY];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 export type ModelCatalogue = {
   provider: RuntimeModel["provider"];
   /** What a run uses when nobody picked anything: the deployment's configured model. */
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];
-  /** Whether there is anything to pick: false for a plan, or when the listing could not be read. */
+  /**
+   * Whether there is anything to pick: false while the admin has picking off, for a plan, or when
+   * the listing could not be read.
+   */
   choosable: boolean;
 };
 
@@ -217,6 +210,8 @@ export function createModelCatalogue(options: {
   apiKey: () => Promise<string | null>;
   /** The admin's model allowlist, read on every call so a change applies at once. */
   allowlist?: () => Allowlist | undefined;
+  /** Whether people may pick at all (the admin's switch). Absent is yes. Read on every call. */
+  enabled?: () => boolean;
   environment?: Record<string, string | undefined>;
   fetch?: typeof fetch;
   log?: (line: string) => void;
@@ -324,7 +319,7 @@ export function createModelCatalogue(options: {
       provider,
       default: defaultModel,
       models,
-      choosable: models.length > 1,
+      choosable: (options.enabled?.() ?? true) && models.length > 1,
     };
   }
 
