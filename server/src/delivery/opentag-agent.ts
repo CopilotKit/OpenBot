@@ -125,7 +125,8 @@ const LINKS = new RegExp(LINK.source, "gi");
 
 /**
  * A channel post the app was not mentioned in: everyone there has seen any link code in it,
- * Reachability or account, so each one is cancelled, quietly (an observe run never replies). The codes are redacted rather than
+ * Reachability or account, so on Slack each one is cancelled, quietly (an observe run never
+ * replies; Teams waits on the same rule as `link`). The codes are redacted rather than
  * the message dropped, so the post still fires the owners' message triggers without carrying a
  * code. A failed cancel is logged and never stops the triggers.
  */
@@ -140,10 +141,10 @@ async function withoutLinkCodes(
     if (!code) continue;
     // Each cancel is tried on its own: a store that fails to spend a Reachability code must not
     // leave an account code with the same value live, and the other way round.
+    if (sender.transport !== "slack") continue;
     await logFailure(() => cancelReachabilityCode(deps, code));
     const identity = deps.identity;
-    if (sender.transport === "slack" && identity)
-      await logFailure(() => identity.discard(code));
+    if (identity) await logFailure(() => identity.discard(code));
   }
   return text.replace(LINKS, "link [code removed]");
 }
@@ -441,8 +442,10 @@ async function link(
   // A Reachability code binds whoever sends it to its issuer's Bot: their messages run as the
   // issuer, and the Bot's questions and approval requests go to them. Anyone else in a shared
   // conversation has seen it and could send it first, so it is only redeemed in a direct message
-  // and one posted here is spent, the same rule as for an account code below.
-  if (challenge && !sender.private) {
+  // and one posted here is spent, the same rule as for an account code below. Slack only for now:
+  // a Teams chat is private only by its conversation kind, and until OpenTag is confirmed to send
+  // `personal` for a one-to-one chat, this rule could spend every code sent from Teams.
+  if (challenge && sender.transport === "slack" && !sender.private) {
     await deps.store.consumeChallenge(code, challenge.ownerUserId);
     return { text: CANCELLED_IN_SHARED };
   }

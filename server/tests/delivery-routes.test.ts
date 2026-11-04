@@ -400,6 +400,27 @@ test("a Reachability code in a Teams personal chat still links", async () => {
     },
   ]);
 });
+test("a Reachability code in a shared Teams chat still links until Teams' private chats are confirmed", async () => {
+  // The direct-message rule is Slack's only for now: a Teams chat is private only by its kind, and
+  // nothing yet confirms OpenTag sends `personal` for one, so applying the rule could spend every
+  // code sent from Teams.
+  const f = fixture({ bound: false, challengeTransport: "teams" });
+  const result = await run(f, {
+    context: [
+      sender("teams:tenant1:user1", {
+        id: "19:meeting_abc@thread.v2",
+        kind: "groupChat",
+      }),
+    ],
+    ...linkMessage(REACHABILITY_CODE),
+  });
+  expect(said(result.events)).toContain("Linked.");
+  expect(f.calls).toEqual([
+    {
+      bind: expect.objectContaining({ transport: "teams", identity: "user1" }),
+    },
+  ]);
+});
 const observedMessage = (content: string) => ({
   context: [
     {
