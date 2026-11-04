@@ -1155,23 +1155,29 @@ describe("automatic Learning container assignment", () => {
 });
 
 describe("memory sources and background research", () => {
-  test("are on by default for a fresh deployment", () => {
+  test("memory sources are on by default; background research is asked for in a conversation", () => {
     expect(loadConfig(baseEnvironment).memoryDefaults).toEqual({
       sources: true,
-      research: true,
+      research: false,
     });
   });
 
-  test.each(["false", "0"])("each switches off on its own with %p", (value) => {
+  test.each(["false", "0"])("memory sources switch off with %p", (value) => {
     expect(
       loadConfig({ ...baseEnvironment, OPENBOT_MEMORY_SOURCE_DEFAULTS: value })
         .memoryDefaults,
-    ).toEqual({ sources: false, research: true });
-    expect(
-      loadConfig({ ...baseEnvironment, OPENBOT_PROACTIVE_DEFAULTS: value })
-        .memoryDefaults,
-    ).toEqual({ sources: true, research: false });
+    ).toEqual({ sources: false, research: false });
   });
+
+  test.each(["true", "1"])(
+    "research by default comes back only with %p",
+    (value) => {
+      expect(
+        loadConfig({ ...baseEnvironment, OPENBOT_PROACTIVE_DEFAULTS: value })
+          .memoryDefaults,
+      ).toEqual({ sources: true, research: true });
+    },
+  );
 });
 
 /**

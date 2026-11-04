@@ -1625,7 +1625,10 @@ export function loadConfig(
     ...learningSetupCredential(environment),
     memoryDefaults: {
       sources: switchedOn(environment, "OPENBOT_MEMORY_SOURCE_DEFAULTS"),
-      research: switchedOn(environment, "OPENBOT_PROACTIVE_DEFAULTS"),
+      // Off unless asked for: a Bot offers a check-in in the conversation instead (`offer_check_in`).
+      research: ["true", "1"].includes(
+        optional(environment, "OPENBOT_PROACTIVE_DEFAULTS") ?? "",
+      ),
     },
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
