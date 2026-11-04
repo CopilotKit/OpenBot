@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
@@ -68,6 +68,15 @@ function fixture(topology: "host" | "image" = "image") {
       return runCommand(command, options);
     if (options.stdoutFile)
       writeFileSync(options.stdoutFile, "PGDMP fixture backup");
+    // The image topology reads /release from inside the server container.
+    if (command.includes("exec") && command.includes("bun"))
+      return JSON.stringify({
+        version: candidate.version,
+        commit: candidate.source.commit,
+        distributionId: candidate.distribution.id,
+        repository: candidate.distribution.repository,
+        channel: candidate.distribution.channel,
+      });
     if (command.includes("config"))
       return JSON.stringify({
         name: "original-project",
@@ -256,9 +265,14 @@ test("target Compose volume or database changes refuse before stopping existing 
 
 test("a ready server reporting the wrong release is never accepted", async () => {
   const f = fixture();
+  const run: CommandRunner = async (command, options) =>
+    command.includes("exec") && command.includes("bun")
+      ? JSON.stringify({ version: "wrong-version" })
+      : f.run(command, options);
   await expect(
     applyLocalUpdate({
       ...f.options,
+      run,
       timeoutSeconds: 1,
       probe: async () => ({ status: "ok", version: "wrong-version" }),
     }),
@@ -359,5 +373,54 @@ test.each([
       ),
     ).toBe(false);
     expect(f.git("rev-parse", "HEAD")).toBe(f.old);
+  },
+);
+
+test.each([
+  ["image", ["backup", "migration", "pull", "start"]],
+  ["host", ["backup", "install", "migration", "start"]],
+] as const)(
+  "%s apply runs its long steps to completion with no kill deadline",
+  async (topology, expected) => {
+    const f = fixture(topology);
+    // Host migration runs from server/, which a real checkout has.
+    mkdirSync(join(f.root, "server"));
+    const long: [string, (command: readonly string[]) => boolean][] = [
+      ["pull", (c) => c.includes("pull")],
+      ["backup", (c) => c.some((part) => part.includes("pg_dump"))],
+      [
+        "migration",
+        (c) =>
+          c.includes("scripts/migrate.ts") ||
+          (c.includes("run") && c.includes("migrate")),
+      ],
+      ["install", (c) => c[0] === "bun" && c[1] === "install"],
+      ["start", (c) => c.includes("scripts/start.sh") || c.includes("up")],
+    ];
+    const spawn = spyOn(Bun, "spawn");
+    const deadlines: Record<string, unknown> = {};
+    const run: CommandRunner = async (command, options) => {
+      const step = long.find(([, matches]) => matches(command))?.[0];
+      if (!step) return f.run(command, options);
+      // The real runner, with the options this step gets, on a stand-in command.
+      await runCommand(
+        ["sh", "-c", options.stdoutFile ? "printf PGDMP" : "true"],
+        options,
+      );
+      deadlines[step] = (
+        spawn.mock.lastCall?.[1] as { timeout?: number } | undefined
+      )?.timeout;
+      return "";
+    };
+    try {
+      expect((await applyLocalUpdate({ ...f.options, run })).phase).toBe(
+        "accepted",
+      );
+    } finally {
+      spawn.mockRestore();
+    }
+    expect(Object.keys(deadlines).sort()).toEqual([...expected]);
+    for (const step of expected)
+      expect([step, deadlines[step]]).toEqual([step, undefined]);
   },
 );
