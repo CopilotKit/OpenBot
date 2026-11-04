@@ -37,18 +37,22 @@ reachable from another's.
 
 ### Automatic project setup
 
-In OpenBot Desktop, signing in to CopilotKit also prepares this installation's apps. The native
-app uses the same sign-in session to create or reuse its isolated Composio project, saves the
-project key in protected local storage, and supplies it to the server when you start or restart
-OpenBot. No terminal, CLI installation, or key copying is needed. A failed preparation stays in
-the normal sign-in flow so you can sign in again and retry. Individual apps still require their
+In OpenBot Desktop, once you sign in to CopilotKit, OpenBot connects this installation's apps.
+The native app uses the same sign-in session to create or reuse its isolated Composio project,
+saves the project key in protected local storage, and supplies it to the server when you start or
+restart OpenBot. No terminal, CLI installation, or key copying is needed. Sign-in and Start never
+wait on this step. If it fails, OpenBot starts with apps unavailable, and the sign-in screen offers
+Connect apps to try again. A `COMPOSIO_API_KEY` you put in `.env` or the environment always wins
+over a provisioned key, and OpenBot never moves or removes it. Individual apps still require their
 own account consent after an administrator enables them.
 
 Desktop requires the deployed Ops provisioning backend and an updated desktop release. The
 source-checkout flow below additionally requires a compatible published CopilotKit CLI.
 
 After `npx --yes copilotkit@latest login`, `bash scripts/start.sh` provisions Composio before
-starting services. To prepare only this connection, run:
+starting services. This step is best-effort, like Learning setup. If it cannot complete,
+`start.sh` prints the helper's reason and starts OpenBot with apps unavailable. To prepare only
+this connection, or to retry, run:
 
 ```sh
 bun run setup:composio

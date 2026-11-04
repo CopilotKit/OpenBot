@@ -25,6 +25,17 @@ const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
+/// A finished CopilotKit sign-in, bound to the folder and the attempt it was started for.
+///
+/// Neither the credential nor the Ops session leaves this side: the window only ever names the
+/// folder and the project.
+struct ManagedSignIn {
+    root: PathBuf,
+    generation: u64,
+    credential: String,
+    session: openbot_desktop_lib::intelligence::OpsSession,
+}
+
 /// What the shell is running, so the window and the tray say the same thing.
 #[derive(Default)]
 struct Shell {
@@ -76,8 +87,8 @@ struct Shell {
         )>,
     >,
     intelligence_sign_in_generation: std::sync::atomic::AtomicU64,
-    /// The credential that sign-in produced, held so a project can be chosen with it.
-    intelligence_credential: Mutex<Option<String>>,
+    /// The sign-in that finished, held so a project can be chosen with it and apps connected.
+    intelligence_credential: Mutex<Option<ManagedSignIn>>,
     /// Proof that this runtime key's project has the default Learning container.
     intelligence_learning: Mutex<Option<openbot_desktop_lib::intelligence::ProvisionedConnection>>,
     self_hosted_intelligence:
@@ -1683,12 +1694,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
 
         let api_key = intelligence_key_for_start(&root, api_key, saved_secret)?;
-        let mut existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        let existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
             &root,
             &root.join(".env"),
             &openbot_env::MINTED[..],
         )?;
-        existing_secrets.extend(openbot_desktop_lib::composio::configured(&root)?);
         require_existing_encryption_key_with_recovery(
             &root,
             &existing_secrets,
@@ -1770,41 +1780,15 @@ async fn start_stack_inner<R: tauri::Runtime>(
             &mut settings,
             shell.intelligence_learning.lock().unwrap().as_ref(),
         )?;
-        /*
-         * The credentials come out here and never reach the file.
-         *
-         * `.env` is a settings file, and a settings file is something somebody can open, read out to
-         * support or paste into a chat. A model key, a plan token and the tokens these services prove
-         * themselves to each other with are not settings. They go to this machine's own credential
-         * store, and travel from there to the processes that need them as environment, which is where
-         * a secret can live without being written down. See `vault` for what each platform gets.
-         */
-        let (settings, mut secrets) = openbot_desktop_lib::vault::split(settings);
-        /*
-         * The credentials, plus any setting this answer dropped.
-         *
-         * `write` keeps lines it does not own, which is what protects a hand-set value. The cost is
-         * that a key this run deliberately stopped writing would otherwise survive: `BOT_MODEL` did,
-         * leaving an OpenAI key asking OpenAI for the model name a previous compatible-endpoint answer
-         * had given. Anything the writer owns and did not produce this time is taken out.
-         */
-        let mut purge = secrets.clone();
-        for key in openbot_env::REMOVED_WHEN_UNSET {
-            if !settings.contains_key(key) {
-                purge.insert(key.into(), String::new());
-            }
-        }
-        openbot_desktop_lib::saved_intent::persist_configuration(
-            &root,
-            &settings,
-            &secrets,
-            &purge,
-            &credential,
-        )?;
+        let (settings, mut secrets) = persist_start_environment(&root, settings, &credential)?;
         report(&app, "env", true, "settings written, credentials stored");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
-        pin_runtime_settings(&settings, &mut secrets);
+        for key in ["PICKED_HARNESS_PORT", "OPENBOT_TOOL_URL"] {
+            if let Some(value) = settings.get(key) {
+                secrets.insert(key.into(), value.clone());
+            }
+        }
         // Set before Bun imports the runtime, and retained for supervised restarts.
         secrets.extend(desktop_telemetry::runtime_env(&app));
 
@@ -2402,19 +2386,52 @@ fn require_no_exited_compose_services(
     ))
 }
 
-fn pin_runtime_settings(
-    settings: &std::collections::BTreeMap<String, String>,
-    secrets: &mut stack::Secrets,
-) {
-    for key in [
-        "PICKED_HARNESS_PORT",
-        "OPENBOT_TOOL_URL",
-        "OPENBOT_BROKER_PROVIDER",
-    ] {
-        if let Some(value) = settings.get(key) {
-            secrets.insert(key.into(), value.clone());
+/// Write this run's settings, store its credentials, and answer with what the host processes get.
+fn persist_start_environment(
+    root: &Path,
+    settings: std::collections::BTreeMap<String, String>,
+    credential: &openbot_env::ModelCredential,
+) -> Result<(std::collections::BTreeMap<String, String>, stack::Secrets), Problem> {
+    /*
+     * The credentials come out here and never reach the file.
+     *
+     * `.env` is a settings file, and a settings file is something somebody can open, read out to
+     * support or paste into a chat. A model key, a plan token and the tokens these services prove
+     * themselves to each other with are not settings. They go to this machine's own credential
+     * store, and travel from there to the processes that need them as environment, which is where
+     * a secret can live without being written down. See `vault` for what each platform gets.
+     */
+    let (settings, mut secrets) = openbot_desktop_lib::vault::split(settings);
+    /*
+     * The credentials, plus any setting this answer dropped.
+     *
+     * `write` keeps lines it does not own, which is what protects a hand-set value. The cost is
+     * that a key this run deliberately stopped writing would otherwise survive: `BOT_MODEL` did,
+     * leaving an OpenAI key asking OpenAI for the model name a previous compatible-endpoint answer
+     * had given. Anything the writer owns and did not produce this time is taken out.
+     */
+    let mut purge = secrets.clone();
+    for key in openbot_env::REMOVED_WHEN_UNSET {
+        if !settings.contains_key(key) {
+            purge.insert(key.into(), String::new());
         }
     }
+    openbot_desktop_lib::saved_intent::persist_configuration(
+        root, &settings, &secrets, &purge, credential,
+    )?;
+    /*
+     * The app broker's settings, read where the person keeps them and handed over at runtime only.
+     *
+     * None of them is written, moved or purged. A Composio key in `.env` stays in `.env` and wins;
+     * a provisioned one stays in the protected store. Pinning them here also beats a blank value
+     * inherited from this app's own environment, which Bun would otherwise prefer to `.env`.
+     * Never fatal: without them, OpenBot starts with apps unavailable.
+     */
+    match openbot_desktop_lib::composio::resolve(root) {
+        Ok(brokers) => secrets.extend(brokers.runtime()),
+        Err(problem) => eprintln!("[apps] {}", problem.said),
+    }
+    Ok((settings, secrets))
 }
 
 fn cleanup_before_start<R, C>(
@@ -3604,14 +3621,7 @@ async fn begin_intelligence_sign_in(app: tauri::AppHandle, root: String) -> Resu
         return Err("Choose where OpenBot lives before signing in.".into());
     }
     let (signing, url) = openbot_desktop_lib::intelligence::SigningInToIntelligence::begin()?;
-    let shell = app.state::<Shell>();
-    let mut credential = shell.intelligence_credential.lock().unwrap();
-    let generation = shell
-        .intelligence_sign_in_generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        + 1;
-    *credential = None;
-    drop(credential);
+    let generation = supersede_managed_sign_in(&app.state::<Shell>());
     *app.state::<Shell>()
         .signing_in_to_intelligence
         .lock()
@@ -3646,23 +3656,39 @@ async fn finish_intelligence_sign_in<R: tauri::Runtime>(
             "Where OpenBot lives changed. Sign in again for this folder.",
         ));
     }
-    let (credential, projects) =
-        tauri::async_runtime::spawn_blocking(move || signing.finish(&bound_root))
-            .await
-            .map_err(|_| {
-                openbot_desktop_lib::problem::Problem::plain(
-                    "The sign-in did not finish. Try signing in again.",
-                )
-            })??;
-    publish_intelligence_credential(&app.state::<Shell>(), generation, credential)?;
+    let signed_in = tauri::async_runtime::spawn_blocking(move || signing.finish())
+        .await
+        .map_err(|_| {
+            openbot_desktop_lib::problem::Problem::plain(
+                "The sign-in did not finish. Try signing in again.",
+            )
+        })??;
+    let projects =
+        publish_intelligence_sign_in(&app.state::<Shell>(), generation, bound_root, signed_in)?;
     Ok(projects)
 }
 
-fn publish_intelligence_credential(
+/// Start a new managed sign-in: every earlier one, finished or not, stops counting.
+fn supersede_managed_sign_in(shell: &Shell) -> u64 {
+    let mut held = shell.intelligence_credential.lock().unwrap();
+    let generation = shell
+        .intelligence_sign_in_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    *held = None;
+    generation
+}
+
+/// Keep a finished sign-in, only if it is still the attempt the window is waiting for.
+///
+/// Checked before anything is kept. An abandoned browser tab finished later, under another
+/// account, must not leave its credential or its session behind for the newer attempt.
+fn publish_intelligence_sign_in(
     shell: &Shell,
     generation: u64,
-    credential: String,
-) -> Result<(), Problem> {
+    root: PathBuf,
+    signed_in: openbot_desktop_lib::intelligence::SignedIn,
+) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, Problem> {
     let mut held = shell.intelligence_credential.lock().unwrap();
     if shell
         .intelligence_sign_in_generation
@@ -3673,23 +3699,92 @@ fn publish_intelligence_credential(
             "A newer sign-in was started. Finish that sign-in instead.",
         ));
     }
-    *held = Some(credential);
-    Ok(())
+    *held = Some(ManagedSignIn {
+        root,
+        generation,
+        credential: signed_in.credential,
+        session: signed_in.session,
+    });
+    Ok(signed_in.projects)
+}
+
+/// The finished sign-in for this folder. Another folder's sign-in is refused, never borrowed.
+fn managed_sign_in_for(
+    shell: &Shell,
+    root: &Path,
+) -> Result<(u64, String, openbot_desktop_lib::intelligence::OpsSession), Problem> {
+    match shell.intelligence_credential.lock().unwrap().as_ref() {
+        Some(held) if held.root == root => Ok((
+            held.generation,
+            held.credential.clone(),
+            held.session.clone(),
+        )),
+        Some(_) => Err(Problem::plain(
+            "Where OpenBot lives changed. Sign in again for this folder.",
+        )),
+        None => Err(Problem::plain("Sign in to CopilotKit first.")),
+    }
+}
+
+/// Connect this installation's apps with the sign-in that just finished, and again on a retry.
+///
+/// A follow-on step that can only add a key. Sign-in has already succeeded and Start never waits
+/// on it, so a failure leaves apps unavailable and the window offers Connect apps.
+#[tauri::command]
+async fn connect_intelligence_apps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+) -> Result<(), Problem> {
+    let root = stack::root_from(&root);
+    tauri::async_runtime::spawn_blocking(move || {
+        connect_apps(
+            &app.state::<Shell>(),
+            &root,
+            openbot_desktop_lib::composio::provision,
+        )
+    })
+    .await
+    .map_err(|_| {
+        Problem::plain("OpenBot couldn't connect your apps. Choose Connect apps to try again.")
+    })?
+}
+
+fn connect_apps(
+    shell: &Shell,
+    root: &Path,
+    provision: impl FnOnce(
+        &Path,
+        &openbot_desktop_lib::intelligence::OpsSession,
+    ) -> Result<openbot_desktop_lib::composio::Provisioned, Problem>,
+) -> Result<(), Problem> {
+    let (generation, _, session) = managed_sign_in_for(shell, root)?;
+    match provision(root, &session)? {
+        openbot_desktop_lib::composio::Provisioned::Preserved => Ok(()),
+        openbot_desktop_lib::composio::Provisioned::New(key) => {
+            // Checked again, and held while saving: a sign-in started since, or one for another
+            // folder, must not receive this key.
+            let held = shell.intelligence_credential.lock().unwrap();
+            if !held
+                .as_ref()
+                .is_some_and(|held| held.generation == generation && held.root == root)
+            {
+                return Err(Problem::plain(
+                    "A newer sign-in was started. Finish that sign-in instead.",
+                ));
+            }
+            openbot_desktop_lib::composio::save(root, key)
+        }
+    }
 }
 
 /// Create a project using the account already signed in, without exposing its credential to the UI.
 #[tauri::command]
 async fn create_intelligence_project(
     app: tauri::AppHandle,
+    root: String,
     name: String,
 ) -> Result<openbot_desktop_lib::intelligence::Project, Problem> {
-    let credential = app
-        .state::<Shell>()
-        .intelligence_credential
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| Problem::plain("Sign in to CopilotKit first."))?;
+    let (_, credential, _) = managed_sign_in_for(&app.state::<Shell>(), &stack::root_from(&root))?;
     tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::intelligence::create_project(&credential, &name)
     })
@@ -3699,19 +3794,14 @@ async fn create_intelligence_project(
 
 /// Create a key for the project somebody chose, and hand it back for the field.
 #[tauri::command]
-async fn intelligence_key_for(
-    app: tauri::AppHandle,
+async fn intelligence_key_for<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
     project: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    let credential = app
-        .state::<Shell>()
-        .intelligence_credential
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| {
-            openbot_desktop_lib::problem::Problem::plain("Sign in to CopilotKit first.")
-        })?;
+    // Bound to the folder the sign-in was for. A key made for one folder's project, picked after
+    // the folder changed, would start the other folder without its apps.
+    let (_, credential, _) = managed_sign_in_for(&app.state::<Shell>(), &stack::root_from(&root))?;
     let provisioned = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::intelligence::provision_connection(&credential, &project)
     })
@@ -4496,6 +4586,7 @@ fn main() {
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
             intelligence_key_for,
+            connect_intelligence_apps,
             create_intelligence_project,
             begin_organization_sign_in,
             finish_organization_sign_in,

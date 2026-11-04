@@ -10,7 +10,7 @@ import {
 } from "./HarnessPicker";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { OrganizationSignIn } from "./OrganizationSignIn";
-import { asProblem, Failure, type Problem } from "./Problem";
+import { asProblem, Failure, InlineFailure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
   type ModelChoice,
@@ -165,6 +165,30 @@ export function App() {
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
   const managedAttempt = useRef(0);
+  /*
+   * This installation's apps, connected after a managed sign-in has already succeeded.
+   *
+   * A follow-on step that can only add a key. It used to run inside the sign-in, so a failure to
+   * connect apps failed the whole CopilotKit sign-in. Now sign-in and Start never wait on it, and a
+   * failure leaves apps unavailable with Connect apps to try again.
+   */
+  const [apps, setApps] = useState<
+    | { state: "connecting" }
+    | { state: "ready" }
+    | { state: "unavailable"; problem: Problem }
+    | null
+  >(null);
+
+  async function connectApps(attempt = managedAttempt.current) {
+    setApps({ state: "connecting" });
+    try {
+      await invoke("connect_intelligence_apps", { root: root.trim() });
+      if (managedAttempt.current === attempt) setApps({ state: "ready" });
+    } catch (error) {
+      if (managedAttempt.current === attempt)
+        setApps({ state: "unavailable", problem: asProblem(error) });
+    }
+  }
 
   async function signInToCopilotKit() {
     await cancelSelfHostedSignIn();
@@ -173,6 +197,7 @@ export function App() {
     setSigningIn(true);
     setFailure(null);
     setSignInUrl(null);
+    setApps(null);
     try {
       const url = await invoke<string>("begin_intelligence_sign_in", {
         root: root.trim(),
@@ -183,7 +208,9 @@ export function App() {
         "finish_intelligence_sign_in",
         { root: root.trim() },
       );
-      if (managedAttempt.current === attempt) setProjects(available);
+      if (managedAttempt.current !== attempt) return;
+      setProjects(available);
+      void connectApps(attempt);
     } catch (error) {
       if (managedAttempt.current === attempt) setFailure(asProblem(error));
     } finally {
@@ -204,7 +231,7 @@ export function App() {
         selfHosted
           ? "finish_self_hosted_intelligence_sign_in"
           : "intelligence_key_for",
-        selfHosted ? { root, project: id } : { project: id },
+        selfHosted ? { root, project: id } : { root: root.trim(), project: id },
       );
       if (selfHosted && selfHostedAttempt.current !== attempt) return;
       setApiKey(key);
@@ -233,7 +260,7 @@ export function App() {
     try {
       const project = await invoke<{ id: string; name: string }>(
         "create_intelligence_project",
-        { name },
+        { root: root.trim(), name },
       );
       setProjects((current) => [...(current ?? []), project]);
       setProjectName("");
@@ -830,6 +857,9 @@ export function App() {
                 managedAttempt.current += 1;
                 setSigningIn(false);
                 setSignInUrl(null);
+                // A sign-in belongs to the folder it was for. Its projects and apps do too.
+                setProjects(null);
+                setApps(null);
                 setRoot(event.target.value);
                 setModel(null);
                 setPreparation(null);
@@ -1189,6 +1219,27 @@ export function App() {
                 </div>
               </>
             )}
+            {intelligenceSignInKind === "managed" &&
+              !signInUrl &&
+              (apps?.state === "connecting" ? (
+                <p className="footnote" role="status">
+                  Connecting your apps…
+                </p>
+              ) : apps?.state === "unavailable" ? (
+                <>
+                  <InlineFailure problem={apps.problem} />
+                  <p className="footnote">
+                    You can start OpenBot without them.
+                  </p>
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() => void connectApps()}
+                  >
+                    Connect apps
+                  </button>
+                </>
+              ) : null)}
             {/*
             This used to be headed "Self-hosted Intelligence" over two fields pre-filled with the
             MANAGED service's addresses, which says the opposite of what it does: somebody opening

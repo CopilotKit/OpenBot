@@ -628,15 +628,6 @@ pub fn compose(
             .unwrap_or_else(secret);
         env.insert(key.into(), value);
     }
-    // Vendor credentials are preserved, never minted by the desktop.
-    for key in crate::composio::BROKER_KEYS
-        .into_iter()
-        .chain(["OPENBOT_BROKER_PROVIDER"])
-    {
-        if let Some(value) = kept.get(key).filter(|value| !value.trim().is_empty()) {
-            env.insert(key.into(), value.clone());
-        }
-    }
 
     env.insert(
         "DATABASE_URL".into(),
@@ -1608,38 +1599,6 @@ HTTPS_PROXY=http://proxy:8080
             &BTreeMap::new(),
         );
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
-    }
-
-    #[test]
-    fn broker_credentials_are_preserved_without_local_generation() {
-        let kept = BTreeMap::from([
-            ("COMPOSIO_API_KEY".into(), "fresh-project-key".into()),
-            ("ARCADE_API_KEY".into(), "existing-arcade".into()),
-            ("OPENBOT_BROKER_PROVIDER".into(), "arcade".into()),
-        ]);
-        let values = compose(
-            &intelligence(),
-            &Model::default(),
-            &engine_status(None),
-            &Ports::default(),
-            &pinned(),
-            None,
-            &kept,
-        );
-        for (name, value) in kept {
-            assert_eq!(values[&name], value);
-        }
-        let empty = compose(
-            &intelligence(),
-            &Model::default(),
-            &engine_status(None),
-            &Ports::default(),
-            &pinned(),
-            None,
-            &BTreeMap::new(),
-        );
-        assert!(!empty.contains_key("COMPOSIO_API_KEY"));
-        assert!(!empty.contains_key("ARCADE_API_KEY"));
     }
 
     #[test]
